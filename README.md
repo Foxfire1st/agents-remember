@@ -53,94 +53,6 @@ This system goes further in four ways:
 
 ---
 
-## What exists today and where it stops
-
-There is a spectrum of approaches for giving AI agents project context, from simple configuration files to sophisticated agent architectures. Each solves real problems. The question is where each one stops.
-
-| Approach                                                                                                                                                                                                                                   | What it does                                                                                                                                                                                                                                                                 | Where it stops                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Context files** ([CLAUDE.md](https://claude.com/blog/using-claude-md-files), [.cursorrules](https://docs.cursor.com/context/rules), [copilot-instructions.md](https://docs.github.com/en/copilot/how-tos/configure-custom-instructions)) | Single file loaded at session start with project conventions and rules. Nested variants ([per-directory CLAUDE.md](https://claude.com/blog/using-claude-md-files), [Codebase Context Spec](https://github.com/Agentic-Insights/codebase-context-spec)) add per-area context. | Flat descriptions of the project. No cross-repo awareness, no task state, no way to encode "we are mid-migration and the direction is X."                                                                                                                                                                       |
-| **RAG / semantic code search** ([Cursor @Codebase](https://docs.cursor.com/chat/context#codebase), [GitHub Copilot code search](https://docs.github.com/en/copilot))                                                                       | Embeds code chunks as vectors. Retrieves semantically similar fragments at query time.                                                                                                                                                                                       | Retrieves code fragments, not structural knowledge. No encoding of intent, contracts, or invariants. Per-query — nothing persists between retrievals. Misses relevant code that doesn't match the query embedding.                                                                                              |
-| **Repository maps** ([aider RepoMap](https://aider.chat/docs/repomap.html), [Cursor indexing](https://docs.cursor.com/context/codebase-indexing))                                                                                          | Builds a structural map of symbols and relationships. Aider uses tree-sitter + PageRank to rank symbols by connectivity. Cursor indexes into a server-side vector DB for semantic search.                                                                                    | Ephemeral — rebuilt or re-queried each session. Single-repo. Maps what *is*, not what *should be*: no migration direction, no cross-repo contracts, no persistent task state.                                                                                                                                   |
-| **Stateful agents** ([Letta/MemGPT](https://docs.letta.com/))                                                                                                                                                                              | Agent manages its own persistent memory across sessions. Decides what to remember and what to forget via tool calls.                                                                                                                                                         | General-purpose memory — the agent decides what matters, with no structural guarantee it captures cross-repo contracts, invariants, or migration state. Cognitive state and coordination state are separate: cross-repo awareness remains an [unsolved problem](https://github.com/letta-ai/letta/issues/3226). |
-
-These systems share a design direction: they treat context as something to **retrieve or accumulate** — pulling information from the codebase toward the AI. This system inverts the direction. It pre-structures what the AI needs to know and places it where the workflow naturally reads it. The AI doesn't search for context; the context is already loaded when it starts working.
-
-That retrieval-based approach breaks down when:
-- The project spans multiple repositories, and correctness requires knowing what happens on the other side of an API call, WebSocket event, or message queue topic — something no single-repo index or embedding will surface.
-- You are mid-migration, and the AI needs to know not just what the code does now, but which direction it should move — intent that doesn't exist in any code fragment to retrieve.
-- A task spans multiple sessions, and the plan and decisions need to survive between them — not in agent memory that may silently drop what it considers unimportant.
-- Multiple developers or agents are working in the same codebase, and one needs to see what the other is currently changing — coordination state that no individual agent's memory covers.
-
----
-
-## What this system adds
-
-This system extends the "context file" idea in four specific ways:
-
-**1. Per-file companion files with cross-repo edges.**
-Not one flat file per repo — a companion markdown file for each important source file with typed sections: what the code does (Logic), what must not break (Invariants), what this file connects to in other repos (Cross-repo References), which specifications define the intended behavior (Docs References), and what tasks are currently modifying it (Tasks). The cross-repo and docs reference sections are the key difference — they give the AI visibility into contracts, protocols, and specifications that no amount of code search will surface.
-
-**2. Task files that preserve intent across sessions.**
-When a complex change starts, the plan, implementation steps, and all decisions go into a task file — not the chat. If the session ends, the context window fills up, or a different developer continues the work, the task file is the source of truth for what was agreed and why. This is ["docs as code"](https://www.writethedocs.org/guide/docs-as-code/) applied to the plan itself.
-
-**3. Skills — structured workflows the AI follows.**
-Instead of hoping the AI discovers the right process, skills are explicit instructions: how to start a task, how to check for stale docs, how to bootstrap context for a new repo, how to query library documentation. The AI reads the skill and follows the steps.
-
-**4. Drift detection.**
-Every companion file records the git commit of its code-partner at which it was last verified. Before a task starts, the system compares these hashes against the current code. If someone merged a change outside this workflow, the AI detects the drift and updates the companion file before planning. This does not guarantee perfect accuracy — but it makes staleness explicit and recoverable instead of silent.
-
-These four additions have a compounding property: the first task on a codebase pays the most — researching cross-repo contracts, documenting invariants, writing companion files where none existed. Every task after that starts with that context already in place. Without companion files, every session pays the same O(n) search cost: the AI greps, follows imports, reads files — often re-discovering relationships it found last session. Those search results also add noise to the context window, degrading the model's performance on everything else it is holding (the same mechanism Du et al. measured — longer input, worse output, even when the answer is present). With companion files, that research is replaced by a single O(1) curated read — less context consumed, higher signal-to-noise ratio, better output. The system gets cheaper with use, not more expensive.
-
----
-
-## What this looks like in your code
-
-Here are three examples from a multi-repo project — the kind of thing this system is built for.
-
-### Example 1: The plugin registration pattern
-
-A backend service has 20+ plugins (Analytics, Notifications, Billing, Search, etc.). There is no central plugin list. No `registerPlugin()` call in main. Instead, each plugin uses a decorator that registers it at import time, and the framework collects them via package scanning:
-
-```python
-# In analytics_plugin.py — plugin registers itself via decorator
-@register_plugin(
-    name="analytics",
-    init_order=15,
-    dependencies=["database", "cache"],
-)
-class AnalyticsPlugin:
-    async def setup(self, app):
-        # ...
-```
-
-An AI that does not know this pattern will look for a plugin list in `main.py`, not find one, and either add manual import calls (wrong) or ask you where to register things (wasted time). The companion file for the plugin framework explains the pattern once, and every AI session afterwards knows.
-
-### Example 2: Init order matters
-
-The service has a specific initialization sequence — Database first, then Cache, then MessageQueue, then Auth, then HTTP Server. An AI adding a new plugin has no way to guess which init slot it needs. Wrong position = silent dependency on something not yet initialized.
-
-### Example 3: Cross-repo event type sync
-
-`EventType` in the backend defines 12 event types (`user.created`, `order.placed`, `payment.failed`, ...). These same types must appear as:
-- `EventType` in the TypeScript frontend
-- `EventCategory` in the mobile app
-- `event_types` in the Go gateway service
-
-Adding an event type in the backend without updating the other three repositories produces silent failures. The new event arrives, gets mapped to `unknown`, and nobody sees an error. A companion file with a Cross-repo References section makes this contract visible:
-
-```markdown
-### Cross-repo References
-- EventType enum must stay in sync with:
-  - TypeScript: EventType (web-client/src/types/events.ts)
-  - React Native: EventCategory (mobile-app/src/constants/events.ts)
-  - Go: event_types (gateway/internal/events/types.go)
-```
-
-No amount of code search in one repo will discover this. The companion file makes it explicit.
-
----
-
 ## What a companion file looks like
 
 For a source file like `api-service/src/stores/sessionStore.ts`, the companion lives at `onboarding/api-service/.../sessionStore.md`:
@@ -192,6 +104,53 @@ taskfile: tasks/260315_lock-state-migration.md (S2)
 
 ---
 
+## What this looks like in your code
+
+Here are three examples from a multi-repo project — the kind of thing this system is built for.
+
+### Example 1: The plugin registration pattern
+
+A backend service has 20+ plugins (Analytics, Notifications, Billing, Search, etc.). There is no central plugin list. No `registerPlugin()` call in main. Instead, each plugin uses a decorator that registers it at import time, and the framework collects them via package scanning:
+
+```python
+# In analytics_plugin.py — plugin registers itself via decorator
+@register_plugin(
+    name="analytics",
+    init_order=15,
+    dependencies=["database", "cache"],
+)
+class AnalyticsPlugin:
+    async def setup(self, app):
+        # ...
+```
+
+An AI that does not know this pattern will look for a plugin list in `main.py`, not find one, and either add manual import calls (wrong) or ask you where to register things (wasted time). The companion file for the plugin framework explains the pattern once, and every AI session afterwards knows.
+
+### Example 2: Init order matters
+
+The service has a specific initialization sequence — Database first, then Cache, then MessageQueue, then Auth, then HTTP Server. An AI adding a new plugin has no way to guess which init slot it needs. Wrong position = silent dependency on something not yet initialized.
+
+### Example 3: Cross-repo event type sync
+
+`EventType` in the backend defines 12 event types (`user.created`, `order.placed`, `payment.failed`, ...). These same types must appear as:
+- `EventType` in the TypeScript frontend
+- `EventCategory` in the mobile app
+- `event_types` in the Go gateway service
+
+Adding an event type in the backend without updating the other three repositories produces silent failures. The new event arrives, gets mapped to `unknown`, and nobody sees an error. A companion file with a Cross-repo References section makes this contract visible:
+
+```markdown
+### Cross-repo References
+- EventType enum must stay in sync with:
+  - TypeScript: EventType (web-client/src/types/events.ts)
+  - React Native: EventCategory (mobile-app/src/constants/events.ts)
+  - Go: event_types (gateway/internal/events/types.go)
+```
+
+No amount of code search in one repo will discover this. The companion file makes it explicit.
+
+---
+
 ## Folder structure
 
 ```
@@ -214,6 +173,45 @@ ai-infinite-context/                  # This repo — clone alongside your code 
     instructions/                     # Auto-attached context per file pattern
     prompts/                          # Manual-invocation templates
 ```
+
+## What exists today and where it stops
+
+There is a spectrum of approaches for giving AI agents project context, from simple configuration files to sophisticated agent architectures. Each solves real problems. The question is where each one stops.
+
+| Approach                                                                                                                                                                                                                                   | What it does                                                                                                                                                                                                                                                                 | Where it stops                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Context files** ([CLAUDE.md](https://claude.com/blog/using-claude-md-files), [.cursorrules](https://docs.cursor.com/context/rules), [copilot-instructions.md](https://docs.github.com/en/copilot/how-tos/configure-custom-instructions)) | Single file loaded at session start with project conventions and rules. Nested variants ([per-directory CLAUDE.md](https://claude.com/blog/using-claude-md-files), [Codebase Context Spec](https://github.com/Agentic-Insights/codebase-context-spec)) add per-area context. | Flat descriptions of the project. No cross-repo awareness, no task state, no way to encode "we are mid-migration and the direction is X."                                                                                                                                                                       |
+| **RAG / semantic code search** ([Cursor @Codebase](https://docs.cursor.com/chat/context#codebase), [GitHub Copilot code search](https://docs.github.com/en/copilot))                                                                       | Embeds code chunks as vectors. Retrieves semantically similar fragments at query time.                                                                                                                                                                                       | Retrieves code fragments, not structural knowledge. No encoding of intent, contracts, or invariants. Per-query — nothing persists between retrievals. Misses relevant code that doesn't match the query embedding.                                                                                              |
+| **Repository maps** ([aider RepoMap](https://aider.chat/docs/repomap.html), [Cursor indexing](https://docs.cursor.com/context/codebase-indexing))                                                                                          | Builds a structural map of symbols and relationships. Aider uses tree-sitter + PageRank to rank symbols by connectivity. Cursor indexes into a server-side vector DB for semantic search.                                                                                    | Ephemeral — rebuilt or re-queried each session. Single-repo. Maps what *is*, not what *should be*: no migration direction, no cross-repo contracts, no persistent task state.                                                                                                                                   |
+| **Stateful agents** ([Letta/MemGPT](https://docs.letta.com/))                                                                                                                                                                              | Agent manages its own persistent memory across sessions. Decides what to remember and what to forget via tool calls.                                                                                                                                                         | General-purpose memory — the agent decides what matters, with no structural guarantee it captures cross-repo contracts, invariants, or migration state. Cognitive state and coordination state are separate: cross-repo awareness remains an [unsolved problem](https://github.com/letta-ai/letta/issues/3226). |
+
+These systems share a design direction: they treat context as something to **retrieve or accumulate** — pulling information from the codebase toward the AI. This system inverts the direction. It pre-structures what the AI needs to know and places it where the workflow naturally reads it. The AI doesn't search for context; the context is already loaded when it starts working.
+
+That retrieval-based approach breaks down when:
+- The project spans multiple repositories, and correctness requires knowing what happens on the other side of an API call, WebSocket event, or message queue topic — something no single-repo index or embedding will surface.
+- You are mid-migration, and the AI needs to know not just what the code does now, but which direction it should move — intent that doesn't exist in any code fragment to retrieve.
+- A task spans multiple sessions, and the plan and decisions need to survive between them — not in agent memory that may silently drop what it considers unimportant.
+- Multiple developers or agents are working in the same codebase, and one needs to see what the other is currently changing — coordination state that no individual agent's memory covers.
+
+---
+
+## What this system adds
+
+This system extends the "context file" idea in four specific ways:
+
+**1. Per-file companion files with cross-repo edges.**
+Not one flat file per repo — a companion markdown file for each important source file with typed sections: what the code does (Logic), what must not break (Invariants), what this file connects to in other repos (Cross-repo References), which specifications define the intended behavior (Docs References), and what tasks are currently modifying it (Tasks). The cross-repo and docs reference sections are the key difference — they give the AI visibility into contracts, protocols, and specifications that no amount of code search will surface.
+
+**2. Task files that preserve intent across sessions.**
+When a complex change starts, the plan, implementation steps, and all decisions go into a task file — not the chat. If the session ends, the context window fills up, or a different developer continues the work, the task file is the source of truth for what was agreed and why. This is ["docs as code"](https://www.writethedocs.org/guide/docs-as-code/) applied to the plan itself.
+
+**3. Skills — structured workflows the AI follows.**
+Instead of hoping the AI discovers the right process, skills are explicit instructions: how to start a task, how to check for stale docs, how to bootstrap context for a new repo, how to query library documentation. The AI reads the skill and follows the steps.
+
+**4. Drift detection.**
+Every companion file records the git commit of its code-partner at which it was last verified. Before a task starts, the system compares these hashes against the current code. If someone merged a change outside this workflow, the AI detects the drift and updates the companion file before planning. This does not guarantee perfect accuracy — but it makes staleness explicit and recoverable instead of silent.
+
+These four additions have a compounding property: the first task on a codebase pays the most — researching cross-repo contracts, documenting invariants, writing companion files where none existed. Every task after that starts with that context already in place. Without companion files, every session pays the same O(n) search cost: the AI greps, follows imports, reads files — often re-discovering relationships it found last session. Those search results also add noise to the context window, degrading the model's performance on everything else it is holding (the same mechanism Du et al. measured — longer input, worse output, even when the answer is present). With companion files, that research is replaced by a single O(1) curated read — less context consumed, higher signal-to-noise ratio, better output. The system gets cheaper with use, not more expensive.
 
 ---
 
