@@ -35,21 +35,23 @@ These are not unusual experiences. They are the default behavior of every LLM-ba
 
 ---
 
-## The core idea: externalize the AI's working memory
+## What this system adds
 
-When you work on a complex change, you hold things in your head: what the code does, what must not break, what connects to other systems, what direction a migration is going. You built that understanding over months or years. The AI has none of it. Every session starts empty.
+This system extends the "system prompt" idea in four specific ways:
 
-The obvious step is to write that knowledge down — version controlled, diffable, committed alongside the code. That is necessary, but it is not enough. A flat description of the project still leaves the AI to figure out the specifics by searching code. And code search cannot tell it which parts of the codebase are connected across repos, which invariants must hold, or which direction an in-progress migration is supposed to go.
+**1. Per-file companion files with cross-repo edges.**
+Not one flat file per repo — a companion markdown file for each important source file with typed sections: what the code does (Logic), what must not break (Invariants), what this file connects to in other repos (Cross-repo References), which specifications define the intended behavior (Docs References), and what tasks are currently modifying it (Tasks). The cross-repo and docs reference sections are the key difference — they give the AI visibility into contracts, protocols, and specifications that no amount of code search will surface.
 
-This system goes further in four ways:
+**2. Task files that preserve intent across sessions.**
+When a complex change starts, the plan, implementation steps, and all decisions go into a task file — not the chat. If the session ends, the context window fills up, or a different developer continues the work, the task file is the source of truth for what was agreed and why. This is ["docs as code"](https://www.writethedocs.org/guide/docs-as-code/) applied to the plan itself.
 
-**Structured, not narrative.** Each companion file has typed sections — Logic, Invariants, Cross-repo References, Tasks — not free-form notes. The AI does not read prose and hope to extract what matters. Each section has a defined purpose.
+**3. Skills — structured workflows the AI follows.**
+Instead of hoping the AI discovers the right process, skills are explicit instructions: how to start a task, how to check for stale docs, how to bootstrap context for a new repo, how to query library documentation. The AI reads the skill and follows the steps.
 
-**Navigable, not flat.** Each file has outward edges: cross-repo references point to the corresponding code in other repositories, docs references point to specifications, task blocks point to the active task file. The AI follows edges to adjacent context instead of searching blindly.
+**4. Drift detection.**
+Every companion file records the git commit of its code-partner at which it was last verified. Before a task starts, the system compares these hashes against the current code. If someone merged a change outside this workflow, the AI detects the drift and updates the companion file before planning. This does not guarantee perfect accuracy — but it makes staleness explicit and recoverable instead of silent.
 
-**Read-first.** The AI reads the companion file *alongside* reading the source code. This inverts the default behavior. Instead of only reading code and guessing at context, it starts with the structural knowledge already loaded — what the code connects to, what must not break, what direction an in-progress migration is going — and then reads the code with that context in place.
-
-**Workflow-integrated.** Companion files are not maintained by discipline — they are maintained because the task workflow requires updating them at defined transition points. When the AI starts a substep, it reads the companion files. When it finishes a substep, it updates them. Drift detection catches everything that happens outside this workflow. The result: accurate documentation is a side effect of the process, not a separate obligation.
+These four additions have a compounding property: the first task on a codebase pays the most — researching cross-repo contracts, documenting invariants, writing companion files where none existed. Every task after that starts with that context already in place. Without companion files, every session pays the same O(n) search cost: the AI greps, follows imports, reads files — often re-discovering relationships it found last session. Those search results also add noise to the context window, degrading the model's performance on everything else it is holding (the same mechanism Du et al. measured — longer input, worse output, even when the answer is present). With companion files, that research is replaced by a single O(1) curated read — less context consumed, higher signal-to-noise ratio, better output. The system gets cheaper with use, not more expensive.
 
 ---
 
@@ -194,26 +196,6 @@ That retrieval-based approach breaks down when:
 - You are mid-migration, and the AI needs to know not just what the code does now, but which direction it should move — intent that doesn't exist in any code fragment to retrieve.
 - A task spans multiple sessions, and the plan and decisions need to survive between them — not in agent memory that may silently drop what it considers unimportant.
 - Multiple developers or agents are working in the same codebase, and one needs to see what the other is currently changing — coordination state that no individual agent's memory covers.
-
----
-
-## What this system adds
-
-This system extends the "context file" idea in four specific ways:
-
-**1. Per-file companion files with cross-repo edges.**
-Not one flat file per repo — a companion markdown file for each important source file with typed sections: what the code does (Logic), what must not break (Invariants), what this file connects to in other repos (Cross-repo References), which specifications define the intended behavior (Docs References), and what tasks are currently modifying it (Tasks). The cross-repo and docs reference sections are the key difference — they give the AI visibility into contracts, protocols, and specifications that no amount of code search will surface.
-
-**2. Task files that preserve intent across sessions.**
-When a complex change starts, the plan, implementation steps, and all decisions go into a task file — not the chat. If the session ends, the context window fills up, or a different developer continues the work, the task file is the source of truth for what was agreed and why. This is ["docs as code"](https://www.writethedocs.org/guide/docs-as-code/) applied to the plan itself.
-
-**3. Skills — structured workflows the AI follows.**
-Instead of hoping the AI discovers the right process, skills are explicit instructions: how to start a task, how to check for stale docs, how to bootstrap context for a new repo, how to query library documentation. The AI reads the skill and follows the steps.
-
-**4. Drift detection.**
-Every companion file records the git commit of its code-partner at which it was last verified. Before a task starts, the system compares these hashes against the current code. If someone merged a change outside this workflow, the AI detects the drift and updates the companion file before planning. This does not guarantee perfect accuracy — but it makes staleness explicit and recoverable instead of silent.
-
-These four additions have a compounding property: the first task on a codebase pays the most — researching cross-repo contracts, documenting invariants, writing companion files where none existed. Every task after that starts with that context already in place. Without companion files, every session pays the same O(n) search cost: the AI greps, follows imports, reads files — often re-discovering relationships it found last session. Those search results also add noise to the context window, degrading the model's performance on everything else it is holding (the same mechanism Du et al. measured — longer input, worse output, even when the answer is present). With companion files, that research is replaced by a single O(1) curated read — less context consumed, higher signal-to-noise ratio, better output. The system gets cheaper with use, not more expensive.
 
 ---
 
