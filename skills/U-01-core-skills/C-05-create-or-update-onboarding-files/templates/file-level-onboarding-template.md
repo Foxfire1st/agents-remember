@@ -29,7 +29,11 @@
 
 ### Docs References
 
-<Reference docs, specs, or adjacent onboarding that explain the domain implemented by this file.>
+<Use a table. Every row must include a clickable source path, exact citation line ranges, and a concise finding that explains what the cited lines establish for this file. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
+
+| Source Path                                                    | Citations | Finding                                                                |
+| -------------------------------------------------------------- | --------- | ---------------------------------------------------------------------- |
+| [<path/to/doc-or-onboarding.md>](path/to/doc-or-onboarding.md) | L10-L18   | <Concise summary of the cited lines and why they matter to this file.> |
 
 ## Invariants And Boundaries
 
@@ -37,17 +41,11 @@
 
 ## Cross-Repo References
 
-<Interfaces to or from other repos, external services, or cross-layer contracts. State `None.` when there are no meaningful cross-repo references.>
+<Use a table. Every row must include a clickable source path, exact citation line ranges, and a concise finding that explains the cross-repo tie, external contract, or service boundary. If nothing relevant exists, keep the table and record what was checked plus `No meaningful cross-repo references found.`>
 
-## Tasks
-
-> **Task** — `<what part of this file is affected>`
->
-> - **Goal:** <migration|deprecation|bugfix|feature>
-> - **Status:** <planned|in-progress|readyForReview|needsFixes|completed>
-> - **Description:** <what will change and why>
-> - **Progress:** <current state, blockers>
-> - **Taskfile:** tasks/<task-file>.md (<task-id>)
+| Source Path                                                                    | Citations | Finding                                                                                 |
+| ------------------------------------------------------------------------------ | --------- | --------------------------------------------------------------------------------------- |
+| [<path/to/source-or-adjacent-repo-file>](path/to/source-or-adjacent-repo-file) | L42-L58   | <Concise summary of the interface, external repo/service involved, and why it matters.> |
 
 ## Update History
 
