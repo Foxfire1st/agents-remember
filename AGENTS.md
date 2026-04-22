@@ -10,14 +10,21 @@ This workspace uses a layered memory system. Understand the layers before acting
 | glossary   | `docs/glossary/` | Canonical vocabulary and cross-repo index                       |
 | tasks      | `tasks/`         | Current change intent, plans, decision logs                     |
 
-# heavy-task-workflow
+## Onboarding Usage
+
+When working with code make sure to read the corresponding onboarding file alongside it. The code path tells the agent where to find the onboarding, and the onboarding file name matches the code file name.
+
+For example, if you are working with `src/js/libs/device_connection/apiRequests.ts`, read `onboarding/device-management/helpdesk/src/js/libs/device_connection/apiRequests.md` for the relevant commentary.
+Note that onboarding repositories may be segmented by domain (e.g., `helpdesk`) to group related files.
+
+## heavy-task-workflow
 
 Operational references:
 
 1. `skills/**`
 2. `skills/W-01-heavy-task-workflow/workflow/**`
 
-## Process Guard Rails
+### Process Guard Rails
 
 1.  Use live skills and workflow docs as the operating spec for phase order, artifact names, ownership, and checkpoint gates.
 2.  Start from the live repo state and the current task. Change only what the task and workflow require.
@@ -27,9 +34,14 @@ Operational references:
 6.  Implementation is sequential by default. Record issues first; do not silently promote them into requirement or architecture changes.
 7.  Checkpoint reviews are review-only. They assess artifacts and findings; they do not rewrite working artifacts or approvals.
 
-## Workflow Development Guard Rails
+### Workflow Development Guard Rails
 
 Workflow design reference when changing the workflow itself: [onboarding/heavy-task-workflow/overview.md](onboarding/heavy-task-workflow/overview.md)
 
 1. Use onboarding docs when developing or changing the workflow itself, not as the primary operational source for normal coding tasks.
 2. Keep separation of concerns: `SKILL.md` owns entrypoint guidance, workflow docs own phase behavior, templates own scaffolds, and validation or check assets own verification.
+
+## No Code Changes Before Explicit Developer Approval
+
+When asked to find a sollution to a problem, do not change any code before you have explained your sollution in chat with code examples for all distinct changes you intend to make.
+**Then wait for developer approval before touching any code!**
