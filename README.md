@@ -107,6 +107,6 @@ The smallest possible adoption path:
 2. Write a bare `onboarding/overview.md` for your repo.
 3. Put `AGENTS.md` in the root so agents read it at session start.
 4. Start using an agent normally. Chat mode handles the first tasks. Onboarding grows as the agent writes companion files for the areas it touches.
-5. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when a task's complexity crosses the threshold.
+5. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when a plan needs to survive into the next day.
 
 The system rewards incremental adoption. You don't need to map your entire codebase before the first task — you need the conventions in place so the first task builds the first companion file, and every task after benefits.

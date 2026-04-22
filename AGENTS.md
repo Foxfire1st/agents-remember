@@ -45,3 +45,11 @@ Workflow design reference when changing the workflow itself: [onboarding/heavy-t
 
 When asked to find a sollution to a problem, do not change any code before you have explained your sollution in chat with code examples for all distinct changes you intend to make.
 **Then wait for developer approval before touching any code!**
+
+## Chat Based Coding Workflow
+
+1. When planning code changes against onboarding documentation, invoke `C-02-onboarding-drift-detection` to find all drifted onboardings for the files in question. Do not plan against drifted or missing-verification onboarding until the drift report has been handed off to `C-05-create-or-update-onboarding-files` or the caller has explicitly accepted directional-only trust.
+
+2. Then once you have planned the changes show them to the developer in chat including code examples for every distinct change you intend to make. Wait for explicit developer approval before you start changing any code.
+
+3. After approval apply the code changes, create or update the onboarding documentation, and use the appropriate code quality checks from `docs/tools.md`.

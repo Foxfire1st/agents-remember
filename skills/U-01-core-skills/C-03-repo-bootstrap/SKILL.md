@@ -1,5 +1,5 @@
 ---
-name: repo-bootstrap
+name: C-03-repo-bootstrap
 description: "Bootstrap onboarding for an undocumented or under-documented repo. Uses parallel specialized agents to scout structure, deep-dive areas, and synthesise a repo overview. Designed for context efficiency — orchestrator stays thin, agents write to disk, findings carry confidence levels. Can stop after any phase."
 ---
 
@@ -191,7 +191,7 @@ Before exploring blind, discover what's known about this repo's external interfa
 1. **Read the current (possibly placeholder) overview** at `onboarding/<repo>/overview.md`.
 2. **Search bootstrapped repos' onboarding** for references to this repo:
    ```bash
-   grep -r "<repo-name>" docs_and_tasks/onboarding/ --include="*.md" -l
+   grep -r "<repo-name>" onboarding/ --include="*.md" -l
    ```
 3. **Read the cross-repo sections** of those files. These name specific files, interfaces, event types, and communication paths — use them as seed points for the deep-dive.
 4. **Check the glossary** for terms associated with this repo.
