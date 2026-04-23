@@ -8,7 +8,7 @@ The memory layer is a shadow documentation tree that mirrors your source tree on
 
 The memory layer is the product. Everything else in this repo is a way to interact with it.
 
-Here an example of an onboarding companion file, `src/helpers/NameTools.php`'s onboarding:
+Here an example of an onboarding companion file, `src/helpers/ComponentLabelResolver.php`'s onboarding:
 ![onboarding-example](onboarding-example.png)
 
 ## The three modes
