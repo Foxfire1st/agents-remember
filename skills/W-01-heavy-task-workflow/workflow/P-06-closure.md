@@ -8,6 +8,8 @@ Closure happens after implementation is approved, not merely after coding stops.
 
 Its main job in the MVP model is to bring onboarding documentation up to date from the final implemented state and then write the final report.
 
+Closure is a consolidation pass, not a license to leave all durable discoveries undocumented until the very end.
+
 ---
 
 ## Core Identity
@@ -63,6 +65,8 @@ Closure updates onboarding documentation for the implemented surfaces.
 
 If an onboarding document is missing for an implemented surface, Closure should create it through the onboarding update path rather than leaving the surface undocumented.
 
+Closure should also confirm that durable findings discovered during implementation were already captured when practical, and then use this phase to consolidate or finish any remaining onboarding wording rather than rediscovering behavior from scratch.
+
 ### 4. Stop on mismatch instead of silently closing
 
 If the onboarding refresh reveals a material mismatch between approved target-state and actual code, approved architecture and actual ownership, or approved requirements and actual implemented behavior, Closure must stop and send the workflow back to the appropriate earlier discussion.
@@ -95,5 +99,6 @@ Closure does not:
 Closure ends only when:
 
 1. onboarding documentation has been updated from the final implemented state
-2. `final_report.md` exists
-3. the task has been marked complete
+2. durable findings from the task have been preserved in onboarding rather than left only in chat history
+3. `final_report.md` exists
+4. the task has been marked complete

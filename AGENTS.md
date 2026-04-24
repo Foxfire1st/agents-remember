@@ -17,6 +17,8 @@ When working with code make sure to read the corresponding onboarding file along
 For example, if you are working with `src/js/libs/device_connection/apiRequests.ts`, read `onboarding/device-management/helpdesk/src/js/libs/device_connection/apiRequests.md` for the relevant commentary.
 Note that onboarding repositories may be segmented by domain (e.g., `helpdesk`) to group related files.
 
+When a task uncovers durable current-state knowledge, record that knowledge in onboarding during implementation as soon as the finding is stable enough to state accurately, or at latest in the immediate post-implementation documentation pass. Do not rely on rediscovering the same behavior in a later session.
+
 ## heavy-task-workflow
 
 Operational references:
@@ -48,8 +50,8 @@ When asked to find a sollution to a problem, do not change any code before you h
 
 ## Chat Based Coding Workflow
 
-1. When planning code changes against onboarding documentation, invoke `C-02-onboarding-drift-detection` to find all drifted onboardings for the files in question. Do not plan against drifted or missing-verification onboarding until the drift report has been handed off to `C-05-create-or-update-onboarding-files` or the caller has explicitly accepted directional-only trust.
+1. When planning code changes against onboarding documentation, you MUST invoke `C-02-onboarding-drift-detection` to find all drifted onboarding files. Do not plan against drifted or missing-verification onboarding until the drift report has been handed off to `C-05-create-or-update-onboarding-files` or the caller has explicitly accepted directional-only trust. Do not skip this step! It is critical to maintain onboarding integrity and prevent untracked drift.
 
-2. Then once you have planned the changes show them to the developer in chat including code examples for every distinct change you intend to make. Wait for explicit developer approval before you start changing any code.
+2. Then after updating Onboarding you can investigate and plan the changes, which then you show to the developer in chat including code examples for every distinct change you intend to make. Wait for explicit developer approval before you start changing any code.
 
-3. After approval apply the code changes, create or update the onboarding documentation, and use the appropriate code quality checks from `docs/tools.md`.
+3. After approval apply the code changes, capture durable findings in the relevant onboarding files during implementation whenever the discovery is already clear, finish any remaining onboarding refresh immediately after implementation, and use the appropriate code quality checks from `docs/tools.md`.
