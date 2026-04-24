@@ -30,25 +30,25 @@ Use this template for `onboarding/<repo>/<component>/overview.md`.
 
 ## Onboarding File Index
 
-| Priority | Source File                                  | Onboarding Path                                            | Why                                        |
-| -------- | -------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------ |
-| high     | [<path/to/source-file>](path/to/source-file) | [<path/to/onboarding-file.md>](path/to/onboarding-file.md) | <why this file needs dedicated onboarding> |
+| Priority | Source File                          | Onboarding Path                                    | Why                                        |
+| -------- | ------------------------------------ | -------------------------------------------------- | ------------------------------------------ |
+| high     | [<source-file>](path/to/source-file) | [<onboarding-file.md>](path/to/onboarding-file.md) | <why this file needs dedicated onboarding> |
 
 ## Cross-Repo References
 
 <Start with prose that explains the important cross-repo or cross-boundary behavior in this component. Then add the citation table to back that explanation up. Preserve and correct useful existing explanation rather than replacing it with the table. If nothing relevant exists, keep the table and record what was checked plus `No relevant cross-repo evidence found.`>
 
-| Source Path                                                          | Citations | Finding                                                                                                  |
-| -------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
-| [<path/to/source-or-onboarding.md>](path/to/source-or-onboarding.md) | L15-L29   | <Concise summary of the cross-repo tie, interface, or external contract established by the cited lines.> |
+| Finding                                                                                                  | Citations | Source Path                                                           |
+| -------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------- |
+| <Concise summary of the cross-repo tie, interface, or external contract established by the cited lines.> | L15-L29   | [<source-or-onboarding.md>](relative/path/to/source-or-onboarding.md) |
 
 ## Docs References
 
 <Start with prose that explains the documentation context that matters for this component. Then add the citation table to back that explanation up. Preserve and correct useful existing explanation rather than replacing it with the table. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
 
-| Source Path                                                    | Citations | Finding                                                                                    |
-| -------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------ |
-| [<path/to/doc-or-onboarding.md>](path/to/doc-or-onboarding.md) | L20-L33   | <Concise summary of the cited lines and why they matter for understanding this component.> |
+| Finding                                                                                    | Citations | Source Path                                                |
+| ------------------------------------------------------------------------------------------ | --------- | ---------------------------------------------------------- |
+| <Concise summary of the cited lines and why they matter for understanding this component.> | L20-L33   | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
 
 ## Tech Stack
 
@@ -62,6 +62,7 @@ Use this template for `onboarding/<repo>/<component>/overview.md`.
 ## Notes
 
 - `Docs References` and `Cross-Repo References` are explanation-first sections backed by citation tables.
-- `Source Path` must be the clickable link to the cited file.
+- In `Cross-Repo References`, `Source Path` must be a workspace-relative link to the cited code or onboarding file.
+- In `Docs References`, `Source Path` must be the canonical online document link, even if a local mirror was used for reading.
 - `Citations` should use exact line ranges like `L10-L18` or `L10-L18; L42-L47`.
 - `Finding` should be a concise summary of what the cited lines establish.

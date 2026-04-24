@@ -57,13 +57,14 @@ Legacy overviews may still use headings like `Reference Docs` or `Cross-Repo Tie
 
 All `Docs References` and `Cross-Repo References` sections produced by this skill must include explanation-first prose where behavior or boundaries need explanation, backed by citation-supported markdown tables.
 
-1. Required columns: `Source Path`, `Citations`, `Finding`.
-2. `Source Path` is a clickable markdown link to the cited source file.
+1. Required columns: `Finding`, `Citations`, `Source Path`.
+2. In `Docs References`, `Source Path` is a clickable markdown link to the canonical online document URL. In `Cross-Repo References`, `Source Path` is a workspace-relative markdown link to the cited code or onboarding file.
 3. `Citations` records exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
 4. `Finding` is a concise summary of what the cited lines establish.
 5. Do not rely on uncited prose alone in either section.
 6. Preserve or restore useful explanatory prose about system boundaries, flows, and contracts; correct it if needed, then support it with the citation table.
-7. If no relevant source exists, keep the table and record what was checked plus that no relevant evidence was found.
+7. Never emit absolute filesystem paths in onboarding output.
+8. If no relevant source exists, keep the table and record what was checked plus that no relevant evidence was found.
 
 ---
 
@@ -523,11 +524,11 @@ The overview follows `templates/repo-overview-template.md`. `onboarding/device-m
 2. **Architecture at a Glance** — ASCII diagram showing major components and their relationships
 3. **Code Structure** — tables mapping areas to paths, tech, and purpose
 4. **Functional Areas** — prose summaries of each area (derived from area briefs), grouped by domain
-5. **Cross-Repo References** — explanatory prose plus citation-backed table showing interfaces to each adjacent repo with linked source paths, exact line ranges, and concise finding summaries
+5. **Cross-Repo References** — explanatory prose plus citation-backed table with columns `Finding`, `Citations`, and `Source Path`, showing interfaces to each adjacent repo with workspace-relative links in the last column, exact line ranges, and concise finding summaries
 6. **Build & Dev** — how to build, run, test
 7. **Key Invariants** — repo-wide rules that must hold (aggregated from area briefs)
 8. **Glossary Terms** — terms introduced or heavily used by this repo
-9. **Docs References** — explanatory prose plus citation-backed table of Confluence/docs/onboarding sources relevant to this repo, with linked source paths, exact line ranges, and concise finding summaries
+9. **Docs References** — explanatory prose plus citation-backed table with columns `Finding`, `Citations`, and `Source Path`, covering Confluence/docs/onboarding sources relevant to this repo with the canonical online document link in the last column, exact line ranges, and concise finding summaries
 10. **What to Explore Next** — which component overviews should be written first
 
 **Confidence handling in the overview:**
@@ -598,7 +599,7 @@ Each component overview runs as a **sub-agent** to keep the orchestrator clean f
    - Which file-level MDs should be created (ranked by priority — see 4.2 for criteria).
    - Which file-level MDs exist (initially empty for a fresh bootstrap).
 5. **Propagate confidence tags** — claims carried from the area report retain their confidence level. New claims from re-reading code default to `[MEDIUM]`.
-6. **Populate `Docs References` and `Cross-Repo References` as explanation-first sections backed by citation tables** — preserve or restore useful prose, and ensure every row has a linked source path, exact line ranges, and a concise finding summary.
+6. **Populate `Docs References` and `Cross-Repo References` as explanation-first sections backed by citation tables** — preserve or restore useful prose, use the column order `Finding`, `Citations`, `Source Path`, ensure docs rows link to the canonical online reference, ensure code/onboarding rows use workspace-relative links, and ensure every row has exact line ranges plus a concise finding summary.
 
 ### 4.2 Developer review
 

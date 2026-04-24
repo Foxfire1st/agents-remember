@@ -59,7 +59,7 @@ Before writing or revising onboarding content, read `docs/sources.md` and use it
 1. Use the `Domain Documentation` category from `docs/sources.md` as the discovery plan for `Docs References`, `Cross-Repo References`, and any load-bearing explanatory prose.
 2. Preserve useful adjacent onboarding context, but do not let it replace the required `Domain Documentation` pass.
 3. Do not hard-code one external documentation system into this package. The operative rule is to use whatever sources are listed under `Domain Documentation` in `docs/sources.md`.
-4. If `Domain Documentation` includes both a local mirror and a live retrieval path, use the local material first for direct access and escalate to the live source when recency, completeness, or confidence requires it.
+4. If `Domain Documentation` includes both a local mirror and a live retrieval path, use the local material first for direct access and line citations, but emit onboarding links to the canonical live reference. Never emit filesystem paths to local documentation mirrors in onboarding output.
 5. If no relevant material is found in the `Domain Documentation` sources, record what was checked instead of pretending the search space was limited to onboarding only.
 
 ## Reference Section Rule
@@ -70,6 +70,8 @@ Before writing or revising onboarding content, read `docs/sources.md` and use it
 2. Correct outdated or unsupported prose instead of deleting it reflexively.
 3. Add citation-backed tables so the explanation is auditable.
 4. Do not treat the citation table as a replacement for the explanation when the section is carrying real behavioral context.
+5. In `Docs References`, link the last-column cell to the canonical online document URL even when the cited lines were read from a local mirror.
+6. In `Cross-Repo References`, link code or onboarding evidence with workspace-relative markdown paths. Never emit absolute filesystem paths.
 
 ## Lifecycle Rules
 

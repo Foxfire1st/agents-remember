@@ -19,7 +19,7 @@ Create or update one onboarding markdown file mirrored under `onboarding/<repo>/
 1. Start by reading `docs/sources.md` and use its `Domain Documentation` category for the file being documented.
 2. Use the `Domain Documentation` sources from `docs/sources.md` when building `### Docs References` and any load-bearing explanatory prose that depends on technical or behavioral documentation.
 3. Treat adjacent onboarding as supporting input, not the whole discovery plan and not a substitute for the `Domain Documentation` pass.
-4. If `Domain Documentation` includes both local and live variants, use the local material first and escalate to the live source when the local material is insufficient, stale, or missing.
+4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and line citations, but write the onboarding link to the canonical online reference rather than the local mirror path.
 5. If relevant material cannot be found in the `Domain Documentation` sources, record what was checked and that no relevant evidence was found.
 
 ## Placement Rules
@@ -62,12 +62,13 @@ Subsections under `## Code Commentary`:
 
 Citation requirements for reference sections:
 
-1. `### Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Source Path`, `Citations`, and `Finding`.
-2. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Source Path`, `Citations`, and `Finding`.
-3. `Source Path` must be a clickable markdown link to the cited source file.
-4. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
-5. `Finding` must be a concise summary of what those cited lines establish.
-6. Do not rely on uncited prose alone in either section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists, keep the table and note what was checked and that no relevant evidence was found.
+1. `### Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
+2. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
+3. In `### Docs References`, `Source Path` must link to the canonical online document URL. Read local mirrors if needed, but do not link to them.
+4. In `## Cross-Repo References`, `Source Path` must use a workspace-relative markdown link to the cited code or onboarding file. Do not use absolute filesystem paths.
+5. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
+6. `Finding` must be a concise summary of what those cited lines establish.
+7. Do not rely on uncited prose alone in either section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists, keep the table and note what was checked and that no relevant evidence was found.
 
 ## Create Workflow
 
@@ -79,7 +80,7 @@ Citation requirements for reference sections:
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 5. fill the template from `../templates/file-level-onboarding-template.md`
 6. update the component overview if the file should be indexed there
-7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material reflects the `Domain Documentation` sources from `docs/sources.md`, and ensure every table row has a linked source path, exact line ranges, and a concise finding summary
+7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material reflects the `Domain Documentation` sources from `docs/sources.md`, ensure docs rows link to the canonical online reference, ensure code/onboarding rows use workspace-relative links, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
 

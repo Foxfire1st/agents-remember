@@ -19,7 +19,7 @@ Create or update one repo-level entity catalog documenting load-bearing real ent
 1. Start by reading `docs/sources.md` and use its `Domain Documentation` category for the repo entities under review.
 2. Use the `Domain Documentation` sources from `docs/sources.md` when deciding canonical source of truth, naming drift, and cross-layer projections.
 3. Do not rely on adjacent onboarding alone when the `Domain Documentation` category contains more authoritative domain, protocol, or architecture context.
-4. If `Domain Documentation` includes both local and live variants, use the local material first and escalate to the live source when needed.
+4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and evidence gathering, but link onboarding output to the canonical online reference rather than the local mirror.
 
 ## Placement Rules
 

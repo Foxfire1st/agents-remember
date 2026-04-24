@@ -29,11 +29,11 @@
 
 ### Docs References
 
-<Start with a short prose summary if there is meaningful documentation context to explain, then add the citation table. Build this section from the `Domain Documentation` category declared in `docs/sources.md`. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
+<Start with a short prose summary if there is meaningful documentation context to explain, then add the citation table. Build this section from the `Domain Documentation` category declared in `docs/sources.md`. Read local mirrors if needed, but link the table row to the canonical online document reference. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
 
-| Source Path                                                    | Citations | Finding                                                                |
-| -------------------------------------------------------------- | --------- | ---------------------------------------------------------------------- |
-| [<path/to/doc-or-onboarding.md>](path/to/doc-or-onboarding.md) | L10-L18   | <Concise summary of the cited lines and why they matter to this file.> |
+| Finding                                                                | Citations | Source Path                                                |
+| ---------------------------------------------------------------------- | --------- | ---------------------------------------------------------- |
+| <Concise summary of the cited lines and why they matter to this file.> | L10-L18   | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
 
 ## Invariants And Boundaries
 
@@ -41,11 +41,11 @@
 
 ## Cross-Repo References
 
-<Start with a short prose summary if there is meaningful cross-repo or external-boundary behavior to explain, then add the citation table. Build this section using the `Domain Documentation` category from `docs/sources.md` plus the necessary code and onboarding evidence, not from adjacent onboarding alone. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No meaningful cross-repo references found.`>
+<Start with a short prose summary if there is meaningful cross-repo or external-boundary behavior to explain, then add the citation table. Build this section using the `Domain Documentation` category from `docs/sources.md` plus the necessary code and onboarding evidence, not from adjacent onboarding alone. Use workspace-relative links for code or onboarding evidence; never absolute filesystem paths. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No meaningful cross-repo references found.`>
 
-| Source Path                                                                    | Citations | Finding                                                                                 |
-| ------------------------------------------------------------------------------ | --------- | --------------------------------------------------------------------------------------- |
-| [<path/to/source-or-adjacent-repo-file>](path/to/source-or-adjacent-repo-file) | L42-L58   | <Concise summary of the interface, external repo/service involved, and why it matters.> |
+| Finding                                                                                 | Citations | Source Path                                                                     |
+| --------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
+| <Concise summary of the interface, external repo/service involved, and why it matters.> | L42-L58   | [<source-or-adjacent-repo-file>](relative/path/to/source-or-adjacent-repo-file) |
 
 ## Update History
 
