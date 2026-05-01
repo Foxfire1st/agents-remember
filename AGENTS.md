@@ -36,7 +36,7 @@ When working with code:
 
 ## No Code Changes Before Explicit Developer Approval
 
-When asked to find a sollution to a problem, do not change any code before you have explained your sollution in chat with code examples for all distinct changes you intend to make.
+When asked to find a sollution to a problem, do not change any code before you have explained your solution in chat with code examples for all distinct changes you intend to make.
 **Then wait for developer approval before touching any code!**
 
 ## Chat Based Coding Workflow
