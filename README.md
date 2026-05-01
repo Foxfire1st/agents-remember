@@ -47,7 +47,7 @@ Clone this repository somewhere next to your existing code — it doesn't go ins
 
 ```text
 projects/
-  agents-remember/        ← this repo
+  agents-remember-md/        ← this repo
     AGENTS.md
     .env.example
   ar-management/          ← local/team memory root
@@ -99,21 +99,35 @@ The steps are the same regardless of which tool you use:
 
 Coverage builds from real work. The first task on any file writes the companion; every task after reads it.
 
-### Claude Code
+### Codex
 
-Add a `CLAUDE.md` at the root of each code repository:
+Add a `AGENTS.md` at the root of your projects folder:
 
 ```markdown
-# my-app
+# Workspace Agent Instructions
 
-@../agents-remember/AGENTS.md
+Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+
+@agents-remember-md/AGENTS.md
 ```
 
-Claude Code imports the file into context at session start. When a skill applies, the agent reads the corresponding `SKILL.md` using its normal file tools — no extra configuration needed since `agents-remember` is already accessible on disk.
+### Claude Code
+
+Add a `CLAUDE.md` at the root of your projects folder:
+
+```markdown
+# Workspace Agent Instructions
+
+Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+
+@agents-remember-md/AGENTS.md
+```
+
+Claude Code imports the file into context at session start. When a skill applies, the agent reads the corresponding `SKILL.md` using its normal file tools — no extra configuration needed since `agents-remember-md` is already accessible on disk.
 
 ### Cursor
 
-Create `.cursor/rules/agents-remember.mdc` in your code repository:
+Create `.cursor/rules/agents-remember.mdc` in your projects folder:
 
 ```markdown
 ---
@@ -121,7 +135,9 @@ description: Agents Remember memory system conventions
 alwaysApply: true
 ---
 
-@../agents-remember/AGENTS.md
+Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+
+@agents-remember-md/AGENTS.md
 ```
 
 Alternatively, use Cursor's built-in GitHub import to sync rules directly from this repo. Skills are read on demand by the agent using standard file access.
@@ -132,21 +148,21 @@ Open (or create) a `.code-workspace` file that includes both repositories as fol
 
 ```json
 {
-  "folders": [{ "path": "agents-remember" }, { "path": "my-app" }],
+  "folders": [{ "path": "agents-remember-md" }, { "path": "my-app" }],
   "settings": {
     "chat.agentSkillsLocations": {
-      "agents-remember/skills": true,
-      "agents-remember/skills/U-01-core-skills": true,
-      "agents-remember/skills/W-01-heavy-task-workflow": true,
-      "agents-remember/skills/W-02-light-task-workflow": true,
-      "agents-remember/skills/P-00-creation": true,
-      "agents-remember/skills/P-01-research": true,
-      "agents-remember/skills/P-02-synthesis": true,
-      "agents-remember/skills/P-03-design": true,
-      "agents-remember/skills/P-04-planning": true,
-      "agents-remember/skills/P-05-implementation": true,
-      "agents-remember/skills/P-06-closing": true,
-      "agents-remember/skills/P-99-review": true
+      "agents-remember-md/skills": true,
+      "agents-remember-md/skills/U-01-core-skills": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow": true,
+      "agents-remember-md/skills/W-02-light-task-workflow": true,
+      "agents-remember-md/skills/P-00-creation": true,
+      "agents-remember-md/skills/P-01-research": true,
+      "agents-remember-md/skills/P-02-synthesis": true,
+      "agents-remember-md/skills/P-03-design": true,
+      "agents-remember-md/skills/P-04-planning": true,
+      "agents-remember-md/skills/P-05-implementation": true,
+      "agents-remember-md/skills/P-06-closing": true,
+      "agents-remember-md/skills/P-99-review": true
     }
   }
 }
