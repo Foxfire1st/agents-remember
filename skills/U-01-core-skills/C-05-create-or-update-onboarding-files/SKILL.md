@@ -51,6 +51,7 @@ Choose the artifact type first, then use the matching workflow and template.
 6. When updating `Docs References` or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
 7. Start reference discovery from `<AR_MANAGEMENT_ROOT>/system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
 8. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
+9. Treat `<AR_MANAGEMENT_ROOT>/system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
 
 ## Source Discovery Rule
 
@@ -61,6 +62,8 @@ Before writing or revising onboarding content, read `<AR_MANAGEMENT_ROOT>/system
 3. Do not hard-code one external documentation system into this package. The operative rule is to use whatever sources are listed under `Domain Documentation` in `<AR_MANAGEMENT_ROOT>/system/sources.md`.
 4. If `Domain Documentation` includes both a local mirror and a live retrieval path, use the local material first for direct access and line citations, but emit onboarding links to the canonical live reference. Never emit filesystem paths to local documentation mirrors in onboarding output.
 5. If no relevant material is found in the `Domain Documentation` sources, record what was checked instead of pretending the search space was limited to onboarding only.
+6. Do not put `<AR_MANAGEMENT_ROOT>/system/sources.md`, source registries, search result pages, or “see this source list” rows in citation tables. After using the registry to choose where to look, cite the actual documentation, source file, generated artifact, or local mirror that directly proves the statement.
+7. If the registry points to a documentation source but the source does not prove anything relevant for the file, say that no relevant documentation was found and cite the repository source code in `Cross-Repo References` for implementation facts.
 
 ## Reference Section Rule
 
@@ -72,6 +75,7 @@ Before writing or revising onboarding content, read `<AR_MANAGEMENT_ROOT>/system
 4. Do not treat the citation table as a replacement for the explanation when the section is carrying real behavioral context.
 5. In `Docs References`, link the last-column cell to the canonical online document URL even when the cited lines were read from a local mirror.
 6. In `Cross-Repo References`, link code or onboarding evidence with workspace-relative markdown paths. Never emit absolute filesystem paths.
+7. Every citation table row must point to evidence, not to the discovery registry that helped find evidence.
 
 ## Lifecycle Rules
 

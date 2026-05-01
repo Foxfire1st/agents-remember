@@ -21,6 +21,8 @@ Create or update one onboarding markdown file mirrored under `<onboarding-root>/
 3. Treat adjacent onboarding as supporting input, not the whole discovery plan and not a substitute for the `Domain Documentation` pass.
 4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and line citations, but write the onboarding link to the canonical online reference rather than the local mirror path.
 5. If relevant material cannot be found in the `Domain Documentation` sources, record what was checked and that no relevant evidence was found.
+6. `<AR_MANAGEMENT_ROOT>/system/sources.md` is discovery-only. It must not appear as a cited source in `### Docs References` or `## Cross-Repo References`.
+7. Cite the actual evidence source: the library documentation page, canonical local mirror, repository source file, generated artifact, or sibling-repo file that directly proves the statement.
 
 ## Placement Rules
 
@@ -69,6 +71,7 @@ Citation requirements for reference sections:
 5. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
 6. `Finding` must be a concise summary of what those cited lines establish.
 7. Do not rely on uncited prose alone in either section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists, keep the table and note what was checked and that no relevant evidence was found.
+8. Do not cite source registries, search pages, or “where to look” files as evidence. They are allowed only as discovery inputs before reading the actual source.
 
 ## Create Workflow
 
@@ -80,7 +83,7 @@ Citation requirements for reference sections:
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 5. fill the template from `../templates/file-level-onboarding-template.md`
 6. update the component overview if the file should be indexed there
-7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material reflects the `Domain Documentation` sources from `<AR_MANAGEMENT_ROOT>/system/sources.md`, ensure docs rows link to the canonical online reference, ensure code/onboarding rows use workspace-relative links, and ensure every table row has exact line ranges plus a concise finding summary
+7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via `<AR_MANAGEMENT_ROOT>/system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, ensure code/onboarding rows use workspace-relative links, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
 
