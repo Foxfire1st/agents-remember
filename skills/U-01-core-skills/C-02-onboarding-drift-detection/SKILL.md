@@ -34,6 +34,29 @@ This skill can work from one of these scopes:
 
 ## Procedure
 
+### Preferred helper
+
+Use the bundled helper for repo, component, and multi-file checks instead of rewriting shell loops:
+
+```bash
+python <this-skill-dir>/scripts/check_onboarding_drift.py \
+  --repo <repo-root> \
+  --onboarding-root <AR_MANAGEMENT_ROOT>/onboarding/<repo> \
+  --report <AR_MANAGEMENT_ROOT>/onboarding/<repo>/drift-report.md
+```
+
+For file-scoped checks, pass `--source` one or more times:
+
+```bash
+python <this-skill-dir>/scripts/check_onboarding_drift.py \
+  --repo <repo-root> \
+  --onboarding-root <AR_MANAGEMENT_ROOT>/onboarding/<repo> \
+  --source src/foo/bar.py \
+  --source src/foo/baz.py
+```
+
+The helper requires Python and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`.
+
 ### 1. Identify onboarding files in scope
 
 Locate the relevant onboarding files under `<onboarding-root>/<repo>/...`, where `<onboarding-root>` is derived from `AR_MANAGEMENT_ROOT` and documented in `<AR_MANAGEMENT_ROOT>/system/settings.md`.
