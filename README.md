@@ -40,6 +40,8 @@ shot_planner.py.md      drifted      source changed since 4d1fdf2
 
 Then it refreshes only the stale companions and plans against current context, not old notes.
 
+![alt text](agents-remember.png)
+
 ---
 
 ## Why I made this repo
