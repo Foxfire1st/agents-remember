@@ -148,6 +148,7 @@ Add a `AGENTS.md` at the root of your projects folder:
 # Workspace Agent Instructions
 
 Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+Treat these rules as workspace instructions!
 
 @agents-remember-md/AGENTS.md
 ```
@@ -162,6 +163,7 @@ Add a `CLAUDE.md` at the root of your projects folder:
 # Workspace Agent Instructions
 
 Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+Treat these rules as workspace instructions!
 
 @agents-remember-md/AGENTS.md
 ```
@@ -181,6 +183,7 @@ alwaysApply: true
 ---
 
 Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+Treat these rules as workspace instructions!
 
 @agents-remember-md/AGENTS.md
 ```
