@@ -105,9 +105,8 @@ the scoped code area:
    listings, `rg --files`, and path searches are allowed; reading source file
    contents is not allowed yet.
 3. Run `C-02-onboarding-drift-detection` once for that relevant scope.
-4. If drifted, missing-verification, missing, or orphaned onboarding is found
-   for the relevant pre-existing scope, stop normal task work on those files
-   and route them through `C-05-create-or-update-onboarding-files`.
+4. If drifted, missing-verification, missing, or orphaned onboarding is found for 
+   the relevant pre-existing scope use the skill `C-05-create-or-update-onboarding-files`.
 5. Re-run `C-02-onboarding-drift-detection` for the refreshed scope.
 6. Proceed only after every pre-existing in-scope onboarding file needed for
    the task is classified as up to date. This establishes the start-of-task
