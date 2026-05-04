@@ -83,14 +83,14 @@ Citation requirements for reference sections:
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 5. fill the template from `../templates/file-level-onboarding-template.md`
 6. update the component overview if the file should be indexed there
-7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via `<AR_MANAGEMENT_ROOT>/system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, ensure code/onboarding rows use workspace-relative links, and ensure every table row has exact line ranges plus a concise finding summary
+7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via `<AR_MANAGEMENT_ROOT>/system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, health-check those canonical URLs when retrieval tools are available, ensure code/onboarding rows use workspace-relative links that still resolve to the cited files, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
 
 When code changes:
 
 1. re-read the source file and the onboarding file
-2. re-read `<AR_MANAGEMENT_ROOT>/system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation and refreshing citation line ranges when the source moved or changed
+2. re-read `<AR_MANAGEMENT_ROOT>/system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking canonical doc URLs plus workspace-relative cross-repo targets before treating those references as current
 3. update metadata after the content has been verified
 
 When code is deleted or moved:

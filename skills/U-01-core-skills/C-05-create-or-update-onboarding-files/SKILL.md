@@ -52,6 +52,7 @@ Choose the artifact type first, then use the matching workflow and template.
 7. Start reference discovery from `<AR_MANAGEMENT_ROOT>/system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
 8. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
 9. Treat `<AR_MANAGEMENT_ROOT>/system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
+10. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References` or `Cross-Repo References` are still valid.
 
 ## Source Discovery Rule
 
@@ -76,6 +77,9 @@ Before writing or revising onboarding content, read `<AR_MANAGEMENT_ROOT>/system
 5. In `Docs References`, link the last-column cell to the canonical online document URL even when the cited lines were read from a local mirror.
 6. In `Cross-Repo References`, link code or onboarding evidence with workspace-relative markdown paths. Never emit absolute filesystem paths.
 7. Every citation table row must point to evidence, not to the discovery registry that helped find evidence.
+8. Reference health checking is mandatory during create and maintain passes.
+9. For `Docs References`, verify the canonical online URL still resolves to the intended document when retrieval tools are available. If it cannot be verified, record the blocker instead of leaving the entry implicitly trusted.
+10. For `Cross-Repo References`, verify each workspace-relative target still exists and that the cited lines still support the stated finding. Repair or remove broken entries before finishing.
 
 ## Lifecycle Rules
 
