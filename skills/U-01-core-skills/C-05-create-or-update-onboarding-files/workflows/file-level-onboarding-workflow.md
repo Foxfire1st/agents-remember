@@ -1,18 +1,19 @@
 # File-Level Onboarding Workflow
 
-Use this workflow when creating or maintaining onboarding for one concrete source file mirrored under `<onboarding-root>/<repo>/<component>/src/...`.
+Use this workflow when creating or maintaining the shared file-level onboarding content model for one concrete source file. External onboarding stores that content under `<onboarding-root>/<repo>/<component>/src/...`; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
 
 Template: `../templates/file-level-onboarding-template.md`
 
 ## Goal
 
-Create or update one onboarding markdown file mirrored under `<onboarding-root>/<repo>/...` for one concrete source file.
+Create or update the file-level onboarding content for one concrete source file.
 
 ## Scope
 
-1. one onboarding markdown file per source file
-2. strict mirrored path under the component `src/` subtree
-3. durable commentary only; planning stays in task artifacts
+1. one file-level onboarding unit per source file
+2. external storage keeps the strict mirrored path under the component `src/` subtree
+3. inline storage reuses the same content model but follows storage-specific syntax and placement rules
+4. durable commentary only; planning stays in task artifacts
 
 ## Source Discovery Rules
 
@@ -37,6 +38,7 @@ Create or update one onboarding markdown file mirrored under `<onboarding-root>/
 1. File name matches the source file name with `.md` appended.
 2. Never group multiple source files into one onboarding file.
 3. Keep the mirrored path stable so reviewers can move directly between source and onboarding.
+4. When inline storage is configured, keep the section semantics identical and use `inline-onboarding-workflow.md` only for syntax, placement, digesting, and fallback behavior.
 
 ## Metadata Rules
 
@@ -91,7 +93,8 @@ When code changes:
 
 1. re-read the source file and the onboarding file
 2. re-read `<AR_MANAGEMENT_ROOT>/system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking canonical doc URLs plus workspace-relative cross-repo targets before treating those references as current
-3. update metadata after the content has been verified
+3. for inline storage, apply the updated content through `inline-onboarding-workflow.md` so comment syntax, placement, and source digest stay consistent
+4. update metadata after the content has been verified
 
 When code is deleted or moved:
 

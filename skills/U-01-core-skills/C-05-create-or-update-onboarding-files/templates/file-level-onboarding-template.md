@@ -1,5 +1,7 @@
 # <SourceFileName.ext>
 
+This is the canonical file-level onboarding content model. External onboarding mirrors it into markdown files; inline onboarding serializes the same sections into a structured source-file comment block via `inline-onboarding-block-template.md`.
+
 | Field                  | Value                                 |
 | ---------------------- | ------------------------------------- |
 | repository             | <repo-name>                           |

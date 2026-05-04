@@ -10,9 +10,9 @@ That is why the failures are so weird. The output looks plausible. The edit is c
 
 A single top-level instruction file can point the agent in the right direction, but it cannot reappear exactly when the agent needs it. **Once the agent is deep in a file, the relevant context is no longer naturally in front of it.** Recovering it becomes an explicit search problem: expensive, uncertain, and easy to skip.
 
-It is like handing someone a city map at the train station and taking it away before they start walking. The problem is not that they never saw the map. The problem is that it is gone when they need one next turn.
+It is like handing someone a city map at the train station and taking it away before they start walking. The problem is not that they never saw the map. The problem is that it is gone when they need it on the next turn.
 
-That's where Agents Remember simple premise starts: important project knowledge should not have to be hunted down. If it is not local, structured, and discoverable, **then for the agent it effectively does not exist.**
+That's where Agents Remember's simple premise starts: important project knowledge should not have to be hunted down. If it is not local, structured, and discoverable, **then for the agent it effectively does not exist.**
 
 So the way forward is to make that missing context visible before the agent has to guess.
 
@@ -24,7 +24,7 @@ An agent touches:
 resolve_auto_editor/src/orchestrator/core_editor.py
 ```
 
-So it checks the mirrored onboarding companion:
+In the default external mode, it checks the mirrored onboarding unit:
 
 ```text
 ar-management/onboarding/resolve_auto_editor/orchestrator-and-agent-loop/src/orchestrator/core_editor.py.md
@@ -38,7 +38,7 @@ shot_planner.py.md      drifted      source changed since 4d1fdf2
 22 other files          up to date
 ```
 
-Then it refreshes only the stale companions and plans against current context, not old notes.
+Then it refreshes only the stale onboarding and plans against current context, not old notes.
 
 ![alt text](agents-remember.png)
 
@@ -52,20 +52,20 @@ That is exactly the kind of environment where agents struggle. A small issue is 
 
 The idea came from our embedded code. Many files had large comment sections at the top: who changed what, when, and what strange behavior mattered. At first that looked excessive. But as I browsed, I realized those comments let me understand code I had never worked in before. I could read some, sure, but the commentary gave me the shape of the system much faster than code alone would have.
 
-I wanted that same effect for developers working with agents. But without the risk of introducing "noise" into source files for experienced developers, just because it is helpful for agents. Also commentary in files can go stale without anyone noticing. So this repo keeps the extended commentary layer separate, while still making it easy to find: one markdown file per source file, mirrored by path.
+I wanted that same effect for developers working with agents. But I did not want to force extra commentary into source files for teams that prefer to keep code surfaces clean, and I did not want the knowledge layer to drift without explicit verification. So the first version of this repo kept the extended commentary separate and deterministic: one mirrored markdown onboarding unit per source file.
 
-That 1-to-1 mapping is the trick. If an agent is working on `src/foo/bar.ts`, it knows exactly where to look for `<onboarding-root>/my-app/src/foo/bar.md`. No secret wiki, no guessing, no giant context dump. The agent can onboard itself from the file it is touching and discover the hidden contracts around it naturally.
+That is still the default, but it is not the whole idea anymore. The real trick is not markdown for its own sake. The trick is 1-to-1 onboarding. If an agent is working on `src/foo/bar.ts`, it should know exactly where the onboarding unit lives and how to verify it. In external mode that means `<onboarding-root>/my-app/src/foo/bar.ts.md`. In inline mode that means the structured onboarding block inside `src/foo/bar.ts` itself. No secret wiki, no guessing, no giant context dump. The agent can onboard itself from the file it is touching and discover the hidden contracts around it naturally.
 
 That is what this repository is trying to make practical: a collaborative knowledge layer that grows as work happens. Documentation stops being a second job and becomes a trail of useful context left behind by real tasks.
 
-The onboarding files are a shared knowledge substrate. Versioned in git, readable by people, and easy for agents to retrieve. That transfer of knowledge between developers, tools, and future sessions is the heart of this project.
+The onboarding units are a shared knowledge substrate. Versioned in git, readable by people, and easy for agents to retrieve. That transfer of knowledge between developers, tools, and future sessions is the heart of this project.
 
 ---
 
 ## Techstack
 
 ```text
-Skills for for Claude Code, Cursor, VS Code etc. No software dependendencies.
+Skills for Claude Code, Cursor, VS Code, and similar tools. No software dependencies.
 Just markdown files and conventions.
 ```
 
@@ -82,7 +82,7 @@ projects/
     .env.example
   ar-management/          ← local/team memory root
     onboarding/
-      my-app-onboarding/   ← created later by C-03 or supplied by your team
+      my-app/              ← created later by C-03 or supplied by your team
         src/
     tasks/
     docs/
@@ -122,7 +122,47 @@ ar-management/
     └── tools.md
 ```
 
-The onboarding root can later contain newly created onboarding folders or cloned onboarding repositories that your team version-controls. `C-00` intentionally leaves `onboarding/` empty; `C-03-repo-bootstrap` owns repo onboarding below that point. The starter `system/sources.md` and `system/tools.md` are intentionally plain; fill them in with project-specific docs, commands, and checks as repos are onboarded.
+The onboarding root can later contain newly created onboarding folders or cloned onboarding repositories that your team version-controls. `C-00` intentionally leaves `onboarding/` empty; `C-03-repo-bootstrap` owns repo onboarding below that point. Even when a repo uses inline or hybrid storage, the onboarding root still carries repo-level overviews, catalogs, and any external onboarding units that remain in use. The starter `system/sources.md` and `system/tools.md` are intentionally plain; fill them in with project-specific docs, commands, and checks as repos are onboarded.
+
+---
+
+### Onboarding Storage
+
+Agents Remember treats file-level onboarding as an onboarding unit. The unit can be stored as an external mirrored markdown file, as an inline block inside the source file, or through a hybrid configuration that chooses storage per path.
+
+If no storage settings are configured, Agents Remember keeps the existing behavior: external onboarding with an implicit path rule for the current scoped repository using `includes: ["*"]` and `excludes: []`.
+
+Storage modes:
+
+- `external`: store onboarding in mirrored markdown files under the configured onboarding root.
+- `inline`: store onboarding as a structured comment block inside eligible source files.
+- `hybrid`: use `pathRules` to choose `external`, `inline`, or `disabled` per matched source path.
+
+`pathRules` are shared by all storage modes. Each rule has a `path`, `includes`, and `excludes`. Patterns are evaluated relative to the rule path, rules are evaluated top-down, and `excludes` always wins over `includes`.
+
+```yaml
+onboarding:
+  storage:
+    mode: hybrid
+    default: external
+    pathRules:
+      - path: "my-app"
+        storage: inline
+        includes:
+          - "src/**/*.ts"
+          - "src/**/*.tsx"
+        excludes:
+          - "src/**/*.generated.*"
+          - "src/generated/**"
+      - path: "my-app"
+        storage: disabled
+        includes:
+          - "vendor/**"
+          - "node_modules/**"
+        excludes: []
+```
+
+Inline onboarding reuses the same file-level onboarding content model as external onboarding. Only storage, comment syntax, placement, parsing, digesting, and fallback behavior differ.
 
 ---
 
@@ -132,11 +172,11 @@ The steps are the same regardless of which tool you use:
 
 1. Wire up the agent so it reads `AGENTS.md` from this repo at session start (tool-specific instructions below).
 2. Run `C-00-initialize-management-root` if the `ar-management` scaffold does not exist yet.
-3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure in `<onboarding-root>/my-app-onboarding/`. A bare `overview.md` is enough — the agent fills in depth as it works.
-4. Start using the agent normally. Chat handles most tasks. The agent reads companion files alongside source files and updates them as it goes.
+3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure for the repo under `<onboarding-root>/my-app/`. A bare `overview.md` is enough; the agent fills in depth as it works.
+4. Start using the agent normally. Chat handles most tasks. The agent reads the resolved onboarding unit alongside the source file and updates it as it goes.
 5. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when the task needs a written plan or needs to survive beyond a single session.
 
-Coverage builds from real work. The first task on any file writes the companion; every task after reads it.
+Coverage builds from real work. The first task on a file usually creates or refreshes its onboarding unit; every task after benefits from that local context.
 
 ---
 
@@ -240,7 +280,7 @@ Most tasks don't need a framework. They need an agent that already knows the cod
 
 All three modes share the same three-part discipline:
 
-1. **Drift check before planning.** Before the agent plans against an onboarding file, it verifies the file isn't stale against the source. The `C-02-onboarding-drift-detection` skill runs this check and classifies trust.
+1. **Drift check before planning.** Before the agent plans against onboarding, it verifies that the resolved onboarding unit is not stale against the source. The `C-02-onboarding-drift-detection` skill runs this check and classifies trust.
 2. **Approval before implementation.** The agent proposes changes. The developer approves. No implicit approval, no "I'll just make this small edit."
 3. **Onboarding update after approved changes.** Onboarding reflects approved code, not speculation. The update happens after the developer approves the change, not before.
 
@@ -253,12 +293,12 @@ In chat mode, the whole loop is small enough to state in full. It lives in `AGEN
 ```markdown
 1. When planning code changes against onboarding documentation, invoke
    `C-02-onboarding-drift-detection` to find drifted onboardings for the
-  pre-existing files in question. Do not plan against drifted or
-  missing-verification onboarding until the drift report has been handed off
-  to `C-05-create-or-update-onboarding-files` or the caller has explicitly
-  accepted directional-only trust. This establishes a start-of-task baseline;
-  it does not re-trigger solely because the current task later creates or
-  modifies files in that scope.
+   pre-existing files in question. Do not plan against drifted or
+   missing-verification onboarding until the drift report has been handed off
+   to `C-05-create-or-update-onboarding-files` or the caller has explicitly
+   accepted directional-only trust. This establishes a start-of-task baseline;
+   it does not re-trigger solely because the current task later creates or
+   modifies files in that scope.
 
 2. Once planned, show the changes to the developer in chat including
    code examples for every distinct change you intend to make. Wait for
@@ -277,7 +317,7 @@ No task folder, no phase structure. The same discipline the heavier modes enforc
 
 Memory systems fail in two ways. They go stale (the code moves, the docs don't). They get polluted with speculation (an agent writes what it _planned_ to build, not what exists). This system addresses both:
 
-**Staleness.** Each companion file records the git commit of its source file at last verification. Before any planning work, a diff against that hash tells the agent whether the file has changed. Stale companions are flagged and refreshed before the agent plans against them. This is `C-02-onboarding-drift-detection`, and it runs as the first step of every mode.
+**Staleness.** Each onboarding unit records verification metadata appropriate to its storage mode. External onboarding records the source file's verified git commit. Inline onboarding records a source digest computed from the file body with the onboarding block removed. Before any planning work, the agent resolves where onboarding lives, checks that metadata against the current source, and refreshes stale onboarding before planning against it. This is `C-02-onboarding-drift-detection`, and it runs as the first step of every mode.
 
 **Pollution.** The approval gate is global: no unapproved work goes into onboarding. In chat mode, the gate is the developer's approval turn. In light task, it's approval of the plan and of the implementation. In heavy task, it's the promotion step at Closure after CP5 passes. Task-local artifacts — input documentation, projected outputs, implementation plans — stay task-local until implementation is approved. Only then does anything reach the canonical onboarding tree.
 
@@ -287,7 +327,7 @@ Both guarantees hold across all three modes. The memory layer only accepts valid
 
 ## Repository bootstrapping
 
-Companion files don't need to exist before you can use the system. A repo with no onboarding can start with a bare `overview.md` and be scaffolded by using the `C-03-repo-bootstrap` skill. From there it can grow organically as tasks touch new areas. The first task on a file pays the cost of writing its companion; every task after that benefits.
+Onboarding does not need to be fully present before you can use the system. A repo with no onboarding can start with a bare `overview.md` and be scaffolded by using the `C-03-repo-bootstrap` skill. From there it can grow organically as tasks touch new areas. The first task on a file pays the cost of creating or refreshing that file's onboarding unit; every task after that benefits.
 
 For bulk coverage the `C-03-repo-bootstrap` skill can do more. After `overview.md` you can scaffold an entire repo in phases. Start with the hotspots and then go into detail where needed. You can bootstrap hundreds of files in a session, which is nowadays practical on current models using sub-Agents and parallelism.
 
@@ -302,7 +342,7 @@ For bulk coverage the `C-03-repo-bootstrap` skill can do more. After `overview.m
   - `C-02-onboarding-drift-detection` — staleness detection (used by every mode)
   - `C-03-repo-bootstrap` — scaffold onboarding for an existing repo
   - `C-04-discovery` — top-down reading order for unfamiliar code
-  - `C-05-create-or-update-onboarding-files` — the onboarding file template and maintenance
+  - `C-05-create-or-update-onboarding-files` — the onboarding template, inline adapter docs, and maintenance
 - `skills/P-99-review/` — the adversarial review package used by heavy task
 - `AGENTS.md` — operational principles, including the chat-mode loop
 - `<onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available

@@ -4,13 +4,13 @@ Use this template for any task file created by `W-02-light-task-workflow`.
 
 Implementation sections use checkbox-based steps and checkbox substeps. The checklist is the live execution state during implementation and review.
 
-```markdown
+````markdown
 # Task: <Title>
 
 **Status:** planning
 **Repo:** <primary repo>
 **Type:** <Docs | Skill | Config | Other>
-**Created:** <YYYY-MM-DD>
+**Created:** <YYYY-MM-DDTHH:MM>
 
 ---
 
@@ -32,15 +32,15 @@ Implementation sections use checkbox-based steps and checkbox substeps. The chec
 ### S1 — <title>
 
 - [ ] <step outcome>
-  - [ ] <substep>
-  - [ ] <substep>
+      - [ ] <substep>
+      - [ ] <substep>
 - [ ] <verification or review-ready outcome>
 
 ### S2 — <title>
 
 - [ ] <step outcome>
-  - [ ] <substep>
-  - [ ] <substep>
+      - [ ] <substep>
+      - [ ] <substep>
 - [ ] <verification or review-ready outcome>
 
 ---
@@ -56,6 +56,7 @@ Why this example is included: <why this is the representative example the develo
 ```<language>
 <example snippet>
 ```
+````
 
 ### E2 — <title or "Not needed for this task">
 
@@ -71,9 +72,9 @@ Why this example is included: <reason>
 
 ## Decision Log
 
-| Date | Decision | Rationale |
-| --- | --- | --- |
-| <YYYY-MM-DD> | <what was decided> | <why> |
+| Date-Time          | Decision           | Rationale |
+| ------------------ | ------------------ | --------- |
+| <YYYY-MM-DDTHH:MM> | <what was decided> | <why>     |
 
 ---
 
@@ -86,6 +87,7 @@ Why this example is included: <reason>
 ## References
 
 - <related file, ticket, or discussion>
+
 ```
 
 ## Usage Rules
@@ -97,3 +99,5 @@ Why this example is included: <reason>
 5. Mark substeps complete before their parent verification item.
 6. Add or reorder checklist items when scope changes, then get approval again if the change is significant.
 7. Use the light-task status values: `planning`, `inProgress`, `Completed`.
+8. Use `YYYY-MM-DDTHH:MM` anywhere the template records task-local dates or timestamps, including metadata, decision logs, progress notes, and review outcomes.
+```

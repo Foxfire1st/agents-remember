@@ -21,7 +21,7 @@ This skill can work from one of these scopes:
 ## Primary Outputs
 
 1. a drift summary or drift report
-2. a classification of onboarding as up to date, drifted, missing verification, or orphaned
+2. a classification of onboarding units as up to date, drifted, missing verification, missing, orphaned, disabled, or unsupported
 3. a maintenance worklist for `C-05-create-or-update-onboarding-files`
 4. trust guidance for the caller when stale onboarding still contains directional value
 
@@ -57,43 +57,51 @@ python <this-skill-dir>/scripts/check_onboarding_drift.py \
 
 The helper requires Python and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`.
 
-### 1. Identify onboarding files in scope
+### 1. Resolve onboarding units in scope
 
-Locate the relevant onboarding files under `<onboarding-root>/<repo>/...`, where `<onboarding-root>` is derived from `AR_MANAGEMENT_ROOT` and documented in `<AR_MANAGEMENT_ROOT>/system/settings.md`.
+Read the active storage settings from `<AR_MANAGEMENT_ROOT>/system/settings.md` when available, then resolve the effective onboarding unit for each eligible source path before classification.
 
-Primary drift detection operates on file-level onboarding that mirrors concrete source files and carries verification metadata.
+Primary drift detection still supports external mirrored markdown onboarding under `<onboarding-root>/<repo>/...`, but it may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 
 If repo-level entity catalogs or overview files are in scope, treat them as follow-up maintenance surfaces rather than trying to diff them directly against one source file.
 
 ### 2. Extract verification metadata
 
-For each file-level onboarding document in scope, read:
+For each onboarding unit in scope, read the verification metadata appropriate to its storage mode.
+
+For external mirrored onboarding files, read:
 
 1. `repository`
 2. `path`
 3. `lastVerifiedCommitHash`
 4. `lastVerifiedCommitDate`
 
-If the onboarding file is missing the path or repository metadata needed to resolve the source file, classify it as missing verification and flag it for maintenance.
+For inline onboarding blocks, read the marker-delimited block and use its metadata such as `sourceDigest` and `verifiedAt`.
+
+If the onboarding unit is missing the metadata needed for verification, classify it as missing verification and flag it for maintenance.
 
 ### 3. Compare the source file against the recorded verification point
 
-Use the recorded metadata to classify the current state:
+Use the recorded metadata plus the resolved storage mode to classify the current state:
 
 1. If the source file no longer exists, classify the onboarding file as orphaned.
-2. If the source file exists but `lastVerifiedCommitHash` is empty, classify it as missing verification.
-3. If the hash exists, compare the source file against `HEAD` using git diff.
-4. If there is no diff, classify the onboarding file as up to date.
-5. If there is a diff, classify it as drifted.
-6. If the recorded hash is no longer available in history, treat the onboarding as drifted and require a fuller verification pass.
+2. If the resolved storage mode is `disabled`, classify the source path as disabled.
+3. If external onboarding is expected but the mirrored markdown file is missing, classify it as missing.
+4. If inline onboarding is expected but the marker-delimited block is missing, classify it as missing.
+5. If the external or inline metadata needed for verification is empty, classify it as missing verification.
+6. For external onboarding, compare the source file against the recorded commit using git diff.
+7. For inline onboarding, recompute the source digest from the source body with the onboarding block removed.
+8. If verification matches, classify the onboarding unit as up to date.
+9. If verification does not match, classify it as drifted.
+10. If the storage mode or source encoding cannot be handled safely, classify it as unsupported.
 
 ### 4. Qualify how trustworthy the onboarding still is
 
 For drifted onboarding, record how much directional value remains:
 
-1. high when the drift is small and the old onboarding still explains the surface accurately enough for orientation
+1. high when the drift is small or the source path is intentionally disabled
 2. medium when the onboarding is useful for adjacent context but no longer safe as a direct statement of current behavior
-3. low when the source changed so much that the onboarding should not be trusted without refresh
+3. low when the source changed so much that the onboarding should not be trusted without refresh or when the storage mode is unsupported
 
 Also note which sections are likely affected:
 
@@ -116,7 +124,7 @@ The report should include:
 
 1. scope checked
 2. generated timestamp
-3. counts for up to date, drifted, missing verification, and orphaned files
+3. counts for up to date, drifted, missing verification, missing, orphaned, disabled, and unsupported files
 4. an actionable table listing onboarding file, source file, classification, current trust level, and likely affected sections
 5. enough summary detail for `C-05-create-or-update-onboarding-files` to refresh the right surfaces without rerunning the scan from scratch
 

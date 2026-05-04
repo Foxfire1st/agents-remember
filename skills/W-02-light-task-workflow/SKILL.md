@@ -33,6 +33,8 @@ Naming follows the same convention as heavy-task-workflow:
 
 Use `template.md` as the canonical scaffold. Implementation steps and substeps are tracked with checkboxes, and that checklist is the live execution state during implementation. When code changes are in scope, the task file also carries proposed code examples for each distinct change type so the developer can review the intended implementation shape before approval.
 
+Light-task artifacts use minute-precision timestamps in `YYYY-MM-DDTHH:MM` format wherever they record task-local dates or times.
+
 ## Agent Responsibilities
 
 The agent should:

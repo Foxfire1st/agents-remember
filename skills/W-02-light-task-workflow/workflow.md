@@ -67,6 +67,8 @@ The file must include:
 6. open questions
 7. references
 
+Use `YYYY-MM-DDTHH:MM` for task-local timestamps such as `Created`, decision log entries, progress notes, and review outcomes.
+
 Status values should align with the repository rules:
 
 1. `planning`
@@ -186,6 +188,8 @@ Based on developer feedback:
 1. approved: keep the completed checkbox state, add any notable decision entry, and continue
 2. changes requested: return to Touch 1 and update the plan before editing again
 3. rejected: record the rejection in the decision log and revert or defer as appropriate
+
+When a review outcome or progress note is recorded in the task artifact, use `YYYY-MM-DDTHH:MM` rather than a date-only value.
 
 ## Multi-session continuity
 

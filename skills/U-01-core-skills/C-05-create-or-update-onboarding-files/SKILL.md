@@ -5,10 +5,12 @@ description: "Create and maintain onboarding artifacts including file-level onbo
 
 # C-05 Create Or Update Onboarding Files
 
-This package owns durable onboarding maintenance for two artifact types:
+This package owns durable onboarding maintenance for two artifact types and one storage-specific adapter layer:
 
-1. file-level onboarding markdown files for concrete source files
+1. file-level onboarding units for concrete source files
 2. repo-level entity catalogs for load-bearing cross-layer entities
+
+Inline onboarding does not replace the file-level content model. It reuses the same semantic sections and adds storage-specific syntax, placement, and digest rules through the inline adapter workflow/template.
 
 Planning stays in task artifacts. This package defines how onboarding itself is created, updated, and kept structurally consistent.
 
@@ -18,10 +20,15 @@ It must use the `Domain Documentation` category declared in `<AR_MANAGEMENT_ROOT
 
 Choose the artifact type first, then use the matching workflow and template.
 
-| Artifact type             | Use when                                                                              | Workflow                                      | Template                                      |
-| ------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
-| File-level onboarding     | You are creating or updating onboarding for one source file mirrored under `<onboarding-root>/` | `workflows/file-level-onboarding-workflow.md` | `templates/file-level-onboarding-template.md` |
-| Repo-level entity catalog | You are creating or updating `<onboarding-root>/<repo>/entities.md`                          | `workflows/repo-entity-catalog-workflow.md`   | `templates/repo-entity-catalog-template.md`   |
+| Artifact type             | Use when                                                                        | Workflow                                      | Template                                      |
+| ------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
+| File-level onboarding     | You are creating or updating file-level onboarding for one concrete source file | `workflows/file-level-onboarding-workflow.md` | `templates/file-level-onboarding-template.md` |
+| Repo-level entity catalog | You are creating or updating `<onboarding-root>/<repo>/entities.md`             | `workflows/repo-entity-catalog-workflow.md`   | `templates/repo-entity-catalog-template.md`   |
+
+Storage-specific adapter additions for file-level onboarding:
+
+1. `workflows/inline-onboarding-workflow.md`
+2. `templates/inline-onboarding-block-template.md`
 
 ## Shared Placement Rules
 
@@ -45,14 +52,15 @@ Choose the artifact type first, then use the matching workflow and template.
 
 1. Prefer updating an existing onboarding artifact over creating parallel duplicates.
 2. File-level onboarding explains one concrete source file.
-3. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
-4. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
-5. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
-6. When updating `Docs References` or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
-7. Start reference discovery from `<AR_MANAGEMENT_ROOT>/system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
-8. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
-9. Treat `<AR_MANAGEMENT_ROOT>/system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
-10. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References` or `Cross-Repo References` are still valid.
+3. The canonical file-level onboarding content model is shared by external and inline storage.
+4. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
+5. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
+6. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
+7. When updating `Docs References` or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
+8. Start reference discovery from `<AR_MANAGEMENT_ROOT>/system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
+9. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
+10. Treat `<AR_MANAGEMENT_ROOT>/system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
+11. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References` or `Cross-Repo References` are still valid.
 
 ## Source Discovery Rule
 
