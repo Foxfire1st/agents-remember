@@ -23,6 +23,10 @@
 
 <Patterns, naming conventions, or local style choices specific to this file or area.>
 
+### Invariants And Boundaries
+
+<Rules that must continue to hold, ownership boundaries, sequencing constraints, and what this file should not do.>
+
 ### Todos
 
 <Known issues or technical debt that are not tied to one active task file.>
@@ -34,10 +38,6 @@
 | Finding                                                                | Citations | Source Path                                                |
 | ---------------------------------------------------------------------- | --------- | ---------------------------------------------------------- |
 | <Concise summary of the cited lines and why they matter to this file.> | L10-L18   | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
-
-## Invariants And Boundaries
-
-<Rules that must continue to hold, ownership boundaries, sequencing constraints, and what this file should not do.>
 
 ## Cross-Repo References
 

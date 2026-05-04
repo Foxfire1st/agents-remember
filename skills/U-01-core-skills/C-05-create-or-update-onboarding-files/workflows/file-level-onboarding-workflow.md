@@ -51,16 +51,16 @@ Required top-level sections:
 1. metadata table
 2. `## Purpose`
 3. `## Code Commentary`
-4. `## Invariants And Boundaries`
-5. `## Cross-Repo References`
-6. `## Update History`
+4. `## Cross-Repo References`
+5. `## Update History`
 
 Subsections under `## Code Commentary`:
 
 1. `### Logic`
 2. `### Conventions`
-3. `### Todos`
-4. `### Docs References`
+3. `### Invariants And Boundaries`
+4. `### Todos`
+5. `### Docs References`
 
 Citation requirements for reference sections:
 
