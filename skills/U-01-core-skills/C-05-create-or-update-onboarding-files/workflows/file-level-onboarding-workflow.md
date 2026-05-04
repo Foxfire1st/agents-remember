@@ -1,6 +1,6 @@
 # File-Level Onboarding Workflow
 
-Use this workflow when creating or maintaining the shared file-level onboarding content model for one concrete source file. External onboarding stores that content under `<onboarding-root>/<repo>/<component>/src/...`; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
+Use this workflow when creating or maintaining the shared file-level onboarding content model for one concrete source file. External onboarding stores that content under `<onboarding-root>/<repo>/...` using the source file's repo-relative path directly; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
 
 Template: `../templates/file-level-onboarding-template.md`
 
@@ -11,7 +11,7 @@ Create or update the file-level onboarding content for one concrete source file.
 ## Scope
 
 1. one file-level onboarding unit per source file
-2. external storage keeps the strict mirrored path under the component `src/` subtree
+2. external storage keeps the strict mirrored path directly under the repo root using the source file's repo-relative path
 3. inline storage reuses the same content model but follows storage-specific syntax and placement rules
 4. durable commentary only; planning stays in task artifacts
 
@@ -30,9 +30,8 @@ Create or update the file-level onboarding content for one concrete source file.
 ```text
 <onboarding-root>/
   <repo>/
-    <component>/
-      overview.md
-      src/<mirrored-source-path>.md
+    overview.md
+    <mirrored-source-path>.md
 ```
 
 1. File name matches the source file name with `.md` appended.
@@ -84,7 +83,7 @@ Citation requirements for reference sections:
    - current time via MCP time tool
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 5. fill the template from `../templates/file-level-onboarding-template.md`
-6. update the component overview if the file should be indexed there
+6. update the repo-level overview if the file should be indexed or cross-referenced there
 7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via `<AR_MANAGEMENT_ROOT>/system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, health-check those canonical URLs when retrieval tools are available, ensure code/onboarding rows use workspace-relative links that still resolve to the cited files, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
@@ -99,5 +98,5 @@ When code changes:
 When code is deleted or moved:
 
 1. delete or move the onboarding file to match the source tree
-2. update affected overview indexes and cross-links
+2. update affected repo-level overview indexes and cross-links
 3. check whether repo-level entity catalogs or nearby onboarding need follow-up because of the move or deletion

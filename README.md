@@ -134,9 +134,11 @@ If no storage settings are configured, Agents Remember keeps the existing behavi
 
 Storage modes:
 
-- `external`: store onboarding in mirrored markdown files under the configured onboarding root.
+- `external`: store onboarding in mirrored markdown files under the configured onboarding root using the source file's repo-relative path directly under `<onboarding-root>/<repo>/...`.
 - `inline`: store onboarding as a structured comment block inside eligible source files.
 - `hybrid`: use `pathRules` to choose `external`, `inline`, or `disabled` per matched source path.
+
+Repo-level architecture context stays in `<onboarding-root>/<repo>/overview.md`. If a repo needs deeper coverage beyond the first overview pass, extend that same overview by merging the new area findings into the relevant existing sections so it remains one coherent document instead of growing a permanent `<onboarding-root>/<repo>/<component>/overview.md` layer.
 
 `pathRules` are shared by all storage modes. Each rule has a `path`, `includes`, and `excludes`. Patterns are evaluated relative to the rule path, rules are evaluated top-down, and `excludes` always wins over `includes`.
 
@@ -172,7 +174,7 @@ The steps are the same regardless of which tool you use:
 
 1. Wire up the agent so it reads `AGENTS.md` from this repo at session start (tool-specific instructions below).
 2. Run `C-00-initialize-management-root` if the `ar-management` scaffold does not exist yet.
-3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure for the repo under `<onboarding-root>/my-app/`. A bare `overview.md` is enough; the agent fills in depth as it works.
+3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure for the repo under `<onboarding-root>/my-app/`. A bare repo-level `overview.md` is enough; deeper area sections are folded back into that same file as the repo is explored.
 4. Start using the agent normally. Chat handles most tasks. The agent reads the resolved onboarding unit alongside the source file and updates it as it goes.
 5. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when the task needs a written plan or needs to survive beyond a single session.
 

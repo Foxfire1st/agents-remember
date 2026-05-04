@@ -311,6 +311,27 @@ def discover_onboarding_files(onboarding_root: Path) -> list[Path]:
     )
 
 
+def discover_inline_onboarding_sources(repo_root: Path, settings: StorageSettings) -> list[str]:
+    inline_sources: list[str] = []
+    for source_file in list_repo_sources(repo_root):
+        if resolve_storage_for_source(source_file, settings, repo_root.name) != "inline":
+            continue
+
+        source_path = repo_root / source_file
+        if not source_path.exists():
+            continue
+
+        try:
+            source_text = source_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+
+        if extract_inline_onboarding_block(source_text) is not None:
+            inline_sources.append(source_file)
+
+    return sorted(inline_sources)
+
+
 def classify_external_onboarding(onboarding_file: Path, repo_root: Path) -> DriftRow:
     metadata = parse_table_metadata(onboarding_file)
     repository = metadata.get("repository", "")
@@ -770,12 +791,6 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Path to the repo onboarding root, e.g. ar-management/onboarding/my-repo.",
     )
-    parser.add_argument(
-        "--source",
-        action="append",
-        default=[],
-        help="Limit to a repo-relative source path. May be passed multiple times.",
-    )
     parser.add_argument("--report", type=Path, help="Optional Markdown report output path.")
     parser.add_argument("--format", choices=("text", "json", "csv"), default="text", help="Stdout format.")
     parser.add_argument(
@@ -795,10 +810,10 @@ def main(argv: list[str] | None = None) -> int:
     git_check = run_git(repo_root, ["rev-parse", "--show-toplevel"])
     if git_check.returncode != 0:
         parser.error(f"repo path is not a git repository: {repo_root}\n{git_check.stderr.strip()}")
-
     settings = parse_storage_settings(infer_settings_path(onboarding_root))
-    source_files = [normalize_rel_path(path) for path in args.source] if args.source else list_repo_sources(repo_root)
-    rows = [classify_source(path, repo_root, onboarding_root, settings) for path in source_files]
+    rows = [classify_external_onboarding(path, repo_root) for path in discover_onboarding_files(onboarding_root)]
+    rows.extend(classify_inline_source(path, repo_root) for path in discover_inline_onboarding_sources(repo_root, settings))
+    rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
 
     if args.report:
         write_markdown_report(rows, args.report.resolve(), repo_root, onboarding_root)

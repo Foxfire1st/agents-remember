@@ -5,7 +5,7 @@ description: "Bootstrap onboarding for an undocumented or under-documented repo.
 
 # Repo Bootstrap
 
-Bootstrap onboarding documentation for a repo that has little or no onboarding coverage. Produces a high-quality repo overview file and optionally goes deeper into component overviews and file-level MDs.
+Bootstrap onboarding documentation for a repo that has little or no onboarding coverage. Produces a high-quality repo overview file and can later expand that same overview by merging area findings into the appropriate existing sections, alongside targeted file-level MDs.
 
 **Core constraint:** LLM context is limited. A full repo cannot be understood in a single session. This skill breaks the work into bounded phases where each phase operates on a manageable scope and produces a durable artifact. Agents write findings to disk — the orchestrator never ingests raw code or structural data, only distilled reports.
 
@@ -18,7 +18,7 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 - **Durable checkpoints.** Each phase produces a standalone artifact. You can stop after any phase. A state file tracks progress across sessions.
 - **Cross-repo awareness.** Existing onboarding from adjacent repos is used as seed context. When no onboarding exists, the scout falls back to direct code scanning.
 - **Developer consultation.** The developer is consulted at review gates for intent, direction, and domain knowledge that code alone can't reveal.
-- **Artifacts compound.** The scout report feeds deep-dives, deep-dives feed synthesis, synthesis feeds component overviews.
+- **Artifacts compound.** The scout report feeds deep-dives, deep-dives feed synthesis, and later area passes enrich the existing repo overview instead of creating a parallel overview layer.
 
 ---
 
@@ -35,12 +35,12 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 
 ## Inputs
 
-| Input            | Required | Description                                                                                                             |
-| ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `repo`           | Yes      | The repo name (e.g., `dema-platform-backend`, `TAS-Expand`)                                                             |
-| `depth`          | No       | How far to go: `overview-only` (default), `component-overviews`, or `full` (includes file-level MDs for priority areas) |
-| `seed-context`   | No       | Paths to existing onboarding files from adjacent repos that reference this repo. Auto-discovered if not provided.       |
-| `priority-areas` | No       | Areas to prioritise for deeper passes. If omitted, the scout phase identifies them.                                     |
+| Input            | Required | Description                                                                                                                                                                            |
+| ---------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo`           | Yes      | The repo name (e.g., `dema-platform-backend`, `TAS-Expand`)                                                                                                                            |
+| `depth`          | No       | How far to go: `overview-only` (default), `component-overviews` (accepted as a legacy input label for repo-overview expansion), or `full` (includes file-level MDs for priority areas) |
+| `seed-context`   | No       | Paths to existing onboarding files from adjacent repos that reference this repo. Auto-discovered if not provided.                                                                      |
+| `priority-areas` | No       | Areas to prioritise for deeper passes. If omitted, the scout phase identifies them.                                                                                                    |
 
 ---
 
@@ -49,7 +49,7 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 Use explicit templates instead of inferring structure only from legacy examples:
 
 - Repo overview: `templates/repo-overview-template.md`
-- Component overview: `templates/component-overview-template.md`
+- Repo-overview merge guide for area findings: `templates/component-overview-template.md`
 
 Legacy overviews may still use headings like `Reference Docs` or `Cross-Repo Ties`. New output from this skill uses the canonical headings `## Docs References` and `## Cross-Repo References`.
 
@@ -529,7 +529,7 @@ The overview follows `templates/repo-overview-template.md`. `<onboarding-root>/d
 7. **Key Invariants** — repo-wide rules that must hold (aggregated from area briefs)
 8. **Glossary Terms** — terms introduced or heavily used by this repo
 9. **Docs References** — explanatory prose plus citation-backed table with columns `Finding`, `Citations`, and `Source Path`, covering Confluence/docs/onboarding sources relevant to this repo with the canonical online document link in the last column, exact line ranges, and concise finding summaries
-10. **What to Explore Next** — which component overviews should be written first
+10. **What to Explore Next** — which areas should be researched next and then merged into the relevant repo overview sections
 
 **Confidence handling in the overview:**
 
@@ -558,11 +558,11 @@ During review, ask the developer to:
 
 ## Phase 4 — Deepen (optional)
 
-**Goal:** Use the overview + area reports to go deeper — component overviews and file-level MDs.
+**Goal:** Use the overview + area reports to deepen repo coverage by merging area findings into the appropriate existing sections of the repo overview, plus file-level MDs where warranted.
 
-This phase is unbounded. It can be done incrementally, one component at a time, as needed. It is most valuable when a task is about to touch an area — bootstrap the component overview just-in-time.
+This phase is unbounded. It can be done incrementally, one area at a time, as needed. It is most valuable when a task is about to touch an area — expand the relevant repo-overview coverage just in time.
 
-**Done when:** For each component addressed: a developer about to work in that component can read the component overview and understand the internal structure, key files, patterns, and pitfalls without reading every source file first. File-level MDs exist for the highest-risk files (those with invariants, cross-repo interfaces, or non-obvious logic).
+**Done when:** For each area addressed: a developer about to work in that area can read the relevant repo-overview sections and understand the internal structure, key files, patterns, and pitfalls without reading every source file first. File-level MDs exist for the highest-risk files (those with invariants, cross-repo interfaces, or non-obvious logic).
 
 ### 4.0 Priority re-assessment
 
@@ -573,9 +573,9 @@ Before deepening, re-assess which components to tackle first. Priorities may hav
 3. **Check for just-in-time triggers** — if this phase was invoked by `heavy-task-workflow` because a task is about to touch a specific area, that area takes priority regardless of the scout's original ranking.
 4. **Produce a deepening order** — a ranked list of components to address. Update `STATE.md` with this list.
 
-### 4.1 Component overviews
+### 4.1 Merge area findings into the repo overview
 
-Each component overview runs as a **sub-agent** to keep the orchestrator clean for managing the sequence across components.
+Each area-deepening pass runs as a **sub-agent** to keep the orchestrator clean for managing the sequence across areas.
 
 **Sub-agent receives:**
 
@@ -594,7 +594,7 @@ Each component overview runs as a **sub-agent** to keep the orchestrator clean f
 
 1. **Read the full area report and section files** — these are the primary inputs. Note any `[LOW]`-confidence findings that need resolution.
 2. **Re-read key source files** where the area report lacks detail on specific patterns, or where the concerns agent flagged traps/invariants that need more context to document clearly.
-3. **Write the component overview** at `<onboarding-root>/<repo>/<component>/overview.md` using `templates/component-overview-template.md`. `<onboarding-root>/device-management/helpdesk/overview.md` remains the quality reference when available, but the template defines the required section names and citation-backed tables.
+3. **Write or refresh the relevant parts of** `<onboarding-root>/<repo>/overview.md` using `templates/component-overview-template.md` as a merge guide. Update the existing overview sections that own the new information instead of appending a standalone deep-dive block. Do not create or preserve a long-lived `<onboarding-root>/<repo>/<component>/overview.md` layer for that area.
 4. **Include an Onboarding File Index** section listing:
    - Which file-level MDs should be created (ranked by priority — see 4.2 for criteria).
    - Which file-level MDs exist (initially empty for a fresh bootstrap).
@@ -603,16 +603,16 @@ Each component overview runs as a **sub-agent** to keep the orchestrator clean f
 
 ### 4.2 Developer review
 
-After each component overview is written, present it to the developer for review. Ask:
+After each repo-overview merge pass is written, present the updated overview coverage to the developer for review. Ask:
 
 - Does the overview match your understanding of this component?
 - Are there invariants or traps missing that you know about?
 - For `[LOW]`-confidence items: can you confirm or dismiss?
 - Is the file-level MD priority ranking correct?
 
-Update the component overview with corrections. Update `STATE.md`.
+Update the repo overview section with corrections. Update `STATE.md`.
 
-> This gate prevents misunderstandings from propagating into file-level MDs. A wrong component overview produces wrong file-level docs.
+> This gate prevents misunderstandings from propagating into file-level MDs. Wrong repo-overview coverage produces wrong file-level docs.
 
 ### 4.3 File-level MDs
 
@@ -628,13 +628,13 @@ For high-priority files within an approved component:
 
 ### 4.4 Update state and clean up
 
-After a component's overview is reviewed and its file-level MDs are written:
+After an area's repo-overview coverage is reviewed and its file-level MDs are written:
 
-1. **Update `STATE.md`** — mark the component as deepened.
+1. **Update `STATE.md`** — mark the area as deepened.
 2. **Clean up per-component:**
-   - The section files for this component (`areas/<area>/structure.md`, `interfaces.md`, `patterns.md`, `concerns.md`) can now be deleted — their content is captured in the component overview and file-level MDs.
+   - The section files for this component (`areas/<area>/structure.md`, `interfaces.md`, `patterns.md`, `concerns.md`) can now be deleted — their content is captured in the repo overview and file-level MDs.
    - The area brief for this component can be deleted — it was only needed for synthesis.
-   - The full area report can be kept as reference or deleted — it's largely superseded by the component overview but may still be useful for historical context.
+   - The full area report can be kept as reference or deleted — it's largely superseded by the repo overview and file-level MDs but may still be useful for historical context.
 3. **Do not delete section files for components that haven't been deepened yet** — they're still needed as input.
 4. **The scout report and state file are kept** as historical records throughout.
 
@@ -673,10 +673,10 @@ Synthesis agent (Phase 3):
   → Writes: overview.md
   → Developer reviews
 
-Per-component deepen agent (Phase 4 — one per component):
+Per-area deepen agent (Phase 4 — one per area):
   → Reads: repo overview + full area report + section files (concerns, interfaces)
   →         + scout tech profile + component source files
-   → Writes: <onboarding-root>/<repo>/<component>/overview.md
+   → Writes: <onboarding-root>/<repo>/overview.md (updated by merging area findings into the appropriate sections)
   → Returns to orchestrator: confirmation only
   → Developer reviews before file-level MDs proceed
 ```
@@ -701,13 +701,13 @@ Per-component deepen agent (Phase 4 — one per component):
 
 ## When to Use This Skill
 
-| Situation                                                              | Use this skill?                                              |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------ |
-| New repo added to workspace, zero onboarding                           | Yes — full pipeline                                          |
-| Repo has placeholder overview, needs real content                      | Yes — can skip to Phase 1 scout                              |
-| Task will touch an un-bootstrapped area of a partially covered repo    | Yes — run scout + targeted area deep-dive + synthesis update |
-| Repo is already well-bootstrapped, just needs a new component overview | No — use `create_or_update-onboarding-file` directly         |
-| Small script repo with 5 files                                         | Probably not — write the overview directly                   |
+| Situation                                                                                 | Use this skill?                                                                                                |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| New repo added to workspace, zero onboarding                                              | Yes — full pipeline                                                                                            |
+| Repo has placeholder overview, needs real content                                         | Yes — can skip to Phase 1 scout                                                                                |
+| Task will touch an un-bootstrapped area of a partially covered repo                       | Yes — run scout + targeted area deep-dive + synthesis update                                                   |
+| Repo is already well-bootstrapped, just needs one more area merged into the repo overview | No — update the repo overview directly, then use `create_or_update-onboarding-file` for any new file-level MDs |
+| Small script repo with 5 files                                                            | Probably not — write the overview directly                                                                     |
 
 ---
 

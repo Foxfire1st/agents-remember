@@ -61,9 +61,9 @@ Use this template for `<onboarding-root>/<repo>/overview.md`.
 
 ## What to Explore Next
 
-| Priority | Area / Path                                            | Why Next                           |
-| -------- | ------------------------------------------------------ | ---------------------------------- |
-| high     | [<component overview path>](<component overview path>) | <why this should be deepened next> |
+| Priority | Area / Path                                                                              | Why Next                                                         |
+| -------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| high     | [<repo overview anchor or source-area path>](<repo overview anchor or source-area path>) | <why this area should be researched next and then merged into the relevant repo overview sections> |
 
 ## Needs Verification
 
@@ -76,6 +76,7 @@ Use this template for `<onboarding-root>/<repo>/overview.md`.
 ## Notes
 
 - New overviews should use the canonical headings `## Cross-Repo References` and `## Docs References`.
+- When later work adds area-specific detail, merge it into the appropriate existing overview sections instead of appending a standalone deep-dive block.
 - These sections are explanation-first surfaces backed by citation tables, not table-only replacements for narrative context.
 - In `Cross-Repo References`, `Source Path` must be a workspace-relative link to the cited code or onboarding file.
 - In `Docs References`, `Source Path` must be the canonical online document link, even if a local mirror was used for reading.

@@ -9,14 +9,9 @@ Use this skill at task start, before relying on older onboarding for unfamiliar 
 
 Its job is to decide whether onboarding is still trustworthy enough to ground the current work and to produce a concrete maintenance worklist when it is not.
 
-## Scope Inputs
+## Inputs
 
-This skill can work from one of these scopes:
-
-1. a specific source-file list
-2. a component directory
-3. a repo
-4. all onboarding in the workspace
+This skill's standard workflow operates on one repository at a time.
 
 ## Primary Outputs
 
@@ -36,28 +31,18 @@ This skill can work from one of these scopes:
 
 ### Preferred helper
 
-Use the bundled helper for repo, component, and multi-file checks instead of rewriting shell loops:
+Use the bundled helper for repo-wide checks instead of rewriting shell loops:
 
 ```bash
-python <this-skill-dir>/scripts/check_onboarding_drift.py \
+<this-skill-dir>/scripts/check_onboarding_drift.py \
   --repo <repo-root> \
   --onboarding-root <AR_MANAGEMENT_ROOT>/onboarding/<repo> \
   --report <AR_MANAGEMENT_ROOT>/onboarding/<repo>/drift-report.md
 ```
 
-For file-scoped checks, pass `--source` one or more times:
+The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
-```bash
-python <this-skill-dir>/scripts/check_onboarding_drift.py \
-  --repo <repo-root> \
-  --onboarding-root <AR_MANAGEMENT_ROOT>/onboarding/<repo> \
-  --source src/foo/bar.py \
-  --source src/foo/baz.py
-```
-
-The helper requires Python and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`.
-
-### 1. Resolve onboarding units in scope
+### 1. Resolve onboarding units in the repository
 
 Read the active storage settings from `<AR_MANAGEMENT_ROOT>/system/settings.md` when available, then resolve the effective onboarding unit for each eligible source path before classification.
 
@@ -117,8 +102,7 @@ Write a drift report when the scope is large enough that the caller needs a reus
 
 Preferred report locations:
 
-1. `<onboarding-root>/<repo>/drift-report.md` for repo, component, or file-scoped runs
-2. `<onboarding-root>/drift-report-all.md` for workspace-wide runs
+1. `<onboarding-root>/<repo>/drift-report.md` for the repository run
 
 The report should include:
 

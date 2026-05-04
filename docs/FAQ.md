@@ -66,7 +66,7 @@ Onboarding files include two explicit reference sections:
 
 When a file's behavior depends on something outside itself, the onboarding records the edge explicitly. The agent follows edges when they matter, the same way an `import` statement declares what context is needed. This is deliberate — eagerly loading a transitive closure "just in case" is how retrieval systems end up with bloated context and spurious correlations. Making the edge explicit and optional keeps the read surface bounded while preserving cross-file reasoning when it actually matters.
 
-Repo-level context lives one level up: `<onboarding-root>/<repo>/overview.md` and an optional `entities.md` catalog describe load-bearing architecture and cross-layer entities. The `C-04-discovery` skill enforces a top-down reading order — repo overview first, then component overview, then file-level onboarding, then code — so the agent doesn't brute-force its way through unfamiliar surfaces.
+Repo-level context lives one level up: `<onboarding-root>/<repo>/overview.md` and an optional `entities.md` catalog describe load-bearing architecture and cross-layer entities. The `C-04-discovery` skill enforces a top-down reading order — repo overview first, then the relevant topic sections inside that overview, then file-level onboarding, then code — so the agent doesn't brute-force its way through unfamiliar surfaces.
 
 ### Why not just use a vector store or semantic retrieval?
 
