@@ -82,27 +82,14 @@ exception. Code explanation is not an exception. Review is not an exception.
 Planning is not an exception.
 
 Before opening, reading, summarizing, or reasoning from source file contents in
-the relevant repository:
+the relevant repository you must perform these three gates:
 
-1. Resolve `AR_MANAGEMENT_ROOT`.
-2. Run `C-02-onboarding-drift-detection` for the relevant repository at the
-   start of the task.
-3. If drifted, missing-verification, or orphaned onboarding is found,
-   use the skill `C-05-create-or-update-onboarding-files`. Do not ask the
-   developer whether to create or update drifted files!!!! Just do it!
-4. Re-run `C-02-onboarding-drift-detection` for the refreshed repository.
-5. Proceed only after every pre-existing onboarding file needed for the task is
-   classified as up to date. This establishes the start-of-task trust baseline;
-   it does not re-trigger solely because the current task creates or dirties
-   source/onboarding files.
-6. Do not repeatedly drift-check during the same task unless the work expands
-   materially to another repository or to a separately unmanaged area.
+Gate 1: Resolve `AR_MANAGEMENT_ROOT`.
 
-Do not open or inspect source file contents before this gate passes.
+Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository at the start of the task.
 
-There is no source-only or directional bypass for establishing the initial
-baseline in this workspace. If drift detection or onboarding update for
-pre-existing files cannot be completed, stop and report the blocker instead of
-continuing from source.
+Gate 3: If number of Drifted, missing-verification, or orphaned onboarding is greater 0, run `C-05-create-or-update-onboarding-files`.
 
+Do NOT ask the developer whether to create or update drifted files! Just do it!
+Do NOT open or inspect ANY files before this gate passes.
 DO NOT SKIP OR BYPASS THIS GATE UNDER ANY CIRCUMSTANCE. Quick explanation is not an excuse or exception!
