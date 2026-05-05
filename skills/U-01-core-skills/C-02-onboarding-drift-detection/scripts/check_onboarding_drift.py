@@ -48,13 +48,23 @@ class StorageRule(TypedDict, total=False):
     storage: str
     includes: list[str]
     excludes: list[str]
+    include_file_types: list[str]
+    exclude_file_types: list[str]
 
 
 @dataclass
 class StorageSettings:
-    mode: str = "external"
-    default: str = "external"
+    mode: str = "repo-sidecar"
+    default: str = "repo-sidecar"
     path_rules: list[StorageRule] = field(default_factory=list)
+
+
+@dataclass
+class ManagementContext:
+    topology: Literal["internal", "shared"]
+    management_root: Path
+    onboarding_root: Path
+    settings_path: Path
 
 
 @dataclass
@@ -83,8 +93,49 @@ def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str
 
 
 def infer_settings_path(onboarding_root: Path) -> Path:
-    management_root = onboarding_root.parent.parent
+    if onboarding_root.name == "onboarding":
+        management_root = onboarding_root.parent
+    elif onboarding_root.parent.name == "onboarding":
+        management_root = onboarding_root.parent.parent
+    else:
+        management_root = onboarding_root.parent
     return management_root / "system" / "settings.md"
+
+
+def resolve_management_context(
+    repo_root: Path,
+    topology: Literal["internal", "shared"] | None,
+    onboarding_root: Path | None,
+    shared_root: Path | None,
+    settings_path: Path | None,
+) -> ManagementContext:
+    if onboarding_root is not None:
+        resolved_onboarding_root = onboarding_root.resolve()
+        resolved_settings_path = settings_path.resolve() if settings_path else infer_settings_path(resolved_onboarding_root)
+        resolved_management_root = resolved_settings_path.parent.parent
+        return ManagementContext(
+            topology=topology or "internal",
+            management_root=resolved_management_root,
+            onboarding_root=resolved_onboarding_root,
+            settings_path=resolved_settings_path,
+        )
+
+    resolved_topology = topology or "internal"
+    if resolved_topology == "internal":
+        resolved_management_root = repo_root / "ar-management"
+        resolved_onboarding_root = resolved_management_root / "onboarding"
+    else:
+        if shared_root is None:
+            raise ValueError("shared topology requires --shared-root when --onboarding-root is not provided")
+        resolved_management_root = shared_root.resolve()
+        resolved_onboarding_root = resolved_management_root / "onboarding" / repo_root.name
+
+    return ManagementContext(
+        topology=resolved_topology,
+        management_root=resolved_management_root,
+        onboarding_root=resolved_onboarding_root,
+        settings_path=settings_path.resolve() if settings_path else resolved_management_root / "system" / "settings.md",
+    )
 
 
 def clean_scalar(value: str) -> str:
@@ -100,25 +151,41 @@ def extract_yaml_blocks(markdown_text: str) -> list[str]:
     return [match.group(1) for match in re.finditer(r"```(?:yaml|yml)?\n(.*?)```", markdown_text, re.DOTALL)]
 
 
-def parse_storage_settings(settings_path: Path) -> StorageSettings:
+def default_storage_mode(topology: Literal["internal", "shared"]) -> str:
+    return "repo-sidecar" if topology == "internal" else "shared-root"
+
+
+def parse_storage_settings(settings_path: Path, topology: Literal["internal", "shared"]) -> StorageSettings:
     if not settings_path.exists():
-        return StorageSettings()
+        mode = default_storage_mode(topology)
+        return StorageSettings(mode=mode, default=mode)
 
     text = settings_path.read_text(encoding="utf-8")
     for block in extract_yaml_blocks(text):
-        parsed = parse_storage_block(block)
+        parsed = parse_storage_block(block, topology)
         if parsed is not None:
             return parsed
-    return StorageSettings()
+    mode = default_storage_mode(topology)
+    return StorageSettings(mode=mode, default=mode)
 
 
-def parse_storage_block(block: str) -> StorageSettings | None:
-    settings = StorageSettings()
+def parse_storage_block(block: str, topology: Literal["internal", "shared"]) -> StorageSettings | None:
+    mode = default_storage_mode(topology)
+    settings = StorageSettings(mode=mode, default=mode)
     in_onboarding = False
     in_storage = False
+    in_legacy_path_rules = False
+    in_path_rules = False
     current_rule: StorageRule | None = None
-    current_list: Literal["includes", "excludes"] | None = None
+    current_list: Literal["includes", "excludes", "include_file_types", "exclude_file_types"] | None = None
+    current_eligibility_section: Literal["include", "exclude"] | None = None
+    include_paths: list[str] = []
+    exclude_paths: list[str] = []
+    include_file_types: list[str] = []
+    exclude_file_types: list[str] = []
     saw_storage = False
+    saw_path_rules = False
+    saw_global_path_rule = False
 
     for raw_line in block.splitlines():
         line = raw_line.split("#", 1)[0].rstrip()
@@ -130,8 +197,11 @@ def parse_storage_block(block: str) -> StorageSettings | None:
         if indent == 0:
             in_onboarding = stripped == "onboarding:"
             in_storage = False
+            in_legacy_path_rules = False
+            in_path_rules = False
             current_rule = None
             current_list = None
+            current_eligibility_section = None
             continue
 
         if not in_onboarding:
@@ -139,9 +209,85 @@ def parse_storage_block(block: str) -> StorageSettings | None:
 
         if indent == 2 and stripped == "storage:":
             in_storage = True
+            in_legacy_path_rules = False
+            in_path_rules = False
             saw_storage = True
             current_rule = None
             current_list = None
+            current_eligibility_section = None
+            continue
+        if indent == 2 and stripped == "pathRules:":
+            in_storage = False
+            in_legacy_path_rules = False
+            in_path_rules = True
+            saw_path_rules = True
+            current_rule = None
+            current_list = None
+            current_eligibility_section = None
+            continue
+
+        if in_path_rules:
+            if indent == 4 and (stripped.startswith("- path:") or stripped.startswith("- repo:")):
+                current_rule = {
+                    "path": clean_scalar(stripped.split(":", 1)[1]),
+                    "includes": ["*"],
+                    "excludes": [],
+                }
+                settings.path_rules.append(current_rule)
+                current_list = None
+                current_eligibility_section = None
+                continue
+            if current_rule is not None:
+                if indent == 6 and stripped in {"include:", "exclude:"}:
+                    current_eligibility_section = "include" if stripped == "include:" else "exclude"
+                    current_list = None
+                    continue
+                if indent == 8 and stripped in {"paths:", "fileTypes:"} and current_eligibility_section:
+                    if current_eligibility_section == "include":
+                        current_list = "includes" if stripped == "paths:" else "include_file_types"
+                    else:
+                        current_list = "excludes" if stripped == "paths:" else "exclude_file_types"
+                    if current_list == "includes":
+                        current_rule["includes"] = []
+                    elif current_list == "excludes":
+                        current_rule["excludes"] = []
+                    continue
+                if indent == 10 and stripped.startswith("- ") and current_list:
+                    value = clean_scalar(stripped[2:])
+                    if current_list == "includes":
+                        current_rule.setdefault("includes", []).append(value)
+                    elif current_list == "excludes":
+                        current_rule.setdefault("excludes", []).append(value)
+                    elif current_list == "include_file_types":
+                        current_rule.setdefault("include_file_types", []).append(value)
+                    else:
+                        current_rule.setdefault("exclude_file_types", []).append(value)
+                    continue
+                continue
+            if indent == 4 and stripped in {"include:", "exclude:"}:
+                current_eligibility_section = "include" if stripped == "include:" else "exclude"
+                current_list = None
+                saw_global_path_rule = True
+                continue
+            if indent == 6 and stripped in {"paths:", "fileTypes:"} and current_eligibility_section:
+                if current_eligibility_section == "include":
+                    current_list = "includes" if stripped == "paths:" else "include_file_types"
+                else:
+                    current_list = "excludes" if stripped == "paths:" else "exclude_file_types"
+                saw_global_path_rule = True
+                continue
+            if indent == 8 and stripped.startswith("- ") and current_list:
+                value = clean_scalar(stripped[2:])
+                saw_global_path_rule = True
+                if current_list == "includes":
+                    include_paths.append(value)
+                elif current_list == "excludes":
+                    exclude_paths.append(value)
+                elif current_list == "include_file_types":
+                    include_file_types.append(value)
+                else:
+                    exclude_file_types.append(value)
+                continue
             continue
 
         if not in_storage:
@@ -150,12 +296,18 @@ def parse_storage_block(block: str) -> StorageSettings | None:
         if indent == 4 and stripped.startswith("mode:"):
             settings.mode = clean_scalar(stripped.split(":", 1)[1]) or "external"
             continue
+        if indent == 4 and stripped.startswith("layout:"):
+            settings.mode = clean_scalar(stripped.split(":", 1)[1]) or settings.mode
+            continue
         if indent == 4 and stripped.startswith("default:"):
             settings.default = clean_scalar(stripped.split(":", 1)[1]) or "external"
             continue
         if indent == 4 and stripped == "pathRules:":
+            in_legacy_path_rules = True
             current_rule = None
             current_list = None
+            continue
+        if not in_legacy_path_rules:
             continue
         if indent == 6 and stripped.startswith("- path:"):
             current_rule = {
@@ -176,9 +328,28 @@ def parse_storage_block(block: str) -> StorageSettings | None:
             current_rule[current_list] = []
             continue
         if indent == 10 and stripped.startswith("- ") and current_list:
-            current_rule[current_list].append(clean_scalar(stripped[2:]))
+            value = clean_scalar(stripped[2:])
+            if current_list == "includes":
+                current_rule.setdefault("includes", []).append(value)
+            elif current_list == "excludes":
+                current_rule.setdefault("excludes", []).append(value)
+            elif current_list == "include_file_types":
+                current_rule.setdefault("include_file_types", []).append(value)
+            else:
+                current_rule.setdefault("exclude_file_types", []).append(value)
 
-    return settings if saw_storage else None
+    if saw_global_path_rule:
+        settings.path_rules.append(
+            {
+                "path": "",
+                "includes": include_paths or ["*"],
+                "excludes": exclude_paths,
+                "include_file_types": include_file_types,
+                "exclude_file_types": exclude_file_types,
+            }
+        )
+
+    return settings if saw_storage or saw_path_rules else None
 
 
 def normalize_rel_path(value: str) -> str:
@@ -240,12 +411,47 @@ def rule_patterns(rule: StorageRule, key: Literal["includes", "excludes"], defau
     return default.copy()
 
 
+def normalize_file_type(value: str) -> str:
+    normalized = clean_scalar(value).lower()
+    if not normalized:
+        return ""
+    return normalized if normalized.startswith(".") else f".{normalized}"
+
+
+def rule_file_types(
+    rule: StorageRule,
+    key: Literal["include_file_types", "exclude_file_types"],
+) -> set[str]:
+    values = rule.get(key)
+    if not isinstance(values, list):
+        return set()
+    return {normalized for value in values if (normalized := normalize_file_type(str(value)))}
+
+
+def source_file_type(source_file: str) -> str:
+    return PurePosixPath(normalize_rel_path(source_file)).suffix.lower()
+
+
+def matches_file_type(rule: StorageRule, source_file: str) -> bool:
+    included = rule_file_types(rule, "include_file_types")
+    return not included or source_file_type(source_file) in included
+
+
+def excludes_file_type(rule: StorageRule, source_file: str) -> bool:
+    excluded = rule_file_types(rule, "exclude_file_types")
+    return source_file_type(source_file) in excluded
+
+
+def sidecar_storage_label(storage_mode: str) -> bool:
+    return storage_mode in {"external", "repo-sidecar", "shared-root"}
+
+
 def resolve_storage_for_source(source_file: str, settings: StorageSettings, scoped_repo_path: str) -> str:
     normalized_source = normalize_rel_path(source_file)
     rules = settings.path_rules or []
 
     if not rules:
-        return "external"
+        return (settings.default or "external") if settings.mode == "hybrid" else settings.mode
 
     for rule in rules:
         rule_path = str(rule.get("path", ""))
@@ -257,7 +463,9 @@ def resolve_storage_for_source(source_file: str, settings: StorageSettings, scop
         excludes = rule_patterns(rule, "excludes", [])
         if not matches_any(includes, relative_source):
             continue
-        if excludes and matches_any(excludes, relative_source):
+        if not matches_file_type(rule, relative_source):
+            continue
+        if (excludes and matches_any(excludes, relative_source)) or excludes_file_type(rule, relative_source):
             return "disabled"
         if settings.mode == "hybrid":
             return str(rule.get("storage", settings.default or "external"))
@@ -440,10 +648,52 @@ def classify_external_source(source_file: str, repo_root: Path, onboarding_root:
             classification="missing",
             trust="low",
             affected_sections="all; onboarding missing",
-            note="Mirrored onboarding file is missing for an external-mode source.",
+            note="Mirrored onboarding file is missing for this sidecar-managed source.",
         )
     row = classify_external_onboarding(onboarding_file, repo_root)
     row.onboarding_file = onboarding_ref
+    return row
+
+
+def classify_sidecar_onboarding(
+    onboarding_file: Path,
+    repo_root: Path,
+    onboarding_root: Path,
+    settings: StorageSettings,
+) -> DriftRow:
+    metadata = parse_table_metadata(onboarding_file)
+    source_file = normalize_rel_path(metadata.get("path", ""))
+    storage_mode = resolve_storage_for_source(source_file, settings, repo_root.name) if source_file else settings.mode
+    onboarding_ref = rel(onboarding_file, onboarding_root)
+    if storage_mode == "disabled":
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_file,
+            repository=metadata.get("repository", repo_root.name),
+            storage_mode="disabled",
+            last_verified_hash=metadata.get("lastVerifiedCommitHash", ""),
+            last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
+            classification="disabled",
+            trust="high",
+            affected_sections="none",
+            note="Source path is excluded by pathRules.",
+        )
+    if not sidecar_storage_label(storage_mode):
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_file,
+            repository=metadata.get("repository", repo_root.name),
+            storage_mode=storage_mode,
+            last_verified_hash=metadata.get("lastVerifiedCommitHash", ""),
+            last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
+            classification="unsupported",
+            trust="low",
+            affected_sections="resolver; storage configuration",
+            note=f"Sidecar onboarding exists but the source path resolves to '{storage_mode}'.",
+        )
+    row = classify_external_onboarding(onboarding_file, repo_root)
+    row.onboarding_file = onboarding_ref
+    row.storage_mode = storage_mode
     return row
 
 
@@ -614,8 +864,10 @@ def classify_source(source_file: str, repo_root: Path, onboarding_root: Path, se
             affected_sections="none",
             note="Source path is excluded by pathRules.",
         )
-    if storage_mode == "external":
-        return classify_external_source(source_file, repo_root, onboarding_root)
+    if sidecar_storage_label(storage_mode):
+        row = classify_external_source(source_file, repo_root, onboarding_root)
+        row.storage_mode = storage_mode
+        return row
     if storage_mode == "inline":
         return classify_inline_source(source_file, repo_root)
     return DriftRow(
@@ -787,9 +1039,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", required=True, type=Path, help="Path to the source repository root.")
     parser.add_argument(
         "--onboarding-root",
-        required=True,
         type=Path,
-        help="Path to the repo onboarding root, e.g. ar-management/onboarding/my-repo.",
+        help="Compatibility override for the resolved repo onboarding root.",
+    )
+    parser.add_argument(
+        "--topology",
+        choices=("internal", "shared"),
+        help="Management topology for this repo. Defaults to internal when no onboarding root is supplied.",
+    )
+    parser.add_argument(
+        "--shared-root",
+        type=Path,
+        help="Shared ar-management root. Required for --topology shared unless --onboarding-root is supplied.",
+    )
+    parser.add_argument(
+        "--settings-path",
+        type=Path,
+        help="Override the active settings.md path for this run.",
     )
     parser.add_argument("--report", type=Path, help="Optional Markdown report output path.")
     parser.add_argument("--format", choices=("text", "json", "csv"), default="text", help="Stdout format.")
@@ -801,29 +1067,41 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo_root = args.repo.resolve()
-    onboarding_root = args.onboarding_root.resolve()
     if not repo_root.exists():
         parser.error(f"repo path does not exist: {repo_root}")
-    if not onboarding_root.exists():
-        parser.error(f"onboarding root does not exist: {onboarding_root}")
+    try:
+        context = resolve_management_context(
+            repo_root,
+            args.topology,
+            args.onboarding_root,
+            args.shared_root,
+            args.settings_path,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    if not context.onboarding_root.exists():
+        parser.error(f"onboarding root does not exist: {context.onboarding_root}")
 
     git_check = run_git(repo_root, ["rev-parse", "--show-toplevel"])
     if git_check.returncode != 0:
         parser.error(f"repo path is not a git repository: {repo_root}\n{git_check.stderr.strip()}")
-    settings = parse_storage_settings(infer_settings_path(onboarding_root))
-    rows = [classify_external_onboarding(path, repo_root) for path in discover_onboarding_files(onboarding_root)]
+    settings = parse_storage_settings(context.settings_path, context.topology)
+    rows = [
+        classify_sidecar_onboarding(path, repo_root, context.onboarding_root, settings)
+        for path in discover_onboarding_files(context.onboarding_root)
+    ]
     rows.extend(classify_inline_source(path, repo_root) for path in discover_inline_onboarding_sources(repo_root, settings))
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
 
     if args.report:
-        write_markdown_report(rows, args.report.resolve(), repo_root, onboarding_root)
+        write_markdown_report(rows, args.report.resolve(), repo_root, context.onboarding_root)
 
     if args.format == "json":
-        print_json(rows, onboarding_root)
+        print_json(rows, context.onboarding_root)
     elif args.format == "csv":
-        print_csv(rows, onboarding_root)
+        print_csv(rows, context.onboarding_root)
     else:
-        print_text(rows, onboarding_root)
+        print_text(rows, context.onboarding_root)
 
     if args.fail_on_actionable and any(row.classification in ACTIONABLE_CLASSIFICATIONS for row in rows):
         return 1

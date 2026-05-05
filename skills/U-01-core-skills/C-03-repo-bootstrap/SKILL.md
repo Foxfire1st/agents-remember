@@ -16,7 +16,8 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 - **Confidence-tagged findings.** Every factual claim in a report carries a confidence level so downstream consumers know what's verified vs. inferred.
 - **Goal-backward phases.** Each phase defines observable "done when" conditions, not just steps to perform.
 - **Durable checkpoints.** Each phase produces a standalone artifact. You can stop after any phase. A state file tracks progress across sessions.
-- **Cross-repo awareness.** Existing onboarding from adjacent repos is used as seed context. When no onboarding exists, the scout falls back to direct code scanning.
+- **Topology-aware scope.** Bootstrap resolves the target repository's management context first. Internal repositories use their repo-local `ar-management/`; shared-managed repositories use the explicit shared root. Mixed workspaces are resolved per repository.
+- **Cross-repo awareness.** Existing onboarding from adjacent repos is used as seed context only when the active topology allows it. When no onboarding exists, the scout falls back to direct code scanning.
 - **Developer consultation.** The developer is consulted at review gates for intent, direction, and domain knowledge that code alone can't reveal.
 - **Artifacts compound.** The scout report feeds deep-dives, deep-dives feed synthesis, and later area passes enrich the existing repo overview instead of creating a parallel overview layer.
 
@@ -25,6 +26,7 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 ## Prerequisites
 
 - The target repo must be accessible in the workspace.
+- The target repo's `ar-management/` scaffold must exist for default internal bootstrap, or the developer must explicitly select shared scaffolding and provide the shared root.
 - The `create_or_update-onboarding-file` skill must be available (for template compliance in later phases).
 - The `discovery` skill must be available (for cross-repo discovery techniques).
 - The `confluence-search` skill should be available for domain research.
@@ -38,9 +40,22 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 | Input            | Required | Description                                                                                                                                                                            |
 | ---------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repo`           | Yes      | The repo name (e.g., `dema-platform-backend`, `TAS-Expand`)                                                                                                                            |
+| `topology`       | No       | `internal` by default. Use `shared` only when the target repo intentionally uses shared scaffolding.                                                                                   |
+| `shared-root`    | No       | Required when `topology` is `shared` and the shared root cannot be inferred from the caller.                                                                                           |
 | `depth`          | No       | How far to go: `overview-only` (default), `component-overviews` (accepted as a legacy input label for repo-overview expansion), or `full` (includes file-level MDs for priority areas) |
 | `seed-context`   | No       | Paths to existing onboarding files from adjacent repos that reference this repo. Auto-discovered if not provided.                                                                      |
 | `priority-areas` | No       | Areas to prioritise for deeper passes. If omitted, the scout phase identifies them.                                                                                                    |
+
+## Topology And Eligibility
+
+Resolve topology per target repository before Phase 1:
+
+1. Default internal topology uses `<repo-root>/ar-management/` and `<repo-root>/ar-management/system/settings.md`.
+2. Explicit shared topology uses `<shared-ar-management-root>/` and `<shared-ar-management-root>/system/settings.md`.
+3. In mixed workspaces, one repository using shared scaffolding must not move neighboring internal repositories onto the shared root.
+4. In mixed workspaces, one repository using local internal management must not prevent another repository from using shared scaffolding.
+
+Apply the active settings file's `onboarding.pathRules` before selecting bootstrap candidates. `pathRules` decide source path and file-type eligibility. In shared settings, scoped rules such as `path: <repo-name>` let each shared-managed repository define its own eligible paths and file types. They do not switch storage per path; storage is resolved separately from `onboarding.storage`.
 
 ---
 
@@ -185,7 +200,11 @@ The tech profile becomes a section in the scout report. Deep-dive agents receive
 
 ### 1.3 Cross-repo discovery
 
-Before exploring blind, discover what's known about this repo's external interfaces. Use two paths depending on whether adjacent repos have onboarding.
+Before exploring blind, discover what's known about this repo's external interfaces. Use the active topology to decide which adjacent onboarding roots may be read.
+
+For default internal repositories, keep discovery local unless `crossRepo.allow` in the repo-local settings names additional repositories. For shared-managed repositories, use the shared root selected for that repository. In a mixed workspace, shared-managed repositories may use shared onboarding while neighboring internal repositories remain local.
+
+Use two paths depending on whether allowed adjacent repos have onboarding.
 
 #### Path A — Onboarding exists in adjacent repos
 

@@ -1,18 +1,20 @@
 ---
 name: C-00-initialize-management-root
-description: "Initialize the Agents Remember management root for a fresh clone or incomplete local setup. Use when AR_MANAGEMENT_ROOT, ar-management, system/settings.md, system/sources.md, system/tools.md, onboarding, tasks, docs, or notes are missing and Codex needs to create the minimal scaffold before onboarding, drift detection, task tracking, or repo bootstrap can work."
+description: "Initialize the Agents Remember management folder for a fresh clone or incomplete setup. Defaults to a repo-local internal ar-management folder for the target repo; use shared scaffolding only when the developer explicitly asks for it."
 ---
 
 # C-00 Initialize Management Root
 
-Create the minimal local `ar-management` scaffold expected by `agents-remember-md/AGENTS.md`.
+Create the minimal `ar-management/` scaffold expected by `agents-remember-md/AGENTS.md`.
 
-This skill is for first-run setup and repair of missing management-root infrastructure. It does not create repo onboarding or files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
+This skill is for first-run setup and repair of missing management infrastructure. By default it creates only the target repository's internal `ar-management/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
 
 ## Inputs
 
-- `agents_repo`: path to the `agents-remember-md` checkout. Default to the repo containing the active `AGENTS.md`.
-- `management_root`: optional override. If omitted, resolve it from `.env`; if `.env` is absent, use `.env.example`.
+- `target_repo`: path to the repository being initialized. Default to the repository the developer asked to work on.
+- `topology`: `internal` by default. Use `shared` only when the developer explicitly asks for shared scaffolding.
+- `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit shared scaffolding that resolves `.env` or `.env.example`.
+- `management_root`: optional override for explicit shared scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
 - `mode`: `create-missing` by default. Use `repair` only when the user explicitly asks to fix existing scaffold files.
 
 ## Safety Rules
@@ -21,16 +23,26 @@ This skill is for first-run setup and repair of missing management-root infrastr
 2. Create missing directories and files only.
 3. Keep starter files generic; do not invent project-specific tools, docs, sources, or onboarding.
 4. If the resolved management root points outside the intended workspace, state the resolved absolute path before writing.
-5. If `.env` is absent, do not create it unless the user explicitly asks. The default `.env.example` path is enough for first-run scaffolding.
+5. Default internal scaffolding must not create a shared root.
+6. If `.env` is absent, do not create it unless the user explicitly asks for shared configuration.
 
 ## Procedure
 
 ### 1. Resolve The Root
 
-1. Read `<agents_repo>/.env` if it exists; otherwise read `<agents_repo>/.env.example`.
-2. Parse `AR_MANAGEMENT_ROOT=<path>`.
-3. Resolve relative paths from the file that declared the value.
-4. If neither file exists or no value is declared, use `../ar-management` relative to `<agents_repo>` and state that fallback.
+Default internal scaffolding:
+
+1. Resolve `target_repo`.
+2. Set the management root to `<target_repo>/ar-management`.
+3. Do not resolve or create a shared `AR_MANAGEMENT_ROOT`.
+
+Explicit shared scaffolding:
+
+1. Use `management_root` when the developer provided one.
+2. Otherwise read `<agents_repo>/.env` if it exists; if it is absent, read `<agents_repo>/.env.example`.
+3. Parse `AR_MANAGEMENT_ROOT=<path>`.
+4. Resolve relative paths from the file that declared the value.
+5. If neither file exists or no value is declared, use `../ar-management` relative to `<agents_repo>` and state that fallback.
 
 ### 2. Inspect Existing State
 
@@ -53,7 +65,7 @@ Report which are present and which are missing. If everything exists, stop with 
 Create only missing directories:
 
 ```text
-<AR_MANAGEMENT_ROOT>/
+<resolved-root>/
   system/
   onboarding/
   tasks/
@@ -69,29 +81,97 @@ Create only files that do not already exist.
 
 #### `system/settings.md`
 
-```md
+````md
 # Settings
 
 This management root stores local durable context for Agents Remember.
 
-## Path Contract
+## Topology
 
-`AR_MANAGEMENT_ROOT` is resolved from `agents-remember-md/.env`. If `.env` is absent, the default comes from `agents-remember-md/.env.example`.
+```yaml
+management:
+  topology: internal
 
-Relative `AR_MANAGEMENT_ROOT` values resolve from the file that declares them.
+onboarding:
+  storage:
+    mode: repo-sidecar
+  pathRules:
+    include:
+      paths:
+        - README.md
+        - docs/**
+        - src/**
+      fileTypes:
+        - .md
+        - .py
+        - .ts
+        - .tsx
+    exclude:
+      paths:
+        - vendor/**
+        - node_modules/**
+        - dist/**
+        - build/**
+      fileTypes:
+        - .png
+        - .jpg
+        - .zip
+
+crossRepo:
+  allow: []
+```
+````
+
+`onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
+
+For explicit shared scaffolding, use the same file path under the shared root but write `management.topology: shared` and keep `pathRules` present:
+
+```yaml
+management:
+  topology: shared
+
+onboarding:
+  storage:
+    layout: shared-root
+  pathRules:
+    - path: my-app
+      include:
+        paths:
+          - README.md
+          - docs/**
+          - src/**
+        fileTypes:
+          - .md
+          - .py
+          - .ts
+          - .tsx
+      exclude:
+        paths:
+          - vendor/**
+          - node_modules/**
+          - dist/**
+          - build/**
+        fileTypes:
+          - .png
+          - .jpg
+          - .zip
+```
+
+Replace `my-app` with the repository name for each shared-managed repository. Add one scoped rule per repo when shared repositories need different eligible paths or file types.
 
 ## Scaffold
 
-| Layer | Location | Purpose |
-| --- | --- | --- |
-| settings | `system/settings.md` | Path contract and management-root scaffold notes |
-| sources | `system/sources.md` | External and domain documentation registry |
-| tools | `system/tools.md` | Repo-specific commands, checks, and local tool notes |
-| onboarding | `onboarding/` | Durable repo and file-level code commentary |
-| tasks | `tasks/` | Current task plans, decision logs, and implementation notes |
-| docs | `docs/` | Local domain docs, mirrors, and reference material |
-| notes | `notes/` | Scratch observations that are not durable onboarding yet |
-```
+| Layer      | Location             | Purpose                                                     |
+| ---------- | -------------------- | ----------------------------------------------------------- |
+| settings   | `system/settings.md` | Topology, storage, path eligibility, and scaffold notes     |
+| sources    | `system/sources.md`  | External and domain documentation registry                  |
+| tools      | `system/tools.md`    | Repo-specific commands, checks, and local tool notes        |
+| onboarding | `onboarding/`        | Durable repo and file-level code commentary                 |
+| tasks      | `tasks/`             | Current task plans, decision logs, and implementation notes |
+| docs       | `docs/`              | Local domain docs, mirrors, and reference material          |
+| notes      | `notes/`             | Scratch observations that are not durable onboarding yet    |
+
+````
 
 #### `system/sources.md`
 
@@ -113,7 +193,7 @@ No external references configured yet.
 - Prefer local mirrors for reading when available.
 - Link onboarding `Docs References` rows to canonical source URLs when a canonical online reference exists.
 - If no relevant domain documentation exists for a task, record what was checked instead of implying the search space was complete.
-```
+````
 
 #### `system/tools.md`
 
@@ -139,7 +219,8 @@ Record environment setup, local service assumptions, MCP notes, and command cave
 
 Summarize:
 
-- resolved `AR_MANAGEMENT_ROOT`
+- resolved topology
+- resolved management root
 - directories created
 - files created
 - files left untouched

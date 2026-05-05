@@ -2,16 +2,22 @@
 
 This workspace uses a layered memory system. Understand the layers before acting.
 
-Resolve `AR_MANAGEMENT_ROOT` from `.env` in this repository first. If `.env` is absent, use the default from `.env.example`: `../ar-management`, resolved relative to that `.env.example` file. The active management files then live under this scaffold:
+Resolve the active `ar-management/` context for the target repository before relying on onboarding, task files, docs, or tools.
 
-| Layer      | Location                                  | Purpose                                                         |
-| ---------- | ----------------------------------------- | --------------------------------------------------------------- |
-| settings   | `<AR_MANAGEMENT_ROOT>/system/settings.md` | Derived path contract and management-root scaffold              |
-| onboarding | `<AR_MANAGEMENT_ROOT>/onboarding/`        | Code commentary — logic, invariants, conventions, task tracking |
-| tasks      | `<AR_MANAGEMENT_ROOT>/tasks/`             | Current change intent, plans, decision logs                     |
-| docs       | `<AR_MANAGEMENT_ROOT>/docs/`              | Local domain documentation and mirrors                          |
-| sources    | `<AR_MANAGEMENT_ROOT>/system/sources.md`  | References to external technical documentation, mcps, etc.      |
-| tools      | `<AR_MANAGEMENT_ROOT>/system/tools.md`    | Repo-specific commands, checks, tools, and MCP notes            |
+Default to internal topology: the target repository owns `<target-repo>/ar-management/` and its own `system/settings.md`. This local root is sufficient for normal operation and does not require a shared `AR_MANAGEMENT_ROOT`.
+
+Use shared topology only when the developer explicitly asks for shared scaffolding or the current repository has already been selected for shared management. In shared topology, resolve `AR_MANAGEMENT_ROOT` from `.env` or `.env.example` and use the shared root for the selected repository. Mixed workspaces are allowed: resolve topology per target repository, so a locally managed repo keeps using its own root while a neighboring shared-managed repo uses the shared root.
+
+The active management files then live under the resolved root:
+
+| Layer      | Location                             | Purpose                                                         |
+| ---------- | ------------------------------------ | --------------------------------------------------------------- |
+| settings   | `<resolved-root>/system/settings.md` | Topology, storage, path eligibility, and scaffold notes         |
+| onboarding | `<resolved-onboarding-root>/`        | Code commentary — logic, invariants, conventions, task tracking |
+| tasks      | `<resolved-root>/tasks/`             | Current change intent, plans, decision logs                     |
+| docs       | `<resolved-root>/docs/`              | Local domain documentation and mirrors                          |
+| sources    | `<resolved-root>/system/sources.md`  | References to external technical documentation, mcps, etc.      |
+| tools      | `<resolved-root>/system/tools.md`    | Repo-specific commands, checks, tools, and MCP notes            |
 
 ## Task Format Routing
 
@@ -42,7 +48,7 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 2. During investigation, read each relevant source file with its verified onboarding as a pair. If the current task has already modified or created that pair after the gate passed, read the current working versions together and treat them as pending verification rather than re-verified onboarding. Do not bulk-read onboarding as detached background context, and do not defer the onboarding read until after source interpretation. After enough paired reads, show the developer the plan in chat, including code examples for every distinct change you intend to make. Wait for explicit developer approval before you start changing any code.
 
-3. After approval, apply code changes and update the corresponding onboarding in the same editing pass whenever the change affects durable current-state knowledge. Do not postpone required onboarding changes to the end of the task. Use the appropriate code quality checks from `<AR_MANAGEMENT_ROOT>/system/tools.md`.
+3. After approval, apply code changes and update the corresponding onboarding in the same editing pass whenever the change affects durable current-state knowledge. Do not postpone required onboarding changes to the end of the task. Use the appropriate code quality checks from `<resolved-root>/system/tools.md`.
 
 ---
 
@@ -84,7 +90,7 @@ Planning is not an exception.
 Before opening, reading, summarizing, or reasoning from source file contents in
 the relevant repository you must perform these three gates:
 
-Gate 1: Resolve `AR_MANAGEMENT_ROOT`.
+Gate 1: Resolve the authoritative `ar-management/` context for the target repository.
 
 Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository at the start of the task.
 

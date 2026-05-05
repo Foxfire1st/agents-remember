@@ -1,6 +1,6 @@
 ---
 name: C-02-onboarding-drift-detection
-description: "Detect onboarding drift against the canonical onboarding root, classify how trustworthy existing onboarding remains, and hand actionable maintenance work to C-05-create-or-update-onboarding-files."
+description: "Detect onboarding drift against the resolved internal or shared onboarding root, classify how trustworthy existing onboarding remains, and hand actionable maintenance work to C-05-create-or-update-onboarding-files."
 ---
 
 # C-02 Onboarding Drift Detection
@@ -36,17 +36,28 @@ Use the bundled helper for repo-wide checks instead of rewriting shell loops:
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
   --repo <repo-root> \
-  --onboarding-root <AR_MANAGEMENT_ROOT>/onboarding/<repo> \
-  --report <AR_MANAGEMENT_ROOT>/onboarding/<repo>/drift-report.md
+  --report <repo-root>/ar-management/onboarding/drift-report.md
 ```
 
-The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
+The helper defaults to internal topology and resolves onboarding under `<repo-root>/ar-management/onboarding`. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
+
+```bash
+<this-skill-dir>/scripts/check_onboarding_drift.py \
+  --repo <repo-root> \
+  --topology shared \
+  --shared-root <shared-ar-management-root> \
+  --report <shared-ar-management-root>/onboarding/<repo>/drift-report.md
+```
+
+The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
 ### 1. Resolve onboarding units in the repository
 
-Read the active storage settings from `<AR_MANAGEMENT_ROOT>/system/settings.md` when available, then resolve the effective onboarding unit for each eligible source path before classification.
+Resolve the active management context per target repository. Internal repositories read `<repo-root>/ar-management/system/settings.md`; shared repositories read `<shared-ar-management-root>/system/settings.md`.
 
-Primary drift detection still supports external mirrored markdown onboarding under `<onboarding-root>/<repo>/...`, but it may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
+Read `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
+
+Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal storage or shared storage. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 
 If repo-level entity catalogs or overview files are in scope, treat them as follow-up maintenance surfaces rather than trying to diff them directly against one source file.
 
@@ -71,10 +82,10 @@ Use the recorded metadata plus the resolved storage mode to classify the current
 
 1. If the source file no longer exists, classify the onboarding file as orphaned.
 2. If the resolved storage mode is `disabled`, classify the source path as disabled.
-3. If external onboarding is expected but the mirrored markdown file is missing, classify it as missing.
+3. If sidecar onboarding is expected but the mirrored markdown file is missing, classify it as missing.
 4. If inline onboarding is expected but the marker-delimited block is missing, classify it as missing.
 5. If the external or inline metadata needed for verification is empty, classify it as missing verification.
-6. For external onboarding, compare the source file against the recorded commit using git diff.
+6. For sidecar onboarding, compare the source file against the recorded commit using git diff.
 7. For inline onboarding, recompute the source digest from the source body with the onboarding block removed.
 8. If verification matches, classify the onboarding unit as up to date.
 9. If verification does not match, classify it as drifted.
@@ -130,7 +141,7 @@ If no actionable files exist, return a clean summary and stop.
 ## Rules
 
 1. Drift detection remains evidence qualification and maintenance routing, not deep Research.
-2. It must use the configured canonical `<onboarding-root>/` root.
+2. It must use the resolved canonical onboarding root for the target repository.
 3. It hands maintenance work to `C-05-create-or-update-onboarding-files` instead of performing that maintenance itself.
 4. Stale onboarding may remain directional evidence until refreshed or disproven, but that trust level must be made explicit.
 5. Missing verification metadata is itself actionable drift.
