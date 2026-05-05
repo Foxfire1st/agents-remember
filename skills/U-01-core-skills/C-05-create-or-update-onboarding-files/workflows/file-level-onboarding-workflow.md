@@ -17,12 +17,12 @@ Create or update the file-level onboarding content for one concrete source file.
 
 ## Source Discovery Rules
 
-1. Start by reading `<AR_MANAGEMENT_ROOT>/system/sources.md` and use its `Domain Documentation` category for the file being documented.
-2. Use the `Domain Documentation` sources from `<AR_MANAGEMENT_ROOT>/system/sources.md` when building `### Docs References` and any load-bearing explanatory prose that depends on technical or behavioral documentation.
+1. Start by reading the C-08 resolved `system/sources.md` and use its `Domain Documentation` category for the file being documented.
+2. Use the `Domain Documentation` sources from the resolved `system/sources.md` when building `### Docs References` and any load-bearing explanatory prose that depends on technical or behavioral documentation.
 3. Treat adjacent onboarding as supporting input, not the whole discovery plan and not a substitute for the `Domain Documentation` pass.
 4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and line citations, but write the onboarding link to the canonical online reference rather than the local mirror path.
 5. If relevant material cannot be found in the `Domain Documentation` sources, record what was checked and that no relevant evidence was found.
-6. `<AR_MANAGEMENT_ROOT>/system/sources.md` is discovery-only. It must not appear as a cited source in `### Docs References` or `## Cross-Repo References`.
+6. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `### Docs References` or `## Cross-Repo References`.
 7. Cite the actual evidence source: the library documentation page, canonical local mirror, repository source file, generated artifact, or sibling-repo file that directly proves the statement.
 
 ## Placement Rules
@@ -78,20 +78,20 @@ Citation requirements for reference sections:
 
 1. identify the exact source file path
 2. confirm the mirrored onboarding path
-3. read `<AR_MANAGEMENT_ROOT>/system/sources.md`, then read the source file and the relevant materials from its `Domain Documentation` category, capturing the exact citation ranges needed for `Docs References` and `Cross-Repo References`
+3. read the C-08 resolved `system/sources.md`, then read the source file and the relevant materials from its `Domain Documentation` category, capturing the exact citation ranges needed for `Docs References` and `Cross-Repo References`
 4. gather metadata:
    - current time via MCP time tool
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 5. fill the template from `../templates/file-level-onboarding-template.md`
 6. update the repo-level overview if the file should be indexed or cross-referenced there
-7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via `<AR_MANAGEMENT_ROOT>/system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, health-check those canonical URLs when retrieval tools are available, ensure code/onboarding rows use workspace-relative links that still resolve to the cited files, and ensure every table row has exact line ranges plus a concise finding summary
+7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, health-check those canonical URLs when retrieval tools are available, ensure code/onboarding rows use workspace-relative links that still resolve to the cited files, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
 
 When code changes:
 
 1. re-read the source file and the onboarding file
-2. re-read `<AR_MANAGEMENT_ROOT>/system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking canonical doc URLs plus workspace-relative cross-repo targets before treating those references as current
+2. re-read the C-08 resolved `system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking canonical doc URLs plus workspace-relative cross-repo targets before treating those references as current
 3. for inline storage, apply the updated content through `inline-onboarding-workflow.md` so comment syntax, placement, and source digest stay consistent
 4. update metadata after the content has been verified
 

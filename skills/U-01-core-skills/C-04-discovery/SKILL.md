@@ -9,6 +9,8 @@ Use this retained global utility skill when the current surface is unfamiliar an
 
 Its job is to keep investigation ordered: onboarding first, reference context next, cross-repo relationships after that, and code only once the surrounding meaning is clear enough.
 
+Before starting the discovery order, invoke `C-08-ar-management-resolver` for the target repository and use its resolved onboarding root, docs root, settings, `pathRules`, and cross-repo allowances.
+
 ## When To Use It
 
 1. At the start of a task that touches unfamiliar code or architecture.
@@ -20,7 +22,7 @@ Its job is to keep investigation ordered: onboarding first, reference context ne
 
 Always prefer top-down discovery over brute-force code roaming.
 
-1. Read the relevant repo overview under `<onboarding-root>/<repo>/overview.md`.
+1. Read the relevant repo overview under the C-08 resolved onboarding root.
 2. If the area is narrower, read the relevant sections of the repo overview that cover that topic and any relevant file-level onboarding docs.
 3. Read any entity catalog, glossary, or naming reference that helps disambiguate the terms in play.
 4. Follow documentation references surfaced by onboarding before broad browsing.

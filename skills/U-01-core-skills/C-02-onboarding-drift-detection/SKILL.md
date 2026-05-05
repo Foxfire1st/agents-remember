@@ -31,7 +31,7 @@ This skill's standard workflow operates on one repository at a time.
 
 ### Preferred helper
 
-Use the bundled helper for repo-wide checks instead of rewriting shell loops:
+Use `C-08-ar-management-resolver` to resolve the target repository's active management context, then use the bundled helper for repo-wide checks instead of rewriting shell loops:
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
@@ -39,7 +39,7 @@ Use the bundled helper for repo-wide checks instead of rewriting shell loops:
   --report <repo-root>/ar-management/onboarding/drift-report.md
 ```
 
-The helper defaults to internal topology and resolves onboarding under `<repo-root>/ar-management/onboarding`. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
+The helper passes compatibility CLI inputs through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
@@ -49,13 +49,13 @@ The helper defaults to internal topology and resolves onboarding under `<repo-ro
   --report <shared-ar-management-root>/onboarding/<repo>/drift-report.md
 ```
 
-The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
+The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. Topology detection, management-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
 ### 1. Resolve onboarding units in the repository
 
-Resolve the active management context per target repository. Internal repositories read `<repo-root>/ar-management/system/settings.md`; shared repositories read `<shared-ar-management-root>/system/settings.md`.
+Invoke `C-08-ar-management-resolver` for the target repository and use the resolved context. Internal repositories read `<repo-root>/ar-management/system/settings.md`; shared repositories read `<shared-ar-management-root>/system/settings.md`.
 
-Read `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
+C-08 reads `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
 
 Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal storage or shared storage. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 
@@ -141,7 +141,7 @@ If no actionable files exist, return a clean summary and stop.
 ## Rules
 
 1. Drift detection remains evidence qualification and maintenance routing, not deep Research.
-2. It must use the resolved canonical onboarding root for the target repository.
+2. It must use the canonical onboarding root returned by `C-08-ar-management-resolver` for the target repository.
 3. It hands maintenance work to `C-05-create-or-update-onboarding-files` instead of performing that maintenance itself.
 4. Stale onboarding may remain directional evidence until refreshed or disproven, but that trust level must be made explicit.
 5. Missing verification metadata is itself actionable drift.

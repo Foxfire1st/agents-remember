@@ -14,7 +14,7 @@ Inline onboarding does not replace the file-level content model. It reuses the s
 
 Planning stays in task artifacts. This package defines how onboarding itself is created, updated, and kept structurally consistent.
 
-It must use the `Domain Documentation` category declared in `<AR_MANAGEMENT_ROOT>/system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
+Before maintaining onboarding, use `C-08-ar-management-resolver` to resolve the target repository's active management context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
 
 ## Routing
 
@@ -57,21 +57,21 @@ Storage-specific adapter additions for file-level onboarding:
 5. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
 6. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
 7. When updating `Docs References` or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
-8. Start reference discovery from `<AR_MANAGEMENT_ROOT>/system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
+8. Start reference discovery from the C-08 resolved `system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
 9. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
-10. Treat `<AR_MANAGEMENT_ROOT>/system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
+10. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
 11. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References` or `Cross-Repo References` are still valid.
 
 ## Source Discovery Rule
 
-Before writing or revising onboarding content, read `<AR_MANAGEMENT_ROOT>/system/sources.md` and use its `Domain Documentation` category as the required discovery path for technical and behavioral documentation.
+Before writing or revising onboarding content, read the C-08 resolved `system/sources.md` and use its `Domain Documentation` category as the required discovery path for technical and behavioral documentation.
 
-1. Use the `Domain Documentation` category from `<AR_MANAGEMENT_ROOT>/system/sources.md` as the discovery plan for `Docs References`, `Cross-Repo References`, and any load-bearing explanatory prose.
+1. Use the `Domain Documentation` category from the resolved `system/sources.md` as the discovery plan for `Docs References`, `Cross-Repo References`, and any load-bearing explanatory prose.
 2. Preserve useful adjacent onboarding context, but do not let it replace the required `Domain Documentation` pass.
-3. Do not hard-code one external documentation system into this package. The operative rule is to use whatever sources are listed under `Domain Documentation` in `<AR_MANAGEMENT_ROOT>/system/sources.md`.
+3. Do not hard-code one external documentation system into this package. The operative rule is to use whatever sources are listed under `Domain Documentation` in the resolved `system/sources.md`.
 4. If `Domain Documentation` includes both a local mirror and a live retrieval path, use the local material first for direct access and line citations, but emit onboarding links to the canonical live reference. Never emit filesystem paths to local documentation mirrors in onboarding output.
 5. If no relevant material is found in the `Domain Documentation` sources, record what was checked instead of pretending the search space was limited to onboarding only.
-6. Do not put `<AR_MANAGEMENT_ROOT>/system/sources.md`, source registries, search result pages, or “see this source list” rows in citation tables. After using the registry to choose where to look, cite the actual documentation, source file, generated artifact, or local mirror that directly proves the statement.
+6. Do not put the resolved `system/sources.md`, source registries, search result pages, or “see this source list” rows in citation tables. After using the registry to choose where to look, cite the actual documentation, source file, generated artifact, or local mirror that directly proves the statement.
 7. If the registry points to a documentation source but the source does not prove anything relevant for the file, say that no relevant documentation was found and cite the repository source code in `Cross-Repo References` for implementation facts.
 
 ## Reference Section Rule

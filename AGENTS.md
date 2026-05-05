@@ -2,11 +2,11 @@
 
 This workspace uses a layered memory system. Understand the layers before acting.
 
-Resolve the active `ar-management/` context for the target repository before relying on onboarding, task files, docs, or tools.
+Resolve the active `ar-management/` context for the target repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-management-resolver` as the normal resolver entry point: pass the repository name and consume the returned local or shared context.
 
 Default to internal topology: the target repository owns `<target-repo>/ar-management/` and its own `system/settings.md`. This local root is sufficient for normal operation and does not require a shared `AR_MANAGEMENT_ROOT`.
 
-Use shared topology only when the developer explicitly asks for shared scaffolding or the current repository has already been selected for shared management. In shared topology, resolve `AR_MANAGEMENT_ROOT` from `.env` or `.env.example` and use the shared root for the selected repository. Mixed workspaces are allowed: resolve topology per target repository, so a locally managed repo keeps using its own root while a neighboring shared-managed repo uses the shared root.
+Use shared topology only when the developer explicitly asks for shared scaffolding or the current repository has already been selected for shared management. In shared topology, resolve `AR_MANAGEMENT_ROOT` from `.env` or `.env.example` and use the shared root for the selected repository. Mixed workspaces are allowed: resolve topology per target repository, so a locally managed repo keeps using its own root while a neighboring shared-managed repo uses the shared root. Keep this paragraph as fallback guidance if the C-08 helper or script cannot run.
 
 The active management files then live under the resolved root:
 
@@ -44,7 +44,7 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 ## Chat Based Coding Workflow
 
-1. At the start of a coding workflow, invoke `C-02-onboarding-drift-detection` once for the relevant repository. Do not plan against drifted, missing-verification, or orphaned pre-existing onboarding until it has been refreshed through `C-05-create-or-update-onboarding-files` under `Autonomous Onboarding Maintenance`. This establishes the task-start trust baseline. Do not skip this step, and do not re-trigger it solely because the current task later creates or modifies files in that repository.
+1. At the start of a coding workflow, invoke `C-08-ar-management-resolver` for the relevant repository, then invoke `C-02-onboarding-drift-detection` with the resolved context once for that repository. Do not plan against drifted, missing-verification, or orphaned pre-existing onboarding until it has been refreshed through `C-05-create-or-update-onboarding-files` under `Autonomous Onboarding Maintenance`. This establishes the task-start trust baseline. Do not skip this step, and do not re-trigger it solely because the current task later creates or modifies files in that repository.
 
 2. During investigation, read each relevant source file with its verified onboarding as a pair. If the current task has already modified or created that pair after the gate passed, read the current working versions together and treat them as pending verification rather than re-verified onboarding. Do not bulk-read onboarding as detached background context, and do not defer the onboarding read until after source interpretation. After enough paired reads, show the developer the plan in chat, including code examples for every distinct change you intend to make. Wait for explicit developer approval before you start changing any code.
 
@@ -90,9 +90,9 @@ Planning is not an exception.
 Before opening, reading, summarizing, or reasoning from source file contents in
 the relevant repository you must perform these three gates:
 
-Gate 1: Resolve the authoritative `ar-management/` context for the target repository.
+Gate 1: Invoke `C-08-ar-management-resolver` for the target repository and use its resolved context for the authoritative `ar-management/` root, onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, and cross-repo allowances.
 
-Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository at the start of the task.
+Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository at the start of the task, using the context resolved by C-08.
 
 Gate 3: If number of Drifted, missing-verification, or orphaned onboarding is greater 0, run `C-05-create-or-update-onboarding-files`.
 

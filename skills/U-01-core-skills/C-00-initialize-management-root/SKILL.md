@@ -9,6 +9,8 @@ Create the minimal `ar-management/` scaffold expected by `agents-remember-md/AGE
 
 This skill is for first-run setup and repair of missing management infrastructure. By default it creates only the target repository's internal `ar-management/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
 
+Use `C-08-ar-management-resolver` when an agent needs to inspect an existing repository's active management context. This skill creates or repairs scaffold files; it does not replace C-08 as the normal resolver.
+
 ## Inputs
 
 - `target_repo`: path to the repository being initialized. Default to the repository the developer asked to work on.

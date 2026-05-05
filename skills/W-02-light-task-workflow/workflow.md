@@ -16,7 +16,7 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 
 ### 1. Ensure the local task area exists
 
-All light-task artifacts live under `<task-root>/`, where `<task-root>` is derived from `AR_MANAGEMENT_ROOT` and documented in `<AR_MANAGEMENT_ROOT>/system/settings.md`.
+All light-task artifacts live under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-management-resolver` for the target repository.
 
 If `<task-root>/` does not exist yet, create it before writing the task file.
 
@@ -48,8 +48,8 @@ If the task plan relies on onboarding files:
 
 Before planning:
 
-1. check `<AR_MANAGEMENT_ROOT>/docs/` for local reference material when it exists
-2. check glossary or naming references listed in `<AR_MANAGEMENT_ROOT>/system/sources.md` when they exist
+1. check the C-08 resolved `docs/` root for local reference material when it exists
+2. check glossary or naming references listed in the C-08 resolved `system/sources.md` when they exist
 3. check `<onboarding-root>/` for any repo whose behavior or terminology the artifact touches
 4. use supporting search or docs tools only when the task domain needs them
 
@@ -110,13 +110,13 @@ For each implementation section:
 2. read the relevant files or materials
 3. perform the approved work
 4. route durable current-state findings for that implemented slice through `C-05-create-or-update-onboarding-files` as soon as the finding is stable enough to state accurately
-5. use the checks listed in `<AR_MANAGEMENT_ROOT>/system/tools.md` for that implemented slice when those checks are available
+5. use the checks listed in the C-08 resolved `system/tools.md` for that implemented slice when those checks are available
 6. finish any remaining onboarding cleanup for that implemented slice through `C-05-create-or-update-onboarding-files` before considering it done
 7. mark a substep complete only after its code or artifact change, its onboarding capture or update through `C-05-create-or-update-onboarding-files`, and its relevant listed checks are done
 8. mark the parent step checkbox complete only after its substeps and verification are complete
 9. record any meaningful judgment call in the decision log
 
-If `<AR_MANAGEMENT_ROOT>/system/tools.md` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
+If the C-08 resolved `system/tools.md` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
 
 ### 3. Milestone alignment
 
@@ -153,7 +153,7 @@ When all planned work is complete:
 Before final closure:
 
 1. verify any referenced workflow or skill paths still resolve
-2. check whether newly introduced terms belong in the glossary or naming references listed in `<AR_MANAGEMENT_ROOT>/system/sources.md`
+2. check whether newly introduced terms belong in the glossary or naming references listed in the C-08 resolved `system/sources.md`
 3. update any repo-level descriptions that would now be misleading
 
 ## Three-touch iteration cycle

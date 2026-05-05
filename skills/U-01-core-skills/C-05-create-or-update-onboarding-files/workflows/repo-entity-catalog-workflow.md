@@ -16,11 +16,11 @@ Create or update one repo-level entity catalog documenting load-bearing real ent
 
 ## Source Discovery Rules
 
-1. Start by reading `<AR_MANAGEMENT_ROOT>/system/sources.md` and use its `Domain Documentation` category for the repo entities under review.
-2. Use the `Domain Documentation` sources from `<AR_MANAGEMENT_ROOT>/system/sources.md` when deciding canonical source of truth, naming drift, and cross-layer projections.
+1. Start by reading the C-08 resolved `system/sources.md` and use its `Domain Documentation` category for the repo entities under review.
+2. Use the `Domain Documentation` sources from the resolved `system/sources.md` when deciding canonical source of truth, naming drift, and cross-layer projections.
 3. Do not rely on adjacent onboarding alone when the `Domain Documentation` category contains more authoritative domain, protocol, or architecture context.
 4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and evidence gathering, but link onboarding output to the canonical online reference rather than the local mirror.
-5. `<AR_MANAGEMENT_ROOT>/system/sources.md` is a discovery index only. Do not cite it as evidence; cite the actual documentation, code, generated artifact, or sibling-repo source that proves each entity claim.
+5. The resolved `system/sources.md` is a discovery index only. Do not cite it as evidence; cite the actual documentation, code, generated artifact, or sibling-repo source that proves each entity claim.
 
 ## Placement Rules
 
@@ -66,14 +66,14 @@ Avoid entries that are:
 
 1. confirm the repo does not already have an entity catalog
 2. gather current time via MCP time tool
-3. read `<AR_MANAGEMENT_ROOT>/system/sources.md`, then read the repo overview and the relevant materials from its `Domain Documentation` category needed to identify the first load-bearing entities; cite those actual materials, not the registry
+3. read the C-08 resolved `system/sources.md`, then read the repo overview and the relevant materials from its `Domain Documentation` category needed to identify the first load-bearing entities; cite those actual materials, not the registry
 4. fill the template from `../templates/repo-entity-catalog-template.md`
 5. seed the catalog with the most confusion-prone entities first
 6. add a lightweight pointer from the repo overview when it improves discoverability
 
 ## Maintain Workflow
 
-1. re-read `<AR_MANAGEMENT_ROOT>/system/sources.md`, the current catalog, and the relevant source materials for the entity being updated; use the registry only to locate evidence
+1. re-read the C-08 resolved `system/sources.md`, the current catalog, and the relevant source materials for the entity being updated; use the registry only to locate evidence
 2. prefer updating an existing entry over creating a near-duplicate
 3. update `lastUpdated` whenever the entity set or any existing entity meaningfully changes
 4. keep the file selective; expand only when the extra entries materially improve understanding

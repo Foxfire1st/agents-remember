@@ -278,7 +278,7 @@ Most tasks don't need a framework. They need an agent that already knows the cod
 
 All three modes share the same three-part discipline:
 
-1. **Drift check before planning.** Before the agent plans against onboarding, it verifies that the resolved onboarding unit is not stale against the source. The `C-02-onboarding-drift-detection` skill runs this check and classifies trust.
+1. **Resolve, then drift check before planning.** Before the agent plans against onboarding, it uses `C-08-ar-management-resolver` to resolve the active management context, then verifies that the resolved onboarding unit is not stale against the source. The `C-02-onboarding-drift-detection` skill runs this check and classifies trust.
 2. **Approval before implementation.** The agent proposes changes. The developer approves. No implicit approval, no "I'll just make this small edit."
 3. **Onboarding update after approved changes.** Onboarding reflects approved code, not speculation. The update happens after the developer approves the change, not before.
 
@@ -315,7 +315,7 @@ No task folder, no phase structure. The same discipline the heavier modes enforc
 
 Memory systems fail in two ways. They go stale (the code moves, the docs don't). They get polluted with speculation (an agent writes what it _planned_ to build, not what exists). This system addresses both:
 
-**Staleness.** Each onboarding unit records verification metadata appropriate to its storage mode. Sidecar onboarding records the source file's verified git commit. Inline onboarding records a source digest computed from the file body with the onboarding block removed. Before any planning work, the agent resolves where onboarding lives, checks that metadata against the current source, and refreshes stale onboarding before planning against it. This is `C-02-onboarding-drift-detection`, and it runs as the first step of every mode.
+**Staleness.** Each onboarding unit records verification metadata appropriate to its storage mode. Sidecar onboarding records the source file's verified git commit. Inline onboarding records a source digest computed from the file body with the onboarding block removed. Before any planning work, the agent uses `C-08-ar-management-resolver` to resolve where onboarding lives, then `C-02-onboarding-drift-detection` checks that metadata against the current source and routes stale onboarding for refresh before planning continues.
 
 **Pollution.** The approval gate is global: no unapproved work goes into onboarding. In chat mode, the gate is the developer's approval turn. In light task, it's approval of the plan and of the implementation. In heavy task, it's the promotion step at Closure after CP5 passes. Task-local artifacts — input documentation, projected outputs, implementation plans — stay task-local until implementation is approved. Only then does anything reach the canonical onboarding tree.
 
@@ -390,6 +390,8 @@ onboarding:
           - .map
 ```
 
+---
+
 ### Shared For Selected Repositories
 
 Use this when every selected repository should store eligible onboarding artifacts under one shared root:
@@ -406,9 +408,11 @@ projects/
 
 Run `C-00-initialize-management-root` in shared mode only when the developer explicitly asks for shared scaffolding. Default C-00 behavior remains repo-local internal scaffolding.
 
+---
+
 ### Shared Beside Local Repositories
 
-Mixed workspaces are supported. Resolve topology per target repository:
+Mixed workspaces are supported. C-08 resolves topology per target repository:
 
 ```text
 projects/
@@ -425,7 +429,17 @@ projects/
       repo-b/
 ```
 
-When the target repo is `repo-a`, the agent uses `repo-a/ar-management/`. When the target repo is `repo-b` and shared scaffolding was explicitly selected for it, the agent uses the shared root. A shared-managed repo does not force its neighbors into shared mode, and a locally managed repo does not prevent another repo from using shared mode.
+When the target repo is `repo-a`, C-08 returns `repo-a/ar-management/`. When the target repo is `repo-b` and shared scaffolding was explicitly selected for it, C-08 returns the shared root. A shared-managed repo does not force its neighbors into shared mode, and a locally managed repo does not prevent another repo from using shared mode.
+
+---
+
+### Resolve The Active Management Context
+
+Agents use `C-08-ar-management-resolver` to resolve a repository's active management context. In normal use, the agent passes the repository name and receives the resolved topology, management root, onboarding root, settings path, task root, docs root, storage settings, `pathRules`, and cross-repo allowances.
+
+For local-first repositories, C-08 returns the repo-local `ar-management/` folder. For repositories intentionally selected for shared management, C-08 returns the shared root and that repository's shared onboarding layout. This keeps mixed workspaces per-repository: local repos stay local, while selected shared repos use the shared root.
+
+`C-02-onboarding-drift-detection` consumes that resolved context to classify stale onboarding. It is not the topology resolver.
 
 ---
 
@@ -439,6 +453,7 @@ When the target repo is `repo-a`, the agent uses `repo-a/ar-management/`. When t
   - `C-03-repo-bootstrap` — scaffold onboarding for an existing repo
   - `C-04-discovery` — top-down reading order for unfamiliar code
   - `C-05-create-or-update-onboarding-files` — the onboarding template, inline adapter docs, and maintenance
+  - `C-08-ar-management-resolver` — resolve the active local or shared management context from a repository name
 - `skills/P-99-review/` — the adversarial review package used by heavy task
 - `AGENTS.md` — operational principles, including the chat-mode loop
 - `<resolved-onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available
