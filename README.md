@@ -77,12 +77,14 @@ Clone this repository somewhere next to your existing code — it doesn't go ins
 
 ```text
 projects/
-  agents-remember-md/        ← this repo
-    AGENTS.md
-    .env.example
-  ar-management/          ← local/team memory root
+  AGENTS.md                   ← workspace AGENTS.md
+  .env                        ← .env with instructions for ar-management location
+  agents-remember-md/         ← this repo
+    AGENTS.md                 
+    .env.example              ← copy this to workspace root and rename it to .env
+  ar-management/              ← local/team memory root
     onboarding/
-      my-app/              ← created later by C-03 or supplied by your team
+      my-app/                 ← created later by C-03 or supplied by your team
         src/
     tasks/
     docs/
@@ -90,7 +92,7 @@ projects/
       settings.md
       sources.md
       tools.md
-  my-app/                 ← your existing repo
+  my-app/                     ← your existing repo
     src/
 ```
 
@@ -101,10 +103,10 @@ projects/
 The default setup expects an `ar-management` folder beside this repo. The default is shown in `.env.example`:
 
 ```dotenv
-AR_MANAGEMENT_ROOT=../ar-management
+AR_MANAGEMENT_ROOT=./ar-management
 ```
 
-Relative paths resolve from the `.env` file in the agents-remember checkout. To use a different location, copy `.env.example` to `.env` and edit the value. The `.env` file is intentionally ignored because it is local machine configuration.
+Relative paths resolve from the `.env` file in your workspace root. Copy the `.env.example` in agents-remember-md to `.env` in your workspace root.
 
 Initialize the management root with `C-00-initialize-management-root`. This first-run skill resolves `AR_MANAGEMENT_ROOT`, creates the missing directories, and writes starter `settings.md`, `sources.md`, and `tools.md` files without overwriting existing files.
 

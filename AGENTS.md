@@ -66,7 +66,7 @@ source.
   files have no committed state or commit hash, ask the developer whether you may
   commit and push the current state.
 - When opening a relevant source file, open its verified onboarding with it.
-- When changing code, update the corresponding onboarding in the same editing
+- When changing code, run `C-05-create-or-update-onboarding-files` for the corresponding onboarding in the same editing
   pass whenever the change affects durable knowledge
 - Once the hard onboarding gate has passed for the task's repository context,
   files created or modified during the current task may still be opened, read,
