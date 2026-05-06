@@ -1,11 +1,11 @@
 # Entities
 
 | Field       | Value                 |
-| ----------- | --------------------- |
+| ----------- | --------------------- | ------- |
 | repository  | <repo-name>           |
 | doc_type    | `repo-entity-catalog` |
 | lastUpdated | <YYYY-MM-DDThh:mm>    |
-| status      | <draft                |active>
+| status      | <draft                | active> |
 
 ## Purpose
 
@@ -16,8 +16,8 @@
 ### <Canonical Entity Name>
 
 | Field                        | Value                                                                       |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| Category                     | <physical device part                                                       |firmware concept|configuration concept|telemetry concept|backend projection|frontend projection|other>
+| ---------------------------- | --------------------------------------------------------------------------- | ---------------- | --------------------- | ----------------- | ------------------ | ------------------- | ------ |
+| Category                     | <physical device part                                                       | firmware concept | configuration concept | telemetry concept | backend projection | frontend projection | other> |
 | Represents In Reality        | <What concrete thing or stable system object this entity stands for>        |
 | Description                  | <Short description>                                                         |
 | Canonical Source Of Truth    | <Which layer or model currently defines the entity most authoritatively>    |

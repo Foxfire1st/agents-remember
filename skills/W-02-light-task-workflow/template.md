@@ -32,15 +32,15 @@ Implementation sections use checkbox-based steps and checkbox substeps. The chec
 ### S1 — <title>
 
 - [ ] <step outcome>
-      - [ ] <substep>
-      - [ ] <substep>
+              - [ ] <substep>
+              - [ ] <substep>
 - [ ] <verification or review-ready outcome>
 
 ### S2 — <title>
 
 - [ ] <step outcome>
-      - [ ] <substep>
-      - [ ] <substep>
+              - [ ] <substep>
+              - [ ] <substep>
 - [ ] <verification or review-ready outcome>
 
 ---
