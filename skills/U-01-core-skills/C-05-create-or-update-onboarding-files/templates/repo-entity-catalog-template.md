@@ -1,11 +1,11 @@
 # Entities
 
 | Field       | Value                 |
-| ----------- | --------------------- | ------- |
+| ----------- | --------------------- |
 | repository  | <repo-name>           |
 | doc_type    | `repo-entity-catalog` |
 | lastUpdated | <YYYY-MM-DDThh:mm>    |
-| status      | <draft                | active> |
+| status      | <draft or active>     |
 
 ## Purpose
 
@@ -15,18 +15,18 @@
 
 ### <Canonical Entity Name>
 
-| Field                        | Value                                                                       |
-| ---------------------------- | --------------------------------------------------------------------------- | ---------------- | --------------------- | ----------------- | ------------------ | ------------------- | ------ |
-| Category                     | <physical device part                                                       | firmware concept | configuration concept | telemetry concept | backend projection | frontend projection | other> |
-| Represents In Reality        | <What concrete thing or stable system object this entity stands for>        |
-| Description                  | <Short description>                                                         |
-| Canonical Source Of Truth    | <Which layer or model currently defines the entity most authoritatively>    |
-| Current Naming Drift         | <Current synonyms, overloaded names, or misleading labels in code>          |
-| Key Identifiers              | <identifiers such as ident, deviceId, address, interfaceIndex, componentId> |
-| Parent / Child Relationships | <Important containment or ownership relations>                              |
-| Often Confused With          | <Nearby entities it is commonly mixed up with>                              |
-| Source References            | <Primary code or doc references>                                            |
-| Migration Notes              | <Only if there is active drift or deferred renaming>                        |
+| Field                        | Value                                                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Category                     | <physical device part, firmware concept, configuration concept, telemetry concept, backend projection, frontend projection, or other> |
+| Represents In Reality        | <What concrete thing or stable system object this entity stands for>                                                                  |
+| Description                  | <Short description>                                                                                                                   |
+| Canonical Source Of Truth    | <Which layer or model currently defines the entity most authoritatively>                                                              |
+| Current Naming Drift         | <Current synonyms, overloaded names, or misleading labels in code>                                                                    |
+| Key Identifiers              | <identifiers such as ident, deviceId, address, interfaceIndex, componentId>                                                           |
+| Parent / Child Relationships | <Important containment or ownership relations>                                                                                        |
+| Often Confused With          | <Nearby entities it is commonly mixed up with>                                                                                        |
+| Source References            | <Primary code or doc references>                                                                                                      |
+| Migration Notes              | <Only if there is active drift or deferred renaming>                                                                                  |
 
 ## Cross-Layer Projections
 
