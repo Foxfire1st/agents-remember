@@ -1,6 +1,6 @@
 ## Memory System Awareness
 
-This workspace uses a layered memory system. Make sure to read "Hard Start-of-Task Onboarding Gate" chapter before performing actions.
+This workspace uses a layered memory system. Make sure to read "Onboarding Rules" chapter before performing actions.
 
 Infer which repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is considered the "target" repository.
 
@@ -62,6 +62,8 @@ When asked to find a sollution to a problem, do not change any code before you h
 
 ---
 
+# Onboarding Rules
+
 ## Onboarding Documentation
 
 Onboarding files are companion context for source files. Their main purpose is
@@ -69,14 +71,13 @@ to be read alongside the code they describe, at the moment that code is
 inspected. They are not a bulk pre-read and they are not a replacement for
 source.
 
-# Onboarding Rules
-
 ## Code-Onboarding Paired Reads
 
 - Onboarding paths mirror their source code counterparts.
   For example, `src/components/Button.js` has onboarding at `onboarding/src/components/Button.js.md`.
 - Read onboardings alongside source files.
 - Reading onboarding before planning changes avoids regressions.
+- If onboardings are current, they have to be read alongside the code.
 - When opening a relevant source file, open its verified onboarding with it.
 
 ## Onboarding Maintenance during Implementation
