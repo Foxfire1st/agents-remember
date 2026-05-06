@@ -51,4 +51,4 @@ This is the canonical file-level onboarding content model. External onboarding m
 
 ## Update History
 
-<!-- newest first; entries move here from Tasks when the parent task is completed or abandoned -->
+<!-- newest first; append-only; preserve earlier entries and add later entries for corrections, superseded notes, or follow-up clarification -->

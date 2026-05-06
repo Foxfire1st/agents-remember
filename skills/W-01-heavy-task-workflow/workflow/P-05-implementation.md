@@ -77,6 +77,8 @@ For each step, the Coder agent should:
 
 If the Coder agent finds a problem while implementing a step, it records that problem in the issues section of `implementation_plan.md`.
 
+The issues section is append-only for recorded issue history. If an issue is resolved, rejected, or superseded, add the later outcome instead of deleting the earlier issue entry.
+
 Issues are discussed with the developer through the orchestrator. They are not automatically turned into requirement or architecture intake.
 
 If the step reveals durable knowledge that will matter for future work, that knowledge should be routed through `C-05-create-or-update-onboarding-files` during the implementation phase unless the orchestrator explicitly defers the wording cleanup to Closure.

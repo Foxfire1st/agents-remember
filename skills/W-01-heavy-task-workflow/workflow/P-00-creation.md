@@ -85,6 +85,8 @@ It should contain at least:
 4. phase progress skeleton
 5. links to the runtime artifacts as they are created
 
+Any decision, progress, issue, or history log created in `task.md` or `progress.md` is append-only. Preserve superseded entries and add later entries that override, reject, or clarify them.
+
 ### 3. Capture raw requirement intake
 
 Creation writes the developer's raw ask into `requirement_change_candidates.md`.

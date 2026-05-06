@@ -45,4 +45,4 @@
 
 ## Update History
 
-<!-- newest first -->
+<!-- newest first; append-only; preserve earlier entries and add later entries for corrections, superseded notes, or follow-up clarification -->

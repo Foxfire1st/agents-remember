@@ -61,6 +61,7 @@ Storage-specific adapter additions for file-level onboarding:
 9. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
 10. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
 11. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References` or `Cross-Repo References` are still valid.
+12. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
 
 ## Source Discovery Rule
 
@@ -95,6 +96,7 @@ Before writing or revising onboarding content, read the C-08 resolved `system/so
 
 1. update the relevant onboarding sections that no longer match the code
 2. refresh verification metadata after the content update
+3. append a newest-first `Update History` entry instead of deleting or rewriting earlier history
 
 ### When code is deleted or moved
 

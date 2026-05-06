@@ -69,6 +69,8 @@ The file must include:
 
 Use `YYYY-MM-DDTHH:MM` for task-local timestamps such as `Created`, decision log entries, progress notes, and review outcomes.
 
+Decision logs are append-only: never delete or rewrite earlier entries. Add a later entry when a previous decision is superseded, corrected, rejected, or clarified.
+
 Status values should align with the repository rules:
 
 1. `planning`
@@ -114,7 +116,7 @@ For each implementation section:
 6. finish any remaining onboarding cleanup for that implemented slice through `C-05-create-or-update-onboarding-files` before considering it done
 7. mark a substep complete only after its code or artifact change, its onboarding capture or update through `C-05-create-or-update-onboarding-files`, and its relevant listed checks are done
 8. mark the parent step checkbox complete only after its substeps and verification are complete
-9. record any meaningful judgment call in the decision log
+9. record any meaningful judgment call as a new decision log entry
 
 If the C-08 resolved `system/tools.md` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
 
@@ -168,7 +170,7 @@ Update the task file first:
 | ---------------- | -------------------------------------------------------------------------------- |
 | New requirement  | Append it to Requirements with a short annotation noting when it was added       |
 | New work slice   | Add a new `S#` section or new checkbox items under an existing section           |
-| Changed approach | Rewrite the affected step text and record the reason in the decision log         |
+| Changed approach | Rewrite the affected step text and append the reason to the decision log         |
 | Deferred work    | Mark it as deferred in the relevant step or note it in a dedicated deferred line |
 
 If the change is significant, get renewed approval before editing files.
@@ -185,7 +187,7 @@ Do the work for the current slice, update onboarding for that same slice through
 
 Based on developer feedback:
 
-1. approved: keep the completed checkbox state, add any notable decision entry, and continue
+1. approved: keep the completed checkbox state, append any notable decision entry, and continue
 2. changes requested: return to Touch 1 and update the plan before editing again
 3. rejected: record the rejection in the decision log and revert or defer as appropriate
 

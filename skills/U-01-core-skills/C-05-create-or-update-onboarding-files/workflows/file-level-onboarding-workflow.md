@@ -55,6 +55,8 @@ Required top-level sections:
 4. `## Cross-Repo References`
 5. `## Update History`
 
+`## Update History` is append-only and newest-first. Preserve earlier entries even when they are superseded; add a later entry that corrects, supersedes, or clarifies them.
+
 Subsections under `## Code Commentary`:
 
 1. `### Logic`
@@ -94,6 +96,7 @@ When code changes:
 2. re-read the C-08 resolved `system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking canonical doc URLs plus workspace-relative cross-repo targets before treating those references as current
 3. for inline storage, apply the updated content through `inline-onboarding-workflow.md` so comment syntax, placement, and source digest stay consistent
 4. update metadata after the content has been verified
+5. append a newest-first `Update History` entry without deleting or rewriting earlier entries
 
 When code is deleted or moved:
 

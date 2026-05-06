@@ -76,7 +76,8 @@ Avoid entries that are:
 1. re-read the C-08 resolved `system/sources.md`, the current catalog, and the relevant source materials for the entity being updated; use the registry only to locate evidence
 2. prefer updating an existing entry over creating a near-duplicate
 3. update `lastUpdated` whenever the entity set or any existing entity meaningfully changes
-4. keep the file selective; expand only when the extra entries materially improve understanding
+4. append a newest-first `Update History` entry without deleting or rewriting earlier entries
+5. keep the file selective; expand only when the extra entries materially improve understanding
 
 ## Review Heuristics
 

@@ -48,7 +48,7 @@ It writes:
 1. `P-03-design/D-01-requirement-clarification/requirement-clarification.md`
 2. promotion-ready requirement decisions for the orchestrator to write into `requirements.md`
 
-The agent or orchestrator must ask the requirement-facing questions one by one, wait for the developer's answer, and record that answer.
+The agent or orchestrator must ask the requirement-facing questions one by one, wait for the developer's answer, and record that answer. Recorded answers and decision history are append-only; later clarification should be added as a later entry instead of rewriting the earlier answer.
 
 ### D-02 Architecture Deliberation
 
@@ -67,7 +67,7 @@ It writes:
 1. `P-03-design/D-02-architecture-deliberation/architecture-deliberation.md`
 2. normalized architecture items in `architecture_open_questions.md` with assigned architecture IDs
 
-The agent or orchestrator must ask the architecture-facing questions one by one, include tradeoffs where useful, wait for the developer's answer, and record that answer.
+The agent or orchestrator must ask the architecture-facing questions one by one, include tradeoffs where useful, wait for the developer's answer, and record that answer. Recorded answers and decision history are append-only; later clarification should be added as a later entry instead of rewriting the earlier answer.
 
 ### D-03 Output Dry Run Planning
 

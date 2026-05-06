@@ -30,6 +30,7 @@ The orchestrator should:
 2. during Creation, present task-folder naming options and wait for explicit developer selection before scaffolding
 3. ask D-01 and D-02 questions one by one and wait for explicit answers
 4. maintain `task.md`, `requirements.md`, `architecture.md`, `requirement_change_candidates.md`, `architecture_open_questions.md`, and each phase `progress.md`
+	- decision, progress, issue, and history logs in those artifacts are append-only; preserve superseded entries and add later entries that override, reject, or clarify them
 5. route work to the appropriate phase-local skill instead of absorbing every phase locally
 6. trigger `R-01-adversarial-review` at the defined checkpoints
 7. route factual current-state findings through `C-01-findings-capture` and `C-05-create-or-update-onboarding-files` when allowed
@@ -56,6 +57,8 @@ The orchestrator is the sole writer of the root contracts, staging artifacts, an
 4. `requirement_change_candidates.md`
 5. `architecture_open_questions.md`
 6. `P-XX-<phase>/progress.md`
+
+Where these artifacts contain decision, progress, issue, or history logs, the logs are append-only. Do not delete or rewrite earlier entries to make the current state look cleaner; add a later entry that supersedes, corrects, rejects, or clarifies the earlier one.
 
 ## Context Recovery
 

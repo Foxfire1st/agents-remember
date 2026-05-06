@@ -100,4 +100,5 @@ Why this example is included: <reason>
 6. Add or reorder checklist items when scope changes, then get approval again if the change is significant.
 7. Use the light-task status values: `planning`, `inProgress`, `Completed`.
 8. Use `YYYY-MM-DDTHH:MM` anywhere the template records task-local dates or timestamps, including metadata, decision logs, progress notes, and review outcomes.
+9. Treat `## Decision Log` as append-only: preserve superseded entries and add later rows that override, reject, or clarify earlier decisions.
 ```
