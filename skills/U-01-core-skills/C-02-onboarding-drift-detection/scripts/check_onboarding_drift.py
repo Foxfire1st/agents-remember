@@ -600,7 +600,9 @@ def resolve_report_path(report_path: Path | None, management_root: Path) -> Path
     if report_path is None:
         return management_root / "tasks" / "drift-report.md"
     if report_path.is_absolute():
-        return report_path
+        if report_path.resolve().is_relative_to(management_root.resolve()):
+            return report_path
+        return management_root / "tasks" / report_path.name
     return management_root / report_path
 
 
@@ -695,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--report",
         type=Path,
-        help="Optional Markdown report output path. Relative paths resolve from the C-08 management root.",
+        help="Optional Markdown report output path. All report paths are constrained to the C-08 management root.",
     )
     parser.add_argument("--format", choices=("text", "json", "csv"), default="text", help="Stdout format.")
     parser.add_argument(

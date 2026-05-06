@@ -49,7 +49,7 @@ The helper passes compatibility CLI inputs through the C-08 resolver. For explic
   --shared-root <shared-ar-management-root>
 ```
 
-If `--report` is supplied, absolute paths are used exactly and relative paths are resolved from the C-08 management root, not from the shell's current working directory.
+If `--report` is supplied, C-08's resolved management root still owns report placement. Relative paths are resolved from the resolved management root. Absolute paths are only used as-is when they are already inside the resolved management root; otherwise the report filename is redirected to `<resolved-management-root>/tasks/`.
 
 The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. Topology detection, management-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
