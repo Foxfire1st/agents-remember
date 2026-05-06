@@ -596,6 +596,14 @@ def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Pa
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def resolve_report_path(report_path: Path | None, management_root: Path) -> Path:
+    if report_path is None:
+        return management_root / "tasks" / "drift-report.md"
+    if report_path.is_absolute():
+        return report_path
+    return management_root / report_path
+
+
 def print_text(rows: list[DriftRow], onboarding_root: Path) -> None:
     for row in rows:
         print(
@@ -684,7 +692,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Override the active settings.md path for this run.",
     )
-    parser.add_argument("--report", type=Path, help="Optional Markdown report output path.")
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Optional Markdown report output path. Relative paths resolve from the C-08 management root.",
+    )
     parser.add_argument("--format", choices=("text", "json", "csv"), default="text", help="Stdout format.")
     parser.add_argument(
         "--fail-on-actionable",
@@ -722,8 +734,7 @@ def main(argv: list[str] | None = None) -> int:
     rows.extend(classify_inline_source(path, repo_root) for path in discover_inline_onboarding_sources(repo_root, settings))
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
 
-    if args.report:
-        write_markdown_report(rows, args.report.resolve(), repo_root, context.onboarding_root)
+    write_markdown_report(rows, resolve_report_path(args.report, context.management_root), repo_root, context.onboarding_root)
 
     if args.format == "json":
         print_json(rows, context.onboarding_root)

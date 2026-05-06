@@ -35,9 +35,10 @@ Use `C-08-ar-management-resolver` to resolve the target repository's active mana
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
-  --repo <repo-root> \
-  --report <repo-root>/ar-management/onboarding/drift-report.md
+  --repo <repo-root>
 ```
+
+By default the helper writes the Markdown report to `<resolved-management-root>/tasks/drift-report.md`. That means internal repositories write under their repo-local management root, while shared-managed repositories write under the shared management root resolved by C-08.
 
 The helper passes compatibility CLI inputs through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
 
@@ -45,9 +46,10 @@ The helper passes compatibility CLI inputs through the C-08 resolver. For explic
 <this-skill-dir>/scripts/check_onboarding_drift.py \
   --repo <repo-root> \
   --topology shared \
-  --shared-root <shared-ar-management-root> \
-  --report <shared-ar-management-root>/onboarding/<repo>/drift-report.md
+  --shared-root <shared-ar-management-root>
 ```
+
+If `--report` is supplied, absolute paths are used exactly and relative paths are resolved from the C-08 management root, not from the shell's current working directory.
 
 The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. Topology detection, management-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
@@ -113,7 +115,7 @@ Write a drift report when the scope is large enough that the caller needs a reus
 
 Preferred report locations:
 
-1. `<onboarding-root>/<repo>/drift-report.md` for the repository run
+1. `<resolved-management-root>/tasks/drift-report.md` for the repository run
 
 The report should include:
 
