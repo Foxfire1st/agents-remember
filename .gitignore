@@ -2,3 +2,5 @@ system/sources.md
 system/settings.md
 system/tools.md
 .env
+*.pyc
+__pycache__/
