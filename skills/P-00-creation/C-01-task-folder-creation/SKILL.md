@@ -22,4 +22,4 @@ It should route task start work around:
 2. Capture raw architecture intake without approving it.
 3. Before scaffolding, present task-name options in direct discussion and wait for explicit developer selection.
 4. The naming options must include a current-branch-based suggestion when available, the normal task-intent-based suggestions, and a custom option.
-5. Hand onboarding maintenance off to `C-02-onboarding-refresh` instead of hiding it here.
+5. Hand onboarding maintenance off to skill `C-05-create-or-update-onboarding-files` instead of hiding it here.

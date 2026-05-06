@@ -85,7 +85,7 @@ Use the recorded metadata plus the resolved storage mode to classify the current
 3. If sidecar onboarding is expected but the mirrored markdown file is missing, classify it as missing.
 4. If inline onboarding is expected but the marker-delimited block is missing, classify it as missing.
 5. If the external or inline metadata needed for verification is empty, classify it as missing verification.
-6. For sidecar onboarding, compare the source file against the recorded commit using git diff.
+6. For sidecar onboarding, compare the source file against the recorded commit through `HEAD`, then check that same source path for staged or unstaged local changes.
 7. For inline onboarding, recompute the source digest from the source body with the onboarding block removed.
 8. If verification matches, classify the onboarding unit as up to date.
 9. If verification does not match, classify it as drifted.
@@ -123,6 +123,8 @@ The report should include:
 4. an actionable table listing onboarding file, source file, classification, current trust level, and likely affected sections
 5. enough summary detail for `C-05-create-or-update-onboarding-files` to refresh the right surfaces without rerunning the scan from scratch
 
+The markdown report should not include a full inventory of up-to-date files; stdout, JSON, or CSV output can be used when a complete row list is needed.
+
 Treat the drift report as a maintenance artifact, not as a long-lived research handoff.
 
 ### 6. Hand off to onboarding maintenance
@@ -137,6 +139,7 @@ The handoff should identify:
 4. which stale onboarding can still be used directionally until maintenance finishes
 
 If no actionable files exist, return a clean summary and stop.
+If actionable files exist run `C-05-create-or-update-onboarding-files` before proceeding with any given task.
 
 ## Rules
 
@@ -146,3 +149,4 @@ If no actionable files exist, return a clean summary and stop.
 4. Stale onboarding may remain directional evidence until refreshed or disproven, but that trust level must be made explicit.
 5. Missing verification metadata is itself actionable drift.
 6. Orphaned onboarding should be surfaced clearly rather than left to accumulate silently.
+7. Drift detection must not scan unrelated untracked files or classify source files without existing onboarding as missing during the default repo-wide gate.

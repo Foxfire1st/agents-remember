@@ -84,6 +84,25 @@ def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str
     )
 
 
+def local_change_note(repo_root: Path, source_file: str) -> str:
+    states: list[str] = []
+    unstaged = run_git(repo_root, ["diff", "--quiet", "--", source_file])
+    if unstaged.returncode == 1:
+        states.append("unstaged")
+    elif unstaged.returncode != 0:
+        return f"Unable to inspect local unstaged changes: {unstaged.stderr.strip() or 'unknown git error'}."
+
+    staged = run_git(repo_root, ["diff", "--cached", "--quiet", "--", source_file])
+    if staged.returncode == 1:
+        states.append("staged")
+    elif staged.returncode != 0:
+        return f"Unable to inspect local staged changes: {staged.stderr.strip() or 'unknown git error'}."
+
+    if not states:
+        return ""
+    return f"Source has local {' and '.join(states)} changes not represented in HEAD."
+
+
 def list_repo_sources(repo_root: Path) -> list[str]:
     result = run_git(repo_root, ["ls-files", "-z"])
     if result.returncode != 0:
@@ -204,6 +223,20 @@ def classify_external_onboarding(onboarding_file: Path, repo_root: Path) -> Drif
 
     diff = run_git(repo_root, ["diff", "--quiet", last_hash, "HEAD", "--", source_file])
     if diff.returncode == 0:
+        local_note = local_change_note(repo_root, source_file)
+        if local_note:
+            return DriftRow(
+                onboarding_file=onboarding_file.as_posix(),
+                source_file=source_file,
+                repository=repository,
+                storage_mode="external",
+                last_verified_hash=last_hash,
+                last_verified_date=last_date,
+                classification="drifted",
+                trust="medium",
+                affected_sections="logic; invariants; conventions; docs references",
+                note=local_note,
+            )
         return DriftRow(
             onboarding_file=onboarding_file.as_posix(),
             source_file=source_file,
@@ -513,7 +546,6 @@ def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Pa
     head_text = head.stdout.strip() if head.returncode == 0 else "unknown"
     summary = counts(rows)
     actionable = [row for row in rows if row.classification != "up to date"]
-    clean = [row for row in rows if row.classification == "up to date"]
 
     lines: list[str] = [
         "# Onboarding Drift Report",
@@ -558,21 +590,6 @@ def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Pa
             )
     else:
         lines.append("| _None_ |  |  |  |  |  |")
-
-    lines.extend(
-        [
-            "",
-            "## Up To Date",
-            "",
-            "| Source file | Onboarding file |",
-            "| --- | --- |",
-        ]
-    )
-    if clean:
-        for row in clean:
-            lines.append(f"| `{row.source_file}` | `{rel(row.onboarding_file, onboarding_root)}` |")
-    else:
-        lines.append("| _None_ |  |")
 
     lines.append("")
     report_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,8 @@
 ## Memory System Awareness
 
-This workspace uses a layered memory system. Understand the layers before acting.
+This workspace uses a layered memory system. Make sure to read "Hard Start-of-Task Onboarding Gate" chapter before performing actions.
+
+Infer which repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is considered the "target" repository.
 
 Resolve the active `ar-management/` context for the target repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-management-resolver` as the normal resolver entry point: pass the repository name and consume the returned local or shared context.
 
@@ -52,9 +54,9 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 ---
 
-## No Code Changes Before Explicit Developer Approval
+## No Code Changes Before Explicit Developer Approval (Onboarding Maintenance is an exception!)
 
-When asked to find a sollution to a problem, do not change any code before you have explained your solution in chat with code examples for all distinct changes you intend to make.
+When asked to find a sollution to a problem, do not change any code before you have explained your solution in chat with code examples for all distinct changes you intend to make. Onboarding maintenance does not count as code changes!
 **Then wait for developer approval before touching any code!**
 
 ---
@@ -66,36 +68,43 @@ to be read alongside the code they describe, at the moment that code is
 inspected. They are not a bulk pre-read and they are not a replacement for
 source.
 
-### Onboarding Rules
+# Onboarding Rules
 
-- When onboarding verification for pre-existing files is blocked because source
-  files have no committed state or commit hash, ask the developer whether you may
-  commit and push the current state.
+- When planning/discussing code changes, and onboardings are fresh,
+  read both relevant code- and their companion onboarding files.
+  Reading onboarding before planning changes avoids regressions.
 - When opening a relevant source file, open its verified onboarding with it.
-- When changing code, run `C-05-create-or-update-onboarding-files` for the corresponding onboarding in the same editing
-  pass whenever the change affects durable knowledge
+- When you make code changes, do also update or create onboardings using
+  `C-05-create-or-update-onboarding-files`.
 - Once the hard onboarding gate has passed for the task's repository context,
   files created or modified during the current task may still be opened, read,
   and reasoned about within that same task even though they are now pending
   verification.
 
-### Hard Start-of-Task Onboarding Gate
+## Hard Start-of-Task Onboarding Gate
 
-This gate applies ALWAYS for every Task. Even for code explanations!
+This gate applies ALWAYS at the start for every Task. Even for code explanations!
 No matter if that touches, explains, reviews, plans around,
 debugs, or changes a repository code area. Read-only analysis is not an
 exception. Code explanation is not an exception. Review is not an exception.
 Planning is not an exception.
 
 Before opening, reading, summarizing, or reasoning from source file contents in
-the relevant repository you must perform these three gates:
+the relevant repository you must perform these five gates in order:
 
-Gate 1: Invoke `C-08-ar-management-resolver` for the target repository and use its resolved context for the authoritative `ar-management/` root, onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, and cross-repo allowances.
+Gate 1: Invoke `C-08-ar-management-resolver` for the target repository and use its resolved context for the authoritative `ar-management/` root,
+onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, and cross-repo allowances.
 
-Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository at the start of the task, using the context resolved by C-08.
+Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository and then read its drift report.
+Do not for any reason skip execution of the drift detection skill.
 
-Gate 3: If number of Drifted, missing-verification, or orphaned onboarding is greater 0, run `C-05-create-or-update-onboarding-files`.
+Gate 3: If the drift report indicates any drifted, missing-verification, or orphaned onboarding, tell the developer what
+the report says briefly and then ask if they want to update the onboarding before proceeding.
+If they say yes, then orchestrate the update process and split the work to up to 5 sub agents who each handle at max 15 files.
+All sub agents shall use this skill: `C-05-create-or-update-onboarding-files` and you pass it the instructions it needs to perform the job.
+If the developer says says no, tell them that reasoning over drifted onboardings may introduce risk of regressions.
 
-Do NOT ask the developer whether to create or update drifted files! Just do it!
-Do NOT open or inspect ANY files before this gate passes.
-DO NOT SKIP OR BYPASS THIS GATE UNDER ANY CIRCUMSTANCE. Quick explanation is not an excuse or exception!
+Gate 4: Run `C-02-onboarding-drift-detection` again to confirm that all onboarding is now verified and up to date.
+Do not for any reason skip execution of the drift detection skill.
+
+Gate 5: Only after steps 1 - 4 are completed, report to the developer. Then delete the drift report file.
