@@ -52,6 +52,7 @@ Check for these paths under the resolved root:
 
 ```text
 system/settings.md
+system/settings.json
 system/sources.md
 system/tools.md
 onboarding/
@@ -83,97 +84,87 @@ Create only files that do not already exist.
 
 #### `system/settings.md`
 
-````md
+```md
 # Settings
 
 This management root stores local durable context for Agents Remember.
 
-## Topology
+Use this Markdown file for human and agent instructions, scaffold notes, and operational context. Machine-readable storage, path-rule, and cross-repo settings live in `system/settings.json`.
 
-```yaml
-management:
-  topology: internal
-
-onboarding:
-  storage:
-    mode: repo-sidecar
-  pathRules:
-    include:
-      paths:
-        - README.md
-        - docs/**
-        - src/**
-      fileTypes:
-        - .md
-        - .py
-        - .ts
-        - .tsx
-    exclude:
-      paths:
-        - vendor/**
-        - node_modules/**
-        - dist/**
-        - build/**
-      fileTypes:
-        - .png
-        - .jpg
-        - .zip
-
-crossRepo:
-  allow: []
-```
-````
-
-`onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
-
-For explicit shared scaffolding, use the same file path under the shared root but write `management.topology: shared` and keep `pathRules` present:
-
-```yaml
-management:
-  topology: shared
-
-onboarding:
-  storage:
-    layout: shared-root
-  pathRules:
-    - path: my-app
-      include:
-        paths:
-          - README.md
-          - docs/**
-          - src/**
-        fileTypes:
-          - .md
-          - .py
-          - .ts
-          - .tsx
-      exclude:
-        paths:
-          - vendor/**
-          - node_modules/**
-          - dist/**
-          - build/**
-        fileTypes:
-          - .png
-          - .jpg
-          - .zip
-```
-
-Replace `my-app` with the repository name for each shared-managed repository. Add one scoped rule per repo when shared repositories need different eligible paths or file types.
+Do not duplicate active `pathRules` here as the authoritative machine source when `system/settings.json` exists.
 
 ## Scaffold
 
-| Layer      | Location             | Purpose                                                     |
-| ---------- | -------------------- | ----------------------------------------------------------- |
-| settings   | `system/settings.md` | Topology, storage, path eligibility, and scaffold notes     |
-| sources    | `system/sources.md`  | External and domain documentation registry                  |
-| tools      | `system/tools.md`    | Repo-specific commands, checks, and local tool notes        |
-| onboarding | `onboarding/`        | Durable repo and file-level code commentary                 |
-| tasks      | `tasks/`             | Current task plans, decision logs, and implementation notes |
-| docs       | `docs/`              | Local domain docs, mirrors, and reference material          |
-| notes      | `notes/`             | Scratch observations that are not durable onboarding yet    |
+| Layer         | Location               | Purpose                                                     |
+| ------------- | ---------------------- | ----------------------------------------------------------- |
+| instructions  | `system/settings.md`   | Human and agent guidance, path contract, and scaffold notes |
+| path settings | `system/settings.json` | Machine-readable storage, pathRules, and cross-repo data    |
+| sources       | `system/sources.md`    | External and domain documentation registry                  |
+| tools         | `system/tools.md`      | Repo-specific commands, checks, and local tool notes        |
+| onboarding    | `onboarding/`          | Durable repo and file-level code commentary                 |
+| tasks         | `tasks/`               | Current task plans, decision logs, and implementation notes |
+| docs          | `docs/`                | Local domain docs, mirrors, and reference material          |
+| notes         | `notes/`               | Scratch observations that are not durable onboarding yet    |
+```
 
-````
+#### `system/settings.json`
+
+```json
+{
+  "version": 1,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": []
+  }
+}
+```
+
+`onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
+
+For explicit shared scaffolding, use the same file path under the shared root and scope `pathRules` by repository:
+
+```json
+{
+  "version": 1,
+  "onboarding": {
+    "storage": {
+      "layout": "shared-root"
+    },
+    "pathRules": [
+      {
+        "path": "my-app",
+        "include": {
+          "paths": ["README.md", "docs/**", "src/**"],
+          "fileTypes": [".md", ".py", ".ts", ".tsx"]
+        },
+        "exclude": {
+          "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+          "fileTypes": [".png", ".jpg", ".zip"]
+        }
+      }
+    ]
+  },
+  "crossRepo": {
+    "allow": []
+  }
+}
+```
+
+Replace `my-app` with the repository name for each shared-managed repository. Add one scoped rule per repo when shared repositories need different eligible paths or file types.
 
 #### `system/sources.md`
 
@@ -195,7 +186,7 @@ No external references configured yet.
 - Prefer local mirrors for reading when available.
 - Link onboarding `Docs References` rows to canonical source URLs when a canonical online reference exists.
 - If no relevant domain documentation exists for a task, record what was checked instead of implying the search space was complete.
-````
+```
 
 #### `system/tools.md`
 

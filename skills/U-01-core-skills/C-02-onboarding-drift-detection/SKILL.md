@@ -53,9 +53,9 @@ The compatibility `--onboarding-root` override remains available when a caller a
 
 ### 1. Resolve onboarding units in the repository
 
-Invoke `C-08-ar-management-resolver` for the target repository and use the resolved context. Internal repositories read `<repo-root>/ar-management/system/settings.md`; shared repositories read `<shared-ar-management-root>/system/settings.md`.
+Invoke `C-08-ar-management-resolver` for the target repository and use the resolved context. Internal repositories use `<repo-root>/ar-management/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; shared repositories use the same pair under the shared root.
 
-C-08 reads `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
+C-08 resolves `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared JSON settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
 
 Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal storage or shared storage. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 

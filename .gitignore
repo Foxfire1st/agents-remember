@@ -1,5 +1,6 @@
 system/sources.md
 system/settings.md
+system/settings.json
 system/tools.md
 .env
 *.pyc

@@ -19,6 +19,8 @@ In the normal workflow, pass only the repository name. C-08 decides whether that
 - `onboarding_root`: optional compatibility override when a caller has already resolved the repository onboarding root.
 - `target_repo`: optional full repository path for callers that already have the path. This does not replace `repo_name` as the normal agent-facing contract.
 
+When a sibling `settings.json` exists beside `settings.md`, C-08 prefers that JSON file for machine-readable storage, `pathRules`, and `crossRepo` data. `settings.md` remains the human and agent instruction file, and legacy fenced settings in `settings.md` are still accepted as a fallback when JSON is absent.
+
 ## Outputs
 
 The resolver returns one management context for the target repository:
@@ -29,6 +31,7 @@ The resolver returns one management context for the target repository:
 - `management_root`
 - `onboarding_root`
 - `settings_path`
+- `path_settings_path`: sibling machine-readable settings path when `settings.json` exists, otherwise empty in JSON output
 - `task_root`
 - `docs_root`
 - `system_root`
@@ -43,7 +46,7 @@ The resolver returns one management context for the target repository:
 1. If `onboarding_root` is supplied, treat it as a compatibility override and infer the management root and settings path from that root.
 2. If `requested_topology` is `internal`, use `<target-repo>/ar-management/`.
 3. If `requested_topology` is `shared`, use the supplied or inferred shared `ar-management/` root.
-4. If no topology override is supplied, inspect the active shared root and settings. A repository is shared-managed only when the shared root contains repository-specific evidence such as `onboarding/<repo_name>/` or a scoped `pathRules` entry for `path: <repo_name>` or `path: <repo_name>/<subtree>`.
+4. If no topology override is supplied, inspect the active shared root and resolved settings. A repository is shared-managed only when the shared root contains repository-specific evidence such as `onboarding/<repo_name>/` or a scoped `pathRules` entry for `path: <repo_name>` or `path: <repo_name>/<subtree>`.
 5. If no shared selection applies, default to internal topology and use `<target-repo>/ar-management/`.
 
 Mixed workspaces are resolved per target repository. One shared-managed repository does not move neighboring local repositories onto the shared root, and one local repository does not prevent another repository from using shared management.
@@ -61,7 +64,7 @@ Use the bundled helper as the single source of truth for resolver logic:
 
 Compatibility callers that already have a repository path can pass `--repo <repo-root>`. Explicit shared operations can pass `--topology shared --shared-root <shared-ar-management-root>`.
 
-The helper uses only the Python standard library. If the executable bit is unavailable, invoke it with the machine's Python 3 interpreter.
+The helper uses only the Python standard library, including the built-in JSON parser for `settings.json`. If the executable bit is unavailable, invoke it with the machine's Python 3 interpreter.
 
 ## Consumers
 
@@ -71,7 +74,7 @@ The helper uses only the Python standard library. If the executable bit is unava
 
 ## Boundaries
 
-1. C-08 owns topology detection, management-root resolution, settings parsing, storage semantics, `pathRules`, and cross-repo allowance parsing.
+1. C-08 owns topology detection, management-root resolution, JSON-first settings parsing with legacy Markdown fallback, storage semantics, `pathRules`, and cross-repo allowance parsing.
 2. Other skills may import or call the C-08 helper, but they must not keep parallel resolver implementations.
 3. The top `AGENTS.md` topology explanation remains fallback guidance for humans and agents if the helper cannot run.
 4. C-08 resolves where management context lives; it does not create missing scaffolding. Use `C-00-initialize-management-root` for scaffold creation.

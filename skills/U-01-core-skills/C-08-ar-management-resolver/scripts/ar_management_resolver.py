@@ -50,6 +50,7 @@ class ManagementContext:
     management_root: Path
     onboarding_root: Path
     settings_path: Path
+    path_settings_path: Path | None
     task_root: Path
     docs_root: Path
     system_root: Path
@@ -145,6 +146,10 @@ def infer_settings_path(onboarding_root: Path) -> Path:
     return management_root / "system" / "settings.md"
 
 
+def path_settings_path_for(settings_path: Path) -> Path:
+    return settings_path.with_suffix(".json")
+
+
 def infer_topology_from_onboarding_root(onboarding_root: Path) -> Literal["internal", "shared"]:
     return "shared" if onboarding_root.parent.name == "onboarding" else "internal"
 
@@ -156,6 +161,10 @@ def parse_management_settings(
     mode = default_storage_mode(topology)
     fallback_storage = StorageSettings(mode=mode, default=mode)
     fallback_cross_repo = CrossRepoSettings()
+    path_settings_path = path_settings_path_for(settings_path)
+    if path_settings_path.exists():
+        return parse_json_settings(path_settings_path, topology)
+
     if not settings_path.exists():
         return fallback_storage, fallback_cross_repo
 
@@ -171,6 +180,105 @@ def parse_management_settings(
         if cross_repo.allow:
             selected_cross_repo = cross_repo
     return selected_storage or fallback_storage, selected_cross_repo
+
+
+def require_mapping(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    return value
+
+
+def optional_mapping(value: object, label: str) -> dict[str, object]:
+    if value is None:
+        return {}
+    return require_mapping(value, label)
+
+
+def string_list(value: object, label: str, default: list[str] | None = None) -> list[str]:
+    if value is None:
+        return default.copy() if default is not None else []
+    if isinstance(value, str):
+        cleaned = clean_scalar(value)
+        return [cleaned] if cleaned else []
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a string or list of strings")
+    values: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{label} must contain only strings")
+        cleaned = clean_scalar(item)
+        if cleaned:
+            values.append(cleaned)
+    return values
+
+
+def parse_json_settings(
+    settings_path: Path,
+    topology: Literal["internal", "shared"],
+) -> tuple[StorageSettings, CrossRepoSettings]:
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid JSON settings in {settings_path}: {error}") from error
+
+    root = require_mapping(data, "settings.json root")
+    onboarding = optional_mapping(root.get("onboarding"), "onboarding") if "onboarding" in root else root
+    mode = default_storage_mode(topology)
+    settings = StorageSettings(mode=mode, default=mode)
+    storage = optional_mapping(onboarding.get("storage") or root.get("storage"), "storage")
+    configured_mode = storage.get("mode") or storage.get("layout")
+    if configured_mode is not None:
+        if not isinstance(configured_mode, str):
+            raise ValueError("storage mode/layout must be a string")
+        settings.mode = clean_scalar(configured_mode) or settings.mode
+    configured_default = storage.get("default")
+    if configured_default is not None:
+        if not isinstance(configured_default, str):
+            raise ValueError("storage default must be a string")
+        settings.default = clean_scalar(configured_default) or settings.default
+
+    raw_path_rules = onboarding.get("pathRules") if "pathRules" in onboarding else root.get("pathRules")
+    settings.path_rules = parse_json_path_rules(raw_path_rules)
+
+    cross_repo = CrossRepoSettings()
+    cross_repo_mapping = optional_mapping(root.get("crossRepo"), "crossRepo")
+    cross_repo.allow = string_list(cross_repo_mapping.get("allow"), "crossRepo.allow")
+    return settings, cross_repo
+
+
+def parse_json_path_rules(value: object) -> list[StorageRule]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        return [parse_json_path_rule(value, "pathRules")]
+    if not isinstance(value, list):
+        raise ValueError("pathRules must be an object or list of objects")
+    return [parse_json_path_rule(rule, f"pathRules[{index}]") for index, rule in enumerate(value)]
+
+
+def parse_json_path_rule(value: object, label: str) -> StorageRule:
+    rule = require_mapping(value, label)
+    path_value = rule.get("path", rule.get("repo", ""))
+    if not isinstance(path_value, str):
+        raise ValueError(f"{label}.path must be a string")
+    parsed_rule: StorageRule = {
+        "path": normalize_rel_path(path_value),
+        "includes": ["*"],
+        "excludes": [],
+    }
+    storage = rule.get("storage")
+    if storage is not None:
+        if not isinstance(storage, str):
+            raise ValueError(f"{label}.storage must be a string")
+        parsed_rule["storage"] = clean_scalar(storage)
+
+    include = optional_mapping(rule.get("include"), f"{label}.include")
+    exclude = optional_mapping(rule.get("exclude"), f"{label}.exclude")
+    parsed_rule["includes"] = string_list(include.get("paths"), f"{label}.include.paths", ["*"])
+    parsed_rule["excludes"] = string_list(exclude.get("paths"), f"{label}.exclude.paths")
+    parsed_rule["include_file_types"] = string_list(include.get("fileTypes"), f"{label}.include.fileTypes")
+    parsed_rule["exclude_file_types"] = string_list(exclude.get("fileTypes"), f"{label}.exclude.fileTypes")
+    return parsed_rule
 
 
 def parse_settings_block(
@@ -627,6 +735,7 @@ def build_management_context(
     cross_repo: CrossRepoSettings,
 ) -> ManagementContext:
     system_root = management_root / "system"
+    path_settings_path = path_settings_path_for(settings_path)
     return ManagementContext(
         topology=topology,
         repo_name=repo_name,
@@ -634,6 +743,7 @@ def build_management_context(
         management_root=management_root,
         onboarding_root=onboarding_root,
         settings_path=settings_path,
+        path_settings_path=path_settings_path if path_settings_path.exists() else None,
         task_root=management_root / "tasks",
         docs_root=management_root / "docs",
         system_root=system_root,
@@ -680,6 +790,7 @@ def context_to_dict(context: ManagementContext) -> dict[str, object]:
         "management_root": path_to_string(context.management_root),
         "onboarding_root": path_to_string(context.onboarding_root),
         "settings_path": path_to_string(context.settings_path),
+        "path_settings_path": path_to_string(context.path_settings_path) if context.path_settings_path else "",
         "task_root": path_to_string(context.task_root),
         "docs_root": path_to_string(context.docs_root),
         "system_root": path_to_string(context.system_root),
@@ -698,6 +809,8 @@ def print_text(context: ManagementContext) -> None:
     print(f"management_root\t{context.management_root.as_posix()}")
     print(f"onboarding_root\t{context.onboarding_root.as_posix()}")
     print(f"settings_path\t{context.settings_path.as_posix()}")
+    if context.path_settings_path is not None:
+        print(f"path_settings_path\t{context.path_settings_path.as_posix()}")
     print(f"task_root\t{context.task_root.as_posix()}")
     print(f"docs_root\t{context.docs_root.as_posix()}")
     print(f"storage_mode\t{context.storage.mode}")
@@ -710,7 +823,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, help="Compatibility input for callers that already have the repository root path.")
     parser.add_argument("--topology", choices=("internal", "shared"), help="Optional topology override.")
     parser.add_argument("--shared-root", type=Path, help="Optional shared ar-management root hint or override.")
-    parser.add_argument("--settings-path", type=Path, help="Optional active settings.md override.")
+    parser.add_argument("--settings-path", type=Path, help="Optional active settings.md override. A sibling settings.json is preferred for machine-readable path settings when present.")
     parser.add_argument("--onboarding-root", type=Path, help="Compatibility override for an already resolved repo onboarding root.")
     parser.add_argument("--agents-repo", type=Path, help="Optional agents-remember-md checkout path for .env discovery.")
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format.")

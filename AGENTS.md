@@ -6,20 +6,21 @@ Infer which repository is supposed to be worked on for a given task from the dev
 
 Resolve the active `ar-management/` context for the target repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-management-resolver` as the normal resolver entry point: pass the repository name and consume the returned local or shared context.
 
-Default to internal topology: the target repository owns `<target-repo>/ar-management/` and its own `system/settings.md`. This local root is sufficient for normal operation and does not require a shared `AR_MANAGEMENT_ROOT`.
+Default to internal topology: the target repository owns `<target-repo>/ar-management/` with `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings when present. This local root is sufficient for normal operation and does not require a shared `AR_MANAGEMENT_ROOT`.
 
 Use shared topology only when the developer explicitly asks for shared scaffolding or the current repository has already been selected for shared management. In shared topology, resolve `AR_MANAGEMENT_ROOT` from `.env` or `.env.example` and use the shared root for the selected repository. Mixed workspaces are allowed: resolve topology per target repository, so a locally managed repo keeps using its own root while a neighboring shared-managed repo uses the shared root. Keep this paragraph as fallback guidance if the C-08 helper or script cannot run.
 
 The active management files then live under the resolved root:
 
-| Layer      | Location                             | Purpose                                                         |
-| ---------- | ------------------------------------ | --------------------------------------------------------------- |
-| settings   | `<resolved-root>/system/settings.md` | Topology, storage, path eligibility, and scaffold notes         |
-| onboarding | `<resolved-onboarding-root>/`        | Code commentary — logic, invariants, conventions, task tracking |
-| tasks      | `<resolved-root>/tasks/`             | Current change intent, plans, decision logs                     |
-| docs       | `<resolved-root>/docs/`              | Local domain documentation and mirrors                          |
-| sources    | `<resolved-root>/system/sources.md`  | References to external technical documentation, mcps, etc.      |
-| tools      | `<resolved-root>/system/tools.md`    | Repo-specific commands, checks, tools, and MCP notes            |
+| Layer         | Location                               | Purpose                                                         |
+| ------------- | -------------------------------------- | --------------------------------------------------------------- |
+| instructions  | `<resolved-root>/system/settings.md`   | Human and agent guidance, path contract, and scaffold notes     |
+| path settings | `<resolved-root>/system/settings.json` | Machine-readable storage, pathRules, and cross-repo data        |
+| onboarding    | `<resolved-onboarding-root>/`          | Code commentary — logic, invariants, conventions, task tracking |
+| tasks         | `<resolved-root>/tasks/`               | Current change intent, plans, decision logs                     |
+| docs          | `<resolved-root>/docs/`                | Local domain documentation and mirrors                          |
+| sources       | `<resolved-root>/system/sources.md`    | References to external technical documentation, mcps, etc.      |
+| tools         | `<resolved-root>/system/tools.md`      | Repo-specific commands, checks, tools, and MCP notes            |
 
 ## Task Format Routing
 
@@ -70,10 +71,16 @@ source.
 
 # Onboarding Rules
 
-- When planning/discussing code changes, and onboardings are fresh,
-  read both relevant code- and their companion onboarding files.
-  Reading onboarding before planning changes avoids regressions.
+## Code-Onboarding Paired Reads
+
+- Onboarding paths mirror their source code counterparts.
+  For example, `src/components/Button.js` has onboarding at `onboarding/src/components/Button.js.md`.
+- Read onboardings alongside source files.
+- Reading onboarding before planning changes avoids regressions.
 - When opening a relevant source file, open its verified onboarding with it.
+
+## Onboarding Maintenance during Implementation
+
 - When you make code changes, do also update or create onboardings using
   `C-05-create-or-update-onboarding-files`.
 - Once the hard onboarding gate has passed for the task's repository context,

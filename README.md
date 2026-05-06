@@ -89,6 +89,7 @@ projects/
       notes/
       system/
         settings.md
+        settings.json
         sources.md
         tools.md
 ```
@@ -97,7 +98,7 @@ projects/
 
 ### Create The Local Management Folder
 
-Initialize the target repository with `C-00-initialize-management-root`. This first-run skill defaults to internal topology, creates only the target repo's local `ar-management/` folder, and writes starter `settings.md`, `sources.md`, and `tools.md` files without overwriting existing files.
+Initialize the target repository with `C-00-initialize-management-root`. This first-run skill defaults to internal topology, creates only the target repo's local `ar-management/` folder, and writes starter `settings.md`, `settings.json`, `sources.md`, and `tools.md` files without overwriting existing files.
 
 The resulting scaffold looks like this:
 
@@ -109,11 +110,12 @@ ar-management/
 ├── notes/
 └── system/
     ├── settings.md
+    ├── settings.json
     ├── sources.md
     └── tools.md
 ```
 
-`C-00` intentionally leaves `onboarding/` empty; `C-03-repo-bootstrap` owns repo onboarding below that point. The starter `system/settings.md` controls topology, storage, and `pathRules`. The starter `system/sources.md` and `system/tools.md` are intentionally plain; fill them in with project-specific docs, commands, and checks as repos are onboarded.
+`C-00` intentionally leaves `onboarding/` empty; `C-03-repo-bootstrap` owns repo onboarding below that point. The starter `system/settings.md` is the human and agent instruction file, while `system/settings.json` is the machine-readable settings file for storage, `pathRules`, and cross-repo allowances. The starter `system/sources.md` and `system/tools.md` are intentionally plain; fill them in with project-specific docs, commands, and checks as repos are onboarded.
 
 ---
 
@@ -121,7 +123,7 @@ ar-management/
 
 Agents Remember treats file-level onboarding as an onboarding unit. The unit can be stored as a repo-local sidecar markdown file, or as an inline block inside the source file when a repo explicitly selects inline storage.
 
-Storage choice and path eligibility are different concerns:
+Storage choice and path eligibility are different concerns in `system/settings.json`:
 
 - `onboarding.storage` decides where eligible onboarding artifacts live.
 - `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
@@ -130,34 +132,27 @@ Default internal storage is `repo-sidecar`, which stores onboarding directly und
 
 Repo-level architecture context stays in `ar-management/onboarding/overview.md`. If a repo needs deeper coverage beyond the first overview pass, extend that same overview by merging the new area findings into the relevant existing sections so it remains one coherent document instead of growing a permanent `ar-management/onboarding/<component>/overview.md` layer.
 
-`pathRules` exist in both internal and shared settings. They include or exclude paths and file types; they do not switch storage per path. In repo-local internal settings, an unscoped rule applies to that repository. In shared settings, scope rules with `path: <repo-name>` so each shared-managed repository can have its own eligibility rules. Leave a rule unscoped only when you intentionally want the same eligibility default for every shared-managed repository.
+`pathRules` exist in both internal and shared JSON settings. They include or exclude paths and file types; they do not switch storage per path. In repo-local internal settings, an unscoped rule applies to that repository. In shared settings, scope rules with `path: <repo-name>` so each shared-managed repository can have its own eligibility rules. Leave a rule unscoped only when you intentionally want the same eligibility default for every shared-managed repository.
 
-```yaml
-management:
-  topology: internal
-
-onboarding:
-  storage:
-    mode: repo-sidecar
-  pathRules:
-    include:
-      paths:
-        - README.md
-        - docs/**
-        - src/**
-      fileTypes:
-        - .md
-        - .py
-        - .ts
-        - .tsx
-    exclude:
-      paths:
-        - vendor/**
-        - node_modules/**
-        - dist/**
-      fileTypes:
-        - .png
-        - .zip
+```json
+{
+  "version": 1,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**"],
+        "fileTypes": [".png", ".zip"]
+      }
+    }
+  }
+}
 ```
 
 Inline onboarding reuses the same file-level onboarding content model as sidecar onboarding. Only storage, comment syntax, placement, parsing, digesting, and fallback behavior differ.
@@ -341,53 +336,41 @@ In shared mode, create or choose a shared `ar-management/` root and configure `A
 AR_MANAGEMENT_ROOT=../ar-management
 ```
 
-Shared mode has its own `system/settings.md`, including its own `pathRules`. Scope each rule to the repository it governs:
+Shared mode has its own `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings. Scope each shared `pathRules` entry to the repository it governs:
 
-```yaml
-management:
-  topology: shared
-
-onboarding:
-  storage:
-    layout: shared-root
-  pathRules:
-    - path: my-app
-      include:
-        paths:
-          - README.md
-          - docs/**
-          - src/**
-        fileTypes:
-          - .md
-          - .py
-          - .ts
-          - .tsx
-      exclude:
-        paths:
-          - vendor/**
-          - node_modules/**
-          - dist/**
-        fileTypes:
-          - .png
-          - .zip
-
-    - path: firmware-app
-      include:
-        paths:
-          - README.md
-          - docs/**
-          - firmware/**
-        fileTypes:
-          - .md
-          - .c
-          - .h
-      exclude:
-        paths:
-          - build/**
-          - generated/**
-        fileTypes:
-          - .bin
-          - .map
+```json
+{
+  "version": 1,
+  "onboarding": {
+    "storage": {
+      "layout": "shared-root"
+    },
+    "pathRules": [
+      {
+        "path": "my-app",
+        "include": {
+          "paths": ["README.md", "docs/**", "src/**"],
+          "fileTypes": [".md", ".py", ".ts", ".tsx"]
+        },
+        "exclude": {
+          "paths": ["vendor/**", "node_modules/**", "dist/**"],
+          "fileTypes": [".png", ".zip"]
+        }
+      },
+      {
+        "path": "firmware-app",
+        "include": {
+          "paths": ["README.md", "docs/**", "firmware/**"],
+          "fileTypes": [".md", ".c", ".h"]
+        },
+        "exclude": {
+          "paths": ["build/**", "generated/**"],
+          "fileTypes": [".bin", ".map"]
+        }
+      }
+    ]
+  }
+}
 ```
 
 ---
@@ -400,7 +383,9 @@ Use this when every selected repository should store eligible onboarding artifac
 projects/
   agents-remember-md/
   ar-management/              ← shared root
-    system/settings.md
+    system/
+      settings.md
+      settings.json
     onboarding/
       my-app/
   my-app/
@@ -420,11 +405,14 @@ projects/
   repo-a/
     ar-management/            ← repo-a uses local internal management
       system/settings.md
+      system/settings.json
       onboarding/
   repo-b/
     src/
   ar-management/              ← shared root for repo-b
-    system/settings.md
+    system/
+      settings.md
+      settings.json
     onboarding/
       repo-b/
 ```
@@ -435,7 +423,7 @@ When the target repo is `repo-a`, C-08 returns `repo-a/ar-management/`. When the
 
 ### Resolve The Active Management Context
 
-Agents use `C-08-ar-management-resolver` to resolve a repository's active management context. In normal use, the agent passes the repository name and receives the resolved topology, management root, onboarding root, settings path, task root, docs root, storage settings, `pathRules`, and cross-repo allowances.
+Agents use `C-08-ar-management-resolver` to resolve a repository's active management context. In normal use, the agent passes the repository name and receives the resolved topology, management root, onboarding root, settings path, machine path-settings path when present, task root, docs root, storage settings, `pathRules`, and cross-repo allowances.
 
 For local-first repositories, C-08 returns the repo-local `ar-management/` folder. For repositories intentionally selected for shared management, C-08 returns the shared root and that repository's shared onboarding layout. This keeps mixed workspaces per-repository: local repos stay local, while selected shared repos use the shared root.
 

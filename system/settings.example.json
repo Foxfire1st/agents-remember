@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**", "skills/**", "system/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": []
+  }
+}

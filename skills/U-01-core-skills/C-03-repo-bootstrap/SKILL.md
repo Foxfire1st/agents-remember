@@ -50,12 +50,12 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 
 Invoke `C-08-ar-management-resolver` before Phase 1 and use its resolved context:
 
-1. Default internal topology uses `<repo-root>/ar-management/` and `<repo-root>/ar-management/system/settings.md`.
-2. Selected shared topology uses `<shared-ar-management-root>/` and `<shared-ar-management-root>/system/settings.md`.
+1. Default internal topology uses `<repo-root>/ar-management/`, with prose instructions in `<repo-root>/ar-management/system/settings.md` and machine-readable settings in the sibling `settings.json` when present.
+2. Selected shared topology uses `<shared-ar-management-root>/`, with the same `system/settings.md` and `system/settings.json` split under the shared root.
 3. In mixed workspaces, one repository using shared scaffolding must not move neighboring internal repositories onto the shared root.
 4. In mixed workspaces, one repository using local internal management must not prevent another repository from using shared scaffolding.
 
-Apply the active settings file's `onboarding.pathRules` from the C-08 context before selecting bootstrap candidates. `pathRules` decide source path and file-type eligibility. In shared settings, scoped rules such as `path: <repo-name>` let each shared-managed repository define its own eligible paths and file types. They do not switch storage per path; storage is resolved separately from `onboarding.storage`.
+Apply the resolved `onboarding.pathRules` from the C-08 context before selecting bootstrap candidates. `pathRules` decide source path and file-type eligibility. In shared settings, scoped rules such as `path: <repo-name>` let each shared-managed repository define its own eligible paths and file types. They do not switch storage per path; storage is resolved separately from `onboarding.storage`.
 
 ---
 
