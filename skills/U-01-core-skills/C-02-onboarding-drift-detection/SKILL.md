@@ -141,7 +141,7 @@ The handoff should identify:
 4. which stale onboarding can still be used directionally until maintenance finishes
 
 If no actionable files exist, return a clean summary and stop.
-If actionable files exist run `C-05-create-or-update-onboarding-files` before proceeding with any given task.
+If actionable files exist, consult this repo's [AGENTS.md](../../../AGENTS.md) "Onboarding Rules" section.
 
 ## Rules
 
