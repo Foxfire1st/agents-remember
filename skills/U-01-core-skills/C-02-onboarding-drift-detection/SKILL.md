@@ -38,7 +38,7 @@ Use `C-08-ar-management-resolver` to resolve the target repository's active mana
   --repo <repo-root>
 ```
 
-By default the helper writes the Markdown report to `<resolved-management-root>/tasks/drift-report.md`. That means internal repositories write under their repo-local management root, while shared-managed repositories write under the shared management root resolved by C-08.
+By default the helper writes the Markdown report to `<resolved-management-root>/tasks/<repo-name>_<branch-name>_drift-report.md`. That means internal repositories write under their repo-local management root, while shared-managed repositories write under the shared management root resolved by C-08, and each repository/branch run gets a collision-resistant filename.
 
 The helper passes compatibility CLI inputs through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
 
@@ -49,7 +49,7 @@ The helper passes compatibility CLI inputs through the C-08 resolver. For explic
   --shared-root <shared-ar-management-root>
 ```
 
-If `--report` is supplied, C-08's resolved management root still owns report placement. Relative paths are resolved from the resolved management root. Absolute paths are only used as-is when they are already inside the resolved management root; otherwise the report filename is redirected to `<resolved-management-root>/tasks/`.
+If `--report` is supplied, C-08's resolved management root still owns report placement. Relative paths are resolved from the resolved management root. Absolute paths are only used as-is when they are already inside the resolved management root; otherwise the report filename is redirected to `<resolved-management-root>/tasks/`. The repo/branch-prefixed default filename applies whenever `--report` is omitted.
 
 The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. Topology detection, management-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
@@ -115,7 +115,7 @@ Write a drift report when the scope is large enough that the caller needs a reus
 
 Preferred report locations:
 
-1. `<resolved-management-root>/tasks/drift-report.md` for the repository run
+1. `<resolved-management-root>/tasks/<repo-name>_<branch-name>_drift-report.md` for the repository run
 
 The report should include:
 

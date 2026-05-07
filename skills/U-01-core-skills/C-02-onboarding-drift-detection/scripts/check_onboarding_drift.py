@@ -84,6 +84,25 @@ def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str
     )
 
 
+def sanitize_report_token(token: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", token.strip())
+    normalized = normalized.strip(".-_")
+    return normalized or "unknown"
+
+
+def current_branch_name(repo_root: Path) -> str:
+    branch = run_git(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if branch.returncode != 0:
+        return "unknown-branch"
+    return branch.stdout.strip() or "unknown-branch"
+
+
+def default_report_filename(repo_root: Path) -> str:
+    repo_name = sanitize_report_token(repo_root.name)
+    branch_name = sanitize_report_token(current_branch_name(repo_root))
+    return f"{repo_name}_{branch_name}_drift-report.md"
+
+
 def local_change_note(repo_root: Path, source_file: str) -> str:
     states: list[str] = []
     unstaged = run_git(repo_root, ["diff", "--quiet", "--", source_file])
@@ -596,9 +615,9 @@ def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Pa
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def resolve_report_path(report_path: Path | None, management_root: Path) -> Path:
+def resolve_report_path(report_path: Path | None, management_root: Path, repo_root: Path) -> Path:
     if report_path is None:
-        return management_root / "tasks" / "drift-report.md"
+        return management_root / "tasks" / default_report_filename(repo_root)
     if report_path.is_absolute():
         if report_path.resolve().is_relative_to(management_root.resolve()):
             return report_path
@@ -736,7 +755,12 @@ def main(argv: list[str] | None = None) -> int:
     rows.extend(classify_inline_source(path, repo_root) for path in discover_inline_onboarding_sources(repo_root, settings))
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
 
-    write_markdown_report(rows, resolve_report_path(args.report, context.management_root), repo_root, context.onboarding_root)
+    write_markdown_report(
+        rows,
+        resolve_report_path(args.report, context.management_root, repo_root),
+        repo_root,
+        context.onboarding_root,
+    )
 
     if args.format == "json":
         print_json(rows, context.onboarding_root)
