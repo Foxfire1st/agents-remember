@@ -1,6 +1,7 @@
 # Agents Remember Cross-Repo Mode Design Spec
 
 **Status:** finalized alpha design for implementation  
+**Revision:** v3 — aligned with current `settings.json` shape  
 **Audience:** coding agents and maintainers implementing safe cross-repo context retrieval  
 **Scope:** cross-repo mode after the `ar-memory` / `ar-management` split and the worktree-backed memory design
 
@@ -10,139 +11,240 @@
 
 Cross-repo mode lets an agent working in one repository read carefully selected clues from other repositories.
 
-With worktrees and shared memory enabled, cross-repo mode becomes riskier: an agent can accidentally read another repo from the wrong branch, or read a memory branch that describes a different code state. If that knowledge is then written into the current repo's onboarding, the cross-repo section of onboarding can become corrupted with wrong or branch-incompatible knowledge.
+With worktrees and branch-specific memory enabled, cross-repo mode must be branch-gated. Otherwise an agent can read another repo or memory layer from the wrong branch and write branch-incompatible facts into the current repo's onboarding.
 
-The fix is simple and strict:
+The rule is strict:
 
 ```text
-Cross-repo context is branch-gated.
+A cross-repo source is included only when its code checkout is on the expected branch.
+If memory clues are enabled, its memory checkout must also be on that expected branch.
 ```
 
-Each repo's own memory settings define which external repos may be used and which branch each external repo must be on. If the external repo is not on that expected branch, it is excluded from cross-repo context. If memory clues are enabled for that external repo, the external memory layer must also be on that same expected branch and its ledger/header must confirm that it tracks that branch.
+The current repo's committed memory settings decide which external repos may be used. The untracked shared `ar-management/` coordinator may help resolve local paths, but it cannot grant cross-repo permission.
 
-Cross-repo policy must live in the current repo's durable memory settings, not in the untracked shared `ar-management/` coordination layer. The shared coordinator may resolve local paths, but it must not decide which cross-repo knowledge is allowed.
+This spec intentionally reuses the existing settings model:
+
+```text
+version
+onboarding.storage
+onboarding.pathRules
+crossRepo.allow
+```
+
+The main change is that `crossRepo.allow` evolves from a simple list of repo names into a list of branch-gated cross-repo source objects.
 
 ---
 
-## 2. Locked decisions
+## 2. Existing settings shape to preserve
 
-### 2.1 Cross-repo settings are repo-owned, committed policy
+The current implementation already has the right container shape. Machine-readable settings live in `settings.json`, while `settings.md` remains human-readable guidance.
 
-Cross-repo settings belong to the memory layer of the repo that wants to consume cross-repo clues.
+The existing internal example uses:
 
-Internal memory mode:
+```json
+{
+  "version": 1,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**", "skills/**", "system/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": []
+  }
+}
+```
+
+The existing resolver already treats JSON as the preferred machine-readable source and parses `crossRepo.allow` as the cross-repo allowance field.
+
+Therefore the new design should not introduce a parallel `crossRepo.entries` key unless there is a strong reason. The cleaner alpha design is:
 
 ```text
-<code-repo>/ar-memory/settings/cross-repo.yaml
+Keep crossRepo.allow.
+Upgrade its item shape.
 ```
 
-Shared memory mode:
+---
+
+## 3. Updated settings locations
+
+The settings shape is reused, but locations change because the system now separates durable memory from local coordination.
+
+### 3.1 Internal memory mode
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/settings/cross-repo.yaml
+<code-repo>/ar-memory/settings/settings.json
 ```
 
-The settings are committed with the memory layer. They are team-visible and reviewable.
-
-They must not live in:
+### 3.2 Shared memory mode
 
 ```text
-ar-management/settings/
+ar-management/memory-repos/ar-<repo-name>/settings/settings.json
 ```
 
-because the shared `ar-management/` folder is local coordination, not team policy.
-
-### 2.2 Shared `ar-management` may only resolve local paths
-
-The untracked shared coordinator may contain local path mappings, for example:
+### 3.3 Local shared coordinator
 
 ```text
-ar-management/settings/repo-locations.yaml
+ar-management/settings/settings.json
 ```
 
-This file can help the resolver find local checkouts:
+The local coordinator settings are untracked. They may contain path hints, but not cross-repo policy.
 
-```yaml
-repos:
-  repo-b:
-    code_path: /workspace/repos/repo-b
-    memory_path: /workspace/ar-management/memory-repos/ar-repo-b
-```
+---
 
-But this is not permission policy. It cannot enable cross-repo use by itself and cannot weaken committed memory settings.
+## 4. Locked decisions
 
-The split is:
+### 4.1 JSON only
+
+All machine-readable settings use strict JSON.
+
+Allowed:
 
 ```text
-memory_root/settings/cross-repo.yaml       = team policy
-ar-management/settings/repo-locations.yaml = local path resolution only
+settings.json
 ```
 
-### 2.3 Every cross-repo entry must declare an expected code branch
+Not allowed:
 
-A cross-repo entry must say which branch the external repo is expected to be on.
-
-Example:
-
-```yaml
-cross_repo:
-  enabled: true
-  entries:
-    - repo: repo-b
-      expected_branch: dev
-      include_code: true
-      include_memory: false
+```text
+settings.yaml
+settings.yml
+cross-repo.yaml
+repo-locations.yaml
 ```
 
-If `repo-b` is not currently resolved on `dev`, it is excluded from cross-repo context.
+Implementation must use Python's standard `json` module only.
 
-There is no default branch guessing in v1.
+### 4.2 Cross-repo policy is committed memory policy
 
-### 2.4 Code clues are the minimum; memory clues are explicit opt-in
+Cross-repo policy belongs to the durable memory layer of the repo that wants to consume cross-repo clues.
 
-For a listed cross-repo dependency, code clues are the baseline.
+Internal:
 
-Memory clues from that repo are used only when explicitly enabled:
-
-```yaml
-include_memory: true
+```text
+<code-repo>/ar-memory/settings/settings.json
 ```
 
-If `include_memory` is false or omitted, the agent may only use code-side clues from the external repo.
+Shared:
 
-### 2.5 If memory clues are enabled, code and memory must both point at the expected branch
-
-For an external repo entry like:
-
-```yaml
-repo: repo-b
-expected_branch: dev
-include_memory: true
+```text
+ar-management/memory-repos/ar-<repo-name>/settings/settings.json
 ```
 
-both of these must be true:
+It must not be enabled from the local shared coordinator.
+
+### 4.3 Reuse `crossRepo.allow`
+
+The existing key stays:
+
+```json
+{
+  "crossRepo": {
+    "allow": []
+  }
+}
+```
+
+But the allowed item shape changes from string-only to object-based.
+
+New preferred shape:
+
+```json
+{
+  "crossRepo": {
+    "allow": [
+      {
+        "repo": "repo-b",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": false
+      }
+    ]
+  }
+}
+```
+
+Rationale:
+
+```text
+allow already communicates permission.
+The new object adds branch and memory-safety details.
+No duplicate entries/rules key is needed.
+```
+
+### 4.4 No implicit branch guessing
+
+Each `crossRepo.allow` object must declare:
+
+```json
+"expectedBranch": "dev"
+```
+
+If the external code checkout is not on that branch, the entry is excluded.
+
+### 4.5 Code clues are the minimum
+
+Code is the minimum cross-repo source.
+
+Default:
+
+```json
+"includeCode": true
+```
+
+If omitted, treat it as true.
+
+### 4.6 Memory clues are explicit opt-in
+
+Memory clues require:
+
+```json
+"includeMemory": true
+```
+
+If omitted, treat it as false.
+
+### 4.7 Code and memory must both match the expected branch
+
+For this policy:
+
+```json
+{
+  "repo": "repo-b",
+  "expectedBranch": "dev",
+  "includeCode": true,
+  "includeMemory": true
+}
+```
+
+all of these must be true before memory clues are included:
 
 ```text
 repo-b code checkout is on branch dev
-repo-b memory checkout is on branch dev
+ar-repo-b memory checkout is on branch dev
+ar-repo-b memory.md declares trackedCodeBranch dev
+ar-repo-b memory.md declares memoryBranch dev
 ```
 
-For shared memory, `memory.md` must also confirm:
+If code is on the wrong branch, exclude the entire entry.
 
-```yaml
-tracked_code_branch: dev
-memory_branch: dev
-```
+If code is on the expected branch but memory is missing or invalid, include code-only and report memory exclusion.
 
-If the code checkout is on `dev` but the memory repo is on `main`, memory clues are excluded.
+### 4.8 No divergent reference memory
 
-If the memory repo is on `dev` but the code checkout is on `main`, the entire cross-repo entry is excluded.
+Cross-repo mode must not use divergent memory as semi-trusted reference context.
 
-### 2.6 No divergent cross-repo memory is used
-
-Cross-repo mode must not use divergent memory as a semi-trusted reference layer.
-
-A cross-repo entry is either:
+An entry resolves to one of:
 
 ```text
 included
@@ -150,983 +252,657 @@ included-code-only
 excluded
 ```
 
-There is no state where the agent uses a memory branch that does not track the expected branch.
+There is no `foreign-reference` state for cross-repo context.
 
-### 2.7 Cross-repo mode is read-only toward external repos
+### 4.9 Cross-repo mode is read-only toward external repos
 
-Cross-repo mode consumes information from external repos. It does not update their code or memory.
+When working in `repo-a`, cross-repo mode may read from `repo-b`, but it must not update `repo-b` code or memory.
 
-When working in `repo-a`, the agent may update `repo-a` code and `repo-a` memory. It must not update `repo-b` code or `repo-b` memory as part of cross-repo context retrieval.
-
-If `repo-b` needs its own memory updates, that is a separate task/worktree operation for `repo-b`.
-
-### 2.8 Cross-repo facts written into onboarding require provenance
-
-If cross-repo information is written into the current repo's onboarding, it must be clear where it came from.
-
-A cross-repo section should include at least:
-
-```text
-source repo
-source branch
-source code commit
-source memory commit, if memory clues were used
-```
-
-This keeps cross-repo onboarding auditable and prevents vague claims from becoming durable truth.
-
-Example:
-
-```markdown
-## Cross-Repo Context
-
-- `repo-b@dev` commit `abc123` exposes `PaymentStatus.SUSPENDED`, which this mapper must preserve when translating billing responses.
-  Memory clue used: `ar-repo-b@dev` memory commit `def456`.
-```
+Updating external repo memory requires a separate task/worktree operation for that external repo.
 
 ---
 
-## 3. Mental model
+## 5. Committed memory settings schema
 
-### 3.1 Current repo
-
-The repo the agent is actively working in.
-
-Example:
-
-```text
-repo-a
-```
-
-Its memory layer owns the cross-repo settings.
-
-Internal mode:
-
-```text
-repo-a/ar-memory/settings/cross-repo.yaml
-```
-
-Shared mode:
-
-```text
-ar-management/memory-repos/ar-repo-a/settings/cross-repo.yaml
-```
-
-### 3.2 External repo
-
-A repo that may provide cross-repo clues.
-
-Example:
-
-```text
-repo-b
-```
-
-The external repo must be explicitly listed in `repo-a`'s committed cross-repo settings.
-
-### 3.3 External memory repo
-
-If memory clues are enabled, the external repo's memory layer may also be read.
-
-Internal external repo:
-
-```text
-repo-b/ar-memory/
-```
-
-Shared external repo:
-
-```text
-ar-management/memory-repos/ar-repo-b/
-```
-
-### 3.4 Expected branch
-
-The branch the current repo expects the external repo to be on when used for cross-repo clues.
-
-Example:
-
-```yaml
-expected_branch: dev
-```
-
-This is usually the integration/source branch relevant to the current repo's work, not necessarily the current task branch.
-
-For example, a task in `repo-a` may work on:
-
-```text
-repo-a work branch: feature/fix-status-mapping
-repo-a source branch: dev
-```
-
-but still expect cross-repo clues from:
-
-```text
-repo-b branch: dev
-```
-
----
-
-## 4. Settings format
-
-### 4.1 File location
-
-Recommended path:
-
-```text
-<memory-root>/settings/cross-repo.yaml
-```
-
-Where `memory-root` is:
-
-```text
-internal: <code-repo>/ar-memory/
-shared:  ar-management/memory-repos/ar-<repo-name>/
-```
-
-### 4.2 Minimal schema
-
-```yaml
-schema: ar-cross-repo/v1
-cross_repo:
-  enabled: true
-  entries:
-    - repo: repo-b
-      expected_branch: dev
-      include_code: true
-      include_memory: false
-
-    - repo: repo-c
-      expected_branch: dev
-      include_code: true
-      include_memory: true
-```
-
-### 4.3 Field semantics
-
-```yaml
-schema
-```
-
-Schema identifier. Required.
-
-```yaml
-cross_repo.enabled
-```
-
-Global toggle for cross-repo mode for the current repo. If false, no cross-repo clues are used.
-
-```yaml
-entries[].repo
-```
-
-Stable repo name used by the resolver/local path registry.
-
-```yaml
-entries[].expected_branch
-```
-
-Required branch gate. The external code checkout must be on this branch or the entry is excluded.
-
-```yaml
-entries[].include_code
-```
-
-Whether to include code-side clues. Defaults to true for listed entries. If false, the entry should normally be disabled or removed.
-
-```yaml
-entries[].include_memory
-```
-
-Whether to include memory-side clues from the external repo. Defaults to false. This must be explicit opt-in.
-
-### 4.4 Optional future fields
-
-The v1 schema should stay small. Future fields may include:
-
-```yaml
-paths:
-  include:
-    - src/contracts/**
-  exclude:
-    - tests/**
-
-reason: "repo-a consumes repo-b billing status contracts"
-
-required: false
-```
-
-These are out of scope for the first implementation unless needed immediately.
-
----
-
-## 5. Resolution and validation algorithm
-
-### 5.1 Inputs
-
-The resolver receives or discovers:
-
-```text
-current repo name
-current memory root
-current task/worktree context, if any
-cross-repo settings from current memory root
-local repo path mappings from ar-management, if available
-```
-
-### 5.2 Algorithm
-
-For each entry in `cross_repo.entries`:
-
-1. Read `repo` and `expected_branch`.
-2. Resolve the external code repo path.
-3. If the code repo path cannot be found, exclude the entry.
-4. Read the external code repo's current branch.
-5. If the branch is not exactly `expected_branch`, exclude the entry.
-6. Record external code commit.
-7. If `include_memory` is not true, include code-only context.
-8. If `include_memory` is true, resolve the external memory root.
-9. If the memory root cannot be found, include code-only context with memory excluded, or exclude the entry if a future `memory_required` option exists.
-10. Read the external memory branch.
-11. If the memory branch is not exactly `expected_branch`, exclude memory clues.
-12. If shared memory, parse `memory.md`.
-13. Validate that `memory.md` declares the expected branch.
-14. Validate ledger shape and newest-first invariant.
-15. Classify memory freshness/compatibility against the external code commit.
-16. Include memory clues only if the branch and ledger gates pass.
-
-### 5.3 No automatic branch switching
-
-If an external repo is on the wrong branch, the resolver must not silently switch it.
-
-Bad:
-
-```text
-repo-b is on main, expected dev, so the agent checks out dev automatically.
-```
-
-Good:
-
-```text
-repo-b is on main, expected dev, so repo-b is excluded from cross-repo context.
-```
-
-A future explicit command may prepare dedicated read-only cross-repo worktrees, but v1 should not silently move another repo's working tree.
-
----
-
-## 6. Branch gates
-
-### 6.1 Code branch gate
-
-Required for every entry.
-
-```text
-external_code_branch == expected_branch
-```
-
-If false, exclude the entire entry.
-
-### 6.2 Memory branch gate
-
-Required only when `include_memory: true`.
-
-For internal external memory:
-
-```text
-external code branch == expected_branch
-```
-
-Because internal memory lives inside the code repo, the memory layer follows the same branch.
-
-For shared external memory:
-
-```text
-external memory branch == expected_branch
-memory.md.tracked_code_branch == expected_branch
-memory.md.memory_branch == expected_branch
-```
-
-If any of these fail, exclude memory clues.
-
-### 6.3 Ledger sanity gate for shared memory
-
-For shared external memory, `memory.md` must satisfy:
-
-```text
-schema is recognized
-header exists
-table has Code commit | Memory commit
-table is newest-first
-first row Code commit == last_verified_code_commit
-first row Memory commit == last_memory_content_commit
-```
-
-If the ledger is malformed, exclude memory clues.
-
-### 6.4 Commit compatibility gate
-
-If memory clues are enabled, the resolver should compare:
-
-```text
-memory.md.last_verified_code_commit
-external code HEAD
-```
-
-Allowed:
-
-```text
-last_verified_code_commit == external code HEAD
-```
-
-or:
-
-```text
-last_verified_code_commit is an ancestor of external code HEAD
-```
-
-The second case means memory is branch-compatible but possibly stale. Code remains the source of truth. Any durable cross-repo claim derived from memory must be verified against code before being written into the current repo's onboarding.
-
-Disallowed:
-
-```text
-last_verified_code_commit is not an ancestor of external code HEAD
-```
-
-This indicates divergent or incompatible memory. Exclude memory clues.
-
----
-
-## 7. Result model
-
-The resolver should return both included and excluded cross-repo entries so agents can explain what happened.
-
-Example:
+### 5.1 Minimal disabled example
 
 ```json
 {
-  "cross_repo": {
-    "enabled": true,
-    "included": [
+  "version": 2,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": []
+  }
+}
+```
+
+No separate `enabled` boolean is required. Empty `allow` means cross-repo disabled.
+
+### 5.2 Code-only cross-repo example
+
+```json
+{
+  "version": 2,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": [
       {
         "repo": "repo-b",
-        "expected_branch": "dev",
-        "code": {
-          "path": "/workspace/repos/repo-b",
-          "branch": "dev",
-          "commit": "abc123",
-          "state": "included"
-        },
-        "memory": {
-          "enabled_by_policy": true,
-          "path": "/workspace/ar-management/memory-repos/ar-repo-b",
-          "branch": "dev",
-          "commit": "def456",
-          "ledger": "memory.md",
-          "last_verified_code_commit": "abc123",
-          "state": "included"
-        }
-      },
-      {
-        "repo": "repo-c",
-        "expected_branch": "dev",
-        "code": {
-          "path": "/workspace/repos/repo-c",
-          "branch": "dev",
-          "commit": "c001",
-          "state": "included"
-        },
-        "memory": {
-          "enabled_by_policy": false,
-          "state": "not-requested"
-        }
-      }
-    ],
-    "excluded": [
-      {
-        "repo": "repo-d",
-        "expected_branch": "dev",
-        "reason": "code branch mismatch",
-        "actual_code_branch": "main"
-      },
-      {
-        "repo": "repo-e",
-        "expected_branch": "dev",
-        "reason": "memory branch mismatch",
-        "actual_code_branch": "dev",
-        "actual_memory_branch": "main",
-        "code_included": true,
-        "memory_included": false
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": false
       }
     ]
   }
 }
 ```
 
-Important detail: if the code branch gate passes but the memory gate fails, the implementation may include code-only clues while excluding memory clues. The result must make that explicit.
+### 5.3 Code plus memory cross-repo example
+
+```json
+{
+  "version": 2,
+  "onboarding": {
+    "storage": {
+      "mode": "repo-sidecar"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": [
+      {
+        "repo": "billing-api",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": true
+      },
+      {
+        "repo": "payment-gateway",
+        "expectedBranch": "release/2.4",
+        "includeCode": true,
+        "includeMemory": false
+      }
+    ]
+  }
+}
+```
+
+### 5.4 Shared memory repo example
+
+A shared memory repo uses the same settings shape, but its storage mode describes a memory repo root, not the old shared monorepo root.
+
+```json
+{
+  "version": 2,
+  "onboarding": {
+    "storage": {
+      "mode": "memory-repo"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": [
+      {
+        "repo": "billing-api",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": true
+      }
+    ]
+  }
+}
+```
+
+Open implementation choice: `storage.mode` may stay `repo-sidecar` for both internal and shared memory roots if the resolver treats `memory_root` as the already-resolved memory location. The key point is that `shared-root` must no longer mean one shared Git repo for many repo memories.
 
 ---
 
-## 8. Interaction with worktrees
+## 6. Field definitions
 
-### 8.1 Cross-repo mode must respect active worktree context
+### `version`
 
-When a task is running inside a worktree, cross-repo mode should resolve from the task/worktree-aware resolver context.
+Required integer.
 
-For the current repo, use the active worktree contract.
-
-For external repos, use only local checkouts or worktrees that are already on the expected branch.
-
-### 8.2 Cross-repo entries are not task-owned
-
-Cross-repo settings live in memory settings and are not tied to a specific task.
-
-A task contract may record a snapshot of which cross-repo entries were included during the task, but that snapshot is not policy.
-
-Example task contract addition:
-
-```yaml
-cross_repo_snapshot:
-  - repo: repo-b
-    expected_branch: dev
-    code_branch: dev
-    code_commit: abc123
-    memory_enabled: true
-    memory_branch: dev
-    memory_commit: def456
-    state: included
-  - repo: repo-d
-    expected_branch: dev
-    state: excluded
-    reason: code branch mismatch: main
+```json
+"version": 2
 ```
 
-### 8.3 No silent preparation of external worktrees in v1
+The existing repo uses `version: 1`. Worktree/cross-repo branch gates should move the machine-readable settings contract to version 2.
 
-C-09 may later grow an explicit command such as:
+### `onboarding.storage`
 
-```text
-prepare-cross-repo-context
+Preserved from the current settings shape.
+
+Internal memory mode:
+
+```json
+"storage": { "mode": "repo-sidecar" }
 ```
 
-That command could create read-only external worktrees on the expected branches.
+Shared memory mode may use:
 
-But the first implementation should be conservative:
+```json
+"storage": { "mode": "memory-repo" }
+```
+
+or reuse `repo-sidecar` once the resolver has already resolved a memory root.
+
+### `onboarding.pathRules`
+
+Preserved from the current settings shape.
+
+The worktree design should not replace path rules. They still answer:
 
 ```text
-If the external repo is not already resolved on the expected branch, exclude it.
+Which source paths and file types are eligible for onboarding?
+```
+
+### `crossRepo.allow`
+
+Required array. Empty means disabled.
+
+Preferred v2 item shape:
+
+```json
+{
+  "repo": "repo-b",
+  "expectedBranch": "dev",
+  "includeCode": true,
+  "includeMemory": false
+}
+```
+
+String entries from the old v1 shape are not branch-safe. In alpha v2 they should be rejected with a migration error rather than guessed.
+
+### `repo`
+
+Required string.
+
+Logical repo name used by the resolver and local path hints.
+
+### `expectedBranch`
+
+Required string.
+
+The external code repo must be on this branch.
+
+### `includeCode`
+
+Optional boolean. Defaults to true.
+
+### `includeMemory`
+
+Optional boolean. Defaults to false.
+
+---
+
+## 7. Local coordinator settings
+
+The shared `ar-management/` coordinator may have local path hints:
+
+```text
+ar-management/settings/settings.json
+```
+
+Example:
+
+```json
+{
+  "version": 1,
+  "repoLocations": {
+    "repo-a": {
+      "codePath": "/workspace/repos/repo-a",
+      "memoryPath": "/workspace/ar-management/memory-repos/ar-repo-a"
+    },
+    "repo-b": {
+      "codePath": "/workspace/repos/repo-b",
+      "memoryPath": "/workspace/ar-management/memory-repos/ar-repo-b"
+    }
+  }
+}
+```
+
+This file can answer:
+
+```text
+Where is repo-b checked out locally?
+Where is ar-repo-b checked out locally?
+```
+
+It cannot answer:
+
+```text
+May repo-a use repo-b as cross-repo context?
+May repo-a use ar-repo-b memory?
+```
+
+Permission must come from `repo-a`'s committed memory settings.
+
+---
+
+## 8. Memory ledger compatibility
+
+Shared memory repos use:
+
+```text
+ar-management/memory-repos/ar-<repo-name>/memory.md
+```
+
+`memory.md` is the per-branch ledger. It must be parseable without YAML dependencies.
+
+Recommended format:
+
+````markdown
+# Memory Branch Ledger
+
+```json ar-memory-ledger
+{
+  "schema": "ar-memory-branch-ledger/v1",
+  "repoName": "repo-b",
+  "trackedCodeBranch": "dev",
+  "memoryBranch": "dev",
+  "baseCodeCommit": "8d21c91",
+  "baseMemoryCommit": "a71f002",
+  "lastVerifiedCodeCommit": "f4c8b12",
+  "lastMemoryContentCommit": "b9e44aa",
+  "sortOrder": "newest-first"
+}
+```
+
+| Code commit | Memory commit |
+|---|---|
+| f4c8b12 | b9e44aa |
+| c31a760 | d08219f |
+| 8d21c91 | a71f002 |
+````
+
+For cross-repo memory inclusion, resolver checks:
+
+```text
+external memory branch == expectedBranch
+memory.md trackedCodeBranch == expectedBranch
+memory.md memoryBranch == expectedBranch
+first ledger row Code commit == lastVerifiedCodeCommit
+first ledger row Memory commit == lastMemoryContentCommit
 ```
 
 ---
 
-## 9. Cross-repo onboarding rules
+## 9. Resolution algorithm
 
-### 9.1 Cross-repo sections are allowed but guarded
+When the current repo requests cross-repo context:
 
-Onboarding may contain cross-repo context when it is useful.
+```text
+1. Resolve current repo memory root.
+2. Read <current-memory-root>/settings/settings.json.
+3. Read crossRepo.allow.
+4. If allow is missing or empty, cross-repo mode is disabled.
+5. For each allow object:
+   a. Validate repo and expectedBranch.
+   b. Resolve external code path from task context or local coordinator hints.
+   c. Check external code branch.
+   d. If external code branch != expectedBranch, exclude entire entry.
+   e. If includeMemory is false, include code-only context.
+   f. If includeMemory is true, resolve external memory path.
+   g. Check external memory branch.
+   h. Parse external memory.md ledger metadata.
+   i. Validate branch and ledger top-row invariants.
+   j. Include memory only if all checks pass.
+6. Return included and excluded entries with reasons.
+```
 
-Example section:
+The resolver must not silently checkout, switch, rebase, or repair external repos.
+
+---
+
+## 10. Result states
+
+### `included`
+
+Code and memory are both included.
+
+Conditions:
+
+```text
+includeMemory == true
+external code branch == expectedBranch
+external memory branch == expectedBranch
+memory.md trackedCodeBranch == expectedBranch
+memory.md memoryBranch == expectedBranch
+```
+
+### `included-code-only`
+
+Only code is included.
+
+Conditions:
+
+```text
+external code branch == expectedBranch
+includeMemory == false
+```
+
+or:
+
+```text
+external code branch == expectedBranch
+includeMemory == true
+external memory is missing/disabled/invalid
+```
+
+The result must clearly report why memory was excluded.
+
+### `excluded`
+
+The entry is not used.
+
+Common reasons:
+
+```text
+legacy string allow entry missing expectedBranch
+external code path missing
+external code branch mismatch
+external repo is detached
+external memory branch mismatch
+memory.md missing
+memory.md invalid JSON metadata
+memory.md trackedCodeBranch mismatch
+```
+
+---
+
+## 11. Resolver output example
+
+```json
+{
+  "crossRepo": {
+    "allow": [
+      {
+        "repo": "repo-b",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": true,
+        "state": "included",
+        "code": {
+          "path": "/workspace/repos/repo-b",
+          "branch": "dev",
+          "head": "abc123"
+        },
+        "memory": {
+          "path": "/workspace/ar-management/memory-repos/ar-repo-b",
+          "branch": "dev",
+          "ledgerPath": "/workspace/ar-management/memory-repos/ar-repo-b/memory.md",
+          "lastVerifiedCodeCommit": "abc123",
+          "lastMemoryContentCommit": "def456"
+        }
+      },
+      {
+        "repo": "repo-c",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": false,
+        "state": "excluded",
+        "reason": "external code repo is on branch main, expected dev"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 12. Worktree interaction
+
+Cross-repo mode must be worktree-aware.
+
+If a task is running inside a worktree, the resolver should use the task/worktree context for the current repo and any explicitly prepared external repo paths.
+
+`C-09-git-worktree-manager` does not own cross-repo policy. It may:
+
+```text
+request cross-repo resolution
+record a snapshot of included/excluded cross-repo entries in the task contract
+warn the human when configured cross-repo entries are excluded
+re-run cross-repo resolution before closeout if onboarding cross-repo sections changed
+```
+
+The task contract may record what cross-repo context was used, but that snapshot is not policy.
+
+Example snapshot:
+
+```json
+{
+  "crossRepoSnapshot": {
+    "resolvedAt": "2026-05-08T00:00:00Z",
+    "allow": [
+      {
+        "repo": "repo-b",
+        "state": "included",
+        "expectedBranch": "dev",
+        "codeCommit": "abc123",
+        "memoryCommit": "def456"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 13. Onboarding rules for cross-repo context
+
+Onboarding may contain cross-repo context when useful, but durable claims must be provenance-backed.
+
+Allowed:
 
 ```markdown
 ## Cross-Repo Context
 
-- `repo-b@dev` commit `abc123` owns the canonical `PaymentStatus` enum used by this adapter.
-- `repo-c@dev` commit `c001` publishes the event payload consumed here.
+- `billing-api@dev` commit `abc123` emits `PaymentStatus.SUSPENDED`; this repo's mapper must preserve that status.
+  Memory clue used: `ar-billing-api@dev` memory commit `def456`.
 ```
 
-### 9.2 Cross-repo claims must not be vague
-
-Bad:
+Code-only context must say memory was not used:
 
 ```markdown
-Repo B does status mapping differently.
-```
+## Cross-Repo Context
 
-Good:
-
-```markdown
-`repo-b@dev` commit `abc123` maps external status `SUSPENDED` to `PaymentStatus.SUSPENDED`; this adapter must preserve that value when translating billing responses.
-```
-
-### 9.3 Memory-derived claims require code confirmation
-
-If a clue came from another repo's memory layer, the agent must confirm it against the external repo's code before writing it as durable onboarding in the current repo.
-
-This is especially important when the external memory is branch-compatible but stale.
-
-### 9.4 Excluded repos must not leak into onboarding
-
-If an external repo is excluded because it is on the wrong branch, missing, or has incompatible memory, the agent must not write conclusions from that repo into onboarding.
-
-It may mention in a task report:
-
-```text
-repo-b was configured for cross-repo context but excluded because it was on main instead of dev.
-```
-
-But it should not turn excluded knowledge into durable onboarding.
-
----
-
-## 10. Resolver changes
-
-### 10.1 Resolver responsibilities
-
-The resolver should own cross-repo context resolution because agents should not reconstruct policy/path/branch logic from prose.
-
-It should:
-
-```text
-read current repo memory settings
-read cross-repo policy
-resolve local external repo paths
-validate expected branches
-validate memory opt-in and memory branches
-validate shared memory ledgers
-return included/excluded cross-repo context
-```
-
-### 10.2 Resolver inputs
-
-Add optional inputs:
-
-```text
-include_cross_repo: true | false
-current_task_id
-current_worktree_name
-coordination_root
-repo_locations_file
-```
-
-### 10.3 Resolver outputs
-
-Add:
-
-```text
-cross_repo.enabled
-cross_repo.policy_path
-cross_repo.included[]
-cross_repo.excluded[]
-cross_repo.warnings[]
-```
-
-The output should be explicit enough that a coding agent can explain why a repo was included or ignored.
-
-### 10.4 Settings precedence
-
-Cross-repo policy follows the same settings precedence as the memory design:
-
-```text
-memory_root/settings/        # strongest, committed repo/team policy
-coordination_root/settings/  # local defaults/path hints only
-built-in defaults            # weakest
-```
-
-But for cross-repo inclusion, only memory-root policy can allow entries.
-
-Local coordinator settings may help find repos, but cannot add allowed repos by themselves.
-
----
-
-## 11. C-09 Git Worktree Manager responsibilities
-
-C-09 should not own cross-repo policy, but it should respect and surface cross-repo resolver output.
-
-During task start, C-09 should:
-
-```text
-request cross-repo resolution if the selected workflow wants cross-repo context
-record included/excluded snapshot in the task contract
-warn if configured cross-repo entries were excluded
-```
-
-During task closeout, C-09 should:
-
-```text
-re-run cross-repo resolution if onboarding cross-repo sections changed
-warn if any previously included external repo is now branch-incompatible
-block or require human confirmation before committing onboarding changes based on now-invalid cross-repo context
-```
-
-C-09 must not:
-
-```text
-silently checkout external repos to expected branches
-commit external repo changes
-commit external memory changes
-weaken memory-root cross-repo policy
+- `billing-api@dev` commit `abc123` emits `PaymentStatus.SUSPENDED`; this repo's mapper must preserve that status.
+  Memory clue used: none; verified from code only.
 ```
 
 ---
 
-## 12. Failure modes and required behavior
+## 14. Failure behavior
 
-### 12.1 External code repo missing
+### Missing current repo settings
 
-Behavior:
+Cross-repo disabled.
 
-```text
-exclude entry
-report missing local code repo path
+The resolver must not infer cross-repo policy from local coordinator settings.
+
+### Invalid current repo settings JSON
+
+Cross-repo disabled and configuration error reported.
+
+### Legacy string allow entries
+
+Old v1 shape:
+
+```json
+{
+  "crossRepo": {
+    "allow": ["repo-b"]
+  }
+}
 ```
 
-Do not guess from the internet or remote host.
+This is not branch-safe. In alpha v2, treat it as invalid for cross-repo use and explain that `expectedBranch` is required.
 
-### 12.2 External code branch mismatch
+### External code branch mismatch
 
-Example:
+Exclude entire entry.
 
-```text
-expected: dev
-actual: main
-```
+### External memory branch mismatch
 
-Behavior:
+Include code-only if the code branch is valid and `includeCode` is true. Exclude memory and report mismatch.
 
-```text
-exclude entire entry
-report branch mismatch
-```
+### Detached external checkout
 
-### 12.3 External memory not found
-
-If `include_memory: true` but the memory repo is missing:
-
-Behavior:
-
-```text
-include code-only context if code branch gate passed
-exclude memory clues
-warn that memory was requested but unavailable
-```
-
-### 12.4 External memory branch mismatch
-
-Example:
-
-```text
-code repo-b branch: dev
-memory ar-repo-b branch: main
-expected branch: dev
-```
-
-Behavior:
-
-```text
-include code-only context
-exclude memory clues
-warn that memory branch does not match expected branch
-```
-
-### 12.5 External memory ledger malformed
-
-Behavior:
-
-```text
-include code-only context
-exclude memory clues
-warn that memory.md is invalid
-```
-
-### 12.6 External memory diverged from code
-
-If `memory.md.last_verified_code_commit` is not an ancestor of the external code HEAD:
-
-Behavior:
-
-```text
-include code-only context
-exclude memory clues
-warn that external memory is incompatible with external code
-```
-
-### 12.7 Cross-repo settings missing
-
-Behavior:
-
-```text
-cross-repo disabled for this repo
-```
-
-No implicit discovery.
+Exclude in v1. Named branches are required.
 
 ---
 
-## 13. Security and trust model
+## 15. Implementation requirements
 
-Cross-repo mode is an allow-list.
+### 15.1 Preserve JSON-first parsing
 
-Only repos listed in the current repo's committed memory settings can be used.
+The existing resolver already prefers `settings.json`. Keep that direction.
 
-Branch gates prevent accidental cross-branch contamination.
+### 15.2 Extend `CrossRepoSettings`
 
-Memory opt-in prevents another repo's onboarding from being consumed accidentally.
+Current shape:
 
-Provenance requirements prevent cross-repo statements from becoming anonymous durable facts.
+```python
+@dataclass
+class CrossRepoSettings:
+    allow: list[str] = field(default_factory=list)
+```
 
-The current repo's maintainers decide what external repos they trust enough to consult.
+New shape should model objects:
+
+```python
+@dataclass
+class CrossRepoAllowEntry:
+    repo: str
+    expected_branch: str
+    include_code: bool = True
+    include_memory: bool = False
+
+@dataclass
+class CrossRepoSettings:
+    allow: list[CrossRepoAllowEntry] = field(default_factory=list)
+```
+
+### 15.3 Keep validation strict
+
+Validate:
+
+```text
+settings root is object
+version is integer if present
+crossRepo is object if present
+crossRepo.allow is an array if present
+allow item is object
+allow.repo is string
+allow.expectedBranch is string
+allow.includeCode is boolean if present
+allow.includeMemory is boolean if present
+```
+
+Malformed top-level settings should disable cross-repo mode for safety.
+
+Malformed individual entries should be excluded and reported.
 
 ---
 
-## 14. Example scenarios
-
-### 14.1 Code-only cross-repo context
-
-`repo-a` settings:
-
-```yaml
-schema: ar-cross-repo/v1
-cross_repo:
-  enabled: true
-  entries:
-    - repo: repo-b
-      expected_branch: dev
-      include_code: true
-      include_memory: false
-```
-
-Local state:
-
-```text
-repo-b code branch: dev
-```
-
-Result:
-
-```text
-repo-b code clues included
-repo-b memory clues not requested
-```
-
-### 14.2 Code and memory context included
-
-`repo-a` settings:
-
-```yaml
-schema: ar-cross-repo/v1
-cross_repo:
-  enabled: true
-  entries:
-    - repo: repo-b
-      expected_branch: dev
-      include_code: true
-      include_memory: true
-```
-
-Local state:
-
-```text
-repo-b code branch: dev
-ar-repo-b memory branch: dev
-ar-repo-b memory.md tracked_code_branch: dev
-memory last_verified_code_commit is ancestor of repo-b HEAD
-```
-
-Result:
-
-```text
-repo-b code clues included
-repo-b memory clues included
-```
-
-### 14.3 Code branch mismatch
-
-Settings expect:
-
-```text
-repo-b expected branch: dev
-```
-
-Local state:
-
-```text
-repo-b code branch: main
-```
-
-Result:
-
-```text
-repo-b excluded entirely
-```
-
-### 14.4 Memory branch mismatch
-
-Settings expect:
-
-```text
-repo-b expected branch: dev
-include_memory: true
-```
-
-Local state:
-
-```text
-repo-b code branch: dev
-ar-repo-b memory branch: main
-```
-
-Result:
-
-```text
-repo-b code clues included
-repo-b memory clues excluded
-```
-
-### 14.5 Missing memory repo
-
-Settings request:
-
-```text
-include_memory: true
-```
-
-Local state:
-
-```text
-repo-b code branch: dev
-ar-repo-b missing locally
-```
-
-Result:
-
-```text
-repo-b code clues included
-repo-b memory clues excluded with warning
-```
-
----
-
-## 15. Required implementation changes
-
-### 15.1 Add committed cross-repo settings file
-
-Add support for:
-
-```text
-<memory-root>/settings/cross-repo.yaml
-```
-
-in both internal and shared memory modes.
-
-### 15.2 Update resolver
-
-Resolver must be able to:
-
-```text
-read cross-repo settings from memory_root
-resolve local external repo paths
-validate branch gates
-validate memory opt-in
-validate shared memory ledger gates
-return included/excluded cross-repo entries
-```
-
-### 15.3 Add optional local repo registry
-
-Add support for a local helper file such as:
-
-```text
-ar-management/settings/repo-locations.yaml
-```
-
-This is path resolution only, not policy.
-
-### 15.4 Update onboarding update rules
-
-When writing cross-repo sections into onboarding, require provenance:
-
-```text
-source repo
-source branch
-source code commit
-source memory commit, if used
-```
-
-### 15.5 Update C-09 worktree manager
-
-C-09 should:
-
-```text
-record cross-repo resolution snapshots in task contracts when used
-revalidate cross-repo context before closeout if onboarding cross-repo sections changed
-block or warn on branch mismatch
-```
-
-### 15.6 Add tests
+## 16. Tests
 
 Minimum tests:
 
 ```text
-cross-repo disabled when settings missing
-code-only include when branch matches
-exclude when code branch mismatches
-memory include when code + memory branches match
-memory exclude when memory branch mismatches
-memory exclude when memory.md header mismatches
-memory exclude when ledger malformed
-memory exclude when last_verified_code_commit is not ancestor of code HEAD
-local ar-management settings cannot add unapproved repo
+1. cross-repo disabled when crossRepo.allow is missing or empty
+2. cross-repo disabled when settings.json is invalid JSON
+3. local ar-management settings cannot enable cross-repo by itself
+4. legacy string crossRepo.allow entry rejected because expectedBranch is missing
+5. external repo included code-only when branch matches and includeMemory false
+6. external repo excluded when code branch mismatches expectedBranch
+7. external memory included when code branch, memory branch, and memory.md metadata all match expectedBranch
+8. external memory excluded when memory branch mismatches expectedBranch
+9. external memory excluded when memory.md metadata trackedCodeBranch mismatches expectedBranch
+10. external memory excluded when memory.md JSON metadata cannot be parsed
+11. task snapshot records included/excluded entries without becoming policy
+12. onboarding cross-repo sections include repo, branch, and commit provenance
 ```
 
 ---
 
-## 16. Safety invariants
+## 17. Non-goals for v1
 
-Tooling should enforce these where possible:
+### Auto-cloning external repos
+
+Agents Remember does not discover company remotes or auto-clone cross-repo dependencies in v1.
+
+Humans provide local paths or clone repos manually into the shared coordinator structure.
+
+### Auto-switching external branches
+
+The resolver must not silently checkout another branch in an external repo.
+
+If `repo-b` is on `main` and policy expects `dev`, `repo-b` is excluded.
+
+### Memory-only cross-repo context
+
+V1 assumes code is the minimum source of truth.
+
+Memory clues can supplement code clues, but should not replace code-side branch validation.
+
+### Cross-repo writes
+
+Cross-repo mode is read-only toward external repos.
+
+Updating external memory requires a separate task for that external repo.
+
+---
+
+## 18. Final design sentence
 
 ```text
-1. Cross-repo policy lives in memory_root/settings/cross-repo.yaml.
-2. Shared ar-management settings can resolve paths but cannot grant cross-repo permissions.
-3. Every cross-repo entry must declare expected_branch.
-4. External code checkout must be on expected_branch or the entry is excluded.
-5. Memory clues are opt-in per entry.
-6. If memory clues are enabled, external memory must also be on expected_branch.
-7. Shared external memory must have memory.md tracking expected_branch.
-8. Malformed or incompatible external memory is excluded.
-9. Cross-repo mode never writes to external repos or external memory repos.
-10. Excluded repos must not leak into durable onboarding.
-11. Cross-repo onboarding claims must include source repo, branch, and commit provenance.
-12. No automatic branch switching for external repos in v1.
+Cross-repo mode reuses settings.json and crossRepo.allow: each allowed external repo must declare an expected branch, code must be on that branch, and memory is used only when explicitly enabled and proven by memory.md to track that same branch.
 ```
-
----
-
-## 17. Deferred / out of scope for v1
-
-### 17.1 Automatic external worktree preparation
-
-A future command may create dedicated read-only external worktrees on expected branches.
-
-V1 only includes external repos already resolved on the expected branch.
-
-### 17.2 Remote repository discovery
-
-Agents Remember does not discover company remotes for cross-repo settings. Humans provide local paths or clone repos manually.
-
-### 17.3 Complex path-scoped cross-repo policies
-
-Path include/exclude filters can be added later.
-
-V1 is branch-gated repo-level inclusion.
-
-### 17.4 Cross-repo writes
-
-V1 cross-repo mode is read-only toward external repos.
-
-If another repo's memory needs updating, that is a separate task for that repo.
-
-### 17.5 Detached HEAD support
-
-V1 requires named branches for cross-repo inclusion.
-
-Detached checkouts are excluded unless a later schema adds explicit commit-pinned cross-repo entries.
-
----
-
-## 18. Core thesis
-
-Cross-repo mode is safe only when it is explicit, branch-gated, and repo-owned.
-
-The current repo's committed memory settings decide which external repos may provide clues. The local shared coordinator can help find those repos, but it cannot approve them. External code must be on the expected branch. External memory must be explicitly opted in, must be on that same branch, and must prove through `memory.md` that it tracks that branch.
-
-This keeps cross-repo context useful without letting worktrees or divergent memory branches poison durable onboarding with wrong knowledge.

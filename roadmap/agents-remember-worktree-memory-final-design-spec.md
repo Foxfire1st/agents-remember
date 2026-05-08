@@ -1149,12 +1149,6 @@ memory source branch: <memory-base-commit>..<current-memory-source-head>
 
 If another approved task landed first, those commits are now visible. If they conflict with the current task, the conflict should surface during review/closeout and the human decides how to proceed.
 
-### 12.3 Unpushed commits
-
-Unpushed commits are a risk signal, not the entire rule.
-
-All source branch advancement matters. Unpushed advancement is simply higher risk because it may represent parallel local agent work.
-
 ---
 
 ## 13. Settings precedence
@@ -1185,8 +1179,8 @@ The task context can be restored through:
 code commit message
 memory content commit message
 memory.md ledger mapping
-task contract
-task workflow artifacts
+task contract (not tracked so only local and optional)
+task workflow artifacts (not tracked so only local and optional)
 ```
 
 Onboarding files should stay focused on durable onboarding truth, not workflow bookkeeping.
@@ -1216,6 +1210,8 @@ Recommended ledger commit pattern:
 ```
 
 This keeps `git log` useful on both sides.
+
+The commit messages are to be understood as defaults. Before committing the agent needs to ask if the developer agrees with the suggested commit message or want to suggest their own.
 
 ---
 
