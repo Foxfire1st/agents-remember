@@ -30,6 +30,9 @@ Todos:
 Docs References:
 - <Short prose summary or `No relevant documentation found.`>
 
+Repo-Internal References:
+- <Short prose summary or `No relevant internal references found.`>
+
 Cross-Repo References:
 - <Short prose summary or `No meaningful cross-repo references found.`>
 @ar-onboarding-end

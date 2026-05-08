@@ -22,8 +22,8 @@ Create or update the file-level onboarding content for one concrete source file.
 3. Treat adjacent onboarding as supporting input, not the whole discovery plan and not a substitute for the `Domain Documentation` pass.
 4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and line citations, but write the onboarding link to the canonical online reference rather than the local mirror path.
 5. If relevant material cannot be found in the `Domain Documentation` sources, record what was checked and that no relevant evidence was found.
-6. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `### Docs References` or `## Cross-Repo References`.
-7. Cite the actual evidence source: the library documentation page, canonical local mirror, repository source file, generated artifact, or sibling-repo file that directly proves the statement.
+6. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `### Docs References`, `## Repo-Internal References`, or `## Cross-Repo References`.
+7. Cite the actual evidence source: the library documentation page, canonical local mirror, repository source file, generated artifact, onboarding file, or sibling-repo file that directly proves the statement.
 
 ## Placement Rules
 
@@ -52,8 +52,9 @@ Required top-level sections:
 1. metadata table
 2. `## Purpose`
 3. `## Code Commentary`
-4. `## Cross-Repo References`
-5. `## Update History`
+4. `## Repo-Internal References`
+5. `## Cross-Repo References`
+6. `## Update History`
 
 `## Update History` is append-only and newest-first. Preserve earlier entries even when they are superseded; add a later entry that corrects, supersedes, or clarifies them.
 
@@ -68,32 +69,34 @@ Subsections under `## Code Commentary`:
 Citation requirements for reference sections:
 
 1. `### Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
-2. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
-3. In `### Docs References`, `Source Path` must link to the canonical online document URL. Read local mirrors if needed, but do not link to them.
-4. In `## Cross-Repo References`, `Source Path` must use a workspace-relative markdown link to the cited code or onboarding file. Do not use absolute filesystem paths.
-5. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
-6. `Finding` must be a concise summary of what those cited lines establish.
-7. Do not rely on uncited prose alone in either section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists, keep the table and note what was checked and that no relevant evidence was found.
-8. Do not cite source registries, search pages, or “where to look” files as evidence. They are allowed only as discovery inputs before reading the actual source.
+2. `## Repo-Internal References` must include a concise prose summary when there is meaningful same-repository context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
+3. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
+4. In `### Docs References`, `Source Path` must link to the canonical online document URL. Read local mirrors if needed, but do not link to them.
+5. In `## Repo-Internal References`, `Source Path` must use a workspace-relative markdown link to the cited same-repository code, onboarding, config, test, or generated artifact. Do not use absolute filesystem paths.
+6. In `## Cross-Repo References`, `Source Path` must use a workspace-relative markdown link when the cited boundary evidence exists in the workspace; otherwise link to the canonical external document or system reference.
+7. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
+8. `Finding` must be a concise summary of what those cited lines establish.
+9. Do not rely on uncited prose alone in any reference section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists, keep the table and note what was checked and that no relevant evidence was found.
+10. Do not cite source registries, search pages, or “where to look” files as evidence. They are allowed only as discovery inputs before reading the actual source.
 
 ## Create Workflow
 
 1. identify the exact source file path
 2. confirm the mirrored onboarding path
-3. read the C-08 resolved `system/sources.md`, then read the source file and the relevant materials from its `Domain Documentation` category, capturing the exact citation ranges needed for `Docs References` and `Cross-Repo References`
+3. read the C-08 resolved `system/sources.md`, then read the source file and the relevant materials from its `Domain Documentation` category, capturing the exact citation ranges needed for `Docs References`, `Repo-Internal References`, and `Cross-Repo References`
 4. gather metadata:
    - current time via MCP time tool
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 5. fill the template from `../templates/file-level-onboarding-template.md`
 6. update the repo-level overview if the file should be indexed or cross-referenced there
-7. cross-check docs references and cross-repo references before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, health-check those canonical URLs when retrieval tools are available, ensure code/onboarding rows use workspace-relative links that still resolve to the cited files, and ensure every table row has exact line ranges plus a concise finding summary
+7. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, ensure repo-internal rows use same-repository workspace-relative links, ensure cross-repo rows still represent a real external or sibling boundary, health-check the cited targets when retrieval tools are available, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
 
 When code changes:
 
 1. re-read the source file and the onboarding file
-2. re-read the C-08 resolved `system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking canonical doc URLs plus workspace-relative cross-repo targets before treating those references as current
+2. re-read the C-08 resolved `system/sources.md` when the domain-documentation discovery path may have changed, then update any changed purpose, logic, conventions, invariants, docs references, repo-internal references, or cross-repo references, including correcting existing explanation, refreshing citation line ranges when the source moved or changed, and health-checking the cited targets before treating those references as current
 3. for inline storage, apply the updated content through `inline-onboarding-workflow.md` so comment syntax, placement, and source digest stay consistent
 4. update metadata after the content has been verified
 5. append a newest-first `Update History` entry without deleting or rewriting earlier entries

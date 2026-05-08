@@ -56,39 +56,41 @@ Storage-specific adapter additions for file-level onboarding:
 4. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
 5. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
 6. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
-7. When updating `Docs References` or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
+7. When updating `Docs References`, `Repo-Internal References`, or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
 8. Start reference discovery from the C-08 resolved `system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
 9. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
-10. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence in `Docs References` or `Cross-Repo References`.
-11. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References` or `Cross-Repo References` are still valid.
+10. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence, and never let it stand in for the direct proof that belongs in `Docs References`, `Repo-Internal References`, or `Cross-Repo References`.
+11. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References`, `Repo-Internal References`, or `Cross-Repo References` are still valid.
 12. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
 
 ## Source Discovery Rule
 
 Before writing or revising onboarding content, read the C-08 resolved `system/sources.md` and use its `Domain Documentation` category as the required discovery path for technical and behavioral documentation.
 
-1. Use the `Domain Documentation` category from the resolved `system/sources.md` as the discovery plan for `Docs References`, `Cross-Repo References`, and any load-bearing explanatory prose.
+1. Use the `Domain Documentation` category from the resolved `system/sources.md` as the discovery plan for `Docs References` and any load-bearing explanatory prose that depends on external technical or domain documentation.
 2. Preserve useful adjacent onboarding context, but do not let it replace the required `Domain Documentation` pass.
 3. Do not hard-code one external documentation system into this package. The operative rule is to use whatever sources are listed under `Domain Documentation` in the resolved `system/sources.md`.
 4. If `Domain Documentation` includes both a local mirror and a live retrieval path, use the local material first for direct access and line citations, but emit onboarding links to the canonical live reference. Never emit filesystem paths to local documentation mirrors in onboarding output.
 5. If no relevant material is found in the `Domain Documentation` sources, record what was checked instead of pretending the search space was limited to onboarding only.
-6. Do not put the resolved `system/sources.md`, source registries, search result pages, or “see this source list” rows in citation tables. After using the registry to choose where to look, cite the actual documentation, source file, generated artifact, or local mirror that directly proves the statement.
-7. If the registry points to a documentation source but the source does not prove anything relevant for the file, say that no relevant documentation was found and cite the repository source code in `Cross-Repo References` for implementation facts.
+6. Do not put the resolved `system/sources.md`, source registries, search result pages, or “see this source list” rows in citation tables. After using the registry to choose where to look, cite the actual documentation, source file, generated artifact, onboarding file, or boundary document that directly proves the statement.
+7. If the registry points to a documentation source but the source does not prove anything relevant for the file, say that no relevant documentation was found in `Docs References`. Route same-repository implementation facts to `Repo-Internal References`, and use `Cross-Repo References` only when the evidence proves a real repository or external-system boundary.
 
 ## Reference Section Rule
 
-`Docs References` and `Cross-Repo References` are explanation-first sections.
+`Docs References`, `Repo-Internal References`, and `Cross-Repo References` are explanation-first sections.
 
-1. Explain domain behavior, system boundaries, or cross-repo interactions in prose.
+1. Explain domain behavior, same-repository implementation context, or system-boundary interactions in prose.
 2. Correct outdated or unsupported prose instead of deleting it reflexively.
 3. Add citation-backed tables so the explanation is auditable.
 4. Do not treat the citation table as a replacement for the explanation when the section is carrying real behavioral context.
 5. In `Docs References`, link the last-column cell to the canonical online document URL even when the cited lines were read from a local mirror.
-6. In `Cross-Repo References`, link code or onboarding evidence with workspace-relative markdown paths. Never emit absolute filesystem paths.
-7. Every citation table row must point to evidence, not to the discovery registry that helped find evidence.
-8. Reference health checking is mandatory during create and maintain passes.
-9. For `Docs References`, verify the canonical online URL still resolves to the intended document when retrieval tools are available. If it cannot be verified, record the blocker instead of leaving the entry implicitly trusted.
-10. For `Cross-Repo References`, verify each workspace-relative target still exists and that the cited lines still support the stated finding. Repair or remove broken entries before finishing.
+6. In `Repo-Internal References`, link same-repository code, onboarding, config, tests, or generated artifacts with workspace-relative markdown paths. Never emit absolute filesystem paths.
+7. In `Cross-Repo References`, use workspace-relative markdown paths when the proving boundary target is available in the workspace, and otherwise link to the canonical external document or system reference.
+8. Every citation table row must point to evidence, not to the discovery registry that helped find evidence.
+9. Reference health checking is mandatory during create and maintain passes.
+10. For `Docs References`, verify the canonical online URL still resolves to the intended document when retrieval tools are available. If it cannot be verified, record the blocker instead of leaving the entry implicitly trusted.
+11. For `Repo-Internal References`, verify each workspace-relative target still exists and that the cited lines still support the stated finding. Repair or remove broken entries before finishing.
+12. For `Cross-Repo References`, verify each cited boundary target still exists, still supports the stated boundary, and still belongs in this bucket rather than `Repo-Internal References`.
 
 ## Lifecycle Rules
 

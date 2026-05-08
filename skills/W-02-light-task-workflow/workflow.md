@@ -57,11 +57,13 @@ Before planning:
 
 Use `template.md` as the canonical scaffold.
 
+Write every checkbox on its own line. Under a parent step, indent nested checklist items by two spaces and keep the verification checkbox nested under the step it validates rather than emitting it as a same-level sibling.
+
 The file must include:
 
 1. objective
 2. requirements
-3. implementation steps with checkbox steps and checkbox substeps
+3. implementation steps with one checkbox per line and nested checkbox items indented by two spaces under the parent step
 4. proposed code examples for each distinct implementation change when code changes are in scope
 5. decision log
 6. open questions
@@ -115,7 +117,7 @@ For each implementation section:
 5. use the checks listed in the C-08 resolved `system/tools.md` for that implemented slice when those checks are available
 6. finish any remaining onboarding cleanup for that implemented slice through `C-05-create-or-update-onboarding-files` before considering it done
 7. mark a substep complete only after its code or artifact change, its onboarding capture or update through `C-05-create-or-update-onboarding-files`, and its relevant listed checks are done
-8. mark the parent step checkbox complete only after its substeps and verification are complete
+8. mark the parent step checkbox complete only after its nested implementation items and verification checkbox are complete
 9. record any meaningful judgment call as a new decision log entry
 
 If the C-08 resolved `system/tools.md` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
