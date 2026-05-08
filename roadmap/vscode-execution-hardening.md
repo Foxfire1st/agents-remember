@@ -195,7 +195,7 @@ Skill package path:
 skills/p-03-design/d-04-output-documentation
 
 Task artifact path:
-<task-folder>/P-03-design/D-04-output-documentation/
+<task-folder>/P-03-design/D-04-output-documentation/ // dev note: If we make one thing lowercase we should make both lowercase.
 ```
 
 The first should be lowercase because it is a skill package identifier. The second can remain uppercase if it is part of the workflow taxonomy.
@@ -219,7 +219,7 @@ The current `r-02-input-documentation` skill should not present as WIP if the fo
 
 Suggested replacement:
 
-```md
+````md
 ---
 name: r-02-input-documentation
 description: Create or refresh task-local current-state input documentation for the approved project slice. Use when Research needs mapped existing-file documentation before synthesis, design, or planning.
@@ -232,6 +232,7 @@ Use this skill to create or refresh task-local input documentation under:
 ```text
 <task-folder>/input-project-documentation/
 ```
+````
 
 This skill documents existing current-state behavior only. It does not update durable onboarding.
 
@@ -250,7 +251,8 @@ Required modes:
 2. `overview-generation` — synthesize area overview docs only after mapped file docs are current.
 
 Return the files created or updated, the evidence used, and any unresolved uncertainty.
-```
+
+````
 
 ---
 
@@ -272,7 +274,7 @@ Example:
   "agents-remember-md/skills/p-99-review": true,
   "agents-remember-md/skills/u-01-core-skills": true
 }
-```
+````
 
 Do not include `p-06-closing` until it contains a real skill.
 
@@ -456,7 +458,7 @@ Suggested file:
 ---
 name: AR Planner
 description: Read-only Agents Remember planner. Resolves onboarding, checks drift, and proposes a plan without editing files.
-tools: ['search/codebase', 'search/usages', 'read/problems', 'web/fetch']
+tools: ["search/codebase", "search/usages", "read/problems", "web/fetch"]
 handoffs:
   - label: Start approved implementation
     agent: AR Builder
@@ -506,7 +508,7 @@ Suggested file:
 ---
 name: AR Builder
 description: Approved implementation agent. Edits source and corresponding onboarding only after explicit approval.
-tools: ['search/codebase', 'search/usages', 'read/problems', 'edit', 'execute']
+tools: ["search/codebase", "search/usages", "read/problems", "edit", "execute"]
 handoffs:
   - label: Review completed work
     agent: AR Reviewer
@@ -546,7 +548,7 @@ Suggested file:
 ---
 name: AR Reviewer
 description: Read-mostly verifier for Agents Remember work. Checks diff, onboarding consistency, drift, and policy violations.
-tools: ['search/codebase', 'search/usages', 'read/problems', 'execute']
+tools: ["search/codebase", "search/usages", "read/problems", "execute"]
 ---
 
 # AR Reviewer
@@ -973,15 +975,15 @@ hooks
 
 Use the right layer for each kind of control.
 
-| Need | Best layer |
-|---|---|
-| The agent should prefer something | Prompt / `AGENTS.md` |
-| The agent needs repo context | `AGENTS.md` / onboarding |
-| The agent needs a repeatable process | Skill |
-| The agent must not do something | Hook / permission / sandbox |
-| The agent must prove completion | Stop hook / validation script / CI |
-| The repo should look professional | Validator / CI / packaging discipline |
-| The active write boundary must be enforced | Execution contract + hook |
+| Need                                       | Best layer                            |
+| ------------------------------------------ | ------------------------------------- |
+| The agent should prefer something          | Prompt / `AGENTS.md`                  |
+| The agent needs repo context               | `AGENTS.md` / onboarding              |
+| The agent needs a repeatable process       | Skill                                 |
+| The agent must not do something            | Hook / permission / sandbox           |
+| The agent must prove completion            | Stop hook / validation script / CI    |
+| The repo should look professional          | Validator / CI / packaging discipline |
+| The active write boundary must be enforced | Execution contract + hook             |
 
 Final architecture:
 
