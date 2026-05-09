@@ -50,6 +50,11 @@ class WorktreeContract:
     code_commit: str = ""
     memory_content_commit: str = ""
     ledger_commit: str = ""
+    integration_status: str = "not-started"
+    integration_strategy: str = ""
+    integrated_code_commit: str = ""
+    integrated_memory_content_commit: str = ""
+    integrated_ledger_commit: str = ""
     cleanup: str = "pending"
 
 
@@ -202,6 +207,21 @@ def contract_to_text(contract: WorktreeContract) -> str:
         lines.append(f"  ledger_commit: {contract.ledger_commit}")
     lines.extend(
         [
+            "",
+            "integration:",
+            f"  status: {contract.integration_status}",
+        ]
+    )
+    if contract.integration_strategy:
+        lines.append(f"  strategy: {contract.integration_strategy}")
+    if contract.integrated_code_commit:
+        lines.append(f"  code_commit: {contract.integrated_code_commit}")
+    if contract.integrated_memory_content_commit:
+        lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
+    if contract.integrated_ledger_commit:
+        lines.append(f"  ledger_commit: {contract.integrated_ledger_commit}")
+    lines.extend(
+        [
             f"  cleanup: {contract.cleanup}",
             "---",
             "",
@@ -306,6 +326,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     memory = _section(data, "memory")
     human_review = _section(data, "human_review")
     closeout = _section(data, "closeout")
+    integration = _section(data, "integration")
     memory_mode = str(data.get("memory_mode") or memory.get("mode") or "").strip()
     return WorktreeContract(
         task_id=str(data.get("task_id", "")).strip(),
@@ -336,5 +357,10 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         code_commit=closeout.get("code_commit", ""),
         memory_content_commit=closeout.get("memory_content_commit", ""),
         ledger_commit=closeout.get("ledger_commit", ""),
-        cleanup=closeout.get("cleanup", "pending"),
+        integration_status=integration.get("status", "not-started"),
+        integration_strategy=integration.get("strategy", ""),
+        integrated_code_commit=integration.get("code_commit", ""),
+        integrated_memory_content_commit=integration.get("memory_content_commit", ""),
+        integrated_ledger_commit=integration.get("ledger_commit", ""),
+        cleanup=integration.get("cleanup", closeout.get("cleanup", "pending")),
     )

@@ -80,6 +80,16 @@ def has_changes(repo: Path) -> bool:
     return bool(require_git(repo, ["status", "--porcelain"]))
 
 
+def require_clean(repo: Path, label: str) -> None:
+    changes = require_git(repo, ["status", "--porcelain"])
+    if changes:
+        raise RuntimeError(f"{label} is not clean:\n{changes}")
+
+
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    return run_git(repo, ["merge-base", "--is-ancestor", ancestor, descendant]).returncode == 0
+
+
 def ensure_git_identity(repo: Path) -> None:
     if not run_git(repo, ["config", "--get", "user.email"]).stdout.strip():
         require_git(repo, ["config", "user.email", "agents-remember@example.invalid"])
@@ -140,6 +150,8 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "human_review_status": contract.human_review_status,
         "approved_for_commit": contract.approved_for_commit,
         "closeout_status": contract.closeout_status,
+        "integration_status": contract.integration_status,
+        "cleanup": contract.cleanup,
     }
 
 
@@ -436,6 +448,214 @@ def command_closeout(args: argparse.Namespace) -> int:
     return 0
 
 
+def integration_branch(contract: WorktreeContract) -> str:
+    return f"{contract.memory_work_branch}-integration"
+
+
+def blocked_integration_payload(contract: WorktreeContract, state: str, reason: str, **extra: object) -> dict[str, object]:
+    return {
+        "state": state,
+        "reason": reason,
+        "developer_decision_required": True,
+        **status_payload(contract),
+        **extra,
+    }
+
+
+def validate_integrate_contract(contract: WorktreeContract) -> None:
+    if contract.closeout_status != "completed":
+        raise RuntimeError("integration requires closeout.status completed")
+    if not contract.approved_for_commit:
+        raise RuntimeError("integration requires approved closeout")
+    if not contract.code_commit:
+        raise RuntimeError("integration requires closeout code_commit")
+    if not contract.code_worktree.exists():
+        raise RuntimeError(f"code worktree does not exist: {contract.code_worktree}")
+    if current_branch(contract.code_repo_path) != contract.code_source_branch:
+        raise RuntimeError(f"code source repo must have {contract.code_source_branch} checked out")
+    if current_branch(contract.code_worktree) != contract.code_work_branch:
+        raise RuntimeError(f"code worktree must have {contract.code_work_branch} checked out")
+    require_clean(contract.code_repo_path, "code source repo")
+    require_clean(contract.code_worktree, "code worktree")
+    if head_commit(contract.code_worktree) != contract.code_commit:
+        raise RuntimeError("code worktree HEAD does not match closeout code_commit")
+    if contract.memory_mode == "shared":
+        if contract.memory_repo_path is None or contract.memory_worktree is None or contract.ledger_path is None:
+            raise RuntimeError("shared integration requires memory repo, worktree, and ledger path")
+        if not contract.memory_content_commit or not contract.ledger_commit:
+            raise RuntimeError("shared integration requires closeout memory_content_commit and ledger_commit")
+        if current_branch(contract.memory_repo_path) != contract.memory_source_branch:
+            raise RuntimeError(f"memory source repo must have {contract.memory_source_branch} checked out")
+        if current_branch(contract.memory_worktree) != contract.memory_work_branch:
+            raise RuntimeError(f"memory worktree must have {contract.memory_work_branch} checked out")
+        require_clean(contract.memory_repo_path, "memory source repo")
+        require_clean(contract.memory_worktree, "memory worktree")
+        if head_commit(contract.memory_worktree) != contract.ledger_commit:
+            raise RuntimeError("memory worktree HEAD does not match closeout ledger_commit")
+
+
+def replay_code_if_needed(contract: WorktreeContract, current_code_source: str) -> tuple[str, dict[str, object] | None]:
+    if is_ancestor(contract.code_repo_path, current_code_source, contract.code_commit):
+        return contract.code_commit, None
+    result = run_git(contract.code_worktree, ["rebase", contract.code_source_branch])
+    if result.returncode != 0:
+        return "", blocked_integration_payload(
+            contract,
+            "blocked-code-conflict",
+            "code replay conflicted; resolve with the developer before moving main",
+            stdout=result.stdout.strip(),
+            stderr=result.stderr.strip(),
+            conflict_scope="code",
+        )
+    return head_commit(contract.code_worktree), None
+
+
+def replay_memory_content(
+    contract: WorktreeContract,
+    integrated_code_commit: str,
+    current_memory_source: str,
+    ledger_message: str,
+) -> tuple[str, str, dict[str, object] | None]:
+    assert contract.memory_repo_path is not None
+    assert contract.memory_worktree is not None
+    assert contract.ledger_path is not None
+    scratch_branch = integration_branch(contract)
+    if branch_exists(contract.memory_repo_path, scratch_branch):
+        return "", "", blocked_integration_payload(
+            contract,
+            "blocked-existing-integration-branch",
+            f"memory integration branch already exists: {scratch_branch}",
+            conflict_scope="memory",
+            branch=scratch_branch,
+        )
+    result = run_git(contract.memory_worktree, ["checkout", "-b", scratch_branch, contract.memory_content_commit])
+    if result.returncode != 0:
+        return "", "", blocked_integration_payload(
+            contract,
+            "blocked-memory-replay",
+            "could not create memory integration branch",
+            stdout=result.stdout.strip(),
+            stderr=result.stderr.strip(),
+            conflict_scope="memory",
+        )
+    result = run_git(contract.memory_worktree, ["rebase", "--onto", contract.memory_source_branch, contract.memory_base_commit])
+    if result.returncode != 0:
+        return "", "", blocked_integration_payload(
+            contract,
+            "blocked-memory-conflict",
+            "memory replay conflicted; resolve with the developer before moving memory main",
+            stdout=result.stdout.strip(),
+            stderr=result.stderr.strip(),
+            conflict_scope="memory",
+            branch=scratch_branch,
+        )
+    integrated_memory_content_commit = head_commit(contract.memory_worktree)
+    ledger = load_ledger(contract.ledger_path)
+    write_ledger(contract.ledger_path, prepend_mapping(ledger, integrated_code_commit, integrated_memory_content_commit))
+    require_git(contract.memory_worktree, ["add", "memory.md"])
+    integrated_ledger_commit = commit_if_dirty(contract.memory_worktree, ledger_message)
+    return integrated_memory_content_commit, integrated_ledger_commit, None
+
+
+def command_integrate(args: argparse.Namespace) -> int:
+    if not args.approved:
+        raise RuntimeError("integration requires --approved after human review")
+    contract = load_contract(args.contract_path)
+    if contract.integration_status == "completed":
+        print(json.dumps({"state": "already-integrated", **status_payload(contract)}, indent=2))
+        return 0
+    validate_integrate_contract(contract)
+
+    current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
+    current_memory_source = ""
+    code_replay_required = not is_ancestor(contract.code_repo_path, current_code_source, contract.code_commit)
+    memory_replay_required = False
+    if contract.memory_mode == "shared":
+        assert contract.memory_repo_path is not None
+        current_memory_source = head_commit(contract.memory_repo_path, contract.memory_source_branch)
+        memory_replay_required = not is_ancestor(contract.memory_repo_path, current_memory_source, contract.ledger_commit)
+    if args.strategy == "ff-only" and (code_replay_required or memory_replay_required):
+        print(json.dumps(blocked_integration_payload(
+            contract,
+            "blocked-non-ff",
+            "source branch moved; rerun with --strategy replay after reviewing parallel changes",
+            code_replay_required=code_replay_required,
+            memory_replay_required=memory_replay_required,
+        ), indent=2))
+        return 2
+
+    if args.dry_run:
+        print(json.dumps({
+            "state": "would-integrate",
+            **status_payload(contract),
+            "strategy": args.strategy,
+            "code_replay_required": code_replay_required,
+            "memory_replay_required": memory_replay_required,
+            "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
+        }, indent=2))
+        return 0
+
+    integrated_code_commit = contract.code_commit
+    if args.strategy == "replay":
+        integrated_code_commit, blocked = replay_code_if_needed(contract, current_code_source)
+        if blocked is not None:
+            print(json.dumps(blocked, indent=2))
+            return 2
+    if not is_ancestor(contract.code_repo_path, current_code_source, integrated_code_commit):
+        raise RuntimeError("integrated code commit is not a fast-forward from the current code source branch")
+
+    integrated_memory_content_commit = contract.memory_content_commit
+    integrated_ledger_commit = contract.ledger_commit
+    if contract.memory_mode == "shared":
+        assert contract.memory_repo_path is not None
+        needs_new_ledger = args.strategy == "replay" and (
+            integrated_code_commit != contract.code_commit
+            or not is_ancestor(contract.memory_repo_path, current_memory_source, contract.ledger_commit)
+        )
+        if needs_new_ledger:
+            integrated_memory_content_commit, integrated_ledger_commit, blocked = replay_memory_content(
+                contract,
+                integrated_code_commit,
+                current_memory_source,
+                args.ledger_commit_message or f"[{contract.task_id}] Integration ledger sync: {integrated_code_commit} -> {contract.memory_content_commit}",
+            )
+            if blocked is not None:
+                print(json.dumps(blocked, indent=2))
+                return 2
+        if not is_ancestor(contract.memory_repo_path, current_memory_source, integrated_ledger_commit):
+            raise RuntimeError("integrated memory ledger commit is not a fast-forward from the current memory source branch")
+
+    require_git(contract.code_repo_path, ["merge", "--ff-only", integrated_code_commit])
+    if contract.memory_mode == "shared":
+        assert contract.memory_repo_path is not None
+        require_git(contract.memory_repo_path, ["merge", "--ff-only", integrated_ledger_commit])
+        ledger = load_ledger(contract.memory_repo_path / "memory.md")
+        mapping = find_mapping(ledger, integrated_code_commit)
+        if mapping is None or mapping.memory_commit != integrated_memory_content_commit:
+            raise RuntimeError("integrated memory ledger does not map landed code commit to landed memory content commit")
+
+    updated = replace(
+        contract,
+        integration_status="completed",
+        integration_strategy=args.strategy,
+        integrated_code_commit=integrated_code_commit,
+        integrated_memory_content_commit=integrated_memory_content_commit,
+        integrated_ledger_commit=integrated_ledger_commit,
+        cleanup="pending",
+    )
+    write_contract(contract.contract_path, updated)
+    print(json.dumps({
+        "state": "integrated",
+        **status_payload(updated),
+        "strategy": args.strategy,
+        "integrated_code_commit": integrated_code_commit,
+        "integrated_memory_content_commit": integrated_memory_content_commit,
+        "integrated_ledger_commit": integrated_ledger_commit,
+        "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
+    }, indent=2))
+    return 0
+
+
 def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo-name", help="Repository name to resolve.")
     parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --repo-name.")
@@ -486,6 +706,14 @@ def build_parser() -> argparse.ArgumentParser:
     closeout.add_argument("--ledger-commit-message", default="")
     closeout.add_argument("--dry-run", action="store_true")
     closeout.set_defaults(func=command_closeout)
+
+    integrate = subparsers.add_parser("integrate")
+    integrate.add_argument("--contract-path", type=Path, required=True)
+    integrate.add_argument("--approved", action="store_true")
+    integrate.add_argument("--strategy", choices=("ff-only", "replay"), default="ff-only")
+    integrate.add_argument("--ledger-commit-message", default="")
+    integrate.add_argument("--dry-run", action="store_true")
+    integrate.set_defaults(func=command_integrate)
     return parser
 
 

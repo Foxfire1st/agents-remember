@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -97,6 +98,67 @@ def write_file_onboarding(onboarding_root: Path, repo_name: str, source_path: st
         ),
         encoding="utf-8",
     )
+
+
+def commit_file(repo: Path, path: str, content: str, message: str) -> str:
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    git(repo, "add", path)
+    git(repo, "commit", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
+
+
+def commit_memory_ledger(memory_repo: Path, code_commit: str, memory_content_commit: str, message: str) -> str:
+    ledger_path = memory_repo / "memory.md"
+    ledger = parse_ledger_text(ledger_path.read_text(encoding="utf-8"))
+    write_ledger(ledger_path, prepend_mapping(ledger, code_commit, memory_content_commit))
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", message)
+    return git(memory_repo, "rev-parse", "HEAD")
+
+
+def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
+    code_repo = root / "repo-a"
+    code_base = init_repo(code_repo, "main")
+    memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+    memory_seed = init_repo(memory_repo, "main")
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_seed))
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "Add memory ledger")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    contract = default_contract(
+        task_name="Integrate Thing",
+        repo_name="repo-a",
+        workflow_kind="chat",
+        memory_mode="shared",
+        coordination_root=root / "ar-management",
+        code_repo_path=code_repo,
+        code_source_branch="main",
+        code_work_branch="ar/integrate-thing",
+        code_base_commit=code_base,
+        worktree_name="integrate-thing",
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_work_branch="ar/integrate-thing",
+        memory_base_commit=memory_base,
+    )
+    git(code_repo, "worktree", "add", "-b", contract.code_work_branch, str(contract.code_worktree), "main")
+    git(memory_repo, "worktree", "add", "-b", contract.memory_work_branch, str(contract.memory_worktree), "main")
+    code_commit = commit_file(contract.code_worktree, code_path, code_content, "Add feature")
+    memory_content_commit = commit_file(contract.memory_worktree, "onboarding/feature.txt.md", "# feature\n", "Document feature")
+    ledger_commit = commit_memory_ledger(contract.memory_worktree, code_commit, memory_content_commit, "Sync ledger")
+    closed = replace(
+        contract,
+        human_review_status="approved",
+        approved_for_commit=True,
+        closeout_status="completed",
+        code_commit=code_commit,
+        memory_content_commit=memory_content_commit,
+        ledger_commit=ledger_commit,
+    )
+    write_contract(closed.contract_path, closed)
+    return closed
 
 
 class WorktreeSupportTests(unittest.TestCase):
@@ -241,6 +303,78 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(loaded.task_root, root / "ar-management" / "tasks" / "device-management" / "fix-platform-status-ar")
             self.assertEqual(loaded.memory_mode, "shared")
             self.assertEqual(loaded.ledger_path, loaded.memory_worktree / "memory.md")
+
+    def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_shared_contract_fixture(root)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                strategy="ff-only",
+                ledger_commit_message="",
+                dry_run=False,
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(worktree_manager.command_integrate(args), 0)
+            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), contract.code_commit)
+            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), contract.ledger_commit)
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.integration_status, "completed")
+            self.assertEqual(loaded.integrated_code_commit, contract.code_commit)
+            self.assertEqual(loaded.integrated_memory_content_commit, contract.memory_content_commit)
+            self.assertEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
+
+    def test_integrate_replay_handles_parallel_non_overlapping_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_shared_contract_fixture(root)
+            parallel_code = commit_file(contract.code_repo_path, "parallel.txt", "parallel\n", "Parallel code change")
+            parallel_memory_content = commit_file(contract.memory_repo_path, "onboarding/parallel.txt.md", "# parallel\n", "Document parallel change")
+            commit_memory_ledger(contract.memory_repo_path, parallel_code, parallel_memory_content, "Sync parallel ledger")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                strategy="replay",
+                ledger_commit_message="Replay integration ledger",
+                dry_run=False,
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(worktree_manager.command_integrate(args), 0)
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.integration_status, "completed")
+            self.assertNotEqual(loaded.integrated_code_commit, contract.code_commit)
+            self.assertNotEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
+            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), loaded.integrated_code_commit)
+            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), loaded.integrated_ledger_commit)
+            self.assertTrue((contract.code_repo_path / "feature.txt").exists())
+            self.assertTrue((contract.code_repo_path / "parallel.txt").exists())
+            ledger = parse_ledger_text((contract.memory_repo_path / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(ledger.rows[0].code_commit, loaded.integrated_code_commit)
+            self.assertEqual(ledger.rows[0].memory_commit, loaded.integrated_memory_content_commit)
+
+    def test_integrate_replay_blocks_code_conflicts_before_main_moves(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_shared_contract_fixture(root, code_path="README.md", code_content="# Task\n")
+            parallel_code = commit_file(contract.code_repo_path, "README.md", "# Parallel\n", "Parallel conflicting change")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                strategy="replay",
+                ledger_commit_message="Replay integration ledger",
+                dry_run=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_integrate(args), 2)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["state"], "blocked-code-conflict")
+            self.assertTrue(payload["developer_decision_required"])
+            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), parallel_code)
+            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), contract.memory_base_commit)
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.integration_status, "not-started")
 
     def test_resolver_internal_defaults_to_ar_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
