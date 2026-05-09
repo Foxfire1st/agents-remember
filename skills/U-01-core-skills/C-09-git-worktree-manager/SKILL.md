@@ -18,7 +18,8 @@ The bundled helper exposes these subcommands:
 <this-skill-dir>/scripts/git_worktree_manager.py attach --repo-name <repo> --task-name <task>
 <this-skill-dir>/scripts/git_worktree_manager.py status --repo-name <repo> --task-name <task>
 <this-skill-dir>/scripts/git_worktree_manager.py bootstrap-memory --repo-name <repo>
-<this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --approved ...
+<this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --dry-run ...
+<this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --approved --approval-note <note> ...
 <this-skill-dir>/scripts/git_worktree_manager.py integrate --contract-path <contract.md> --approved --strategy ff-only
 <this-skill-dir>/scripts/git_worktree_manager.py cleanup --contract-path <contract.md> --approved
 ```
@@ -54,7 +55,11 @@ When shared memory is enabled, C-09 validates the memory repo and `memory.md` le
 
 ## Closeout
 
-Closeout is explicitly human-gated. The helper refuses to commit unless `--approved` is supplied, and it stops if the recorded code or shared-memory source branch moved since task start.
+Closeout is explicitly human-gated. Implementation approval is not commit approval. Agents must first run `closeout --dry-run` to prepare a non-mutating commit preview, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Dry-run closeout does not require `--approved`.
+
+Real closeout creates commits and therefore requires both `--approved` and `--approval-note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
+
+Closeout stops if the recorded code or shared-memory source branch moved since task start.
 
 Shared-memory closeout order is:
 
@@ -90,6 +95,7 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 1. C-09 may create or reuse worktrees and task contracts.
 2. C-09 may bootstrap a local shared memory repo when explicitly requested or when `start --memory-choice clean-start` is used.
 3. C-09 must not use divergent memory as semi-trusted reference context.
-4. C-09 must not commit or clean up without explicit human approval.
-5. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits.
-6. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.
+4. C-09 must not commit without explicit commit approval after a closeout preview.
+5. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
+6. C-09 must not clean up without explicit cleanup approval.
+7. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.

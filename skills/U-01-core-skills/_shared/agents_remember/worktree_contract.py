@@ -46,6 +46,7 @@ class WorktreeContract:
     memory_state: str = ""
     human_review_status: str = "pending-review"
     approved_for_commit: bool = False
+    commit_approval_note: str = ""
     closeout_status: str = "not-started"
     code_commit: str = ""
     memory_content_commit: str = ""
@@ -213,6 +214,12 @@ def contract_to_text(contract: WorktreeContract) -> str:
             "human_review:",
             f"  status: {contract.human_review_status}",
             f"  approved_for_commit: {approved}",
+        ]
+    )
+    if contract.commit_approval_note:
+        lines.append(f"  commit_approval_note: {contract.commit_approval_note}")
+    lines.extend(
+        [
             "",
             "closeout:",
             f"  status: {contract.closeout_status}",
@@ -254,9 +261,11 @@ def contract_to_text(contract: WorktreeContract) -> str:
             "",
             f"- Status: {contract.human_review_status}",
             f"- Approved for commit: {approved}",
-            "",
         ]
     )
+    if contract.commit_approval_note:
+        lines.append(f"- Commit approval note: {contract.commit_approval_note}")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -372,6 +381,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         memory_state=memory.get("state", ""),
         human_review_status=human_review.get("status", "pending-review"),
         approved_for_commit=human_review.get("approved_for_commit", "no").lower() in {"yes", "true", "1"},
+        commit_approval_note=human_review.get("commit_approval_note", ""),
         closeout_status=closeout.get("status", "not-started"),
         code_commit=closeout.get("code_commit", ""),
         memory_content_commit=closeout.get("memory_content_commit", ""),

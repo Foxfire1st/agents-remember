@@ -11,6 +11,7 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 1. drift check before planning when onboarding is part of the planning context
 2. approval before implementation
 3. onboarding update through `C-05-create-or-update-onboarding-files` after approved changes, with durable findings routed through that skill during implementation when they become clear enough
+4. separate commit approval before C-09 closeout creates Git commits for worktree-backed tasks
 
 ## Phase 1 — Create Or Update The Task Wrapper
 
@@ -142,12 +143,14 @@ After each step:
 When the approved plan has been fully implemented:
 
 1. confirm the checklist reflects completed code changes, onboarding updates, and listed checks
-2. set the task status to `Completed`
-3. present a concise completion summary in chat covering what changed, what onboarding was updated, and which listed checks were run
+2. for worktree-backed tasks, run C-09 closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
+3. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
+4. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
+5. set the task status to `Completed` only after the implementation cycle is finished and any required worktree closeout has received explicit commit approval
 
 ## Phase 3 — Close
 
-Close does not own implementation work. Code changes, onboarding updates, and listed checks all belong to Phase 2 and should already be finished before this phase begins.
+Close does not own implementation work. Code changes, onboarding updates, and listed checks all belong to Phase 2 and should already be finished before this phase begins. For worktree-backed tasks, close also must not create commits unless the developer approved the closeout preview.
 
 Close may still consolidate or polish onboarding language through `C-05-create-or-update-onboarding-files` if needed, but it must not depend on rediscovering durable findings that should have been captured during Phase 2.
 
@@ -158,6 +161,7 @@ When all planned work is complete:
 1. present what was done, any deviations, and any deferred items
 2. verify that the Phase 2 completion summary still reflects the final state accurately
 3. confirm that durable findings discovered during implementation were routed through `C-05-create-or-update-onboarding-files` rather than left implicit in chat history
+4. for worktree-backed tasks, confirm whether the current state is still awaiting commit approval, already closed out, awaiting integration, or awaiting cleanup
 
 ### 2. Cross-reference check
 

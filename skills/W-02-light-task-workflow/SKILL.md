@@ -48,7 +48,8 @@ The agent should:
 7. run `C-02-onboarding-drift-detection` before planning against onboarding files
 8. stop for approval before implementation
 9. after approval, treat code changes, onboarding propagation through `C-05-create-or-update-onboarding-files`, and the checks listed in the C-08 resolved `system/tools.md` as one implementation cycle
-10. set the task status to `Completed` once the approved implementation cycle is finished
+10. for worktree-backed tasks, present a commit/closeout preview and stop for explicit commit approval before any C-09 closeout commits are created
+11. set the task status to `Completed` once the approved implementation cycle and any approved closeout are finished
 
 ## Context Gathering
 
@@ -67,11 +68,12 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 3. When onboarding files are part of planning context, drift is checked before planning using `C-02-onboarding-drift-detection`.
 4. No implementation begins before explicit developer approval.
 5. Refreshed shared-memory onboarding and ledger changes are committed before C-09 starts worktrees.
-6. Implementation steps and substeps use checkbox state rather than freeform progress prose.
-7. Code-changing light tasks include code examples for each distinct implementation change.
-8. After approval, onboarding is updated through `C-05-create-or-update-onboarding-files` and the listed checks in the C-08 resolved `system/tools.md` are run.
-9. Durable current-state findings discovered during implementation are routed through `C-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
-10. Significant mid-implementation changes update the task file before edits continue.
+6. Implementation approval is separate from commit approval; worktree-backed closeout commits require a later explicit developer approval after a closeout preview.
+7. Implementation steps and substeps use checkbox state rather than freeform progress prose.
+8. Code-changing light tasks include code examples for each distinct implementation change.
+9. After approval, onboarding is updated through `C-05-create-or-update-onboarding-files` and the listed checks in the C-08 resolved `system/tools.md` are run.
+10. Durable current-state findings discovered during implementation are routed through `C-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
+11. Significant mid-implementation changes update the task file before edits continue.
 
 ## Relationship To Other Instructions
 

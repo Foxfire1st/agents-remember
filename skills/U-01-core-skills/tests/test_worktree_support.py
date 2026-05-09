@@ -118,6 +118,47 @@ def commit_memory_ledger(memory_repo: Path, code_commit: str, memory_content_com
     return git(memory_repo, "rev-parse", "HEAD")
 
 
+def open_shared_contract_fixture(root: Path):
+    code_repo = root / "repo-a"
+    code_base = init_repo(code_repo, "main")
+    memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+    memory_seed = init_repo(memory_repo, "main")
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_seed))
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "Add memory ledger")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    contract = default_contract(
+        task_name="Commit Approval Thing",
+        repo_name="repo-a",
+        workflow_kind="chat",
+        memory_mode="shared",
+        coordination_root=root / "ar-management",
+        code_repo_path=code_repo,
+        code_source_branch="main",
+        code_work_branch="ar/commit-approval-thing",
+        code_base_commit=code_base,
+        worktree_name="commit-approval-thing",
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_work_branch="ar/commit-approval-thing",
+        memory_base_commit=memory_base,
+    )
+    git(code_repo, "worktree", "add", "-b", contract.code_work_branch, str(contract.code_worktree), "main")
+    git(memory_repo, "worktree", "add", "-b", contract.memory_work_branch, str(contract.memory_worktree), "main")
+    write_contract(contract.contract_path, contract)
+    return contract
+
+
+def dirty_open_shared_contract_fixture(root: Path):
+    contract = open_shared_contract_fixture(root)
+    (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
+    assert contract.memory_worktree is not None
+    memory_file = contract.memory_worktree / "onboarding" / "feature.txt.md"
+    memory_file.parent.mkdir(parents=True, exist_ok=True)
+    memory_file.write_text("# feature\n", encoding="utf-8")
+    return contract
+
+
 def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
@@ -347,6 +388,78 @@ class WorktreeSupportTests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(worktree_manager.command_status(Namespace(contract_path=contract.contract_path)), 0)
             self.assertEqual(json.loads(output.getvalue())["contract_path"], contract.contract_path.as_posix())
+
+    def test_closeout_dry_run_without_approval_reports_commit_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = dirty_open_shared_contract_fixture(root)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=False,
+                approval_note="",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=True,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["state"], "would-closeout")
+            self.assertEqual(payload["phase"], "commit-approval-pending")
+            self.assertEqual(payload["next_action"], "request-commit-approval")
+            self.assertTrue(payload["commit_approval_required"])
+            self.assertTrue(payload["proposed_commits"]["code"]["would_commit"])
+            self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit)
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_requires_approval_note_for_real_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = dirty_open_shared_contract_fixture(root)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            with self.assertRaises(RuntimeError):
+                worktree_manager.command_closeout(args)
+            self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_records_commit_approval_note(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = dirty_open_shared_contract_fixture(root)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.closeout_status, "completed")
+            self.assertTrue(loaded.approved_for_commit)
+            self.assertEqual(loaded.commit_approval_note, "developer approved commit preview")
+
+    def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_shared_contract_fixture(root)
+            (contract.code_worktree / "followup.txt").write_text("follow-up\n", encoding="utf-8")
+            payload = worktree_manager.status_payload(contract)
+            self.assertEqual(payload["phase"], "commit-approval-pending")
+            self.assertEqual(payload["next_action"], "request-commit-approval")
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -84,6 +84,10 @@ def worktree_dirty(repo: Path | None) -> bool:
     return bool(repo and repo.exists() and run_git(repo, ["status", "--porcelain"]).stdout.strip())
 
 
+def contract_has_worktree_changes(contract: WorktreeContract) -> bool:
+    return worktree_dirty(contract.code_worktree) or worktree_dirty(contract.memory_worktree)
+
+
 def require_clean(repo: Path, label: str) -> None:
     changes = require_git(repo, ["status", "--porcelain"])
     if changes:
@@ -159,6 +163,13 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, str]:
             "next_action": "cleanup",
             "next_command": f"cleanup --contract-path {contract.contract_path.as_posix()} --approved",
         }
+    if contract_has_worktree_changes(contract):
+        return {
+            "phase": "commit-approval-pending",
+            "summary": "Worktree changes are present; prepare a closeout preview and ask for explicit commit approval before creating commits.",
+            "next_action": "request-commit-approval",
+            "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --dry-run --code-commit-message <message>",
+        }
     if contract.closeout_status == "completed":
         return {
             "phase": "integration-pending",
@@ -174,7 +185,7 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, str]:
             "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved",
         }
     return {
-        "phase": "closeout-pending",
+        "phase": "worktree-started",
         "summary": "Worktrees are ready; continue the wrapped workflow and close out after review.",
         "next_action": "work",
         "next_command": f"status --contract-path {contract.contract_path.as_posix()}",
@@ -479,9 +490,41 @@ def command_bootstrap_memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
+    ledger_message = args.ledger_commit_message or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
+    code_dirty = worktree_dirty(contract.code_worktree)
+    memory_dirty = contract.memory_mode == "shared" and worktree_dirty(contract.memory_worktree)
+    payload = {
+        "state": "would-closeout",
+        **status_payload(contract),
+        "phase": "commit-approval-pending",
+        "summary": "Closeout preview only; no commits were created.",
+        "next_action": "request-commit-approval",
+        "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved --approval-note <note>",
+        "commit_approval_required": True,
+        "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
+        "proposed_commits": {
+            "code": {
+                "would_commit": code_dirty,
+                "message": args.code_commit_message,
+                "worktree": contract.code_worktree.as_posix(),
+            },
+            "memory": {
+                "would_commit": memory_dirty,
+                "message": args.memory_commit_message,
+                "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
+            },
+            "ledger": {
+                "would_update": contract.memory_mode == "shared",
+                "message": ledger_message,
+                "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
+            },
+        },
+    }
+    return payload
+
+
 def command_closeout(args: argparse.Namespace) -> int:
-    if not args.approved:
-        raise RuntimeError("closeout requires --approved after human review")
     contract = load_contract(args.contract_path)
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
     if current_code_source != contract.code_base_commit:
@@ -497,8 +540,13 @@ def command_closeout(args: argparse.Namespace) -> int:
                 f"{contract.memory_source_branch} is {current_memory_source}, expected {contract.memory_base_commit}"
             )
     if args.dry_run:
-        print(json.dumps({"state": "would-closeout", **status_payload(contract)}, indent=2))
+        print(json.dumps(closeout_preview_payload(contract, args), indent=2))
         return 0
+    if not args.approved:
+        raise RuntimeError("closeout requires --approved after explicit commit approval")
+    approval_note = args.approval_note.replace("\n", " ").strip()
+    if not approval_note:
+        raise RuntimeError("closeout requires --approval-note describing the developer's explicit commit approval")
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     memory_commit = ""
     ledger_commit = ""
@@ -514,6 +562,7 @@ def command_closeout(args: argparse.Namespace) -> int:
         contract,
         human_review_status="approved",
         approved_for_commit=True,
+        commit_approval_note=approval_note,
         closeout_status="completed",
         code_commit=code_commit,
         memory_content_commit=memory_commit,
@@ -888,6 +937,7 @@ def build_parser() -> argparse.ArgumentParser:
     closeout = subparsers.add_parser("closeout")
     closeout.add_argument("--contract-path", type=Path, required=True)
     closeout.add_argument("--approved", action="store_true")
+    closeout.add_argument("--approval-note", default="")
     closeout.add_argument("--code-commit-message", required=True)
     closeout.add_argument("--memory-commit-message", default="")
     closeout.add_argument("--ledger-commit-message", default="")
