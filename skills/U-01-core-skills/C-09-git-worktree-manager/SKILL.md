@@ -55,7 +55,7 @@ When shared memory is enabled, C-09 validates the memory repo and `memory.md` le
 
 ## Closeout
 
-Closeout is explicitly human-gated. Implementation approval is not commit approval. Agents must first run `closeout --dry-run` to prepare a non-mutating commit preview, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Dry-run closeout does not require `--approved`.
+Closeout is explicitly human-gated. Implementation approval is not commit approval. Agents must first run `closeout --dry-run` to prepare a non-mutating commit preview, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Dry-run closeout does not require `--approved`, and it reports the closeout order plus the affected onboarding metadata refresh plan.
 
 Real closeout creates commits and therefore requires both `--approved` and `--approval-note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
 
@@ -63,11 +63,14 @@ Closeout stops if the recorded code or shared-memory source branch moved since t
 
 Shared-memory closeout order is:
 
-1. commit code worktree changes and capture `C2`
-2. commit memory-content changes and capture `M2`
-3. prepend `C2 | M2` to `memory.md`
-4. commit the ledger update as `L2`
-5. update the task contract closeout state
+1. identify changed code worktree paths and their required sidecar onboarding files
+2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
+3. commit code worktree changes and capture `C2` plus its commit date
+4. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
+5. commit memory-content changes and capture `M2`
+6. prepend `C2 | M2` to `memory.md`
+7. commit the ledger update as `L2`
+8. update the task contract closeout state
 
 Push behavior is not automatic.
 
@@ -96,6 +99,7 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 2. C-09 may bootstrap a local shared memory repo when explicitly requested or when `start --memory-choice clean-start` is used.
 3. C-09 must not use divergent memory as semi-trusted reference context.
 4. C-09 must not commit without explicit commit approval after a closeout preview.
-5. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
-6. C-09 must not clean up without explicit cleanup approval.
-7. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.
+5. C-09 shared-memory closeout must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
+6. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
+7. C-09 must not clean up without explicit cleanup approval.
+8. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.

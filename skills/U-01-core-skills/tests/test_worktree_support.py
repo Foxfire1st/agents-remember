@@ -100,6 +100,13 @@ def write_file_onboarding(onboarding_root: Path, repo_name: str, source_path: st
     )
 
 
+def read_onboarding_field(path: Path, field: str) -> str:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"| {field} |"):
+            return line.split("|", 3)[2].strip().strip("`")
+    raise AssertionError(f"{field} was not found in {path}")
+
+
 def commit_file(repo: Path, path: str, content: str, message: str) -> str:
     target = repo / path
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -153,9 +160,7 @@ def dirty_open_shared_contract_fixture(root: Path):
     contract = open_shared_contract_fixture(root)
     (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
     assert contract.memory_worktree is not None
-    memory_file = contract.memory_worktree / "onboarding" / "feature.txt.md"
-    memory_file.parent.mkdir(parents=True, exist_ok=True)
-    memory_file.write_text("# feature\n", encoding="utf-8")
+    write_file_onboarding(contract.memory_worktree / "onboarding", contract.repo_name, "feature.txt", contract.code_base_commit)
     return contract
 
 
@@ -410,7 +415,12 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(payload["phase"], "commit-approval-pending")
             self.assertEqual(payload["next_action"], "request-commit-approval")
             self.assertTrue(payload["commit_approval_required"])
+            self.assertIn("refresh-onboarding-metadata", payload["closeout_order"])
+            self.assertEqual(payload["changed_code_paths"], ["feature.txt"])
+            self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
+            self.assertEqual(payload["onboarding_metadata_refresh"]["required"][0]["source_path"], "feature.txt")
             self.assertTrue(payload["proposed_commits"]["code"]["would_commit"])
+            self.assertTrue(payload["proposed_commits"]["memory"]["metadata_refresh_after_code_commit"])
             self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
@@ -451,6 +461,51 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(loaded.closeout_status, "completed")
             self.assertTrue(loaded.approved_for_commit)
             self.assertEqual(loaded.commit_approval_note, "developer approved commit preview")
+
+    def test_closeout_refreshes_onboarding_metadata_to_new_code_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = dirty_open_shared_contract_fixture(root)
+            onboarding_file = contract.memory_worktree / "onboarding" / "feature.txt.md"
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), loaded.code_commit)
+            self.assertEqual(read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), payload["code_commit"])
+            ledger = parse_ledger_text((contract.memory_worktree / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(ledger.last_verified_code_commit, payload["code_commit"])
+            self.assertEqual(ledger.last_memory_content_commit, payload["memory_content_commit"])
+            self.assertIn("feature.txt.md", git(contract.memory_worktree, "show", "--name-only", "--format=", payload["memory_content_commit"]))
+
+    def test_closeout_blocks_missing_onboarding_for_changed_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = open_shared_contract_fixture(root)
+            (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            with self.assertRaisesRegex(RuntimeError, "Run C-05 create-or-update-onboarding-files"):
+                worktree_manager.command_closeout(args)
+            self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
     def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

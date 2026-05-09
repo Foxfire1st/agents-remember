@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from dataclasses import asdict, replace
@@ -468,6 +469,119 @@ def commit_if_dirty(repo: Path, message: str) -> str:
     return head_commit(repo)
 
 
+def commit_date(repo: Path, commit: str) -> str:
+    return require_git(repo, ["show", "-s", "--format=%cI", commit])
+
+
+def changed_worktree_paths(repo: Path) -> list[str]:
+    tracked = require_git(repo, ["diff", "--name-only", "HEAD", "--"]).splitlines()
+    untracked = require_git(repo, ["ls-files", "--others", "--exclude-standard"]).splitlines()
+    paths = {
+        path.strip().replace("\\", "/")
+        for path in [*tracked, *untracked]
+        if path.strip() and (repo / path.strip()).is_file()
+    }
+    return sorted(paths)
+
+
+def contract_context(contract: WorktreeContract):
+    return resolver.resolve_management_context(
+        repo_name=contract.repo_name,
+        workspace_root=contract.coordination_root.parent,
+        target_repo=contract.code_repo_path,
+        contract_path=contract.contract_path,
+    )
+
+
+def onboarding_metadata_row(text: str, field: str, value: str, *, code: bool = False) -> tuple[str, bool]:
+    rendered = f"`{value}`" if code else value
+    pattern = re.compile(rf"(\|\s*{re.escape(field)}\s*\|\s*)`?[^|`]*`?(\s*\|)")
+    updated, count = pattern.subn(rf"\g<1>{rendered}\g<2>", text, count=1)
+    return updated, count > 0
+
+
+def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
+    return onboarding_root / f"{source_path}.md"
+
+
+def onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+    context = contract_context(contract)
+    required: list[dict[str, str]] = []
+    missing: list[str] = []
+    unsupported: list[str] = []
+    for source_path in changed_paths:
+        storage = resolver.resolve_storage_for_source(source_path, context.storage, context.repo_name)
+        if storage == "disabled":
+            continue
+        if not resolver.sidecar_storage_label(storage):
+            unsupported.append(source_path)
+            continue
+        onboarding_path = sidecar_onboarding_path(context.onboarding_root, source_path)
+        if not onboarding_path.exists():
+            missing.append(source_path)
+            continue
+        required.append({
+            "source_path": source_path,
+            "onboarding_file": onboarding_path.as_posix(),
+        })
+    return {
+        "required": required,
+        "missing": missing,
+        "unsupported": unsupported,
+    }
+
+
+def validate_onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+    plan = onboarding_refresh_plan(contract, changed_paths)
+    missing = plan["missing"]
+    unsupported = plan["unsupported"]
+    if missing or unsupported:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing sidecar onboarding for: {', '.join(missing)}")
+        if unsupported:
+            details.append(f"unsupported onboarding storage for: {', '.join(unsupported)}")
+        raise RuntimeError(
+            "shared closeout requires current onboarding for changed source files before memory commit; "
+            + "; ".join(details)
+            + ". Run C-05 create-or-update-onboarding-files, then rerun closeout."
+        )
+    for item in plan["required"]:
+        onboarding_path = Path(item["onboarding_file"])
+        text = onboarding_path.read_text(encoding="utf-8")
+        if "lastVerifiedCommitHash" not in text or "lastVerifiedCommitDate" not in text:
+            raise RuntimeError(
+                "shared closeout requires onboarding verification metadata before memory commit; "
+                f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
+                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            )
+    return plan
+
+
+def refresh_onboarding_metadata(
+    contract: WorktreeContract,
+    changed_paths: list[str],
+    verified_commit: str,
+    verified_date: str,
+) -> list[dict[str, str]]:
+    plan = validate_onboarding_refresh_plan(contract, changed_paths)
+    refreshed: list[dict[str, str]] = []
+    for item in plan["required"]:
+        onboarding_path = Path(item["onboarding_file"])
+        text = onboarding_path.read_text(encoding="utf-8")
+        text, hash_found = onboarding_metadata_row(text, "lastVerifiedCommitHash", verified_commit, code=True)
+        text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
+        if not hash_found or not date_found:
+            raise RuntimeError(
+                "shared closeout requires onboarding verification metadata before memory commit; "
+                f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
+                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            )
+        onboarding_path.write_text(text, encoding="utf-8")
+        refreshed.append(item)
+    return refreshed
+
+
 def command_bootstrap_memory(args: argparse.Namespace) -> int:
     context = resolve_context(args)
     source_branch = args.source_branch or current_branch(context.target_repo)
@@ -494,15 +608,31 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
     ledger_message = args.ledger_commit_message or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
     code_dirty = worktree_dirty(contract.code_worktree)
     memory_dirty = contract.memory_mode == "shared" and worktree_dirty(contract.memory_worktree)
+    changed_paths = changed_worktree_paths(contract.code_worktree)
+    metadata_refresh = onboarding_refresh_plan(contract, changed_paths) if contract.memory_mode == "shared" else {
+        "required": [],
+        "missing": [],
+        "unsupported": [],
+    }
     payload = {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created.",
+        "summary": "Closeout preview only; no commits were created. Shared-memory closeout will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
         "next_action": "request-commit-approval",
         "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved --approval-note <note>",
         "commit_approval_required": True,
         "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
+        "closeout_order": [
+            "commit-code",
+            "refresh-onboarding-metadata",
+            "commit-memory-content",
+            "update-ledger",
+            "commit-ledger",
+            "update-contract",
+        ],
+        "changed_code_paths": changed_paths,
+        "onboarding_metadata_refresh": metadata_refresh,
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -513,6 +643,7 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
                 "would_commit": memory_dirty,
                 "message": args.memory_commit_message,
                 "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
+                "metadata_refresh_after_code_commit": contract.memory_mode == "shared",
             },
             "ledger": {
                 "would_update": contract.memory_mode == "shared",
@@ -547,12 +678,18 @@ def command_closeout(args: argparse.Namespace) -> int:
     approval_note = args.approval_note.replace("\n", " ").strip()
     if not approval_note:
         raise RuntimeError("closeout requires --approval-note describing the developer's explicit commit approval")
+    changed_paths = changed_worktree_paths(contract.code_worktree)
+    if contract.memory_mode == "shared":
+        validate_onboarding_refresh_plan(contract, changed_paths)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
+    code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory_commit = ""
     ledger_commit = ""
+    refreshed_onboarding: list[dict[str, str]] = []
     if contract.memory_mode == "shared":
         if contract.memory_worktree is None or contract.ledger_path is None:
             raise RuntimeError("shared closeout requires memory worktree and ledger path")
+        refreshed_onboarding = refresh_onboarding_metadata(contract, changed_paths, code_commit, code_commit_date)
         memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
         ledger = load_ledger(contract.ledger_path)
         write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
@@ -577,6 +714,7 @@ def command_closeout(args: argparse.Namespace) -> int:
         "code_commit": code_commit,
         "memory_content_commit": memory_commit,
         "ledger_commit": ledger_commit,
+        "refreshed_onboarding": refreshed_onboarding,
     }, indent=2))
     return 0
 
