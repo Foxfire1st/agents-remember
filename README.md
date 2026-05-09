@@ -451,6 +451,7 @@ For local-first repositories, C-08 resolves repo-local `ar-memory/` as durable m
   - `C-05-create-or-update-onboarding-files` — the onboarding template, inline adapter docs, and maintenance
   - `C-08-ar-management-resolver` — resolve the active memory and coordination context from a repository name
   - `C-09-git-worktree-manager` — create, attach, report, and human-approved close out worktree-backed tasks
+  - `C-10-adopt-memory-baseline` — turn existing shared-memory onboarding into the first ledgered `memory.md` baseline after drift review
 - `skills/P-99-review/` — the adversarial review package used by heavy task
 - `AGENTS.md` — operational principles, including the chat-mode loop
 - `<resolved-onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available

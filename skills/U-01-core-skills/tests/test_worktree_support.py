@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -39,6 +41,13 @@ worktree_manager = importlib.util.module_from_spec(WORKTREE_MANAGER_SPEC)
 sys.modules[WORKTREE_MANAGER_SPEC.name] = worktree_manager
 WORKTREE_MANAGER_SPEC.loader.exec_module(worktree_manager)
 
+ADOPT_BASELINE_PATH = CORE_ROOT / "C-10-adopt-memory-baseline" / "scripts" / "adopt_memory_baseline.py"
+ADOPT_BASELINE_SPEC = importlib.util.spec_from_file_location("adopt_memory_baseline", ADOPT_BASELINE_PATH)
+assert ADOPT_BASELINE_SPEC is not None and ADOPT_BASELINE_SPEC.loader is not None
+adopt_baseline = importlib.util.module_from_spec(ADOPT_BASELINE_SPEC)
+sys.modules[ADOPT_BASELINE_SPEC.name] = adopt_baseline
+ADOPT_BASELINE_SPEC.loader.exec_module(adopt_baseline)
+
 
 def git(repo: Path, *args: str) -> str:
     result = subprocess.run(
@@ -66,6 +75,28 @@ def init_repo(repo: Path, branch: str = "main") -> str:
     git(repo, "add", "README.md")
     git(repo, "commit", "-m", "Initial commit")
     return git(repo, "rev-parse", "HEAD")
+
+
+def write_file_onboarding(onboarding_root: Path, repo_name: str, source_path: str, commit_hash: str) -> None:
+    path = onboarding_root / f"{source_path}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                f"# {source_path}",
+                "",
+                "| Field | Value |",
+                "| --- | --- |",
+                f"| repository | {repo_name} |",
+                f"| path | `{source_path}` |",
+                "| doc_type | `file-level-onboarding` |",
+                f"| lastVerifiedCommitHash | `{commit_hash}` |",
+                "| lastVerifiedCommitDate | 2026-05-09T00:00:00+00:00 |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 class WorktreeSupportTests(unittest.TestCase):
@@ -262,6 +293,76 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-management")
             self.assertEqual(resolved.allow[0].state, "included")
+
+    def test_adopt_memory_baseline_status_ready_without_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_head = init_repo(workspace / "repo-a", "main")
+            memory_root = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
+            args = Namespace(
+                repo_name="repo-a",
+                workspace_root=workspace,
+                topology="shared",
+                shared_root=workspace / "ar-management",
+                repo=None,
+                report=None,
+            )
+            context = adopt_baseline.resolve_context(args)
+            rows, report = adopt_baseline.run_drift(context, None)
+            payload = adopt_baseline.base_payload(context, rows, report)
+            self.assertEqual(payload["state"], "ready")
+            self.assertEqual(payload["drift"]["actionable"], 0)
+            self.assertFalse(payload["ledger"]["exists"])
+
+    def test_adopt_memory_baseline_blocks_drift_without_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            code_head = init_repo(repo, "main")
+            (repo / "README.md").write_text("# Changed\n", encoding="utf-8")
+            git(repo, "add", "README.md")
+            git(repo, "commit", "-m", "Change README")
+            memory_root = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
+            args = Namespace(
+                repo_name="repo-a",
+                workspace_root=workspace,
+                topology="shared",
+                shared_root=workspace / "ar-management",
+                repo=None,
+                report=None,
+                accept_drift=False,
+                source_branch=None,
+                work_branch=None,
+                dry_run=True,
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(adopt_baseline.command_adopt(args), 2)
+
+    def test_adopt_memory_baseline_creates_initial_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_head = init_repo(workspace / "repo-a", "main")
+            memory_root = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
+            args = Namespace(
+                repo_name="repo-a",
+                workspace_root=workspace,
+                topology="shared",
+                shared_root=workspace / "ar-management",
+                repo=None,
+                report=None,
+                accept_drift=False,
+                source_branch=None,
+                work_branch=None,
+                dry_run=False,
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(adopt_baseline.command_adopt(args), 0)
+            ledger = parse_ledger_text((memory_root / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(ledger.last_verified_code_commit, code_head)
+            self.assertTrue((memory_root / "docs" / ".gitkeep").exists())
 
 
 if __name__ == "__main__":
