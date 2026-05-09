@@ -1,13 +1,13 @@
 ---
 name: C-00-initialize-management-root
-description: "Initialize the Agents Remember management folder for a fresh clone or incomplete setup. Defaults to a repo-local internal ar-management folder for the target repo; use shared scaffolding only when the developer explicitly asks for it."
+description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-management coordination; use shared scaffolding only when the developer explicitly asks for it."
 ---
 
 # C-00 Initialize Management Root
 
-Create the minimal `ar-management/` scaffold expected by `agents-remember-md/AGENTS.md`.
+Create the minimal `ar-memory/` durable-memory scaffold and `ar-management/` coordination scaffold expected by `agents-remember-md/AGENTS.md`.
 
-This skill is for first-run setup and repair of missing management infrastructure. By default it creates only the target repository's internal `ar-management/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
+This skill is for first-run setup and repair of missing memory or coordination infrastructure. By default it creates the target repository's internal `ar-memory/` folder and a local coordination `ar-management/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
 
 Use `C-08-ar-management-resolver` when an agent needs to inspect an existing repository's active management context. This skill creates or repairs scaffold files; it does not replace C-08 as the normal resolver.
 
@@ -16,7 +16,7 @@ Use `C-08-ar-management-resolver` when an agent needs to inspect an existing rep
 - `target_repo`: path to the repository being initialized. Default to the repository the developer asked to work on.
 - `topology`: `internal` by default. Use `shared` only when the developer explicitly asks for shared scaffolding.
 - `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit shared scaffolding that resolves `.env` or `.env.example`.
-- `management_root`: optional override for explicit shared scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
+- `coordination_root`: optional override for explicit shared coordination scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
 - `mode`: `create-missing` by default. Use `repair` only when the user explicitly asks to fix existing scaffold files.
 
 ## Safety Rules
@@ -24,8 +24,8 @@ Use `C-08-ar-management-resolver` when an agent needs to inspect an existing rep
 1. Never overwrite an existing management file without explicit user approval.
 2. Create missing directories and files only.
 3. Keep starter files generic; do not invent project-specific tools, docs, sources, or onboarding.
-4. If the resolved management root points outside the intended workspace, state the resolved absolute path before writing.
-5. Default internal scaffolding must not create a shared root.
+4. If the resolved memory root or coordination root points outside the intended workspace, state the resolved absolute path before writing.
+5. Default internal scaffolding must not create or select a shared memory repo.
 6. If `.env` is absent, do not create it unless the user explicitly asks for shared configuration.
 
 ## Procedure
@@ -35,12 +35,13 @@ Use `C-08-ar-management-resolver` when an agent needs to inspect an existing rep
 Default internal scaffolding:
 
 1. Resolve `target_repo`.
-2. Set the management root to `<target_repo>/ar-management`.
-3. Do not resolve or create a shared `AR_MANAGEMENT_ROOT`.
+2. Set the memory root to `<target_repo>/ar-memory`.
+3. Set the local coordination root to `<target_repo>/ar-management` unless the developer explicitly provided another coordination root.
+4. Do not resolve or create a shared `AR_MANAGEMENT_ROOT`.
 
 Explicit shared scaffolding:
 
-1. Use `management_root` when the developer provided one.
+1. Use `coordination_root` when the developer provided one.
 2. Otherwise read `<agents_repo>/.env` if it exists; if it is absent, read `<agents_repo>/.env.example`.
 3. Parse `AR_MANAGEMENT_ROOT=<path>`.
 4. Resolve relative paths from the file that declared the value.
@@ -48,7 +49,7 @@ Explicit shared scaffolding:
 
 ### 2. Inspect Existing State
 
-Check for these paths under the resolved root:
+Check for these paths under the resolved memory root:
 
 ```text
 system/settings.md
@@ -56,9 +57,17 @@ system/settings.json
 system/sources.md
 system/tools.md
 onboarding/
-tasks/
 docs/
+```
+
+Check for these paths under the resolved coordination root:
+
+```text
+system/
+memory-repos/
+tasks/
 notes/
+worktrees/
 ```
 
 Report which are present and which are missing. If everything exists, stop with a clean summary.
@@ -68,12 +77,17 @@ Report which are present and which are missing. If everything exists, stop with 
 Create only missing directories:
 
 ```text
-<resolved-root>/
+<memory-root>/
   system/
   onboarding/
-  tasks/
   docs/
+
+<coordination-root>/
+  system/
+  memory-repos/
+  tasks/
   notes/
+  worktrees/
 ```
 
 `notes/` is optional scratch space, but creating it keeps the common local layout consistent.
@@ -87,7 +101,7 @@ Create only files that do not already exist.
 ```md
 # Settings
 
-This management root stores local durable context for Agents Remember.
+This memory root stores durable context for Agents Remember.
 
 Use this Markdown file for human and agent instructions, scaffold notes, and operational context. Machine-readable storage, path-rule, and cross-repo settings live in `system/settings.json`.
 
@@ -102,9 +116,7 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
 | sources       | `system/sources.md`    | External and domain documentation registry                  |
 | tools         | `system/tools.md`      | Repo-specific commands, checks, and local tool notes        |
 | onboarding    | `onboarding/`          | Durable repo and file-level code commentary                 |
-| tasks         | `tasks/`               | Current task plans, decision logs, and implementation notes |
 | docs          | `docs/`                | Local domain docs, mirrors, and reference material          |
-| notes         | `notes/`               | Scratch observations that are not durable onboarding yet    |
 ```
 
 #### `system/settings.json`
@@ -135,18 +147,16 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
 
 `onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
 
-For explicit shared scaffolding, use the same file path under the shared root and scope `pathRules` by repository:
+For explicit shared memory scaffolding, use the same file path under the per-repo memory repo:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "onboarding": {
     "storage": {
-      "layout": "shared-root"
+      "mode": "memory-repo"
     },
-    "pathRules": [
-      {
-        "path": "my-app",
+    "pathRules": {
         "include": {
           "paths": ["README.md", "docs/**", "src/**"],
           "fileTypes": [".md", ".py", ".ts", ".tsx"]
@@ -155,8 +165,7 @@ For explicit shared scaffolding, use the same file path under the shared root an
           "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
           "fileTypes": [".png", ".jpg", ".zip"]
         }
-      }
-    ]
+    }
   },
   "crossRepo": {
     "allow": []
@@ -164,7 +173,7 @@ For explicit shared scaffolding, use the same file path under the shared root an
 }
 ```
 
-Replace `my-app` with the repository name for each shared-managed repository. Add one scoped rule per repo when shared repositories need different eligible paths or file types.
+Place this file in `ar-management/memory-repos/ar-<repo-name>/system/settings.json` for shared memory repos. The shared coordinator may have its own local `system/settings.json` for path hints, but cross-repo policy belongs in the committed memory layer.
 
 #### `system/sources.md`
 
@@ -213,17 +222,18 @@ Record environment setup, local service assumptions, MCP notes, and command cave
 Summarize:
 
 - resolved topology
-- resolved management root
+- resolved memory root
+- resolved coordination root
 - directories created
 - files created
 - files left untouched
-- next suggested skill, usually `C-03-repo-bootstrap` to create or refresh onboarding under `onboarding/`
+- next suggested skill, usually `C-03-repo-bootstrap` to create or refresh onboarding under the resolved onboarding root
 
 ## Common Outcomes
 
 ### Fresh Clone
 
-Expected result: create the full scaffold and starter files, then tell the user the management root is ready for repo bootstrap.
+Expected result: create the full memory and coordination scaffold, then tell the user the repo is ready for repo bootstrap.
 
 ### Partial Scaffold
 
@@ -231,4 +241,4 @@ Expected result: create only missing files. Preserve existing `docs/`, `tasks/`,
 
 ### Existing Complete Scaffold
 
-Expected result: make no changes and report that the management root is already initialized.
+Expected result: make no changes and report that the memory and coordination roots are already initialized.

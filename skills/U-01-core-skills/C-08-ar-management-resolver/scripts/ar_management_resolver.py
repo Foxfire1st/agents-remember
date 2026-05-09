@@ -10,9 +10,28 @@ import argparse
 import fnmatch
 import json
 import re
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
+
+
+SHARED_MODULE_ROOT = Path(__file__).resolve().parents[2] / "_shared"
+if SHARED_MODULE_ROOT.exists():
+    sys.path.insert(0, str(SHARED_MODULE_ROOT))
+
+try:
+    from agents_remember.memory_ledger import LedgerError, load_ledger
+    from agents_remember.worktree_contract import ContractError, WorktreeContract, load_contract, task_root_for, worktree_group_for
+except ImportError:  # pragma: no cover - keeps compatibility if shared helpers are unavailable during repair.
+    LedgerError = ValueError
+    ContractError = ValueError
+    WorktreeContract = None  # type: ignore[assignment]
+    load_ledger = None  # type: ignore[assignment]
+    load_contract = None  # type: ignore[assignment]
+    task_root_for = None  # type: ignore[assignment]
+    worktree_group_for = None  # type: ignore[assignment]
 
 
 class StorageRule(TypedDict, total=False):
@@ -32,14 +51,30 @@ class StorageSettings:
 
 
 @dataclass
+class CrossRepoAllowEntry:
+    repo: str
+    expected_branch: str
+    include_code: bool = True
+    include_memory: bool = False
+    state: str = ""
+    reason: str = ""
+    code: dict[str, str] = field(default_factory=dict)
+    memory: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class CrossRepoSettings:
-    allow: list[str] = field(default_factory=list)
+    allow: list[CrossRepoAllowEntry] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ManagementSelection:
     topology: Literal["internal", "shared"]
     management_root: Path
+    coordination_root: Path
+    memory_root: Path
+    settings_path: Path
 
 
 @dataclass
@@ -47,6 +82,8 @@ class ManagementContext:
     topology: Literal["internal", "shared"]
     repo_name: str
     target_repo: Path
+    coordination_root: Path
+    memory_root: Path
     management_root: Path
     onboarding_root: Path
     settings_path: Path
@@ -59,6 +96,12 @@ class ManagementContext:
     storage: StorageSettings
     path_rules: list[StorageRule]
     cross_repo: CrossRepoSettings
+    memory_mode: Literal["internal", "shared", "disabled"]
+    contract_path: Path | None = None
+    worktree_group: Path | None = None
+    code_worktree: Path | None = None
+    memory_worktree: Path | None = None
+    ledger_path: Path | None = None
 
 
 def agents_repo_from_script() -> Path:
@@ -83,7 +126,49 @@ def extract_yaml_blocks(markdown_text: str) -> list[str]:
 
 
 def default_storage_mode(topology: Literal["internal", "shared"]) -> str:
-    return "repo-sidecar" if topology == "internal" else "shared-root"
+    return "repo-sidecar" if topology == "internal" else "memory-repo"
+
+
+def internal_memory_root(target_repo: Path) -> Path:
+    return (target_repo / "ar-memory").resolve()
+
+
+def internal_coordination_root(target_repo: Path) -> Path:
+    return (target_repo / "ar-management").resolve()
+
+
+def shared_memory_root(coordination_root: Path, repo_name: str) -> Path:
+    return (coordination_root / "memory-repos" / f"ar-{repo_name}").resolve()
+
+
+def existing_memory_or_legacy_settings_path(
+    memory_root: Path,
+    coordination_root: Path,
+    topology: Literal["internal", "shared"],
+) -> Path:
+    memory_settings = memory_root / "system" / "settings.md"
+    coordination_settings = coordination_root / "system" / "settings.md"
+    if memory_settings.exists():
+        return memory_settings
+    if coordination_settings.exists():
+        return coordination_settings
+    return memory_settings
+
+
+def memory_roots_from_settings(
+    settings_path: Path,
+    target_repo: Path,
+    repo_name: str,
+    topology: Literal["internal", "shared"],
+) -> tuple[Path, Path]:
+    settings_root = settings_path.resolve().parent.parent
+    if topology == "shared":
+        if settings_root.name == f"ar-{repo_name}" and settings_root.parent.name == "memory-repos":
+            return settings_root.parent.parent, settings_root
+        return settings_root, shared_memory_root(settings_root, repo_name)
+    if settings_root.name == "ar-memory":
+        return internal_coordination_root(target_repo), settings_root
+    return settings_root, internal_memory_root(target_repo)
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -212,6 +297,70 @@ def string_list(value: object, label: str, default: list[str] | None = None) -> 
     return values
 
 
+def optional_bool(value: object, label: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
+def parse_cross_repo_allow(value: object, label: str) -> tuple[list[CrossRepoAllowEntry], list[str]]:
+    if value is None:
+        return [], []
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be an array")
+    entries: list[CrossRepoAllowEntry] = []
+    errors: list[str] = []
+    for index, item in enumerate(value):
+        item_label = f"{label}[{index}]"
+        if isinstance(item, str):
+            repo = clean_scalar(item)
+            reason = "legacy string crossRepo.allow entries are invalid for v2; expectedBranch is required"
+            errors.append(f"{item_label}: {reason}")
+            entries.append(CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason))
+            continue
+        if not isinstance(item, dict):
+            reason = "crossRepo.allow entries must be objects"
+            errors.append(f"{item_label}: {reason}")
+            entries.append(CrossRepoAllowEntry(repo="", expected_branch="", state="excluded", reason=reason))
+            continue
+        repo = item.get("repo")
+        expected_branch = item.get("expectedBranch")
+        reason_parts: list[str] = []
+        if not isinstance(repo, str) or not clean_scalar(repo):
+            reason_parts.append("repo is required")
+            repo_value = ""
+        else:
+            repo_value = clean_scalar(repo)
+        if not isinstance(expected_branch, str) or not clean_scalar(expected_branch):
+            reason_parts.append("expectedBranch is required")
+            expected_branch_value = ""
+        else:
+            expected_branch_value = clean_scalar(expected_branch)
+        try:
+            include_code = optional_bool(item.get("includeCode"), f"{item_label}.includeCode", True)
+            include_memory = optional_bool(item.get("includeMemory"), f"{item_label}.includeMemory", False)
+        except ValueError as error:
+            include_code = True
+            include_memory = False
+            reason_parts.append(str(error))
+        reason = "; ".join(reason_parts)
+        entries.append(
+            CrossRepoAllowEntry(
+                repo=repo_value,
+                expected_branch=expected_branch_value,
+                include_code=include_code,
+                include_memory=include_memory,
+                state="excluded" if reason else "",
+                reason=reason,
+            )
+        )
+        if reason:
+            errors.append(f"{item_label}: {reason}")
+    return entries, errors
+
+
 def parse_json_settings(
     settings_path: Path,
     topology: Literal["internal", "shared"],
@@ -231,6 +380,7 @@ def parse_json_settings(
         if not isinstance(configured_mode, str):
             raise ValueError("storage mode/layout must be a string")
         settings.mode = clean_scalar(configured_mode) or settings.mode
+        settings.default = settings.mode
     configured_default = storage.get("default")
     if configured_default is not None:
         if not isinstance(configured_default, str):
@@ -242,7 +392,7 @@ def parse_json_settings(
 
     cross_repo = CrossRepoSettings()
     cross_repo_mapping = optional_mapping(root.get("crossRepo"), "crossRepo")
-    cross_repo.allow = string_list(cross_repo_mapping.get("allow"), "crossRepo.allow")
+    cross_repo.allow, cross_repo.errors = parse_cross_repo_allow(cross_repo_mapping.get("allow"), "crossRepo.allow")
     return settings, cross_repo
 
 
@@ -330,17 +480,26 @@ def parse_settings_block(
                 saw_cross_repo = True
                 in_cross_repo_allow = True
                 raw_value = stripped.split(":", 1)[1].strip()
+                reason = "legacy string crossRepo.allow entries are invalid for v2; expectedBranch is required"
                 if raw_value.startswith("[") and raw_value.endswith("]"):
                     inner = raw_value[1:-1].strip()
                     if inner:
-                        cross_repo.allow.extend(clean_scalar(value) for value in inner.split(",") if clean_scalar(value))
+                        for value in inner.split(","):
+                            repo = clean_scalar(value)
+                            if repo:
+                                cross_repo.allow.append(CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason))
+                                cross_repo.errors.append(reason)
                 elif raw_value and raw_value != "[]":
-                    cross_repo.allow.append(clean_scalar(raw_value))
+                    repo = clean_scalar(raw_value)
+                    cross_repo.allow.append(CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason))
+                    cross_repo.errors.append(reason)
                 continue
             if indent == 4 and in_cross_repo_allow and stripped.startswith("- "):
                 value = clean_scalar(stripped[2:])
                 if value:
-                    cross_repo.allow.append(value)
+                    reason = "legacy string crossRepo.allow entries are invalid for v2; expectedBranch is required"
+                    cross_repo.allow.append(CrossRepoAllowEntry(repo=value, expected_branch="", state="excluded", reason=reason))
+                    cross_repo.errors.append(reason)
                 continue
             continue
 
@@ -435,9 +594,11 @@ def parse_settings_block(
 
         if indent == 4 and stripped.startswith("mode:"):
             settings.mode = clean_scalar(stripped.split(":", 1)[1]) or "external"
+            settings.default = settings.mode
             continue
         if indent == 4 and stripped.startswith("layout:"):
             settings.mode = clean_scalar(stripped.split(":", 1)[1]) or settings.mode
+            settings.default = settings.mode
             continue
         if indent == 4 and stripped.startswith("default:"):
             settings.default = clean_scalar(stripped.split(":", 1)[1]) or "external"
@@ -579,7 +740,7 @@ def excludes_file_type(rule: StorageRule, source_file: str) -> bool:
 
 
 def sidecar_storage_label(storage_mode: str) -> bool:
-    return storage_mode in {"external", "repo-sidecar", "shared-root"}
+    return storage_mode in {"external", "repo-sidecar", "shared-root", "memory-repo"}
 
 
 def resolve_storage_for_source(source_file: str, settings: StorageSettings, scoped_repo_path: str) -> str:
@@ -618,6 +779,8 @@ def rule_selects_repo(rule: StorageRule, repo_name: str) -> bool:
 def shared_repo_selected(repo_name: str, shared_root: Path) -> bool:
     if not shared_root.exists():
         return False
+    if (shared_root / "memory-repos" / f"ar-{repo_name}").exists():
+        return True
     if (shared_root / "onboarding" / repo_name).exists():
         return True
 
@@ -633,6 +796,150 @@ def require_shared_root(shared_root: Path | None, agents_repo: Path | None = Non
     return resolved
 
 
+def resolve_contract(
+    contract_path: Path | None,
+    coordination_root: Path,
+    repo_name: str,
+    task_name: str | None,
+) -> tuple[Any | None, Path | None]:
+    candidate: Path | None = contract_path.resolve() if contract_path else None
+    if candidate is None and task_name and task_root_for is not None:
+        possible = task_root_for(coordination_root, repo_name, task_name) / "contract.md"
+        if possible.exists():
+            candidate = possible
+    if candidate is None:
+        return None, None
+    if not candidate.exists():
+        return None, candidate
+    if load_contract is None:
+        return None, candidate
+    try:
+        return load_contract(candidate), candidate
+    except ContractError:
+        return None, candidate
+
+
+def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-c", f"safe.directory={repo_root.as_posix()}", *args],
+        cwd=repo_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def git_branch(repo_root: Path) -> str:
+    result = run_git(repo_root, ["branch", "--show-current"])
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def git_head(repo_root: Path) -> str:
+    result = run_git(repo_root, ["rev-parse", "HEAD"])
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def resolve_cross_repo_settings(
+    settings: CrossRepoSettings,
+    workspace_root: Path,
+    coordination_root: Path,
+) -> CrossRepoSettings:
+    resolved = CrossRepoSettings(errors=list(settings.errors))
+    for entry in settings.allow:
+        resolved.allow.append(resolve_cross_repo_entry(entry, workspace_root, coordination_root))
+    return resolved
+
+
+def resolve_cross_repo_entry(
+    entry: CrossRepoAllowEntry,
+    workspace_root: Path,
+    coordination_root: Path,
+) -> CrossRepoAllowEntry:
+    if entry.state == "excluded" and entry.reason:
+        return entry
+    if not entry.repo or not entry.expected_branch:
+        return CrossRepoAllowEntry(
+            repo=entry.repo,
+            expected_branch=entry.expected_branch,
+            include_code=entry.include_code,
+            include_memory=entry.include_memory,
+            state="excluded",
+            reason="repo and expectedBranch are required",
+        )
+    if not entry.include_code:
+        return CrossRepoAllowEntry(
+            repo=entry.repo,
+            expected_branch=entry.expected_branch,
+            include_code=entry.include_code,
+            include_memory=entry.include_memory,
+            state="excluded",
+            reason="includeCode=false leaves no minimum code source to validate",
+        )
+    code_path = (workspace_root / entry.repo).resolve()
+    if not code_path.exists():
+        return _entry_with_state(entry, "excluded", f"external code path missing: {code_path.as_posix()}")
+    code_branch = git_branch(code_path)
+    code_head = git_head(code_path)
+    code_info = {"path": code_path.as_posix(), "branch": code_branch, "head": code_head}
+    if not code_branch:
+        return _entry_with_state(entry, "excluded", "external code repo is detached or not a git repository", code_info)
+    if code_branch != entry.expected_branch:
+        return _entry_with_state(entry, "excluded", f"external code repo is on branch {code_branch}, expected {entry.expected_branch}", code_info)
+    if not entry.include_memory:
+        return _entry_with_state(entry, "included-code-only", "memory inclusion disabled for this entry", code_info)
+
+    memory_path = (coordination_root / "memory-repos" / f"ar-{entry.repo}").resolve()
+    if not memory_path.exists():
+        return _entry_with_state(entry, "included-code-only", f"external memory repo missing: {memory_path.as_posix()}", code_info)
+    memory_branch = git_branch(memory_path)
+    memory_info = {"path": memory_path.as_posix(), "branch": memory_branch, "ledgerPath": (memory_path / "memory.md").as_posix()}
+    if memory_branch != entry.expected_branch:
+        return _entry_with_state(entry, "included-code-only", f"external memory repo is on branch {memory_branch or 'detached'}, expected {entry.expected_branch}", code_info, memory_info)
+    if load_ledger is None:
+        return _entry_with_state(entry, "included-code-only", "memory ledger helper is unavailable", code_info, memory_info)
+    try:
+        ledger = load_ledger(memory_path / "memory.md")
+    except LedgerError as error:
+        return _entry_with_state(entry, "included-code-only", str(error), code_info, memory_info)
+    memory_info.update(
+        {
+            "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
+            "lastMemoryContentCommit": ledger.last_memory_content_commit,
+            "trackedCodeBranch": ledger.tracked_code_branch,
+            "memoryBranch": ledger.memory_branch,
+        }
+    )
+    if ledger.tracked_code_branch != entry.expected_branch:
+        return _entry_with_state(entry, "included-code-only", f"memory.md trackedCodeBranch is {ledger.tracked_code_branch}, expected {entry.expected_branch}", code_info, memory_info)
+    if ledger.memory_branch != entry.expected_branch:
+        return _entry_with_state(entry, "included-code-only", f"memory.md memoryBranch is {ledger.memory_branch}, expected {entry.expected_branch}", code_info, memory_info)
+    return _entry_with_state(entry, "included", "", code_info, memory_info)
+
+
+def _entry_with_state(
+    entry: CrossRepoAllowEntry,
+    state: str,
+    reason: str,
+    code: dict[str, str] | None = None,
+    memory: dict[str, str] | None = None,
+) -> CrossRepoAllowEntry:
+    return CrossRepoAllowEntry(
+        repo=entry.repo,
+        expected_branch=entry.expected_branch,
+        include_code=entry.include_code,
+        include_memory=entry.include_memory,
+        state=state,
+        reason=reason,
+        code=code or {},
+        memory=memory or {},
+    )
+
+
 def detect_management_selection(
     repo_name: str,
     target_repo: Path,
@@ -642,19 +949,41 @@ def detect_management_selection(
     agents_repo: Path | None = None,
 ) -> ManagementSelection:
     if settings_path is not None:
-        settings_management_root = settings_path.resolve().parent.parent
-        if settings_management_root != (target_repo / "ar-management").resolve():
-            return ManagementSelection(topology="shared", management_root=settings_management_root)
+        resolved_settings = settings_path.resolve()
+        inferred_topology = requested_topology
+        if inferred_topology is None:
+            settings_root = resolved_settings.parent.parent
+            inferred_topology = "shared" if settings_root != internal_coordination_root(target_repo) and settings_root != internal_memory_root(target_repo) else "internal"
+        coordination_root, memory_root = memory_roots_from_settings(resolved_settings, target_repo, repo_name, inferred_topology)
+        return ManagementSelection(
+            topology=inferred_topology,
+            management_root=coordination_root,
+            coordination_root=coordination_root,
+            memory_root=memory_root,
+            settings_path=resolved_settings,
+        )
 
     if requested_topology == "internal":
-        return ManagementSelection(topology="internal", management_root=(target_repo / "ar-management").resolve())
+        coordination_root = internal_coordination_root(target_repo)
+        memory_root = internal_memory_root(target_repo)
+        settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "internal")
+        return ManagementSelection("internal", coordination_root, coordination_root, memory_root, settings)
     if requested_topology == "shared":
-        return ManagementSelection(topology="shared", management_root=require_shared_root(shared_root_hint, agents_repo))
+        coordination_root = require_shared_root(shared_root_hint, agents_repo)
+        memory_root = shared_memory_root(coordination_root, repo_name)
+        settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "shared")
+        return ManagementSelection("shared", coordination_root, coordination_root, memory_root, settings)
 
     shared_root = resolve_shared_root_hint(shared_root_hint, agents_repo)
     if shared_root is not None and shared_repo_selected(repo_name, shared_root):
-        return ManagementSelection(topology="shared", management_root=shared_root)
-    return ManagementSelection(topology="internal", management_root=(target_repo / "ar-management").resolve())
+        coordination_root = shared_root
+        memory_root = shared_memory_root(coordination_root, repo_name)
+        settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "shared")
+        return ManagementSelection("shared", coordination_root, coordination_root, memory_root, settings)
+    coordination_root = internal_coordination_root(target_repo)
+    memory_root = internal_memory_root(target_repo)
+    settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "internal")
+    return ManagementSelection("internal", coordination_root, coordination_root, memory_root, settings)
 
 
 def resolve_management_context(
@@ -666,6 +995,9 @@ def resolve_management_context(
     onboarding_root: Path | None = None,
     target_repo: Path | None = None,
     agents_repo: Path | None = None,
+    contract_path: Path | None = None,
+    task_name: str | None = None,
+    worktree_name: str | None = None,
 ) -> ManagementContext:
     resolved_workspace_root = (workspace_root or Path.cwd()).resolve()
     resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
@@ -683,18 +1015,28 @@ def resolve_management_context(
     if onboarding_root is not None:
         resolved_onboarding_root = onboarding_root.resolve()
         resolved_settings_path = settings_path.resolve() if settings_path else infer_settings_path(resolved_onboarding_root)
-        resolved_management_root = resolved_settings_path.parent.parent
         resolved_topology = requested_topology or infer_topology_from_onboarding_root(resolved_onboarding_root)
+        coordination_root, memory_root = memory_roots_from_settings(
+            resolved_settings_path,
+            resolved_target_repo,
+            resolved_repo_name,
+            resolved_topology,
+        )
         storage, cross_repo = parse_management_settings(resolved_settings_path, resolved_topology)
         return build_management_context(
             repo_name=resolved_repo_name,
             target_repo=resolved_target_repo,
             topology=resolved_topology,
-            management_root=resolved_management_root,
+            coordination_root=coordination_root,
+            memory_root=memory_root,
             onboarding_root=resolved_onboarding_root,
             settings_path=resolved_settings_path,
             storage=storage,
             cross_repo=cross_repo,
+            contract_path=contract_path,
+            task_name=task_name,
+            worktree_name=worktree_name,
+            workspace_root=resolved_workspace_root,
         )
 
     selection = detect_management_selection(
@@ -705,22 +1047,29 @@ def resolve_management_context(
         settings_path=settings_path,
         agents_repo=resolved_agents_repo,
     )
-    resolved_settings_path = settings_path.resolve() if settings_path else selection.management_root / "system" / "settings.md"
-    resolved_onboarding_root = (
-        selection.management_root / "onboarding"
+    resolved_settings_path = settings_path.resolve() if settings_path else selection.settings_path
+    legacy_onboarding_root = (
+        selection.coordination_root / "onboarding"
         if selection.topology == "internal"
-        else selection.management_root / "onboarding" / resolved_repo_name
+        else selection.coordination_root / "onboarding" / resolved_repo_name
     )
+    memory_onboarding_root = selection.memory_root / "onboarding"
+    resolved_onboarding_root = memory_onboarding_root if memory_onboarding_root.exists() or not legacy_onboarding_root.exists() else legacy_onboarding_root
     storage, cross_repo = parse_management_settings(resolved_settings_path, selection.topology)
     return build_management_context(
         repo_name=resolved_repo_name,
         target_repo=resolved_target_repo,
         topology=selection.topology,
-        management_root=selection.management_root,
+        coordination_root=selection.coordination_root,
+        memory_root=selection.memory_root,
         onboarding_root=resolved_onboarding_root,
         settings_path=resolved_settings_path,
         storage=storage,
         cross_repo=cross_repo,
+        contract_path=contract_path,
+        task_name=task_name,
+        worktree_name=worktree_name,
+        workspace_root=resolved_workspace_root,
     )
 
 
@@ -728,30 +1077,73 @@ def build_management_context(
     repo_name: str,
     target_repo: Path,
     topology: Literal["internal", "shared"],
-    management_root: Path,
+    coordination_root: Path,
+    memory_root: Path,
     onboarding_root: Path,
     settings_path: Path,
     storage: StorageSettings,
     cross_repo: CrossRepoSettings,
+    contract_path: Path | None = None,
+    task_name: str | None = None,
+    worktree_name: str | None = None,
+    workspace_root: Path | None = None,
 ) -> ManagementContext:
-    system_root = management_root / "system"
+    memory_system_root = memory_root / "system"
+    legacy_system_root = coordination_root / "system"
+    system_root = memory_system_root if memory_system_root.exists() else legacy_system_root
     path_settings_path = path_settings_path_for(settings_path)
+    resolved_contract = resolve_contract(contract_path, coordination_root, repo_name, task_name)
+    contract = resolved_contract[0]
+    resolved_contract_path = resolved_contract[1]
+    task_root = contract.task_root if contract is not None else (
+        task_root_for(coordination_root, repo_name, task_name) if task_name and task_root_for is not None else coordination_root / "tasks"
+    )
+    worktree_group = contract.worktree_group if contract is not None else (
+        worktree_group_for(coordination_root, repo_name, worktree_name) if worktree_name and worktree_group_for is not None else None
+    )
+    code_worktree = contract.code_worktree if contract is not None else None
+    memory_worktree = contract.memory_worktree if contract is not None else None
+    ledger_path = contract.ledger_path if contract is not None else (
+        memory_root / "memory.md" if topology == "shared" else None
+    )
+    memory_mode = contract.memory_mode if contract is not None else ("internal" if topology == "internal" else "shared")
+    if memory_worktree is not None:
+        effective_memory_root = memory_worktree
+    elif memory_mode == "disabled":
+        effective_memory_root = memory_root
+    else:
+        effective_memory_root = memory_root
+    effective_onboarding_root = effective_memory_root / "onboarding" if (effective_memory_root / "onboarding").exists() else onboarding_root
+    effective_docs_root = effective_memory_root / "docs" if (effective_memory_root / "docs").exists() else coordination_root / "docs"
+    resolved_cross_repo = resolve_cross_repo_settings(
+        cross_repo,
+        workspace_root or target_repo.parent,
+        coordination_root,
+    )
     return ManagementContext(
         topology=topology,
         repo_name=repo_name,
         target_repo=target_repo,
-        management_root=management_root,
-        onboarding_root=onboarding_root,
+        coordination_root=coordination_root,
+        memory_root=effective_memory_root,
+        management_root=coordination_root,
+        onboarding_root=effective_onboarding_root,
         settings_path=settings_path,
         path_settings_path=path_settings_path if path_settings_path.exists() else None,
-        task_root=management_root / "tasks",
-        docs_root=management_root / "docs",
+        task_root=task_root,
+        docs_root=effective_docs_root,
         system_root=system_root,
         sources_path=system_root / "sources.md",
         tools_path=system_root / "tools.md",
         storage=storage,
         path_rules=storage.path_rules,
-        cross_repo=cross_repo,
+        cross_repo=resolved_cross_repo,
+        memory_mode=memory_mode,
+        contract_path=resolved_contract_path,
+        worktree_group=worktree_group,
+        code_worktree=code_worktree,
+        memory_worktree=memory_worktree,
+        ledger_path=ledger_path,
     )
 
 
@@ -782,11 +1174,39 @@ def storage_to_dict(storage: StorageSettings) -> dict[str, object]:
     }
 
 
+def cross_repo_entry_to_dict(entry: CrossRepoAllowEntry) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "repo": entry.repo,
+        "expectedBranch": entry.expected_branch,
+        "includeCode": entry.include_code,
+        "includeMemory": entry.include_memory,
+    }
+    if entry.state:
+        payload["state"] = entry.state
+    if entry.reason:
+        payload["reason"] = entry.reason
+    if entry.code:
+        payload["code"] = entry.code
+    if entry.memory:
+        payload["memory"] = entry.memory
+    return payload
+
+
+def cross_repo_to_dict(cross_repo: CrossRepoSettings) -> dict[str, object]:
+    payload: dict[str, object] = {"allow": [cross_repo_entry_to_dict(entry) for entry in cross_repo.allow]}
+    if cross_repo.errors:
+        payload["errors"] = cross_repo.errors
+    return payload
+
+
 def context_to_dict(context: ManagementContext) -> dict[str, object]:
     return {
         "topology": context.topology,
         "repo_name": context.repo_name,
         "target_repo": path_to_string(context.target_repo),
+        "coordination_root": path_to_string(context.coordination_root),
+        "memory_root": path_to_string(context.memory_root),
+        "memory_mode": context.memory_mode,
         "management_root": path_to_string(context.management_root),
         "onboarding_root": path_to_string(context.onboarding_root),
         "settings_path": path_to_string(context.settings_path),
@@ -796,9 +1216,14 @@ def context_to_dict(context: ManagementContext) -> dict[str, object]:
         "system_root": path_to_string(context.system_root),
         "sources_path": path_to_string(context.sources_path),
         "tools_path": path_to_string(context.tools_path),
+        "contract_path": path_to_string(context.contract_path) if context.contract_path else "",
+        "worktree_group": path_to_string(context.worktree_group) if context.worktree_group else "",
+        "code_worktree": path_to_string(context.code_worktree) if context.code_worktree else "",
+        "memory_worktree": path_to_string(context.memory_worktree) if context.memory_worktree else "",
+        "ledger_path": path_to_string(context.ledger_path) if context.ledger_path else "",
         "storage": storage_to_dict(context.storage),
         "pathRules": [path_rule_to_dict(rule) for rule in context.path_rules],
-        "crossRepo": {"allow": context.cross_repo.allow},
+        "crossRepo": cross_repo_to_dict(context.cross_repo),
     }
 
 
@@ -806,6 +1231,9 @@ def print_text(context: ManagementContext) -> None:
     print(f"topology\t{context.topology}")
     print(f"repo_name\t{context.repo_name}")
     print(f"target_repo\t{context.target_repo.as_posix()}")
+    print(f"coordination_root\t{context.coordination_root.as_posix()}")
+    print(f"memory_root\t{context.memory_root.as_posix()}")
+    print(f"memory_mode\t{context.memory_mode}")
     print(f"management_root\t{context.management_root.as_posix()}")
     print(f"onboarding_root\t{context.onboarding_root.as_posix()}")
     print(f"settings_path\t{context.settings_path.as_posix()}")
@@ -814,6 +1242,16 @@ def print_text(context: ManagementContext) -> None:
     print(f"task_root\t{context.task_root.as_posix()}")
     print(f"docs_root\t{context.docs_root.as_posix()}")
     print(f"storage_mode\t{context.storage.mode}")
+    if context.contract_path is not None:
+        print(f"contract_path\t{context.contract_path.as_posix()}")
+    if context.worktree_group is not None:
+        print(f"worktree_group\t{context.worktree_group.as_posix()}")
+    if context.code_worktree is not None:
+        print(f"code_worktree\t{context.code_worktree.as_posix()}")
+    if context.memory_worktree is not None:
+        print(f"memory_worktree\t{context.memory_worktree.as_posix()}")
+    if context.ledger_path is not None:
+        print(f"ledger_path\t{context.ledger_path.as_posix()}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -825,6 +1263,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shared-root", type=Path, help="Optional shared ar-management root hint or override.")
     parser.add_argument("--settings-path", type=Path, help="Optional active settings.md override. A sibling settings.json is preferred for machine-readable path settings when present.")
     parser.add_argument("--onboarding-root", type=Path, help="Compatibility override for an already resolved repo onboarding root.")
+    parser.add_argument("--contract-path", type=Path, help="Optional worktree task contract.md path to resolve task/worktree context.")
+    parser.add_argument("--task-name", help="Optional task name used to locate ar-management/tasks/<repo>/<task-name>-ar/contract.md.")
+    parser.add_argument("--worktree-name", help="Optional worktree name used to compute the worktree group when no contract exists.")
     parser.add_argument("--agents-repo", type=Path, help="Optional agents-remember-md checkout path for .env discovery.")
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format.")
     args = parser.parse_args(argv)
@@ -839,6 +1280,9 @@ def main(argv: list[str] | None = None) -> int:
             onboarding_root=args.onboarding_root,
             target_repo=args.repo,
             agents_repo=args.agents_repo,
+            contract_path=args.contract_path,
+            task_name=args.task_name,
+            worktree_name=args.worktree_name,
         )
     except ValueError as error:
         parser.error(str(error))

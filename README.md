@@ -27,7 +27,7 @@ resolve_auto_editor/src/orchestrator/core_editor.py
 In the default local mode, it checks the repo-local onboarding unit:
 
 ```text
-resolve_auto_editor/ar-management/onboarding/src/orchestrator/core_editor.py.md
+resolve_auto_editor/ar-memory/onboarding/src/orchestrator/core_editor.py.md
 ```
 
 Before trusting that file, it runs drift detection:
@@ -54,7 +54,7 @@ The idea came from our embedded code. Many files had large comment sections at t
 
 I wanted that same effect for developers working with agents. But I did not want to force extra commentary into source files for teams that prefer to keep code surfaces clean, and I did not want the knowledge layer to drift without explicit verification. So the first version of this repo kept the extended commentary separate and deterministic: one mirrored markdown onboarding unit per source file.
 
-The local sidecar file is the default, but it is not the whole idea. The real trick is not markdown for its own sake. The trick is 1-to-1 onboarding. If an agent is working on `src/foo/bar.ts`, it should know exactly where the onboarding unit lives and how to verify it. In the default internal setup that means `ar-management/onboarding/src/foo/bar.ts.md` inside the target repo. In inline storage that means the structured onboarding block inside `src/foo/bar.ts` itself. No secret wiki, no guessing, no giant context dump. The agent can onboard itself from the file it is touching and discover the hidden contracts around it naturally.
+The local sidecar file is the default, but it is not the whole idea. The real trick is not markdown for its own sake. The trick is 1-to-1 onboarding. If an agent is working on `src/foo/bar.ts`, it should know exactly where the onboarding unit lives and how to verify it. In the default internal setup that means `ar-memory/onboarding/src/foo/bar.ts.md` inside the target repo. In inline storage that means the structured onboarding block inside `src/foo/bar.ts` itself. No secret wiki, no guessing, no giant context dump. The agent can onboard itself from the file it is touching and discover the hidden contracts around it naturally.
 
 That is what this repository is trying to make practical: a collaborative knowledge layer that grows as work happens. Documentation stops being a second job and becomes a trail of useful context left behind by real tasks.
 
@@ -73,7 +73,7 @@ Just markdown files and conventions.
 
 ## Quickstart
 
-Clone this repository somewhere next to your existing code. The default setup keeps memory artifacts inside the repository you are onboarding, under that repository's own `ar-management/` folder:
+Clone this repository somewhere next to your existing code. The default setup keeps durable memory artifacts inside the repository you are onboarding, under that repository's own `ar-memory/` folder. Local coordination state such as tasks, notes, and worktrees belongs in `ar-management/`:
 
 ```text
 projects/
@@ -82,32 +82,34 @@ projects/
     AGENTS.md
   my-app/                     ← your existing repo
     src/
-    ar-management/            ← created by C-00 for this repo
+    ar-memory/                ← durable memory for this repo
       onboarding/
-      tasks/
       docs/
-      notes/
       system/
         settings.md
         settings.json
         sources.md
         tools.md
+  ar-management/              ← local coordination
+    system/
+    memory-repos/
+    tasks/
+    notes/
+    worktrees/
 ```
 
 ---
 
-### Create The Local Management Folder
+### Create The Local Memory And Coordination Folders
 
-Initialize the target repository with `C-00-initialize-management-root`. This first-run skill defaults to internal topology, creates only the target repo's local `ar-management/` folder, and writes starter `settings.md`, `settings.json`, `sources.md`, and `tools.md` files without overwriting existing files.
+Initialize the target repository with `C-00-initialize-management-root`. This first-run skill defaults to internal topology, creates the target repo's local `ar-memory/` durable-memory folder, and ensures a local `ar-management/` coordination root exists for tasks, notes, worktrees, and shared memory repos. It writes starter `settings.md`, `settings.json`, `sources.md`, and `tools.md` files under the memory layer without overwriting existing files.
 
-The resulting scaffold looks like this:
+The resulting internal memory scaffold looks like this:
 
 ```text
-ar-management/
+ar-memory/
 ├── onboarding/
-├── tasks/
 ├── docs/
-├── notes/
 └── system/
     ├── settings.md
     ├── settings.json
@@ -115,7 +117,18 @@ ar-management/
     └── tools.md
 ```
 
-`C-00` intentionally leaves `onboarding/` empty; `C-03-repo-bootstrap` owns repo onboarding below that point. The starter `system/settings.md` is the human and agent instruction file, while `system/settings.json` is the machine-readable settings file for storage, `pathRules`, and cross-repo allowances. The starter `system/sources.md` and `system/tools.md` are intentionally plain; fill them in with project-specific docs, commands, and checks as repos are onboarded.
+The local coordinator scaffold is separate:
+
+```text
+ar-management/
+├── system/
+├── memory-repos/
+├── tasks/
+├── notes/
+└── worktrees/
+```
+
+`C-00` intentionally leaves `onboarding/` empty; `C-03-repo-bootstrap` owns repo onboarding below that point. The starter memory-layer `system/settings.md` is the human and agent instruction file, while `system/settings.json` is the machine-readable settings file for storage, `pathRules`, and cross-repo allowances. The starter `system/sources.md` and `system/tools.md` are intentionally plain; fill them in with project-specific docs, commands, and checks as repos are onboarded.
 
 ---
 
@@ -128,9 +141,9 @@ Storage choice and path eligibility are different concerns in `system/settings.j
 - `onboarding.storage` decides where eligible onboarding artifacts live.
 - `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
 
-Default internal storage is `repo-sidecar`, which stores onboarding directly under the target repository's `ar-management/onboarding/` folder using source-relative paths.
+Default internal storage is `repo-sidecar`, which stores onboarding directly under the target repository's `ar-memory/onboarding/` folder using source-relative paths.
 
-Repo-level architecture context stays in `ar-management/onboarding/overview.md`. If a repo needs deeper coverage beyond the first overview pass, extend that same overview by merging the new area findings into the relevant existing sections so it remains one coherent document instead of growing a permanent `ar-management/onboarding/<component>/overview.md` layer.
+Repo-level architecture context stays in `ar-memory/onboarding/overview.md` for internal mode, or in the selected shared memory repo's `onboarding/overview.md` for shared mode. If a repo needs deeper coverage beyond the first overview pass, extend that same overview by merging the new area findings into the relevant existing sections so it remains one coherent document instead of growing a permanent `onboarding/<component>/overview.md` layer.
 
 `pathRules` exist in both internal and shared JSON settings. They include or exclude paths and file types; they do not switch storage per path. In repo-local internal settings, an unscoped rule applies to that repository. In shared settings, scope rules with `path: <repo-name>` so each shared-managed repository can have its own eligibility rules. Leave a rule unscoped only when you intentionally want the same eligibility default for every shared-managed repository.
 
@@ -164,8 +177,8 @@ Inline onboarding reuses the same file-level onboarding content model as sidecar
 The steps are the same regardless of which tool you use:
 
 1. Wire up the agent so it reads `AGENTS.md` from this repo at session start (tool-specific instructions below).
-2. Run `C-00-initialize-management-root` for the target repo if its local `ar-management` scaffold does not exist yet.
-3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure under `<target-repo>/ar-management/onboarding/`. A bare repo-level `overview.md` is enough; deeper area sections are folded back into that same file as the repo is explored.
+2. Run `C-00-initialize-management-root` for the target repo if its local `ar-memory` scaffold or local coordination root does not exist yet.
+3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure under the C-08 resolved `onboarding_root`, usually `<target-repo>/ar-memory/onboarding/` in internal mode. A bare repo-level `overview.md` is enough; deeper area sections are folded back into that same file as the repo is explored.
 4. Start using the agent normally. Chat handles most tasks. The agent reads the resolved onboarding unit alongside the source file and updates it as it goes.
 5. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when the task needs a written plan or needs to survive beyond a single session.
 
@@ -299,7 +312,7 @@ In chat mode, the whole loop is small enough to state in full. It lives in `AGEN
 
 3. After approval, apply the code changes, update the onboarding
    documentation, and use the appropriate code quality checks from
-   `<resolved-root>/system/tools.md`.
+   `<resolved-system-root>/tools.md`.
 ```
 
 No task folder, no phase structure. The same discipline the heavier modes enforce through artifacts is carried by chat turns.
@@ -326,9 +339,9 @@ For bulk coverage the `C-03-repo-bootstrap` skill can do more. After `overview.m
 
 ---
 
-## Advanced: Shared Management Roots
+## Advanced: Shared Memory And Coordination
 
-Most users should start with repo-local internal management. Shared mode is for teams that intentionally want one management root for selected repositories.
+Most users should start with repo-local internal memory. Shared mode is for teams that intentionally want a separate memory repo for one or more selected repositories.
 
 In shared mode, create or choose a shared `ar-management/` root and configure `AR_MANAGEMENT_ROOT` through `.env` or `.env.example`:
 
@@ -336,18 +349,16 @@ In shared mode, create or choose a shared `ar-management/` root and configure `A
 AR_MANAGEMENT_ROOT=../ar-management
 ```
 
-Shared mode has its own `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings. Scope each shared `pathRules` entry to the repository it governs:
+Shared mode keeps local coordination under `ar-management/`, but durable memory lives in one memory repo per code repo under `ar-management/memory-repos/ar-<repo-name>/`. Each memory repo has its own `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "onboarding": {
     "storage": {
-      "layout": "shared-root"
+      "mode": "memory-repo"
     },
-    "pathRules": [
-      {
-        "path": "my-app",
+    "pathRules": {
         "include": {
           "paths": ["README.md", "docs/**", "src/**"],
           "fileTypes": [".md", ".py", ".ts", ".tsx"]
@@ -356,42 +367,40 @@ Shared mode has its own `system/settings.md` for prose guidance and `system/sett
           "paths": ["vendor/**", "node_modules/**", "dist/**"],
           "fileTypes": [".png", ".zip"]
         }
-      },
-      {
-        "path": "firmware-app",
-        "include": {
-          "paths": ["README.md", "docs/**", "firmware/**"],
-          "fileTypes": [".md", ".c", ".h"]
-        },
-        "exclude": {
-          "paths": ["build/**", "generated/**"],
-          "fileTypes": [".bin", ".map"]
-        }
-      }
-    ]
+    }
+  },
+  "crossRepo": {
+    "allow": []
   }
 }
 ```
 
 ---
 
-### Shared For Selected Repositories
+### Shared Memory For Selected Repositories
 
-Use this when every selected repository should store eligible onboarding artifacts under one shared root:
+Use this when a selected repository should store durable memory in its own shared memory repo:
 
 ```text
 projects/
   agents-remember-md/
-  ar-management/              ← shared root
+  ar-management/              ← local coordinator
     system/
       settings.md
       settings.json
-    onboarding/
-      my-app/
+    memory-repos/
+      ar-my-app/              ← durable memory repo for my-app
+        onboarding/
+        docs/
+        system/
+        memory.md
+    tasks/
+    notes/
+    worktrees/
   my-app/
 ```
 
-Run `C-00-initialize-management-root` in shared mode only when the developer explicitly asks for shared scaffolding. Default C-00 behavior remains repo-local internal scaffolding.
+Run `C-00-initialize-management-root` in shared mode only when the developer explicitly asks for shared coordination scaffolding. Default C-00 behavior remains repo-local internal memory plus local coordination.
 
 ---
 
@@ -403,29 +412,28 @@ Mixed workspaces are supported. C-08 resolves topology per target repository:
 projects/
   agents-remember-md/
   repo-a/
-    ar-management/            ← repo-a uses local internal management
+    ar-memory/                ← repo-a uses local internal memory
       system/settings.md
       system/settings.json
       onboarding/
+  ar-management/              ← local/shared coordinator
+    system/
+    memory-repos/
+      ar-repo-b/              ← repo-b uses shared memory
+        onboarding/
   repo-b/
     src/
-  ar-management/              ← shared root for repo-b
-    system/
-      settings.md
-      settings.json
-    onboarding/
-      repo-b/
 ```
 
-When the target repo is `repo-a`, C-08 returns `repo-a/ar-management/`. When the target repo is `repo-b` and shared scaffolding was explicitly selected for it, C-08 returns the shared root. A shared-managed repo does not force its neighbors into shared mode, and a locally managed repo does not prevent another repo from using shared mode.
+When the target repo is `repo-a`, C-08 returns `repo-a/ar-memory/` as `memory_root` and `ar-management/` as `coordination_root`. When the target repo is `repo-b` and shared memory is selected, C-08 returns `ar-management/memory-repos/ar-repo-b/` as `memory_root` and `ar-management/` as `coordination_root`. A shared-memory repo does not force its neighbors into shared mode, and a locally managed repo does not prevent another repo from using shared mode.
 
 ---
 
 ### Resolve The Active Management Context
 
-Agents use `C-08-ar-management-resolver` to resolve a repository's active management context. In normal use, the agent passes the repository name and receives the resolved topology, management root, onboarding root, settings path, machine path-settings path when present, task root, docs root, storage settings, `pathRules`, and cross-repo allowances.
+Agents use `C-08-ar-management-resolver` to resolve a repository's active management context. In normal use, the agent passes the repository name and receives the resolved topology, `coordination_root`, `memory_root`, onboarding root, settings path, machine path-settings path when present, task root, docs root, storage settings, `pathRules`, worktree/ledger fields when a contract exists, and branch-gated cross-repo allowances.
 
-For local-first repositories, C-08 returns the repo-local `ar-management/` folder. For repositories intentionally selected for shared management, C-08 returns the shared root and that repository's shared onboarding layout. This keeps mixed workspaces per-repository: local repos stay local, while selected shared repos use the shared root.
+For local-first repositories, C-08 resolves repo-local `ar-memory/` as durable memory and `ar-management/` as local coordination. For repositories intentionally selected for shared memory, C-08 resolves `ar-management/memory-repos/ar-<repo-name>/` as durable memory and the shared `ar-management/` folder as coordination. The legacy `management_root` JSON key remains as a compatibility alias for `coordination_root`.
 
 `C-02-onboarding-drift-detection` consumes that resolved context to classify stale onboarding. It is not the topology resolver.
 
@@ -436,12 +444,13 @@ For local-first repositories, C-08 returns the repo-local `ar-management/` folde
 - `skills/W-01-heavy-task-workflow/` — the seven-phase workflow for high-stakes tasks
 - `skills/W-02-light-task-workflow/` — the single-page-plan workflow for medium tasks
 - `skills/U-01-core-skills/` — supporting skills used by all modes:
-  - `C-00-initialize-management-root` — create the first-run repo-local `ar-management` scaffold
+  - `C-00-initialize-management-root` — create the first-run repo-local `ar-memory` scaffold and local coordination folders
   - `C-02-onboarding-drift-detection` — staleness detection (used by every mode)
   - `C-03-repo-bootstrap` — scaffold onboarding for an existing repo
   - `C-04-discovery` — top-down reading order for unfamiliar code
   - `C-05-create-or-update-onboarding-files` — the onboarding template, inline adapter docs, and maintenance
-  - `C-08-ar-management-resolver` — resolve the active local or shared management context from a repository name
+  - `C-08-ar-management-resolver` — resolve the active memory and coordination context from a repository name
+  - `C-09-git-worktree-manager` — create, attach, report, and human-approved close out worktree-backed tasks
 - `skills/P-99-review/` — the adversarial review package used by heavy task
 - `AGENTS.md` — operational principles, including the chat-mode loop
 - `<resolved-onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available

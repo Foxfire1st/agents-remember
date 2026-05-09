@@ -16,7 +16,7 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 
 ### 1. Ensure the local task area exists
 
-All light-task artifacts live under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-management-resolver` for the target repository.
+All light-task artifacts live under the C-08 resolved `<task-root>/`. For normal non-worktree tasks this may be the coordination task root; for worktree-backed tasks it is the repo-scoped folder beside `contract.md`, usually `ar-management/tasks/<repo-name>/<task-name>-ar/`.
 
 If `<task-root>/` does not exist yet, create it before writing the task file.
 
@@ -114,13 +114,13 @@ For each implementation section:
 2. read the relevant files or materials
 3. perform the approved work
 4. route durable current-state findings for that implemented slice through `C-05-create-or-update-onboarding-files` as soon as the finding is stable enough to state accurately
-5. use the checks listed in the C-08 resolved `system/tools.md` for that implemented slice when those checks are available
+5. use the checks listed in the C-08 resolved `tools_path` for that implemented slice when those checks are available
 6. finish any remaining onboarding cleanup for that implemented slice through `C-05-create-or-update-onboarding-files` before considering it done
 7. mark a substep complete only after its code or artifact change, its onboarding capture or update through `C-05-create-or-update-onboarding-files`, and its relevant listed checks are done
 8. mark the parent step checkbox complete only after its nested implementation items and verification checkbox are complete
 9. record any meaningful judgment call as a new decision log entry
 
-If the C-08 resolved `system/tools.md` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
+If the C-08 resolved `tools_path` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
 
 ### 3. Milestone alignment
 
@@ -157,7 +157,7 @@ When all planned work is complete:
 Before final closure:
 
 1. verify any referenced workflow or skill paths still resolve
-2. check whether newly introduced terms belong in the glossary or naming references listed in the C-08 resolved `system/sources.md`
+2. check whether newly introduced terms belong in the glossary or naming references listed in the C-08 resolved `sources_path`
 3. update any repo-level descriptions that would now be misleading
 
 ## Three-touch iteration cycle
@@ -232,6 +232,7 @@ Developer request
   light-task-workflow
        │
       ├─ task file under `<task-root>/`
+      ├─ worktree-backed tasks keep the task file beside `contract.md`
        ├─ approval gate before implementation
        └─ live checkbox checklist during execution
 ```

@@ -2,11 +2,11 @@
 
 `settings.md` and `settings.json` exist in both supported topologies.
 
-- Internal topology uses `<target-repo>/ar-management/system/settings.md`.
-- Shared topology uses `<shared-ar-management-root>/system/settings.md`.
+- Internal topology uses `<target-repo>/ar-memory/system/settings.md`.
+- Shared topology uses `ar-management/memory-repos/ar-<repo-name>/system/settings.md`.
 - Machine-readable storage, path-rule, and cross-repo settings live in the sibling `system/settings.json` file.
 
-Default setup is internal and local-first. Shared setup is an explicit advanced choice for teams that want one management root for selected repositories.
+Default setup is internal and local-first. Shared setup is an explicit advanced choice for teams that want one memory repo per selected code repository.
 
 ## Human Settings Markdown
 
@@ -18,7 +18,7 @@ Use this shape for the default repo-local scaffold:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "onboarding": {
     "storage": {
       "mode": "repo-sidecar"
@@ -40,22 +40,20 @@ Use this shape for the default repo-local scaffold:
 }
 ```
 
-Internal `repo-sidecar` storage keeps eligible onboarding artifacts under the repository's own `ar-management/onboarding/` folder. `crossRepo.allow` is empty by default, so internal bootstrap and discovery stay local unless the developer explicitly opts into named neighboring repositories.
+Internal `repo-sidecar` storage keeps eligible onboarding artifacts under the repository's own `ar-memory/onboarding/` folder. `crossRepo.allow` is empty by default, so internal bootstrap and discovery stay local unless the memory settings explicitly opt into branch-gated neighboring repositories.
 
-## Shared JSON Settings
+## Shared Memory JSON Settings
 
-Use this shape only for an explicitly selected shared management root:
+Use this shape in `ar-management/memory-repos/ar-<repo-name>/system/settings.json` for an explicitly selected shared memory repo:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "onboarding": {
     "storage": {
-      "layout": "shared-root"
+      "mode": "memory-repo"
     },
-    "pathRules": [
-      {
-        "path": "my-app",
+    "pathRules": {
         "include": {
           "paths": ["README.md", "docs/**", "src/**"],
           "fileTypes": [".md", ".py", ".ts", ".tsx"]
@@ -64,26 +62,24 @@ Use this shape only for an explicitly selected shared management root:
           "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
           "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
         }
-      },
+    }
+  },
+  "crossRepo": {
+    "allow": [
       {
-        "path": "firmware-app",
-        "include": {
-          "paths": ["README.md", "docs/**", "firmware/**"],
-          "fileTypes": [".md", ".c", ".h"]
-        },
-        "exclude": {
-          "paths": ["build/**", "generated/**"],
-          "fileTypes": [".bin", ".map"]
-        }
+        "repo": "billing-api",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": false
       }
     ]
   }
 }
 ```
 
-Shared storage keeps eligible onboarding artifacts under the selected shared root, usually below `<shared-ar-management-root>/onboarding/<repo-name>/`.
+Shared memory storage keeps eligible onboarding artifacts under the selected per-repo memory root, usually below `ar-management/memory-repos/ar-<repo-name>/onboarding/`.
 
-In shared settings, `pathRules` should normally be a list of scoped rules. A rule with `path: my-app` applies to the repository named `my-app`; a rule with `path: my-app/src` applies only to that repository's `src/` subtree. Use an unscoped include/exclude block only when you intentionally want the same eligibility default for every shared-managed repository.
+Shared memory repos normally use unscoped `pathRules` because the memory repo already maps to exactly one code repo. The local coordinator may still use scoped rules as path hints for compatibility and migration, but cross-repo policy belongs in the committed memory settings.
 
 ## Storage Versus Eligibility
 
@@ -95,17 +91,26 @@ Do not use `pathRules` as per-path storage switching. If a future task adds per-
 
 ## Scaffold Shape
 
-Both topologies use the same `ar-management/` scaffold shape:
+Internal durable memory uses:
 
 ```text
-ar-management/
+ar-memory/
 ├── onboarding/
-├── tasks/
 ├── docs/
-├── notes/
 └── system/
     ├── settings.md
     ├── settings.json
     ├── sources.md
     └── tools.md
+```
+
+The local coordinator uses:
+
+```text
+ar-management/
+├── system/
+├── memory-repos/
+├── tasks/
+├── notes/
+└── worktrees/
 ```

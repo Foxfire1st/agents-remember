@@ -31,14 +31,14 @@ This skill's standard workflow operates on one repository at a time.
 
 ### Preferred helper
 
-Use `C-08-ar-management-resolver` to resolve the target repository's active management context, then use the bundled helper for repo-wide checks instead of rewriting shell loops:
+Use `C-08-ar-management-resolver` to resolve the target repository's active memory and coordination context, then use the bundled helper for repo-wide checks instead of rewriting shell loops:
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
   --repo <repo-root>
 ```
 
-By default the helper writes the Markdown report to `<resolved-management-root>/tasks/<repo-name>_<branch-name>_drift-report.md`. That means internal repositories write under their repo-local management root, while shared-managed repositories write under the shared management root resolved by C-08, and each repository/branch run gets a collision-resistant filename.
+By default the helper writes the Markdown report to `<coordination_root>/tasks/<repo-name>_<branch-name>_drift-report.md`. That means reports are local coordination artifacts even when durable onboarding lives under `ar-memory/` or a shared memory repo, and each repository/branch run gets a collision-resistant filename.
 
 The helper passes compatibility CLI inputs through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
 
@@ -49,17 +49,17 @@ The helper passes compatibility CLI inputs through the C-08 resolver. For explic
   --shared-root <shared-ar-management-root>
 ```
 
-If `--report` is supplied, C-08's resolved management root still owns report placement. Relative paths are resolved from the resolved management root. Absolute paths are only used as-is when they are already inside the resolved management root; otherwise the report filename is redirected to `<resolved-management-root>/tasks/`. The repo/branch-prefixed default filename applies whenever `--report` is omitted.
+If `--report` is supplied, C-08's resolved `coordination_root` still owns report placement. Relative paths are resolved from the resolved coordination root. Absolute paths are only used as-is when they are already inside the resolved coordination root; otherwise the report filename is redirected to `<coordination_root>/tasks/`. The repo/branch-prefixed default filename applies whenever `--report` is omitted.
 
 The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. Topology detection, management-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
 ### 1. Resolve onboarding units in the repository
 
-Invoke `C-08-ar-management-resolver` for the target repository and use the resolved context. Internal repositories use `<repo-root>/ar-management/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; shared repositories use the same pair under the shared root.
+Invoke `C-08-ar-management-resolver` for the target repository and use the resolved context. Internal repositories use `<repo-root>/ar-memory/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; shared repositories use the same pair under `ar-management/memory-repos/ar-<repo-name>/system/` when a shared memory repo exists. During migration, C-08 may still return a legacy shared onboarding root so existing verified onboarding remains readable until the memory repo is bootstrapped.
 
 C-08 resolves `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared JSON settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
 
-Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal storage or shared storage. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
+Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal memory or shared memory. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 
 If repo-level entity catalogs or overview files are in scope, treat them as follow-up maintenance surfaces rather than trying to diff them directly against one source file.
 

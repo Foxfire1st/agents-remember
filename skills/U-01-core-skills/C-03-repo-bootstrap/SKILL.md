@@ -16,7 +16,7 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 - **Confidence-tagged findings.** Every factual claim in a report carries a confidence level so downstream consumers know what's verified vs. inferred.
 - **Goal-backward phases.** Each phase defines observable "done when" conditions, not just steps to perform.
 - **Durable checkpoints.** Each phase produces a standalone artifact. You can stop after any phase. A state file tracks progress across sessions.
-- **Topology-aware scope.** Bootstrap invokes `C-08-ar-management-resolver` for the target repository first. Internal repositories use their repo-local `ar-management/`; shared-managed repositories use the selected shared root. Mixed workspaces are resolved per repository.
+- **Topology-aware scope.** Bootstrap invokes `C-08-ar-management-resolver` for the target repository first. Internal repositories use their repo-local `ar-memory/`; shared-managed repositories use the selected per-repo shared memory root under `ar-management/memory-repos/ar-<repo-name>/`. Mixed workspaces are resolved per repository.
 - **Cross-repo awareness.** Existing onboarding from adjacent repos is used as seed context only when the active topology allows it. When no onboarding exists, the scout falls back to direct code scanning.
 - **Developer consultation.** The developer is consulted at review gates for intent, direction, and domain knowledge that code alone can't reveal.
 - **Artifacts compound.** The scout report feeds deep-dives, deep-dives feed synthesis, and later area passes enrich the existing repo overview instead of creating a parallel overview layer.
@@ -26,7 +26,7 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 ## Prerequisites
 
 - The target repo must be accessible in the workspace.
-- The target repo's `ar-management/` scaffold must exist for default internal bootstrap, or the developer must explicitly select shared scaffolding and provide the shared root.
+- The target repo's `ar-memory/` scaffold must exist for default internal bootstrap, or the developer must explicitly select shared scaffolding and provide the shared coordination root or memory repo.
 - The `create_or_update-onboarding-file` skill must be available (for template compliance in later phases).
 - The `discovery` skill must be available (for cross-repo discovery techniques).
 - The `confluence-search` skill should be available for domain research.
@@ -50,8 +50,8 @@ Bootstrap onboarding documentation for a repo that has little or no onboarding c
 
 Invoke `C-08-ar-management-resolver` before Phase 1 and use its resolved context:
 
-1. Default internal topology uses `<repo-root>/ar-management/`, with prose instructions in `<repo-root>/ar-management/system/settings.md` and machine-readable settings in the sibling `settings.json` when present.
-2. Selected shared topology uses `<shared-ar-management-root>/`, with the same `system/settings.md` and `system/settings.json` split under the shared root.
+1. Default internal topology uses `<repo-root>/ar-memory/`, with prose instructions in `<repo-root>/ar-memory/system/settings.md` and machine-readable settings in the sibling `settings.json` when present.
+2. Selected shared topology uses `ar-management/memory-repos/ar-<repo-name>/` as the memory root, with the same `system/settings.md` and `system/settings.json` split under that memory repo.
 3. In mixed workspaces, one repository using shared scaffolding must not move neighboring internal repositories onto the shared root.
 4. In mixed workspaces, one repository using local internal management must not prevent another repository from using shared scaffolding.
 
@@ -202,7 +202,7 @@ The tech profile becomes a section in the scout report. Deep-dive agents receive
 
 Before exploring blind, discover what's known about this repo's external interfaces. Use the active topology to decide which adjacent onboarding roots may be read.
 
-For default internal repositories, keep discovery local unless `crossRepo.allow` in the repo-local settings names additional repositories. For shared-managed repositories, use the shared root selected for that repository. In a mixed workspace, shared-managed repositories may use shared onboarding while neighboring internal repositories remain local.
+For default internal repositories, keep discovery local unless `crossRepo.allow` in the repo-local memory settings names additional repositories. For shared-managed repositories, use the shared memory root selected for that repository. In a mixed workspace, shared-managed repositories may use shared memory while neighboring internal repositories remain local.
 
 Use two paths depending on whether allowed adjacent repos have onboarding.
 

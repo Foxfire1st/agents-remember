@@ -91,14 +91,15 @@ Why this example is included: <reason>
 ## Usage Rules
 
 1. Keep the section structure even for small tasks.
-2. Use C-08 resolved management-context paths such as `<task-root>/`, `<onboarding-root>/`, and `<resolved-root>/docs/`.
-3. When code changes are in scope, include proposed code examples for each distinct implementation change.
-4. For documentation-only or other non-code tasks, keep the section and state that no code examples are needed.
-5. Keep every checklist item on its own line.
-6. Indent nested checklist items by two spaces beneath their parent checkbox.
-7. Treat the parent checkbox as the step outcome, and keep implementation substeps plus the verification check nested under it.
-8. Mark nested implementation substeps complete before the nested verification check, and mark the parent step complete only after all nested items are complete.
-9. Add or reorder checklist items when scope changes, then get approval again if the change is significant.
-10. Use the light-task status values: `planning`, `inProgress`, `Completed`.
-11. Use `YYYY-MM-DDTHH:MM` anywhere the template records task-local dates or timestamps, including metadata, decision logs, progress notes, and review outcomes.
-12. Treat `## Decision Log` as append-only: preserve superseded entries and add later rows that override, reject, or clarify earlier decisions.
+2. Use C-08 resolved context paths such as `<task-root>/`, `<onboarding-root>/`, `<docs_root>/`, `<tools_path>`, and `<sources_path>`.
+3. For worktree-backed tasks, store the light-task artifact beside `contract.md` under `ar-management/tasks/<repo-name>/<task-name>-ar/`.
+4. When code changes are in scope, include proposed code examples for each distinct implementation change.
+5. For documentation-only or other non-code tasks, keep the section and state that no code examples are needed.
+6. Keep every checklist item on its own line.
+7. Indent nested checklist items by two spaces beneath their parent checkbox.
+8. Treat the parent checkbox as the step outcome, and keep implementation substeps plus the verification check nested under it.
+9. Mark nested implementation substeps complete before the nested verification check, and mark the parent step complete only after all nested items are complete.
+10. Add or reorder checklist items when scope changes, then get approval again if the change is significant.
+11. Use the light-task status values: `planning`, `inProgress`, `Completed`.
+12. Use `YYYY-MM-DDTHH:MM` anywhere the template records task-local dates or timestamps, including metadata, decision logs, progress notes, and review outcomes.
+13. Treat `## Decision Log` as append-only: preserve superseded entries and add later rows that override, reject, or clarify earlier decisions.
