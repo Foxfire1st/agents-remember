@@ -80,6 +80,13 @@ def has_changes(repo: Path) -> bool:
     return bool(require_git(repo, ["status", "--porcelain"]))
 
 
+def ensure_git_identity(repo: Path) -> None:
+    if not run_git(repo, ["config", "--get", "user.email"]).stdout.strip():
+        require_git(repo, ["config", "user.email", "agents-remember@example.invalid"])
+    if not run_git(repo, ["config", "--get", "user.name"]).stdout.strip():
+        require_git(repo, ["config", "user.name", "Agents Remember"])
+
+
 def ensure_worktree(repo: Path, worktree: Path, branch: str, source_branch: str, dry_run: bool) -> str:
     if worktree.exists():
         return "existing"
@@ -290,11 +297,20 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
 def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
     assert contract.memory_repo_path is not None
     assert contract.ledger_path is not None
+    ledger_path = contract.memory_repo_path / "memory.md"
+    if ledger_path.exists():
+        ledger = load_ledger(ledger_path)
+        return {
+            "state": "already-ledgered",
+            "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
+            "lastMemoryContentCommit": ledger.last_memory_content_commit,
+        }
     if dry_run:
         return {"state": "would-bootstrap", "path": contract.memory_repo_path.as_posix()}
     contract.memory_repo_path.mkdir(parents=True, exist_ok=True)
     if not (contract.memory_repo_path / ".git").exists():
         require_git(contract.memory_repo_path, ["init"])
+    ensure_git_identity(contract.memory_repo_path)
     if contract.memory_source_branch and current_branch(contract.memory_repo_path) != contract.memory_source_branch:
         if branch_exists(contract.memory_repo_path, contract.memory_source_branch):
             require_git(contract.memory_repo_path, ["checkout", contract.memory_source_branch])
@@ -302,6 +318,9 @@ def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str
             require_git(contract.memory_repo_path, ["checkout", "-b", contract.memory_source_branch])
     for directory in ("onboarding", "docs", "system"):
         (contract.memory_repo_path / directory).mkdir(parents=True, exist_ok=True)
+    docs_keep = contract.memory_repo_path / "docs" / ".gitkeep"
+    if not any((contract.memory_repo_path / "docs").iterdir()):
+        docs_keep.write_text("", encoding="utf-8")
     overview = contract.memory_repo_path / "onboarding" / "overview.md"
     if not overview.exists():
         overview.write_text(f"# {contract.repo_name} Memory Overview\n\nShared memory repo bootstrap placeholder.\n", encoding="utf-8")
@@ -332,7 +351,7 @@ def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str
         contract.code_base_commit,
         memory_content_commit,
     )
-    write_ledger(contract.memory_repo_path / "memory.md", ledger)
+    write_ledger(ledger_path, ledger)
     require_git(contract.memory_repo_path, ["add", "memory.md"])
     ledger_commit = commit_if_dirty(contract.memory_repo_path, f"[{contract.task_id}] Bootstrap memory ledger")
     return {
