@@ -343,6 +343,10 @@ class WorktreeSupportTests(unittest.TestCase):
                     root / "ar-management" / "tasks" / "device-management" / "fix-platform-status-ar",
                 ],
             )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_status(Namespace(contract_path=contract.contract_path)), 0)
+            self.assertEqual(json.loads(output.getvalue())["contract_path"], contract.contract_path.as_posix())
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

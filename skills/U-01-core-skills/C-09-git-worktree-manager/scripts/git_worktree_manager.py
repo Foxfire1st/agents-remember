@@ -209,12 +209,12 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
 
 
 def load_contract_from_args(args: argparse.Namespace) -> WorktreeContract:
+    if args.contract_path is not None:
+        return load_contract(args.contract_path)
     context = resolve_context(args)
-    contract_path = args.contract_path
-    if contract_path is None:
-        if not args.task_name:
-            raise RuntimeError("--task-name or --contract-path is required")
-        contract_path = context.task_root / "contract.md"
+    if not args.task_name:
+        raise RuntimeError("--task-name or --contract-path is required")
+    contract_path = context.task_root / "contract.md"
     return load_contract(contract_path)
 
 
