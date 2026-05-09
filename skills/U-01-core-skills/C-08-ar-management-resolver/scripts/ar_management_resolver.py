@@ -23,13 +23,21 @@ if SHARED_MODULE_ROOT.exists():
 
 try:
     from agents_remember.memory_ledger import LedgerError, load_ledger
-    from agents_remember.worktree_contract import ContractError, WorktreeContract, load_contract, task_root_for, worktree_group_for
+    from agents_remember.worktree_contract import (
+        ContractError,
+        WorktreeContract,
+        load_contract,
+        task_root_candidates,
+        task_root_for,
+        worktree_group_for,
+    )
 except ImportError:  # pragma: no cover - keeps compatibility if shared helpers are unavailable during repair.
     LedgerError = ValueError
     ContractError = ValueError
     WorktreeContract = None  # type: ignore[assignment]
     load_ledger = None  # type: ignore[assignment]
     load_contract = None  # type: ignore[assignment]
+    task_root_candidates = None  # type: ignore[assignment]
     task_root_for = None  # type: ignore[assignment]
     worktree_group_for = None  # type: ignore[assignment]
 
@@ -804,10 +812,17 @@ def resolve_contract(
     task_name: str | None,
 ) -> tuple[Any | None, Path | None]:
     candidate: Path | None = contract_path.resolve() if contract_path else None
-    if candidate is None and task_name and task_root_for is not None:
-        possible = task_root_for(coordination_root, repo_name, task_name) / "contract.md"
-        if possible.exists():
-            candidate = possible
+    if candidate is None and task_name:
+        candidates: list[Path] = []
+        if task_root_candidates is not None:
+            candidates = task_root_candidates(coordination_root, repo_name, task_name)
+        elif task_root_for is not None:
+            candidates = [task_root_for(coordination_root, repo_name, task_name)]
+        for task_root in candidates:
+            possible = task_root / "contract.md"
+            if possible.exists():
+                candidate = possible
+                break
     if candidate is None:
         return None, None
     if not candidate.exists():

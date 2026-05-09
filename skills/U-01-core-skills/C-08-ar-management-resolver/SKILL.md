@@ -19,7 +19,7 @@ In the normal workflow, pass only the repository name. C-08 decides whether that
 - `onboarding_root`: optional compatibility override when a caller has already resolved the repository onboarding root.
 - `target_repo`: optional full repository path for callers that already have the path. This does not replace `repo_name` as the normal agent-facing contract.
 - `contract_path`: optional `contract.md` path for worktree-backed task context.
-- `task_name`: optional task name used to locate `ar-management/tasks/<repo-name>/<task-name>-ar/contract.md`.
+- `task_name`: optional task name used to locate `ar-management/tasks/<repo-name>/<task-name>/contract.md`, with legacy `*-ar` task contract folders still checked for compatibility.
 - `worktree_name`: optional worktree name used to compute the worktree group when no contract exists.
 
 When a sibling `settings.json` exists beside `settings.md`, C-08 prefers that JSON file for machine-readable storage, `pathRules`, and `crossRepo` data. `settings.md` remains the human and agent instruction file, and legacy fenced settings in `settings.md` are still accepted as a fallback when JSON is absent.

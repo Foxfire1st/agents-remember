@@ -1,6 +1,6 @@
 # Light Task Template
 
-Use this template for any task file created by `W-02-light-task-workflow`.
+Use this template for `task.md` inside any task wrapper created by `W-02-light-task-workflow`.
 
 Implementation sections use checkbox-based steps and nested checkbox items. Keep every checklist item on its own line, and indent nested checklist items by two spaces beneath their parent checkbox. The checklist is the live execution state during implementation and review.
 
@@ -92,7 +92,7 @@ Why this example is included: <reason>
 
 1. Keep the section structure even for small tasks.
 2. Use C-08 resolved context paths such as `<task-root>/`, `<onboarding-root>/`, `<docs_root>/`, `<tools_path>`, and `<sources_path>`.
-3. For worktree-backed tasks, store the light-task artifact beside `contract.md` under `ar-management/tasks/<repo-name>/<task-name>-ar/`.
+3. Store the light-task artifact as `<task-root>/<task-slug>/task.md`; if the task becomes worktree-backed, C-09 stores `contract.md` beside it in the same wrapper folder.
 4. When code changes are in scope, include proposed code examples for each distinct implementation change.
 5. For documentation-only or other non-code tasks, keep the section and state that no code examples are needed.
 6. Keep every checklist item on its own line.

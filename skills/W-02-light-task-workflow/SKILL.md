@@ -24,14 +24,14 @@ Treat the single-page-plan test as guidance rather than a hard routing rule. Use
 
 ## Task Artifact
 
-Light-task-workflow maintains one task file under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-management-resolver` for the target repository.
+Light-task-workflow maintains one task wrapper folder under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-management-resolver` for the target repository. The task document is always named `task.md` inside that wrapper folder.
 
 Naming follows the same convention as heavy-task-workflow:
 
-1. ticket-linked: `YYMMDD_#<number>_<short-slug>.md`
-2. organic: `YYMMDD_<descriptive-slug>.md`
+1. ticket-linked: `YYMMDD_#<number>_<short-slug>/task.md`
+2. organic: `YYMMDD_<descriptive-slug>/task.md`
 
-Use `template.md` as the canonical scaffold. Implementation steps and substeps are tracked with checkboxes, and that checklist is the live execution state during implementation. When code changes are in scope, the task file also carries proposed code examples for each distinct change type so the developer can review the intended implementation shape before approval.
+Create the wrapper folder at the same time the durable task artifact is created, before any C-09 worktree exists. Use `template.md` as the canonical scaffold. Implementation steps and substeps are tracked with checkboxes, and that checklist is the live execution state during implementation. When code changes are in scope, the task file also carries proposed code examples for each distinct change type so the developer can review the intended implementation shape before approval.
 
 Light-task artifacts use minute-precision timestamps in `YYYY-MM-DDTHH:MM` format wherever they record task-local dates or times.
 
@@ -41,7 +41,7 @@ The agent should:
 
 1. stay in direct discussion with the developer
 2. search `<task-root>/` for an existing active task covering the same scope before creating a new one
-3. create or update the task file using `template.md`
+3. create or update the task wrapper and `task.md` using `template.md`
 4. keep requirements, implementation steps, and decisions aligned with the latest approved intent
 5. treat the task file's checkboxes as the live implementation tracker
 6. include proposed code examples for each distinct implementation change when code changes are in scope
@@ -62,15 +62,16 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 
 ## Invariants
 
-1. Every light-task change gets a task file.
+1. Every light-task change gets a task wrapper folder and `task.md`.
 2. The task file is the living contract for requirements, checklist state, decisions, and proposed code examples.
 3. When onboarding files are part of planning context, drift is checked before planning using `C-02-onboarding-drift-detection`.
 4. No implementation begins before explicit developer approval.
-5. Implementation steps and substeps use checkbox state rather than freeform progress prose.
-6. Code-changing light tasks include code examples for each distinct implementation change.
-7. After approval, onboarding is updated through `C-05-create-or-update-onboarding-files` and the listed checks in the C-08 resolved `system/tools.md` are run.
-8. Durable current-state findings discovered during implementation are routed through `C-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
-9. Significant mid-implementation changes update the task file before edits continue.
+5. Refreshed shared-memory onboarding and ledger changes are committed before C-09 starts worktrees.
+6. Implementation steps and substeps use checkbox state rather than freeform progress prose.
+7. Code-changing light tasks include code examples for each distinct implementation change.
+8. After approval, onboarding is updated through `C-05-create-or-update-onboarding-files` and the listed checks in the C-08 resolved `system/tools.md` are run.
+9. Durable current-state findings discovered during implementation are routed through `C-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
+10. Significant mid-implementation changes update the task file before edits continue.
 
 ## Relationship To Other Instructions
 

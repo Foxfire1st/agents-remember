@@ -80,6 +80,10 @@ def has_changes(repo: Path) -> bool:
     return bool(require_git(repo, ["status", "--porcelain"]))
 
 
+def worktree_dirty(repo: Path | None) -> bool:
+    return bool(repo and repo.exists() and run_git(repo, ["status", "--porcelain"]).stdout.strip())
+
+
 def require_clean(repo: Path, label: str) -> None:
     changes = require_git(repo, ["status", "--porcelain"])
     if changes:
@@ -133,8 +137,53 @@ def contract_payload(contract: WorktreeContract) -> dict[str, object]:
     return data
 
 
-def status_payload(contract: WorktreeContract) -> dict[str, object]:
+def lifecycle_guidance(contract: WorktreeContract) -> dict[str, str]:
+    if contract.cleanup == "completed":
+        return {
+            "phase": "cleanup-completed",
+            "summary": "Worktree task lifecycle is complete and cleanup has already run.",
+            "next_action": "done",
+            "next_command": "",
+        }
+    if contract.integration_status == "blocked":
+        return {
+            "phase": "integration-blocked",
+            "summary": "Integration is blocked; review the conflict or non-fast-forward state with the developer before retrying.",
+            "next_action": "developer-decision",
+            "next_command": f"integrate --contract-path {contract.contract_path.as_posix()} --approved --strategy replay",
+        }
+    if contract.integration_status == "completed":
+        return {
+            "phase": "cleanup-pending",
+            "summary": "Integration completed; cleanup is still pending.",
+            "next_action": "cleanup",
+            "next_command": f"cleanup --contract-path {contract.contract_path.as_posix()} --approved",
+        }
+    if contract.closeout_status == "completed":
+        return {
+            "phase": "integration-pending",
+            "summary": "Closeout completed; integrate the task branches back into their source branches.",
+            "next_action": "integrate",
+            "next_command": f"integrate --contract-path {contract.contract_path.as_posix()} --approved --strategy ff-only",
+        }
+    if contract.approved_for_commit:
+        return {
+            "phase": "closeout-pending",
+            "summary": "Closeout approval is recorded, but closeout has not completed.",
+            "next_action": "closeout",
+            "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved",
+        }
     return {
+        "phase": "closeout-pending",
+        "summary": "Worktrees are ready; continue the wrapped workflow and close out after review.",
+        "next_action": "work",
+        "next_command": f"status --contract-path {contract.contract_path.as_posix()}",
+    }
+
+
+def status_payload(contract: WorktreeContract) -> dict[str, object]:
+    guidance = lifecycle_guidance(contract)
+    payload = {
         "task_id": contract.task_id,
         "task_name": contract.task_name,
         "repo_name": contract.repo_name,
@@ -144,8 +193,10 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "worktree_group": contract.worktree_group.as_posix(),
         "code_worktree": contract.code_worktree.as_posix(),
         "code_worktree_exists": contract.code_worktree.exists(),
+        "code_worktree_dirty": worktree_dirty(contract.code_worktree),
         "memory_worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
         "memory_worktree_exists": contract.memory_worktree.exists() if contract.memory_worktree else False,
+        "memory_worktree_dirty": worktree_dirty(contract.memory_worktree),
         "ledger_path": contract.ledger_path.as_posix() if contract.ledger_path else "",
         "human_review_status": contract.human_review_status,
         "approved_for_commit": contract.approved_for_commit,
@@ -153,6 +204,8 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "integration_status": contract.integration_status,
         "cleanup": contract.cleanup,
     }
+    payload.update(guidance)
+    return payload
 
 
 def load_contract_from_args(args: argparse.Namespace) -> WorktreeContract:
@@ -161,7 +214,7 @@ def load_contract_from_args(args: argparse.Namespace) -> WorktreeContract:
     if contract_path is None:
         if not args.task_name:
             raise RuntimeError("--task-name or --contract-path is required")
-        contract_path = context.task_root / "contract.md" if context.task_root.name.endswith("-ar") else context.task_root / context.repo_name / f"{args.task_name}-ar" / "contract.md"
+        contract_path = context.task_root / "contract.md"
     return load_contract(contract_path)
 
 
@@ -173,7 +226,7 @@ def command_status(args: argparse.Namespace) -> int:
 
 def command_attach(args: argparse.Namespace) -> int:
     contract = load_contract_from_args(args)
-    print(json.dumps({"attached": True, **status_payload(contract)}, indent=2))
+    print(json.dumps({"state": "attached", "attached": True, **status_payload(contract)}, indent=2))
     return 0
 
 
@@ -211,7 +264,13 @@ def command_start(args: argparse.Namespace) -> int:
     code_state = ensure_worktree(repo, contract.code_worktree, contract.code_work_branch, contract.code_source_branch, args.dry_run)
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":
-        print(json.dumps({"state": "blocked", "code_worktree": code_state, "memory": memory_state}, indent=2))
+        print(json.dumps({
+            "state": "blocked",
+            "summary": "Code worktree is prepared, but shared memory cannot be used until the developer selects a recovery path.",
+            "next_action": "choose-memory-recovery",
+            "code_worktree": code_state,
+            "memory": memory_state,
+        }, indent=2))
         return 2
     if contract.memory_mode == "shared" and memory_state["state"] == "disabled":
         contract = replace(
@@ -230,7 +289,16 @@ def command_start(args: argparse.Namespace) -> int:
 
     if not args.dry_run:
         write_contract(contract.contract_path, contract)
-    print(json.dumps({"state": "started", "code_worktree": code_state, "memory": memory_state, "contract": contract_payload(contract)}, indent=2))
+    print(json.dumps({
+        "state": "started",
+        "summary": "Worktree task started; continue the wrapped workflow before closeout.",
+        "next_action": "work",
+        "code_worktree": code_state,
+        "memory": memory_state,
+        "contract_path": contract.contract_path.as_posix(),
+        "task_artifact": contract.task_artifact.as_posix(),
+        "contract": contract_payload(contract),
+    }, indent=2))
     return 0
 
 
@@ -260,6 +328,14 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
             "state": "blocked",
             "reason": "shared memory repo is missing",
             "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
+        }
+    if (contract.memory_repo_path / ".git").exists() and has_changes(contract.memory_repo_path):
+        if args.memory_choice == "disabled-memory":
+            return {"state": "disabled", "reason": "human selected disabled memory"}
+        return {
+            "state": "blocked",
+            "reason": "shared memory source repo has uncommitted changes; commit refreshed onboarding and ledger before starting worktrees",
+            "choices": ["commit-memory-and-ledger-first", "disabled-memory", "custom"],
         }
     ledger_path = contract.memory_repo_path / "memory.md"
     try:
@@ -444,7 +520,15 @@ def command_closeout(args: argparse.Namespace) -> int:
         ledger_commit=ledger_commit,
     )
     write_contract(contract.contract_path, updated)
-    print(json.dumps({"state": "closed", **status_payload(updated), "code_commit": code_commit, "memory_content_commit": memory_commit, "ledger_commit": ledger_commit}, indent=2))
+    print(json.dumps({
+        "state": "closed",
+        **status_payload(updated),
+        "summary": "Closeout completed; integrate the task branches back into their source branches.",
+        "next_action": "integrate",
+        "code_commit": code_commit,
+        "memory_content_commit": memory_commit,
+        "ledger_commit": ledger_commit,
+    }, indent=2))
     return 0
 
 
@@ -452,12 +536,17 @@ def integration_branch(contract: WorktreeContract) -> str:
     return f"{contract.memory_work_branch}-integration"
 
 
-def blocked_integration_payload(contract: WorktreeContract, state: str, reason: str, **extra: object) -> dict[str, object]:
+def blocked_integration_payload(contract: WorktreeContract, state: str, reason: str, persist: bool = True, **extra: object) -> dict[str, object]:
+    blocked = replace(contract, integration_status="blocked")
+    if persist:
+        write_contract(blocked.contract_path, blocked)
     return {
         "state": state,
+        **status_payload(blocked),
         "reason": reason,
+        "summary": reason,
+        "next_action": "developer-decision",
         "developer_decision_required": True,
-        **status_payload(contract),
         **extra,
     }
 
@@ -579,6 +668,7 @@ def command_integrate(args: argparse.Namespace) -> int:
             contract,
             "blocked-non-ff",
             "source branch moved; rerun with --strategy replay after reviewing parallel changes",
+            persist=not args.dry_run,
             code_replay_required=code_replay_required,
             memory_replay_required=memory_replay_required,
         ), indent=2))
@@ -588,6 +678,8 @@ def command_integrate(args: argparse.Namespace) -> int:
         print(json.dumps({
             "state": "would-integrate",
             **status_payload(contract),
+            "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
+            "next_action": "integrate",
             "strategy": args.strategy,
             "code_replay_required": code_replay_required,
             "memory_replay_required": memory_replay_required,
@@ -647,11 +739,106 @@ def command_integrate(args: argparse.Namespace) -> int:
     print(json.dumps({
         "state": "integrated",
         **status_payload(updated),
+        "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
+        "next_action": "cleanup",
         "strategy": args.strategy,
         "integrated_code_commit": integrated_code_commit,
         "integrated_memory_content_commit": integrated_memory_content_commit,
         "integrated_ledger_commit": integrated_ledger_commit,
         "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
+    }, indent=2))
+    return 0
+
+
+def remove_registered_worktree(repo: Path, worktree: Path, dry_run: bool) -> dict[str, object]:
+    if not worktree.exists():
+        return {"path": worktree.as_posix(), "removed": False, "reason": "already-absent"}
+    if dry_run:
+        return {"path": worktree.as_posix(), "removed": False, "would_remove": True}
+    result = run_git(repo, ["worktree", "remove", str(worktree)])
+    if result.returncode != 0:
+        return {
+            "path": worktree.as_posix(),
+            "removed": False,
+            "reason": result.stderr.strip() or "git worktree remove failed",
+        }
+    return {"path": worktree.as_posix(), "removed": True}
+
+
+def delete_branch_if_merged(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
+    if not branch_exists(repo, branch):
+        return {"branch": branch, "deleted": False, "reason": "already-absent"}
+    if dry_run:
+        return {"branch": branch, "deleted": False, "would_delete": True}
+    result = run_git(repo, ["branch", "-d", branch])
+    if result.returncode != 0:
+        return {
+            "branch": branch,
+            "deleted": False,
+            "reason": result.stderr.strip() or "git branch -d refused the branch",
+        }
+    return {"branch": branch, "deleted": True}
+
+
+def remove_empty_dir(path: Path, dry_run: bool) -> dict[str, object]:
+    if not path.exists():
+        return {"path": path.as_posix(), "removed": False, "reason": "already-absent"}
+    if any(path.iterdir()):
+        return {"path": path.as_posix(), "removed": False, "reason": "not-empty"}
+    if dry_run:
+        return {"path": path.as_posix(), "removed": False, "would_remove": True}
+    path.rmdir()
+    return {"path": path.as_posix(), "removed": True}
+
+
+def command_cleanup(args: argparse.Namespace) -> int:
+    if not args.approved:
+        raise RuntimeError("cleanup requires --approved after successful integration")
+    contract = load_contract(args.contract_path)
+    if contract.integration_status != "completed":
+        raise RuntimeError("cleanup requires integration.status completed")
+
+    removed_worktrees = {
+        "code": remove_registered_worktree(contract.code_repo_path, contract.code_worktree, args.dry_run),
+    }
+    if contract.memory_mode == "shared" and contract.memory_repo_path is not None and contract.memory_worktree is not None:
+        removed_worktrees["memory"] = remove_registered_worktree(contract.memory_repo_path, contract.memory_worktree, args.dry_run)
+
+    branches = {
+        "code": delete_branch_if_merged(contract.code_repo_path, contract.code_work_branch, args.dry_run),
+    }
+    if contract.memory_mode == "shared" and contract.memory_repo_path is not None and contract.memory_work_branch:
+        branches["memory"] = delete_branch_if_merged(contract.memory_repo_path, contract.memory_work_branch, args.dry_run)
+        integration_work_branch = integration_branch(contract)
+        if branch_exists(contract.memory_repo_path, integration_work_branch):
+            branches["memory_integration"] = delete_branch_if_merged(contract.memory_repo_path, integration_work_branch, args.dry_run)
+
+    directories = {
+        "worktree_group": remove_empty_dir(contract.worktree_group, args.dry_run),
+    }
+    if contract.worktree_group.parent.exists():
+        directories["repo_worktree_group"] = remove_empty_dir(contract.worktree_group.parent, args.dry_run)
+
+    updated = contract if args.dry_run else replace(contract, cleanup="completed")
+    if not args.dry_run:
+        write_contract(contract.contract_path, updated)
+
+    already_clean = (
+        all(not item.get("removed") and item.get("reason") == "already-absent" for item in removed_worktrees.values())
+        and all(not item.get("deleted") and item.get("reason") == "already-absent" for item in branches.values())
+        and updated.cleanup == "completed"
+    )
+    state = "would-cleanup" if args.dry_run else ("already-clean" if already_clean else "cleanup-completed")
+    kept_branches = {key: value for key, value in branches.items() if not value.get("deleted") and value.get("reason") not in {"already-absent", None}}
+    print(json.dumps({
+        "state": state,
+        **status_payload(updated),
+        "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
+        "next_action": "done",
+        "removed_worktrees": removed_worktrees,
+        "branches": branches,
+        "directories": directories,
+        "kept_branches": kept_branches,
     }, indent=2))
     return 0
 
@@ -714,6 +901,12 @@ def build_parser() -> argparse.ArgumentParser:
     integrate.add_argument("--ledger-commit-message", default="")
     integrate.add_argument("--dry-run", action="store_true")
     integrate.set_defaults(func=command_integrate)
+
+    cleanup = subparsers.add_parser("cleanup")
+    cleanup.add_argument("--contract-path", type=Path, required=True)
+    cleanup.add_argument("--approved", action="store_true")
+    cleanup.add_argument("--dry-run", action="store_true")
+    cleanup.set_defaults(func=command_cleanup)
     return parser
 
 

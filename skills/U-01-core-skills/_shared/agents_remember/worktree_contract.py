@@ -65,6 +65,10 @@ def slugify(value: str) -> str:
 
 
 def task_folder_name(task_name: str) -> str:
+    return slugify(task_name)
+
+
+def legacy_task_folder_name(task_name: str) -> str:
     slug = slugify(task_name)
     return slug if slug.endswith("-ar") else f"{slug}-ar"
 
@@ -73,8 +77,23 @@ def task_root_for(coordination_root: Path, repo_name: str, task_name: str) -> Pa
     return coordination_root / "tasks" / repo_name / task_folder_name(task_name)
 
 
+def legacy_task_root_for(coordination_root: Path, repo_name: str, task_name: str) -> Path:
+    return coordination_root / "tasks" / repo_name / legacy_task_folder_name(task_name)
+
+
+def task_root_candidates(coordination_root: Path, repo_name: str, task_name: str) -> list[Path]:
+    current = task_root_for(coordination_root, repo_name, task_name)
+    legacy = legacy_task_root_for(coordination_root, repo_name, task_name)
+    return [current] if current == legacy else [current, legacy]
+
+
+def worktree_folder_name(worktree_name: str) -> str:
+    slug = slugify(worktree_name)
+    return slug if slug.endswith("-ar") else f"{slug}-ar"
+
+
 def worktree_group_for(coordination_root: Path, repo_name: str, worktree_name: str) -> Path:
-    return coordination_root / "worktrees" / repo_name / task_folder_name(worktree_name)
+    return coordination_root / "worktrees" / repo_name / worktree_folder_name(worktree_name)
 
 
 def default_contract(

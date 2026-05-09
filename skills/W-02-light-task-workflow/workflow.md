@@ -12,13 +12,17 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 2. approval before implementation
 3. onboarding update through `C-05-create-or-update-onboarding-files` after approved changes, with durable findings routed through that skill during implementation when they become clear enough
 
-## Phase 1 — Create Or Update The Task File
+## Phase 1 — Create Or Update The Task Wrapper
 
 ### 1. Ensure the local task area exists
 
-All light-task artifacts live under the C-08 resolved `<task-root>/`. For normal non-worktree tasks this may be the coordination task root; for worktree-backed tasks it is the repo-scoped folder beside `contract.md`, usually `ar-management/tasks/<repo-name>/<task-name>-ar/`.
+All light-task artifacts live under the C-08 resolved `<task-root>/`. The durable artifact shape is a wrapper folder plus `task.md`:
 
-If `<task-root>/` does not exist yet, create it before writing the task file.
+```text
+<task-root>/<task-slug>/task.md
+```
+
+Create this wrapper folder as soon as the task class, name, and workflow variables are clear. That can and should happen before any C-09 worktree is created. If the task later becomes worktree-backed, C-09 places `contract.md` beside `task.md` in the same wrapper folder.
 
 ### 2. Reuse an existing active task when appropriate
 
@@ -27,14 +31,16 @@ Before creating a new file:
 1. search `<task-root>/` for an active task already covering the same scope
 2. update that task instead of creating a duplicate when the scope matches
 
-### 3. Name the task file
+### 3. Name the task wrapper
 
 Use the same naming convention as heavy-task-workflow:
 
-| Origin        | Naming convention                  | Example                       |
-| ------------- | ---------------------------------- | ----------------------------- |
-| Ticket-linked | `YYMMDD_#<number>_<short-slug>.md` | `260319_#42_update-readme.md` |
-| Organic       | `YYMMDD_<descriptive-slug>.md`     | `260319_readme-rewrite.md`    |
+| Origin        | Naming convention                     | Example                          |
+| ------------- | ------------------------------------- | -------------------------------- |
+| Ticket-linked | `YYMMDD_#<number>_<short-slug>/`      | `260319_#42_update-readme/`      |
+| Organic       | `YYMMDD_<descriptive-slug>/`          | `260319_readme-rewrite/`         |
+
+The task document inside the wrapper is always `task.md`.
 
 ### 4. Run drift detection before planning against onboarding
 
@@ -43,6 +49,7 @@ If the task plan relies on onboarding files:
 1. invoke `C-02-onboarding-drift-detection` before planning against those files
 2. do not plan against drifted or missing-verification pre-existing onboarding until the drift report has been handed off to `C-05-create-or-update-onboarding-files` or the developer has explicitly accepted directional-only trust
 3. treat files created or modified during the current task as task-local working state after that initial gate passes; they remain pending verification, but they do not by themselves re-block planning for the same task
+4. before any C-09 worktree starts, commit refreshed shared-memory onboarding and the ledger so the worktree starts from a clean, mapped memory baseline
 
 ### 5. Gather context before writing the plan
 
@@ -53,9 +60,9 @@ Before planning:
 3. check `<onboarding-root>/` for any repo whose behavior or terminology the artifact touches
 4. use supporting search or docs tools only when the task domain needs them
 
-### 6. Write the task file
+### 6. Write `task.md`
 
-Use `template.md` as the canonical scaffold.
+Use `template.md` as the canonical scaffold and write it to `<task-wrapper>/task.md`.
 
 Write every checkbox on its own line. Under a parent step, indent nested checklist items by two spaces and keep the verification checkbox nested under the step it validates rather than emitting it as a same-level sibling.
 
@@ -231,8 +238,9 @@ Developer request
        ▼
   light-task-workflow
        │
-      ├─ task file under `<task-root>/`
-      ├─ worktree-backed tasks keep the task file beside `contract.md`
+      ├─ task wrapper under `<task-root>/<task-slug>/`
+      ├─ `task.md` inside the wrapper
+      ├─ worktree-backed tasks add `contract.md` beside `task.md`
        ├─ approval gate before implementation
        └─ live checkbox checklist during execution
 ```

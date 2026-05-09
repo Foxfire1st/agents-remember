@@ -25,7 +25,7 @@ from agents_remember.memory_ledger import (  # noqa: E402
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.worktree_contract import default_contract, load_contract, write_contract  # noqa: E402
+from agents_remember.worktree_contract import default_contract, load_contract, task_root_candidates, write_contract  # noqa: E402
 
 
 RESOLVER_PATH = CORE_ROOT / "C-08-ar-management-resolver" / "scripts" / "ar_management_resolver.py"
@@ -235,6 +235,37 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(result["state"], "blocked")
             self.assertIn("branch metadata", result["reason"])
 
+    def test_start_blocks_dirty_shared_memory_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_seed = init_repo(memory_repo, "main")
+            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", "c1", memory_seed))
+            git(memory_repo, "add", "memory.md")
+            git(memory_repo, "commit", "-m", "Add memory ledger")
+            (memory_repo / "onboarding" / "fresh.md").parent.mkdir(parents=True, exist_ok=True)
+            (memory_repo / "onboarding" / "fresh.md").write_text("# fresh\n", encoding="utf-8")
+            contract = default_contract(
+                task_name="Fix Thing",
+                repo_name="repo-a",
+                workflow_kind="light-task",
+                memory_mode="shared",
+                coordination_root=root / "ar-management",
+                code_repo_path=root / "repo-a",
+                code_source_branch="main",
+                code_work_branch="ar/fix-thing",
+                code_base_commit="c1",
+                worktree_name="fix-thing",
+                memory_repo_path=memory_repo,
+                memory_source_branch="main",
+                memory_work_branch="ar/fix-thing",
+                memory_base_commit=memory_seed,
+            )
+            result = worktree_manager.prepare_memory_for_start(contract, Namespace(memory_choice=None, dry_run=True))
+            self.assertEqual(result["state"], "blocked")
+            self.assertIn("commit refreshed onboarding and ledger", result["reason"])
+            self.assertIn("commit-memory-and-ledger-first", result["choices"])
+
     def test_start_reports_compatible_shared_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -300,9 +331,18 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             write_contract(contract.contract_path, contract)
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.task_root, root / "ar-management" / "tasks" / "device-management" / "fix-platform-status-ar")
+            self.assertEqual(loaded.task_root, root / "ar-management" / "tasks" / "device-management" / "fix-platform-status")
+            self.assertEqual(loaded.task_artifact, loaded.task_root / "task.md")
+            self.assertEqual(loaded.worktree_group, root / "ar-management" / "worktrees" / "device-management" / "fix-platform-status-ar")
             self.assertEqual(loaded.memory_mode, "shared")
             self.assertEqual(loaded.ledger_path, loaded.memory_worktree / "memory.md")
+            self.assertEqual(
+                task_root_candidates(root / "ar-management", "device-management", "Fix Platform Status"),
+                [
+                    root / "ar-management" / "tasks" / "device-management" / "fix-platform-status",
+                    root / "ar-management" / "tasks" / "device-management" / "fix-platform-status-ar",
+                ],
+            )
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -324,6 +364,35 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(loaded.integrated_code_commit, contract.code_commit)
             self.assertEqual(loaded.integrated_memory_content_commit, contract.memory_content_commit)
             self.assertEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
+            self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "cleanup-pending")
+
+            cleanup_args = Namespace(contract_path=contract.contract_path, approved=True, dry_run=False)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_cleanup(cleanup_args), 0)
+            cleanup_payload = json.loads(output.getvalue())
+            self.assertEqual(cleanup_payload["state"], "cleanup-completed")
+            self.assertEqual(cleanup_payload["next_action"], "done")
+            self.assertFalse(contract.code_worktree.exists())
+            self.assertFalse(contract.memory_worktree.exists())
+            self.assertFalse(git(contract.code_repo_path, "branch", "--list", contract.code_work_branch))
+            self.assertFalse(git(contract.memory_repo_path, "branch", "--list", contract.memory_work_branch))
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.cleanup, "completed")
+            self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "cleanup-completed")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_cleanup(cleanup_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["state"], "already-clean")
+
+    def test_cleanup_blocks_before_integration_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_shared_contract_fixture(root)
+            args = Namespace(contract_path=contract.contract_path, approved=True, dry_run=False)
+            with self.assertRaises(RuntimeError):
+                worktree_manager.command_cleanup(args)
 
     def test_integrate_replay_handles_parallel_non_overlapping_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -374,7 +443,8 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), parallel_code)
             self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), contract.memory_base_commit)
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.integration_status, "not-started")
+            self.assertEqual(loaded.integration_status, "blocked")
+            self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "integration-blocked")
 
     def test_resolver_internal_defaults_to_ar_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
