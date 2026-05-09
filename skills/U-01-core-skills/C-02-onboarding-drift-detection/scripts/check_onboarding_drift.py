@@ -103,6 +103,14 @@ def default_report_filename(repo_root: Path) -> str:
     return f"{repo_name}_{branch_name}_drift-report.md"
 
 
+def default_report_dir(temp_root: Path, repo_root: Path) -> Path:
+    return temp_root / "drift-reports" / sanitize_report_token(repo_root.name)
+
+
+def default_report_path(temp_root: Path, repo_root: Path) -> Path:
+    return default_report_dir(temp_root, repo_root) / default_report_filename(repo_root)
+
+
 def local_change_note(repo_root: Path, source_file: str) -> str:
     states: list[str] = []
     unstaged = run_git(repo_root, ["diff", "--quiet", "--", source_file])
@@ -615,14 +623,17 @@ def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Pa
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def resolve_report_path(report_path: Path | None, management_root: Path, repo_root: Path) -> Path:
+def resolve_report_path(report_path: Path | None, coordination_root: Path, temp_root: Path, repo_root: Path) -> Path:
     if report_path is None:
-        return management_root / "tasks" / default_report_filename(repo_root)
+        return default_report_path(temp_root, repo_root)
     if report_path.is_absolute():
-        if report_path.resolve().is_relative_to(management_root.resolve()):
+        if report_path.resolve().is_relative_to(coordination_root.resolve()):
             return report_path
-        return management_root / "tasks" / report_path.name
-    return management_root / report_path
+        return default_report_dir(temp_root, repo_root) / report_path.name
+    candidate = temp_root / report_path
+    if candidate.resolve().is_relative_to(temp_root.resolve()):
+        return candidate
+    return default_report_dir(temp_root, repo_root) / report_path.name
 
 
 def print_text(rows: list[DriftRow], onboarding_root: Path) -> None:
@@ -716,7 +727,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--report",
         type=Path,
-        help="Optional Markdown report output path. All report paths are constrained to the C-08 management root.",
+        help="Optional Markdown report output path. Relative paths resolve from the C-08 temp root; absolute paths are constrained to the coordination root.",
     )
     parser.add_argument("--format", choices=("text", "json", "csv"), default="text", help="Stdout format.")
     parser.add_argument(
@@ -757,7 +768,7 @@ def main(argv: list[str] | None = None) -> int:
 
     write_markdown_report(
         rows,
-        resolve_report_path(args.report, context.management_root, repo_root),
+        resolve_report_path(args.report, context.coordination_root, context.temp_root, repo_root),
         repo_root,
         context.onboarding_root,
     )

@@ -255,6 +255,35 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(context.coordination_root, repo / "ar-management")
             self.assertEqual(context.memory_root, repo / "ar-memory")
             self.assertEqual(context.onboarding_root, repo / "ar-memory" / "onboarding")
+            self.assertEqual(context.temp_root, repo / "ar-management" / "temp")
+
+    def test_drift_report_paths_use_temp_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            coordination_root = workspace / "ar-management"
+            temp_root = coordination_root / "temp"
+            drift = adopt_baseline.drift
+            default_report = drift.resolve_report_path(None, coordination_root, temp_root, repo)
+            self.assertEqual(default_report, temp_root / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
+            self.assertEqual(
+                drift.resolve_report_path(Path("custom/report.md"), coordination_root, temp_root, repo),
+                temp_root / "custom" / "report.md",
+            )
+            self.assertEqual(
+                drift.resolve_report_path(Path("../tasks/leak.md"), coordination_root, temp_root, repo),
+                temp_root / "drift-reports" / "repo-a" / "leak.md",
+            )
+            inside_coordination = coordination_root / "tasks" / "manual.md"
+            self.assertEqual(
+                drift.resolve_report_path(inside_coordination, coordination_root, temp_root, repo),
+                inside_coordination,
+            )
+            self.assertEqual(
+                drift.resolve_report_path(workspace / "outside.md", coordination_root, temp_root, repo),
+                temp_root / "drift-reports" / "repo-a" / "outside.md",
+            )
 
     def test_cross_repo_legacy_string_is_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -311,6 +340,9 @@ class WorktreeSupportTests(unittest.TestCase):
             context = adopt_baseline.resolve_context(args)
             rows, report = adopt_baseline.run_drift(context, None)
             payload = adopt_baseline.base_payload(context, rows, report)
+            self.assertEqual(report, workspace / "ar-management" / "temp" / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
+            self.assertTrue(report.exists())
+            self.assertFalse((workspace / "ar-management" / "tasks" / "repo-a" / "repo-a_main_drift-report.md").exists())
             self.assertEqual(payload["state"], "ready")
             self.assertEqual(payload["drift"]["actionable"], 0)
             self.assertFalse(payload["ledger"]["exists"])

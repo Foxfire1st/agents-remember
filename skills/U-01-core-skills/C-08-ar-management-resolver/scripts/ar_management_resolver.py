@@ -89,6 +89,7 @@ class ManagementContext:
     settings_path: Path
     path_settings_path: Path | None
     task_root: Path
+    temp_root: Path
     docs_root: Path
     system_root: Path
     sources_path: Path
@@ -1098,6 +1099,7 @@ def build_management_context(
     task_root = contract.task_root if contract is not None else (
         task_root_for(coordination_root, repo_name, task_name) if task_name and task_root_for is not None else coordination_root / "tasks"
     )
+    temp_root = coordination_root / "temp"
     worktree_group = contract.worktree_group if contract is not None else (
         worktree_group_for(coordination_root, repo_name, worktree_name) if worktree_name and worktree_group_for is not None else None
     )
@@ -1131,6 +1133,7 @@ def build_management_context(
         settings_path=settings_path,
         path_settings_path=path_settings_path if path_settings_path.exists() else None,
         task_root=task_root,
+        temp_root=temp_root,
         docs_root=effective_docs_root,
         system_root=system_root,
         sources_path=system_root / "sources.md",
@@ -1212,6 +1215,7 @@ def context_to_dict(context: ManagementContext) -> dict[str, object]:
         "settings_path": path_to_string(context.settings_path),
         "path_settings_path": path_to_string(context.path_settings_path) if context.path_settings_path else "",
         "task_root": path_to_string(context.task_root),
+        "temp_root": path_to_string(context.temp_root),
         "docs_root": path_to_string(context.docs_root),
         "system_root": path_to_string(context.system_root),
         "sources_path": path_to_string(context.sources_path),
@@ -1240,6 +1244,7 @@ def print_text(context: ManagementContext) -> None:
     if context.path_settings_path is not None:
         print(f"path_settings_path\t{context.path_settings_path.as_posix()}")
     print(f"task_root\t{context.task_root.as_posix()}")
+    print(f"temp_root\t{context.temp_root.as_posix()}")
     print(f"docs_root\t{context.docs_root.as_posix()}")
     print(f"storage_mode\t{context.storage.mode}")
     if context.contract_path is not None:

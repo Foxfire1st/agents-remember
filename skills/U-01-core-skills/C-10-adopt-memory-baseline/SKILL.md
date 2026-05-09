@@ -21,7 +21,7 @@ Use `status` first. Use `adopt` only after the developer approves the baseline d
 ## Workflow
 
 1. Resolve the repo with C-08 and confirm shared topology.
-2. Run C-02 drift classification against the resolved onboarding root.
+2. Run C-02 drift classification against the resolved onboarding root; its reusable report is written under C-08's resolved temp root unless `--report` is supplied.
 3. Inspect the shared memory repo for an existing `memory.md`.
 4. If a ledger already exists, report it and stop.
 5. If drift has actionable findings, stop unless `--accept-drift` is present.
