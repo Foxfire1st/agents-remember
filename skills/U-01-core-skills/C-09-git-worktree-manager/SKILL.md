@@ -5,9 +5,9 @@ description: "Create, attach to, report on, and close out Agents Remember worktr
 
 # C-09 Git Worktree Manager
 
-Use this skill when a task should run through an explicit code/memory worktree wrapper rather than directly in the source checkout.
+Use this skill when a task should run through an explicit code/memory worktree wrapper or when an approved direct checkout edit needs the same code-memory-ledger closeout discipline.
 
-C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It owns Git worktree state, task contracts, shared-memory compatibility checks, and approved closeout sequencing. It does not replace the workflow that performs the actual implementation.
+C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It owns Git worktree state, task contracts, direct checkout closeout, shared-memory compatibility checks, and approved closeout sequencing. It does not replace the workflow that performs the actual implementation.
 
 ## Commands
 
@@ -20,6 +20,8 @@ The bundled helper exposes these subcommands:
 <this-skill-dir>/scripts/git_worktree_manager.py bootstrap-memory --repo-name <repo>
 <this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --dry-run ...
 <this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --approved --approval-note <note> ...
+<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --repo-name <repo> --dry-run ...
+<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --repo-name <repo> --approved --approval-note <note> ...
 <this-skill-dir>/scripts/git_worktree_manager.py integrate --contract-path <contract.md> --approved --strategy ff-only
 <this-skill-dir>/scripts/git_worktree_manager.py cleanup --contract-path <contract.md> --approved
 ```
@@ -74,6 +76,26 @@ Shared-memory closeout order is:
 
 Push behavior is not automatic.
 
+## Direct Closeout
+
+Use `direct-closeout` only for small approved edits made in the current source checkout, or for memory-only polish that does not need isolated worktrees or durable task artifacts. If the work is parallel, long-running, conflict-prone, review-heavy, or needs replay/integration bookkeeping, use the normal C-09 worktree flow instead.
+
+Direct closeout is still explicitly human-gated. Agents must run `direct-closeout --dry-run` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout requires both `--approved` and `--approval-note`.
+
+Direct closeout resolves the current C-08 context, requires shared memory mode, requires the code checkout and memory repo to be on the same selected branch, and requires `memory.md` branch metadata to match that branch.
+
+Shared-memory direct closeout order is:
+
+1. identify changed current-checkout code paths and their required sidecar onboarding files
+2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
+3. commit code checkout changes and capture `C2` plus its commit date
+4. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
+5. commit memory-content changes and capture `M2`
+6. prepend `C2 | M2` to `memory.md`
+7. commit the ledger update as `L2`
+
+Direct closeout fails without mutation when required onboarding is missing, verification metadata is missing, shared memory is not resolved, branch metadata does not match, or no code or memory changes exist. Missing onboarding is the expected hard failure when the implementation/update pass somehow did not produce a required onboarding file; the next step is to run C-05 for that source file, then rerun the direct closeout preview.
+
 ## Integration
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
@@ -97,9 +119,10 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 
 1. C-09 may create or reuse worktrees and task contracts.
 2. C-09 may bootstrap a local shared memory repo when explicitly requested or when `start --memory-choice clean-start` is used.
-3. C-09 must not use divergent memory as semi-trusted reference context.
-4. C-09 must not commit without explicit commit approval after a closeout preview.
-5. C-09 shared-memory closeout must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
-6. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
-7. C-09 must not clean up without explicit cleanup approval.
-8. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.
+3. C-09 may directly close out approved current-checkout edits when a worktree wrapper would add ceremony without isolation value.
+4. C-09 must not use divergent memory as semi-trusted reference context.
+5. C-09 must not commit without explicit commit approval after a closeout preview.
+6. C-09 shared-memory closeout must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
+7. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
+8. C-09 must not clean up without explicit cleanup approval.
+9. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.

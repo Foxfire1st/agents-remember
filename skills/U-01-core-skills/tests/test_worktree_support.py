@@ -164,6 +164,27 @@ def dirty_open_shared_contract_fixture(root: Path):
     return contract
 
 
+def direct_shared_memory_fixture(root: Path, include_feature_onboarding: bool = True):
+    code_repo = root / "repo-a"
+    init_repo(code_repo, "main")
+    code_base = commit_file(code_repo, "feature.txt", "old\n", "Add feature baseline")
+    memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+    init_repo(memory_repo, "main")
+    if include_feature_onboarding:
+        write_file_onboarding(memory_repo / "onboarding", "repo-a", "feature.txt", code_base)
+        git(memory_repo, "add", "onboarding")
+        git(memory_repo, "commit", "-m", "Document feature baseline")
+    memory_content = git(memory_repo, "rev-parse", "HEAD")
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_content))
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "Add memory ledger")
+    (code_repo / "feature.txt").write_text("new\n", encoding="utf-8")
+    onboarding_file = memory_repo / "onboarding" / "feature.txt.md"
+    if include_feature_onboarding:
+        onboarding_file.write_text(onboarding_file.read_text(encoding="utf-8") + "Updated behavior notes.\n", encoding="utf-8")
+    return code_repo, memory_repo, code_base
+
+
 def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
@@ -506,6 +527,96 @@ class WorktreeSupportTests(unittest.TestCase):
                 worktree_manager.command_closeout(args)
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_direct_closeout_dry_run_reports_commit_plan_without_mutating(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, memory_repo, code_base = direct_shared_memory_fixture(root)
+            memory_head = git(memory_repo, "rev-parse", "HEAD")
+            args = Namespace(
+                repo_name="repo-a",
+                workspace_root=root,
+                repo=code_repo,
+                topology="shared",
+                shared_root=root / "ar-management",
+                contract_path=None,
+                task_name=None,
+                source_branch=None,
+                approved=False,
+                approval_note="",
+                code_commit_message="Update feature",
+                memory_commit_message="Update feature onboarding",
+                ledger_commit_message="Sync direct ledger",
+                dry_run=True,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_direct_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["state"], "would-direct-closeout")
+            self.assertEqual(payload["changed_code_paths"], ["feature.txt"])
+            self.assertIn("refresh-onboarding-metadata", payload["closeout_order"])
+            self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
+            self.assertTrue(payload["proposed_commits"]["code"]["would_commit"])
+            self.assertEqual(git(code_repo, "rev-parse", "HEAD"), code_base)
+            self.assertEqual(git(memory_repo, "rev-parse", "HEAD"), memory_head)
+
+    def test_direct_closeout_refreshes_onboarding_and_updates_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, memory_repo, _code_base = direct_shared_memory_fixture(root)
+            args = Namespace(
+                repo_name="repo-a",
+                workspace_root=root,
+                repo=code_repo,
+                topology="shared",
+                shared_root=root / "ar-management",
+                contract_path=None,
+                task_name=None,
+                source_branch=None,
+                approved=True,
+                approval_note="developer approved direct commit preview",
+                code_commit_message="Update feature",
+                memory_commit_message="Update feature onboarding",
+                ledger_commit_message="Sync direct ledger",
+                dry_run=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_direct_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            onboarding_file = memory_repo / "onboarding" / "feature.txt.md"
+            ledger = parse_ledger_text((memory_repo / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(payload["state"], "direct-closed")
+            self.assertEqual(read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), payload["code_commit"])
+            self.assertEqual(ledger.rows[0].code_commit, payload["code_commit"])
+            self.assertEqual(ledger.rows[0].memory_commit, payload["memory_content_commit"])
+            self.assertIn("feature.txt.md", git(memory_repo, "show", "--name-only", "--format=", payload["memory_content_commit"]))
+
+    def test_direct_closeout_blocks_missing_onboarding_before_code_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, _memory_repo, code_base = direct_shared_memory_fixture(root, include_feature_onboarding=False)
+            args = Namespace(
+                repo_name="repo-a",
+                workspace_root=root,
+                repo=code_repo,
+                topology="shared",
+                shared_root=root / "ar-management",
+                contract_path=None,
+                task_name=None,
+                source_branch=None,
+                approved=True,
+                approval_note="developer approved direct commit preview",
+                code_commit_message="Update feature",
+                memory_commit_message="Update feature onboarding",
+                ledger_commit_message="Sync direct ledger",
+                dry_run=False,
+            )
+            with self.assertRaisesRegex(RuntimeError, "Run C-05 create-or-update-onboarding-files"):
+                worktree_manager.command_direct_closeout(args)
+            self.assertEqual(git(code_repo, "rev-parse", "HEAD"), code_base)
+            self.assertTrue(worktree_manager.worktree_dirty(code_repo))
 
     def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

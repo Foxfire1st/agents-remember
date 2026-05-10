@@ -335,6 +335,8 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 3. After approval, apply code changes and update the corresponding onboarding in the same editing pass whenever the change affects durable current-state knowledge. Do not postpone required onboarding changes to the end of the task. Use the appropriate code quality checks from the C-08 resolved `tools_path`.
 
+4. When an approved chat-mode edit is small enough to stay in the current checkout, close it out through C-09 `direct-closeout` instead of hand-assembling the Git sequence. The command owns the shared-memory invariant: preview first, get explicit commit approval, commit code, refresh affected onboarding metadata to the new code commit, commit memory content, then update and commit the ledger. If required onboarding is missing, run C-05 for the affected source file and rerun the direct closeout preview.
+
 ---
 
 ## No Code Changes Before Explicit Developer Approval (Onboarding Maintenance is an exception!)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage Agents Remember worktree-backed task lifecycle.
+"""Manage Agents Remember task Git lifecycle.
 
 Requires Python 3.10+ and git. Uses only the Python standard library.
 """
@@ -504,8 +504,7 @@ def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
     return onboarding_root / f"{source_path}.md"
 
 
-def onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
-    context = contract_context(contract)
+def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
     required: list[dict[str, str]] = []
     missing: list[str] = []
     unsupported: list[str] = []
@@ -531,8 +530,12 @@ def onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]
     }
 
 
-def validate_onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
-    plan = onboarding_refresh_plan(contract, changed_paths)
+def onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+    return onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
+
+
+def validate_onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
+    plan = onboarding_refresh_plan_for_context(context, changed_paths)
     missing = plan["missing"]
     unsupported = plan["unsupported"]
     if missing or unsupported:
@@ -558,13 +561,17 @@ def validate_onboarding_refresh_plan(contract: WorktreeContract, changed_paths: 
     return plan
 
 
-def refresh_onboarding_metadata(
-    contract: WorktreeContract,
+def validate_onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+    return validate_onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
+
+
+def refresh_onboarding_metadata_for_context(
+    context,
     changed_paths: list[str],
     verified_commit: str,
     verified_date: str,
 ) -> list[dict[str, str]]:
-    plan = validate_onboarding_refresh_plan(contract, changed_paths)
+    plan = validate_onboarding_refresh_plan_for_context(context, changed_paths)
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
@@ -580,6 +587,15 @@ def refresh_onboarding_metadata(
         onboarding_path.write_text(text, encoding="utf-8")
         refreshed.append(item)
     return refreshed
+
+
+def refresh_onboarding_metadata(
+    contract: WorktreeContract,
+    changed_paths: list[str],
+    verified_commit: str,
+    verified_date: str,
+) -> list[dict[str, str]]:
+    return refresh_onboarding_metadata_for_context(contract_context(contract), changed_paths, verified_commit, verified_date)
 
 
 def command_bootstrap_memory(args: argparse.Namespace) -> int:
@@ -711,6 +727,123 @@ def command_closeout(args: argparse.Namespace) -> int:
         **status_payload(updated),
         "summary": "Closeout completed; integrate the task branches back into their source branches.",
         "next_action": "integrate",
+        "code_commit": code_commit,
+        "memory_content_commit": memory_commit,
+        "ledger_commit": ledger_commit,
+        "refreshed_onboarding": refreshed_onboarding,
+    }, indent=2))
+    return 0
+
+
+def validate_direct_shared_context(context, source_branch: str) -> object:
+    if context.memory_mode != "shared":
+        raise RuntimeError("direct closeout currently requires shared memory mode")
+    if not context.memory_root.exists() or not (context.memory_root / ".git").exists():
+        raise RuntimeError(f"shared memory repo is missing or is not a Git repo: {context.memory_root.as_posix()}")
+    if current_branch(context.target_repo) != source_branch:
+        raise RuntimeError(f"code repo is on {current_branch(context.target_repo)}, expected {source_branch}")
+    memory_branch = current_branch(context.memory_root)
+    if memory_branch != source_branch:
+        raise RuntimeError(f"memory repo is on {memory_branch}, expected {source_branch}")
+    ledger = load_ledger(context.memory_root / "memory.md")
+    if ledger.tracked_code_branch != source_branch or ledger.memory_branch != memory_branch:
+        raise RuntimeError(
+            "memory ledger branch metadata does not match the current direct closeout branches: "
+            f"trackedCodeBranch={ledger.tracked_code_branch}, memoryBranch={ledger.memory_branch}, expected={source_branch}"
+        )
+    return ledger
+
+
+def direct_closeout_preview_payload(context, args: argparse.Namespace, source_branch: str) -> dict[str, object]:
+    validate_direct_shared_context(context, source_branch)
+    code_dirty = worktree_dirty(context.target_repo)
+    memory_dirty = worktree_dirty(context.memory_root)
+    changed_paths = changed_worktree_paths(context.target_repo)
+    metadata_refresh = onboarding_refresh_plan_for_context(context, changed_paths)
+    ledger_message = args.ledger_commit_message or f"[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
+    return {
+        "state": "would-direct-closeout",
+        "phase": "commit-approval-pending",
+        "repo_name": context.repo_name,
+        "code_repo": context.target_repo.as_posix(),
+        "memory_repo": context.memory_root.as_posix(),
+        "source_branch": source_branch,
+        "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
+        "next_action": "request-commit-approval",
+        "next_command": "direct-closeout --approved --approval-note <note> --code-commit-message <message>",
+        "commit_approval_required": True,
+        "approval_question": "Approve creating the direct code, memory, and ledger commits with these messages?",
+        "closeout_order": [
+            "commit-code",
+            "refresh-onboarding-metadata",
+            "commit-memory-content",
+            "update-ledger",
+            "commit-ledger",
+        ],
+        "changed_code_paths": changed_paths,
+        "onboarding_metadata_refresh": metadata_refresh,
+        "proposed_commits": {
+            "code": {
+                "would_commit": code_dirty,
+                "message": args.code_commit_message,
+                "worktree": context.target_repo.as_posix(),
+            },
+            "memory": {
+                "would_commit": memory_dirty or bool(metadata_refresh["required"]),
+                "message": args.memory_commit_message,
+                "worktree": context.memory_root.as_posix(),
+                "metadata_refresh_after_code_commit": True,
+            },
+            "ledger": {
+                "would_update": code_dirty or memory_dirty or bool(metadata_refresh["required"]),
+                "message": ledger_message,
+                "path": (context.memory_root / "memory.md").as_posix(),
+            },
+        },
+    }
+
+
+def command_direct_closeout(args: argparse.Namespace) -> int:
+    context = resolve_context(args)
+    source_branch = args.source_branch or current_branch(context.target_repo)
+    validate_direct_shared_context(context, source_branch)
+    if args.dry_run:
+        print(json.dumps(direct_closeout_preview_payload(context, args, source_branch), indent=2))
+        return 0
+    if not args.approved:
+        raise RuntimeError("direct closeout requires --approved after explicit commit approval")
+    approval_note = args.approval_note.replace("\n", " ").strip()
+    if not approval_note:
+        raise RuntimeError("direct closeout requires --approval-note describing the developer's explicit commit approval")
+
+    changed_paths = changed_worktree_paths(context.target_repo)
+    memory_was_dirty = worktree_dirty(context.memory_root)
+    if not changed_paths and not memory_was_dirty:
+        raise RuntimeError("direct closeout found no code or memory changes to commit")
+    validate_onboarding_refresh_plan_for_context(context, changed_paths)
+
+    code_commit = commit_if_dirty(context.target_repo, args.code_commit_message)
+    code_commit_date = commit_date(context.target_repo, code_commit)
+    refreshed_onboarding = refresh_onboarding_metadata_for_context(context, changed_paths, code_commit, code_commit_date)
+    memory_commit = commit_if_dirty(context.memory_root, args.memory_commit_message)
+    ledger_path = context.memory_root / "memory.md"
+    ledger = load_ledger(ledger_path)
+    write_ledger(ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
+    require_git(context.memory_root, ["add", "memory.md"])
+    ledger_commit = commit_if_dirty(
+        context.memory_root,
+        args.ledger_commit_message or f"[direct-closeout] Ledger sync: {code_commit} -> {memory_commit}",
+    )
+    print(json.dumps({
+        "state": "direct-closed",
+        "phase": "done",
+        "repo_name": context.repo_name,
+        "code_repo": context.target_repo.as_posix(),
+        "memory_repo": context.memory_root.as_posix(),
+        "source_branch": source_branch,
+        "summary": "Direct closeout completed; code, memory content, and ledger commits were created on the current branches.",
+        "approval_note": approval_note,
+        "changed_code_paths": changed_paths,
         "code_commit": code_commit,
         "memory_content_commit": memory_commit,
         "ledger_commit": ledger_commit,
@@ -1081,6 +1214,17 @@ def build_parser() -> argparse.ArgumentParser:
     closeout.add_argument("--ledger-commit-message", default="")
     closeout.add_argument("--dry-run", action="store_true")
     closeout.set_defaults(func=command_closeout)
+
+    direct_closeout = subparsers.add_parser("direct-closeout")
+    add_common(direct_closeout)
+    direct_closeout.add_argument("--source-branch")
+    direct_closeout.add_argument("--approved", action="store_true")
+    direct_closeout.add_argument("--approval-note", default="")
+    direct_closeout.add_argument("--code-commit-message", required=True)
+    direct_closeout.add_argument("--memory-commit-message", default="")
+    direct_closeout.add_argument("--ledger-commit-message", default="")
+    direct_closeout.add_argument("--dry-run", action="store_true")
+    direct_closeout.set_defaults(func=command_direct_closeout)
 
     integrate = subparsers.add_parser("integrate")
     integrate.add_argument("--contract-path", type=Path, required=True)

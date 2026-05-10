@@ -44,15 +44,11 @@ The same pattern can also live in a shared memory repo.
 
 For this project, the code repository is:
 
-```text
-https://github.com/Foxfire1st/agents-remember-md
-```
+[https://github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st/agents-remember-md)
 
 and the working memory layer can be inspected here:
 
-```text
-https://github.com/Foxfire1st/ar-agents-remember-md
-```
+[https://github.com/Foxfire1st/ar-agents-remember-md](https://github.com/Foxfire1st/ar-agents-remember-md)
 
 That memory repo has the shape Agents Remember expects:
 
@@ -320,6 +316,8 @@ Most tasks don't need a framework. They need an agent that already knows the cod
 | **Light task**     | Medium tasks, or tasks likely to outlive one session                                                      | Writes a single-page plan to a task file, gets approval, implements, updates onboarding                                                                                                         |
 | **Heavy task**     | Migrations, cross-repo contracts, changes where "looks right, breaks in production" would be catastrophic | Seven phases with review gates and adversarial checkpoints, projected code+intent before touching real code, task-local docs that promote into onboarding only after implementation is approved |
 
+Small chat-mode edits can still use the current checkout. In shared-memory mode, `C-09-git-worktree-manager direct-closeout` handles the approved commit sequence for those micro edits: commit code first, refresh affected onboarding metadata to that code commit, commit memory, then update the ledger. Larger or parallel work should still use C-09 worktrees so integration and cleanup stay explicit.
+
 All three modes share the same three-part discipline:
 
 1. **Resolve, then drift check before planning.** Before the agent plans against onboarding, it uses `C-08-ar-management-resolver` to resolve the active management context, then verifies that the resolved onboarding unit is not stale against the source. The `C-02-onboarding-drift-detection` skill runs this check and classifies trust.
@@ -486,7 +484,7 @@ For local-first repositories, C-08 resolves repo-local `ar-memory/` as durable m
   - `C-04-discovery` — top-down reading order for unfamiliar code
   - `C-05-create-or-update-onboarding-files` — the onboarding template, inline adapter docs, and maintenance
   - `C-08-ar-management-resolver` — resolve the active memory and coordination context from a repository name
-  - `C-09-git-worktree-manager` — create, attach, report, and human-approved close out worktree-backed tasks
+  - `C-09-git-worktree-manager` — create, attach, report, human-approved close out worktree-backed tasks, and direct-closeout approved current-checkout edits
   - `C-10-adopt-memory-baseline` — turn existing shared-memory onboarding into the first ledgered `memory.md` baseline after drift review
 - `skills/P-99-review/` — the adversarial review package used by heavy task
 - `AGENTS.md` — operational principles, including the chat-mode loop
