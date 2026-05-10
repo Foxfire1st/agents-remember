@@ -623,9 +623,17 @@ def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Pa
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def resolve_report_path(report_path: Path | None, coordination_root: Path, temp_root: Path, repo_root: Path) -> Path:
+def resolve_report_path(
+    report_path: Path | None,
+    coordination_root: Path,
+    temp_root: Path,
+    repo_root: Path,
+    memory_root: Path | None = None,
+) -> Path:
     if report_path is None:
         return default_report_path(temp_root, repo_root)
+    if memory_root is not None and report_path.is_absolute() and report_path.resolve().is_relative_to(memory_root.resolve()):
+        return default_report_dir(temp_root, repo_root) / report_path.name
     if report_path.is_absolute():
         if report_path.resolve().is_relative_to(coordination_root.resolve()):
             return report_path
@@ -768,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
 
     write_markdown_report(
         rows,
-        resolve_report_path(args.report, context.coordination_root, context.temp_root, repo_root),
+        resolve_report_path(args.report, context.coordination_root, context.temp_root, repo_root, context.memory_root),
         repo_root,
         context.onboarding_root,
     )

@@ -62,7 +62,7 @@ def run_drift(context, report_path: Path | None):
         for path in drift.discover_inline_onboarding_sources(context.target_repo, context.storage)
     )
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    report = drift.resolve_report_path(report_path, context.coordination_root, context.temp_root, context.target_repo)
+    report = drift.resolve_report_path(report_path, context.coordination_root, context.temp_root, context.target_repo, context.memory_root)
     drift.write_markdown_report(rows, report, context.target_repo, context.onboarding_root)
     return rows, report
 

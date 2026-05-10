@@ -751,6 +751,7 @@ class WorktreeSupportTests(unittest.TestCase):
             init_repo(repo, "main")
             coordination_root = workspace / "ar-management"
             temp_root = coordination_root / "temp"
+            memory_root = coordination_root / "memory-repos" / "ar-repo-a"
             drift = adopt_baseline.drift
             default_report = drift.resolve_report_path(None, coordination_root, temp_root, repo)
             self.assertEqual(default_report, temp_root / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
@@ -766,6 +767,11 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(
                 drift.resolve_report_path(inside_coordination, coordination_root, temp_root, repo),
                 inside_coordination,
+            )
+            memory_report = memory_root / "reports" / "manual-drift-report.md"
+            self.assertEqual(
+                drift.resolve_report_path(memory_report, coordination_root, temp_root, repo, memory_root),
+                temp_root / "drift-reports" / "repo-a" / "manual-drift-report.md",
             )
             self.assertEqual(
                 drift.resolve_report_path(workspace / "outside.md", coordination_root, temp_root, repo),
