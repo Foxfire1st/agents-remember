@@ -40,6 +40,42 @@ shot_planner.py.md      drifted      source changed since 4d1fdf2
 
 Then it refreshes only the stale onboarding and plans against current context, not old notes.
 
+The same pattern can also live in a shared memory repo.
+
+For this project, the code repository is:
+
+```text
+https://github.com/Foxfire1st/agents-remember-md
+```
+
+and the working memory layer can be inspected here:
+
+```text
+https://github.com/Foxfire1st/ar-agents-remember-md
+```
+
+That memory repo has the shape Agents Remember expects:
+
+```text
+ar-management/memory-repos/ar-agents-remember-md/
+  README.md
+  memory.md
+  onboarding/
+    overview.md
+    README.md.md
+    skills/...
+```
+
+`memory.md` is the ledger. It records which memory commit was verified against which code commit:
+
+```text
+<code commit> | <memory commit>
+```
+
+That means the knowledge layer can move through Git the same way code does. A release branch, migration branch, or long-running feature branch can carry the version of memory that matches that branch's code.
+
+The memory repo for this project is intentionally readable as a working example of the memory layer itself.
+
 ![alt text](agents-remember.png)
 
 ---
