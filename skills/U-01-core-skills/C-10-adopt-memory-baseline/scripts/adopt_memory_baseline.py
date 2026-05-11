@@ -16,7 +16,7 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 CORE_ROOT = Path(__file__).resolve().parents[2]
 SHARED_ROOT = CORE_ROOT / "_shared"
-RESOLVER_PATH = CORE_ROOT / "C-08-ar-management-resolver" / "scripts" / "ar_management_resolver.py"
+RESOLVER_PATH = CORE_ROOT / "C-08-ar-coordination-context-resolver" / "scripts" / "ar_coordination_context_resolver.py"
 DRIFT_PATH = CORE_ROOT / "C-02-onboarding-drift-detection" / "scripts" / "check_onboarding_drift.py"
 WORKTREE_MANAGER_PATH = CORE_ROOT / "C-09-git-worktree-manager" / "scripts" / "git_worktree_manager.py"
 sys.path.insert(0, str(SHARED_ROOT))
@@ -35,18 +35,18 @@ def load_module(name: str, path: Path):
     return module
 
 
-resolver = load_module("ar_management_resolver", RESOLVER_PATH)
+resolver = load_module("coordination_resolver", RESOLVER_PATH)
 drift = load_module("check_onboarding_drift", DRIFT_PATH)
 worktree_manager = load_module("git_worktree_manager", WORKTREE_MANAGER_PATH)
 
 
 def resolve_context(args: argparse.Namespace):
-    return resolver.resolve_management_context(
-        repo_name=args.repo_name,
+    return resolver.resolve_coordination_context(
+        code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,
         requested_topology=args.topology,
         shared_root=args.shared_root,
-        target_repo=args.repo,
+        code_repository_root=args.code_repository_root,
     )
 
 
@@ -54,16 +54,16 @@ def run_drift(context, report_path: Path | None):
     if not context.onboarding_root.exists():
         raise RuntimeError(f"onboarding root does not exist: {context.onboarding_root}")
     rows = [
-        drift.classify_sidecar_onboarding(path, context.target_repo, context.onboarding_root, context.storage)
+        drift.classify_sidecar_onboarding(path, context.code_repository_root, context.onboarding_root, context.storage)
         for path in drift.discover_onboarding_files(context.onboarding_root)
     ]
     rows.extend(
-        drift.classify_inline_source(path, context.target_repo)
-        for path in drift.discover_inline_onboarding_sources(context.target_repo, context.storage)
+        drift.classify_inline_source(path, context.code_repository_root)
+        for path in drift.discover_inline_onboarding_sources(context.code_repository_root, context.storage)
     )
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    report = drift.resolve_report_path(report_path, context.coordination_root, context.temp_root, context.target_repo, context.memory_root)
-    drift.write_markdown_report(rows, report, context.target_repo, context.onboarding_root)
+    report = drift.resolve_report_path(report_path, context.coordination_root, context.temp_root, context.code_repository_root, context.memory_root)
+    drift.write_markdown_report(rows, report, context.code_repository_root, context.onboarding_root)
     return rows, report
 
 
@@ -110,9 +110,9 @@ def base_payload(context, rows: list[object], report: Path) -> dict[str, object]
         state = "blocked-drift"
     return {
         "state": state,
-        "repo_name": context.repo_name,
+        "code_repository_name": context.code_repository_name,
         "topology": context.topology,
-        "target_repo": context.target_repo.as_posix(),
+        "code_repository_root": context.code_repository_root.as_posix(),
         "memory_root": context.memory_root.as_posix(),
         "onboarding_root": context.onboarding_root.as_posix(),
         "ledger_path": context.ledger_path.as_posix(),
@@ -151,18 +151,18 @@ def command_adopt(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    source_branch = args.source_branch or current_branch(context.target_repo)
+    source_branch = args.source_branch or current_branch(context.code_repository_root)
     contract = default_contract(
-        task_name=f"adopt-{context.repo_name}-memory-baseline",
-        repo_name=context.repo_name,
+        task_name=f"adopt-{context.code_repository_name}-memory-baseline",
+        repo_name=context.code_repository_name,
         workflow_kind="adopt-memory-baseline",
         memory_mode="shared",
         coordination_root=context.coordination_root,
-        code_repo_path=context.target_repo,
+        code_repo_path=context.code_repository_root,
         code_source_branch=source_branch,
         code_work_branch=args.work_branch or source_branch,
-        code_base_commit=head_commit(context.target_repo, source_branch),
-        worktree_name=f"adopt-{context.repo_name}-memory-baseline",
+        code_base_commit=head_commit(context.code_repository_root, source_branch),
+        worktree_name=f"adopt-{context.code_repository_name}-memory-baseline",
         memory_repo_path=context.memory_root,
         memory_source_branch=source_branch,
         memory_work_branch=args.work_branch or source_branch,
@@ -177,11 +177,11 @@ def command_adopt(args: argparse.Namespace) -> int:
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--repo-name", help="Repository name to resolve.")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --repo-name.")
-    parser.add_argument("--repo", type=Path, help="Compatibility input for callers that already have the repository root path.")
+    parser.add_argument("--code-repository-name", help="Code repository name to resolve.")
+    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
+    parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
     parser.add_argument("--topology", choices=("internal", "shared"), help="Optional topology override.")
-    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-management root.")
+    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-coordination root.")
     parser.add_argument("--report", type=Path, help="Optional C-02 drift report path.")
 
 

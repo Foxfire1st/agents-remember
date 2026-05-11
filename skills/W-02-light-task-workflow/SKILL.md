@@ -24,7 +24,7 @@ Treat the single-page-plan test as guidance rather than a hard routing rule. Use
 
 ## Task Artifact
 
-Light-task-workflow maintains one task wrapper folder under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-management-resolver` for the target repository. The task document is always named `task.md` inside that wrapper folder.
+Light-task-workflow maintains one task wrapper folder under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-coordination-context-resolver` for the target repository. The task document is always named `task.md` inside that wrapper folder.
 
 Naming follows the same convention as heavy-task-workflow:
 

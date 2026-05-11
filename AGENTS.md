@@ -1,5 +1,28 @@
 # AGENTS.md
 
+## Coding Style
+
+### Compatibility And Legacy Code
+
+Do not keep old code paths, wrappers, aliases, fallbacks, or compatibility layers by default.
+
+Compatibility is allowed only when required by:
+
+- an external/public API contract
+- persisted data
+- staged migration or rollout requirements
+- explicit user request
+
+If compatibility is required, make the reason clear in the code or final summary and include the removal condition when applicable.
+
+### Deletion And Cleanup
+
+Delete obsolete code only when it is clearly unused by the updated implementation and not part of a public contract, generated artifact, migration history, or documented extension point.
+
+Remove unused imports, unreachable branches, dead helpers, obsolete tests, and stale comments created by your change.
+
+Do not delete migration files, generated baselines, snapshots, lockfiles, or user data unless explicitly requested.
+
 ## Purpose
 
 This repository is operated in a high-transparency collaboration mode.
@@ -329,7 +352,7 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 ## Chat Based Coding Workflow
 
-1. At the start of a coding workflow, invoke `C-08-ar-management-resolver` for the relevant repository, then invoke `C-02-onboarding-drift-detection` with the resolved context once for that repository. Do not plan against drifted, missing-verification, or orphaned pre-existing onboarding until it has been refreshed through `C-05-create-or-update-onboarding-files` under `Autonomous Onboarding Maintenance`. This establishes the task-start trust baseline. Do not skip this step, and do not re-trigger it solely because the current task later creates or modifies files in that repository.
+1. At the start of a coding workflow, invoke `C-08-ar-coordination-context-resolver` for the relevant repository, then invoke `C-02-onboarding-drift-detection` with the resolved context once for that repository. Do not plan against drifted, missing-verification, or orphaned pre-existing onboarding until it has been refreshed through `C-05-create-or-update-onboarding-files` under `Autonomous Onboarding Maintenance`. This establishes the task-start trust baseline. Do not skip this step, and do not re-trigger it solely because the current task later creates or modifies files in that repository.
 
 2. During investigation, read each relevant source file with its verified onboarding as a pair. If the current task has already modified or created that pair after the gate passed, read the current working versions together and treat them as pending verification rather than re-verified onboarding. Do not bulk-read onboarding as detached background context, and do not defer the onboarding read until after source interpretation. After enough paired reads, show the developer the plan in chat, including code examples for every distinct change you intend to make. Wait for explicit developer approval before you start changing any code.
 
@@ -352,27 +375,27 @@ When asked to find a sollution to a problem, do not change any code before you h
 
 This workspace uses a layered memory system. Make sure to read the below rules before performing actions.
 
-Infer which repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is considered the "target" repository.
+Infer which code repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is the code repository for resolver inputs.
 
-Resolve the active memory and coordination context for the target repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-management-resolver` as the normal resolver entry point: pass the repository name and consume the returned local or shared context.
+Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
 
-Default to internal topology: the target repository owns durable memory under `<target-repo>/ar-memory/` with `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings when present. Local coordination artifacts such as tasks, notes, worktrees, and shared memory repo checkouts live under `ar-management/`.
+Default to internal topology: the code repository owns durable memory under `<code-repository-root>/ar-memory/` with `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings when present. Local coordination artifacts such as tasks, notes, worktrees, and shared memory repo checkouts live under `ar-coordination/`.
 
-Use shared topology only when the developer explicitly asks for shared scaffolding or the current repository has already been selected for shared management. In shared topology, resolve `AR_MANAGEMENT_ROOT` from `.env` or `.env.example`; use that folder as `coordination_root` and the selected repo's `ar-management/memory-repos/ar-<repo-name>/` checkout as `memory_root` when present. Mixed workspaces are allowed: resolve topology per target repository, so a locally managed repo keeps using its own memory root while a neighboring shared-managed repo uses a shared memory repo. Keep this paragraph as fallback guidance if the C-08 helper or script cannot run.
+Use shared topology only when the developer explicitly asks for shared scaffolding or the current repository has already been selected for shared memory. In shared topology, resolve `AR_COORDINATION_ROOT` from `.env` or `.env.example`; use that folder as `coordination_root` and the selected code repository's `ar-coordination/memory-repos/ar-<code-repository-name>/` checkout as `memory_root` when present. Mixed workspaces are allowed: resolve topology per code repository, so a locally managed repository keeps using its own memory root while a neighboring shared-memory repository uses a shared memory repo. Keep this paragraph as fallback guidance if the C-08 helper or script cannot run.
 
 The active files then live under the resolved memory and coordination roots:
 
-| Layer         | Location                                | Purpose                                                         |
-| ------------- | --------------------------------------- | --------------------------------------------------------------- |
-| memory root   | `<memory_root>/`                        | Durable repo memory, either `ar-memory/` or `memory-repos/ar-*` |
-| coordination  | `<coordination_root>/`                  | Local tasks, notes, worktrees, and memory-repo checkouts        |
-| instructions  | `<system_root>/settings.md`             | Human and agent guidance, path contract, and scaffold notes     |
-| path settings | `<system_root>/settings.json`           | Machine-readable storage, pathRules, and cross-repo data        |
-| onboarding    | `<resolved-onboarding-root>/`           | Code commentary — logic, invariants, conventions, task tracking |
-| tasks         | `<task_root>/`                          | Current change intent, plans, decision logs, contracts          |
-| docs          | `<docs_root>/`                          | Local domain documentation and mirrors                          |
-| sources       | `<sources_path>`                        | References to external technical documentation, mcps, etc.      |
-| tools         | `<tools_path>`                          | Repo-specific commands, checks, tools, and MCP notes            |
+| Layer         | Location                      | Purpose                                                         |
+| ------------- | ----------------------------- | --------------------------------------------------------------- |
+| memory root   | `<memory_root>/`              | Durable repo memory, either `ar-memory/` or `memory-repos/ar-*` |
+| coordination  | `<coordination_root>/`        | Local tasks, notes, worktrees, and memory-repo checkouts        |
+| instructions  | `<system_root>/settings.md`   | Human and agent guidance, path contract, and scaffold notes     |
+| path settings | `<system_root>/settings.json` | Machine-readable storage, pathRules, and cross-repo data        |
+| onboarding    | `<resolved-onboarding-root>/` | Code commentary — logic, invariants, conventions, task tracking |
+| tasks         | `<task_root>/`                | Current change intent, plans, decision logs, contracts          |
+| docs          | `<docs_root>/`                | Local domain documentation and mirrors                          |
+| sources       | `<sources_path>`              | References to external technical documentation, mcps, etc.      |
+| tools         | `<tools_path>`                | Repo-specific commands, checks, tools, and MCP notes            |
 
 ---
 
@@ -398,7 +421,7 @@ Planning is not an exception.
 Before opening, reading, summarizing, or reasoning from source file contents in
 the relevant repository you must perform these six gates in order:
 
-Gate 1: Invoke `C-08-ar-management-resolver` for the target repository and use its resolved context for the authoritative `coordination_root`, `memory_root`,
+Gate 1: Invoke `C-08-ar-coordination-context-resolver` for the target repository and use its resolved context for the authoritative `coordination_root`, `memory_root`,
 onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, task/worktree context, ledger path, and cross-repo allowances.
 
 Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository and then read its drift report.

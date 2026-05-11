@@ -19,7 +19,7 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 CORE_ROOT = Path(__file__).resolve().parents[2]
 SHARED_ROOT = CORE_ROOT / "_shared"
-RESOLVER_PATH = CORE_ROOT / "C-08-ar-management-resolver" / "scripts" / "ar_management_resolver.py"
+RESOLVER_PATH = CORE_ROOT / "C-08-ar-coordination-context-resolver" / "scripts" / "ar_coordination_context_resolver.py"
 sys.path.insert(0, str(SHARED_ROOT))
 
 from agents_remember.memory_ledger import (  # noqa: E402
@@ -39,7 +39,7 @@ from agents_remember.worktree_contract import (  # noqa: E402
 )
 
 
-RESOLVER_SPEC = importlib.util.spec_from_file_location("ar_management_resolver", RESOLVER_PATH)
+RESOLVER_SPEC = importlib.util.spec_from_file_location("coordination_resolver", RESOLVER_PATH)
 if RESOLVER_SPEC is None or RESOLVER_SPEC.loader is None:
     raise ImportError(f"Unable to load C-08 resolver module from {RESOLVER_PATH}")
 resolver = importlib.util.module_from_spec(RESOLVER_SPEC)
@@ -120,12 +120,12 @@ def ensure_worktree(repo: Path, worktree: Path, branch: str, source_branch: str,
 
 
 def resolve_context(args: argparse.Namespace):
-    return resolver.resolve_management_context(
-        repo_name=args.repo_name,
+    return resolver.resolve_coordination_context(
+        code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,
         requested_topology=args.topology,
         shared_root=args.shared_root,
-        target_repo=args.repo,
+        code_repository_root=args.code_repository_root,
         task_name=getattr(args, "task_name", None),
         worktree_name=getattr(args, "worktree_name", None),
         contract_path=getattr(args, "contract_path", None),
@@ -198,7 +198,7 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
     payload = {
         "task_id": contract.task_id,
         "task_name": contract.task_name,
-        "repo_name": contract.repo_name,
+        "code_repository_name": contract.repo_name,
         "workflow_kind": contract.workflow_kind,
         "memory_mode": contract.memory_mode,
         "contract_path": contract.contract_path.as_posix(),
@@ -244,16 +244,16 @@ def command_attach(args: argparse.Namespace) -> int:
 
 def command_start(args: argparse.Namespace) -> int:
     context = resolve_context(args)
-    repo = context.target_repo
+    repo = context.code_repository_root
     source_branch = args.source_branch or current_branch(repo)
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
     base_commit = head_commit(repo, source_branch)
     memory_mode = args.memory_mode or context.memory_mode
-    memory_repo = context.coordination_root / "memory-repos" / f"ar-{context.repo_name}" if memory_mode == "shared" else None
+    memory_repo = context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}" if memory_mode == "shared" else None
     memory_base = head_commit(memory_repo) if memory_repo is not None and memory_repo.exists() and (memory_repo / ".git").exists() else ""
     contract = default_contract(
         task_name=args.task_name,
-        repo_name=context.repo_name,
+        repo_name=context.code_repository_name,
         workflow_kind=args.workflow_kind,
         memory_mode=memory_mode,
         coordination_root=context.coordination_root,
@@ -485,10 +485,10 @@ def changed_worktree_paths(repo: Path) -> list[str]:
 
 
 def contract_context(contract: WorktreeContract):
-    return resolver.resolve_management_context(
-        repo_name=contract.repo_name,
+    return resolver.resolve_coordination_context(
+        code_repository_name=contract.repo_name,
         workspace_root=contract.coordination_root.parent,
-        target_repo=contract.code_repo_path,
+        code_repository_root=contract.code_repo_path,
         contract_path=contract.contract_path,
     )
 
@@ -509,7 +509,7 @@ def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> di
     missing: list[str] = []
     unsupported: list[str] = []
     for source_path in changed_paths:
-        storage = resolver.resolve_storage_for_source(source_path, context.storage, context.repo_name)
+        storage = resolver.resolve_storage_for_source(source_path, context.storage, context.code_repository_name)
         if storage == "disabled":
             continue
         if not resolver.sidecar_storage_label(storage):
@@ -600,19 +600,19 @@ def refresh_onboarding_metadata(
 
 def command_bootstrap_memory(args: argparse.Namespace) -> int:
     context = resolve_context(args)
-    source_branch = args.source_branch or current_branch(context.target_repo)
+    source_branch = args.source_branch or current_branch(context.code_repository_root)
     contract = default_contract(
-        task_name=args.task_name or f"bootstrap-{context.repo_name}-memory",
-        repo_name=context.repo_name,
+        task_name=args.task_name or f"bootstrap-{context.code_repository_name}-memory",
+        repo_name=context.code_repository_name,
         workflow_kind="bootstrap-memory",
         memory_mode="shared",
         coordination_root=context.coordination_root,
-        code_repo_path=context.target_repo,
+        code_repo_path=context.code_repository_root,
         code_source_branch=source_branch,
         code_work_branch=args.work_branch or source_branch,
-        code_base_commit=head_commit(context.target_repo, source_branch),
-        worktree_name=args.worktree_name or f"bootstrap-{context.repo_name}-memory",
-        memory_repo_path=context.coordination_root / "memory-repos" / f"ar-{context.repo_name}",
+        code_base_commit=head_commit(context.code_repository_root, source_branch),
+        worktree_name=args.worktree_name or f"bootstrap-{context.code_repository_name}-memory",
+        memory_repo_path=context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}",
         memory_source_branch=source_branch,
         memory_work_branch=args.work_branch or source_branch,
     )
@@ -740,8 +740,8 @@ def validate_direct_shared_context(context, source_branch: str) -> object:
         raise RuntimeError("direct closeout currently requires shared memory mode")
     if not context.memory_root.exists() or not (context.memory_root / ".git").exists():
         raise RuntimeError(f"shared memory repo is missing or is not a Git repo: {context.memory_root.as_posix()}")
-    if current_branch(context.target_repo) != source_branch:
-        raise RuntimeError(f"code repo is on {current_branch(context.target_repo)}, expected {source_branch}")
+    if current_branch(context.code_repository_root) != source_branch:
+        raise RuntimeError(f"code repository is on {current_branch(context.code_repository_root)}, expected {source_branch}")
     memory_branch = current_branch(context.memory_root)
     if memory_branch != source_branch:
         raise RuntimeError(f"memory repo is on {memory_branch}, expected {source_branch}")
@@ -756,16 +756,16 @@ def validate_direct_shared_context(context, source_branch: str) -> object:
 
 def direct_closeout_preview_payload(context, args: argparse.Namespace, source_branch: str) -> dict[str, object]:
     validate_direct_shared_context(context, source_branch)
-    code_dirty = worktree_dirty(context.target_repo)
+    code_dirty = worktree_dirty(context.code_repository_root)
     memory_dirty = worktree_dirty(context.memory_root)
-    changed_paths = changed_worktree_paths(context.target_repo)
+    changed_paths = changed_worktree_paths(context.code_repository_root)
     metadata_refresh = onboarding_refresh_plan_for_context(context, changed_paths)
     ledger_message = args.ledger_commit_message or f"[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
     return {
         "state": "would-direct-closeout",
         "phase": "commit-approval-pending",
-        "repo_name": context.repo_name,
-        "code_repo": context.target_repo.as_posix(),
+        "code_repository_name": context.code_repository_name,
+        "code_repository_root": context.code_repository_root.as_posix(),
         "memory_repo": context.memory_root.as_posix(),
         "source_branch": source_branch,
         "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
@@ -786,7 +786,7 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
             "code": {
                 "would_commit": code_dirty,
                 "message": args.code_commit_message,
-                "worktree": context.target_repo.as_posix(),
+                "worktree": context.code_repository_root.as_posix(),
             },
             "memory": {
                 "would_commit": memory_dirty or bool(metadata_refresh["required"]),
@@ -805,7 +805,7 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
 
 def command_direct_closeout(args: argparse.Namespace) -> int:
     context = resolve_context(args)
-    source_branch = args.source_branch or current_branch(context.target_repo)
+    source_branch = args.source_branch or current_branch(context.code_repository_root)
     validate_direct_shared_context(context, source_branch)
     if args.dry_run:
         print(json.dumps(direct_closeout_preview_payload(context, args, source_branch), indent=2))
@@ -816,14 +816,14 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
     if not approval_note:
         raise RuntimeError("direct closeout requires --approval-note describing the developer's explicit commit approval")
 
-    changed_paths = changed_worktree_paths(context.target_repo)
+    changed_paths = changed_worktree_paths(context.code_repository_root)
     memory_was_dirty = worktree_dirty(context.memory_root)
     if not changed_paths and not memory_was_dirty:
         raise RuntimeError("direct closeout found no code or memory changes to commit")
     validate_onboarding_refresh_plan_for_context(context, changed_paths)
 
-    code_commit = commit_if_dirty(context.target_repo, args.code_commit_message)
-    code_commit_date = commit_date(context.target_repo, code_commit)
+    code_commit = commit_if_dirty(context.code_repository_root, args.code_commit_message)
+    code_commit_date = commit_date(context.code_repository_root, code_commit)
     refreshed_onboarding = refresh_onboarding_metadata_for_context(context, changed_paths, code_commit, code_commit_date)
     memory_commit = commit_if_dirty(context.memory_root, args.memory_commit_message)
     ledger_path = context.memory_root / "memory.md"
@@ -837,8 +837,8 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
     print(json.dumps({
         "state": "direct-closed",
         "phase": "done",
-        "repo_name": context.repo_name,
-        "code_repo": context.target_repo.as_posix(),
+        "code_repository_name": context.code_repository_name,
+        "code_repository_root": context.code_repository_root.as_posix(),
         "memory_repo": context.memory_root.as_posix(),
         "source_branch": source_branch,
         "summary": "Direct closeout completed; code, memory content, and ledger commits were created on the current branches.",
@@ -1164,11 +1164,11 @@ def command_cleanup(args: argparse.Namespace) -> int:
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--repo-name", help="Repository name to resolve.")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --repo-name.")
-    parser.add_argument("--repo", type=Path, help="Compatibility input for callers that already have the repository root path.")
+    parser.add_argument("--code-repository-name", help="Code repository name to resolve.")
+    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
+    parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
     parser.add_argument("--topology", choices=("internal", "shared"), help="Optional topology override.")
-    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-management root.")
+    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-coordination root.")
     parser.add_argument("--contract-path", type=Path, help="Path to an existing contract.md.")
     parser.add_argument("--task-name", help="Task name used for task folder resolution.")
 

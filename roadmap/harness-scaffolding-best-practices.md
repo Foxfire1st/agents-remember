@@ -131,7 +131,7 @@ Use this layer for:
 This is the layer that turns “the agent should stay inside the task boundary” into something tools can enforce.
 
 ```text
-ar-management/tasks/<task-id>/execution-context.json
+ar-coordination/tasks/<task-id>/execution-context.json
 ```
 
 Example:
@@ -141,13 +141,13 @@ Example:
   "taskId": "tas-link-expand",
   "targetRepo": "device-management",
   "codeWorktree": "/home/user/worktrees/device-management/tas-link-expand",
-  "memoryRoot": "/home/user/ar-management",
-  "onboardingRoot": "/home/user/ar-management/onboarding/device-management",
-  "coordinationRoot": "/home/user/ar-management/tasks/tas-link-expand",
+  "memoryRoot": "/home/user/ar-coordination",
+  "onboardingRoot": "/home/user/ar-coordination/onboarding/device-management",
+  "coordinationRoot": "/home/user/ar-coordination/tasks/tas-link-expand",
   "allowedWriteRoots": [
     "/home/user/worktrees/device-management/tas-link-expand",
-    "/home/user/ar-management/onboarding/device-management",
-    "/home/user/ar-management/tasks/tas-link-expand"
+    "/home/user/ar-coordination/onboarding/device-management",
+    "/home/user/ar-coordination/tasks/tas-link-expand"
   ],
   "commitAllowed": false,
   "pushAllowed": false,
@@ -336,10 +336,10 @@ Example:
   "version": 1,
   "skills": [
     {
-      "name": "c-08-ar-management-resolver",
-      "path": "skills/u-01-core-skills/c-08-ar-management-resolver",
+      "name": "c-08-ar-coordination-context-resolver",
+      "path": "skills/u-01-core-skills/c-08-ar-coordination-context-resolver",
       "phase": "u-01-core-skills",
-      "description": "Resolve the active Agents Remember management root, onboarding root, and task context before planning or editing."
+      "description": "Resolve the active Agents Remember coordination root, onboarding root, and task context before planning or editing."
     }
   ]
 }
@@ -1518,7 +1518,7 @@ coverage/
 ## Execution contract validation
 
 ```bash
-python scripts/agent/validate-execution-context.py ar-management/tasks/<task-id>/execution-context.json
+python scripts/agent/validate-execution-context.py ar-coordination/tasks/<task-id>/execution-context.json
 ```
 
 Checks:

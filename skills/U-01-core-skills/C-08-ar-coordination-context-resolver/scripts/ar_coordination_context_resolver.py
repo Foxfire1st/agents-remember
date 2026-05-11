@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve the active Agents Remember ar-management context for one repository.
+"""Resolve the active Agents Remember coordination context for one repository.
 
 Requires Python 3.9+. Uses only the Python standard library.
 """
@@ -77,22 +77,20 @@ class CrossRepoSettings:
 
 
 @dataclass
-class ManagementSelection:
+class CoordinationSelection:
     topology: Literal["internal", "shared"]
-    management_root: Path
     coordination_root: Path
     memory_root: Path
     settings_path: Path
 
 
 @dataclass
-class ManagementContext:
+class CoordinationContext:
     topology: Literal["internal", "shared"]
-    repo_name: str
-    target_repo: Path
+    code_repository_name: str
+    code_repository_root: Path
     coordination_root: Path
     memory_root: Path
-    management_root: Path
     onboarding_root: Path
     settings_path: Path
     path_settings_path: Path | None
@@ -138,19 +136,19 @@ def default_storage_mode(topology: Literal["internal", "shared"]) -> str:
     return "repo-sidecar" if topology == "internal" else "memory-repo"
 
 
-def internal_memory_root(target_repo: Path) -> Path:
-    return (target_repo / "ar-memory").resolve()
+def internal_memory_root(code_repository_root: Path) -> Path:
+    return (code_repository_root / "ar-memory").resolve()
 
 
-def internal_coordination_root(target_repo: Path) -> Path:
-    return (target_repo / "ar-management").resolve()
+def internal_coordination_root(code_repository_root: Path) -> Path:
+    return (code_repository_root / "ar-coordination").resolve()
 
 
-def shared_memory_root(coordination_root: Path, repo_name: str) -> Path:
-    return (coordination_root / "memory-repos" / f"ar-{repo_name}").resolve()
+def shared_memory_root(coordination_root: Path, code_repository_name: str) -> Path:
+    return (coordination_root / "memory-repos" / f"ar-{code_repository_name}").resolve()
 
 
-def existing_memory_or_legacy_settings_path(
+def settings_path_for_roots(
     memory_root: Path,
     coordination_root: Path,
     topology: Literal["internal", "shared"],
@@ -166,18 +164,18 @@ def existing_memory_or_legacy_settings_path(
 
 def memory_roots_from_settings(
     settings_path: Path,
-    target_repo: Path,
-    repo_name: str,
+    code_repository_root: Path,
+    code_repository_name: str,
     topology: Literal["internal", "shared"],
 ) -> tuple[Path, Path]:
     settings_root = settings_path.resolve().parent.parent
     if topology == "shared":
-        if settings_root.name == f"ar-{repo_name}" and settings_root.parent.name == "memory-repos":
+        if settings_root.name == f"ar-{code_repository_name}" and settings_root.parent.name == "memory-repos":
             return settings_root.parent.parent, settings_root
-        return settings_root, shared_memory_root(settings_root, repo_name)
+        return settings_root, shared_memory_root(settings_root, code_repository_name)
     if settings_root.name == "ar-memory":
-        return internal_coordination_root(target_repo), settings_root
-    return settings_root, internal_memory_root(target_repo)
+        return internal_coordination_root(code_repository_root), settings_root
+    return settings_root, internal_memory_root(code_repository_root)
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -207,37 +205,37 @@ def resolve_shared_root_hint(shared_root: Path | None, agents_repo: Path | None 
     resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
     for env_path in (resolved_agents_repo / ".env", resolved_agents_repo / ".env.example"):
         values = parse_env_file(env_path)
-        root = values.get("AR_MANAGEMENT_ROOT")
+        root = values.get("AR_COORDINATION_ROOT")
         if root:
             return resolve_path_from_declaring_file(root, env_path)
     return None
 
 
-def find_repo(workspace_root: Path, repo_name: str) -> Path:
-    repo_path = Path(repo_name).expanduser()
+def find_code_repository_root(workspace_root: Path, code_repository_name: str) -> Path:
+    repo_path = Path(code_repository_name).expanduser()
     if repo_path.is_absolute() and repo_path.exists():
         return repo_path.resolve()
 
-    direct = (workspace_root / repo_name).resolve()
+    direct = (workspace_root / code_repository_name).resolve()
     if direct.exists():
         return direct
 
-    matches = [path for path in workspace_root.iterdir() if path.is_dir() and path.name == repo_name]
+    matches = [path for path in workspace_root.iterdir() if path.is_dir() and path.name == code_repository_name]
     if len(matches) == 1:
         return matches[0].resolve()
     if len(matches) > 1:
-        raise ValueError(f"multiple repositories named {repo_name!r} found under {workspace_root}")
-    raise ValueError(f"repository {repo_name!r} was not found under {workspace_root}")
+        raise ValueError(f"multiple code repositories named {code_repository_name!r} found under {workspace_root}")
+    raise ValueError(f"code repository {code_repository_name!r} was not found under {workspace_root}")
 
 
 def infer_settings_path(onboarding_root: Path) -> Path:
     if onboarding_root.name == "onboarding":
-        management_root = onboarding_root.parent
+        context_root = onboarding_root.parent
     elif onboarding_root.parent.name == "onboarding":
-        management_root = onboarding_root.parent.parent
+        context_root = onboarding_root.parent.parent
     else:
-        management_root = onboarding_root.parent
-    return management_root / "system" / "settings.md"
+        context_root = onboarding_root.parent
+    return context_root / "system" / "settings.md"
 
 
 def path_settings_path_for(settings_path: Path) -> Path:
@@ -248,7 +246,7 @@ def infer_topology_from_onboarding_root(onboarding_root: Path) -> Literal["inter
     return "shared" if onboarding_root.parent.name == "onboarding" else "internal"
 
 
-def parse_management_settings(
+def parse_coordination_settings(
     settings_path: Path,
     topology: Literal["internal", "shared"],
 ) -> tuple[StorageSettings, CrossRepoSettings]:
@@ -449,7 +447,7 @@ def parse_settings_block(
     cross_repo = CrossRepoSettings()
     in_onboarding = False
     in_storage = False
-    in_legacy_path_rules = False
+    in_storage_path_rules = False
     in_path_rules = False
     in_cross_repo = False
     in_cross_repo_allow = False
@@ -476,7 +474,7 @@ def parse_settings_block(
             in_onboarding = stripped == "onboarding:"
             in_cross_repo = stripped == "crossRepo:"
             in_storage = False
-            in_legacy_path_rules = False
+            in_storage_path_rules = False
             in_path_rules = False
             in_cross_repo_allow = False
             current_rule = None
@@ -517,7 +515,7 @@ def parse_settings_block(
 
         if indent == 2 and stripped == "storage:":
             in_storage = True
-            in_legacy_path_rules = False
+            in_storage_path_rules = False
             in_path_rules = False
             saw_storage = True
             current_rule = None
@@ -526,7 +524,7 @@ def parse_settings_block(
             continue
         if indent == 2 and stripped == "pathRules:":
             in_storage = False
-            in_legacy_path_rules = False
+            in_storage_path_rules = False
             in_path_rules = True
             saw_path_rules = True
             current_rule = None
@@ -613,11 +611,11 @@ def parse_settings_block(
             settings.default = clean_scalar(stripped.split(":", 1)[1]) or "external"
             continue
         if indent == 4 and stripped == "pathRules:":
-            in_legacy_path_rules = True
+            in_storage_path_rules = True
             current_rule = None
             current_list = None
             continue
-        if not in_legacy_path_rules:
+        if not in_storage_path_rules:
             continue
         if indent == 6 and stripped.startswith("- path:"):
             current_rule = {
@@ -780,22 +778,22 @@ def resolve_storage_for_source(source_file: str, settings: StorageSettings, scop
     return (settings.default or "external") if settings.mode == "hybrid" else "disabled"
 
 
-def rule_selects_repo(rule: StorageRule, repo_name: str) -> bool:
+def rule_selects_code_repository(rule: StorageRule, code_repository_name: str) -> bool:
     rule_path = normalize_rel_path(str(rule.get("path", "")))
-    return rule_path == repo_name or rule_path.startswith(f"{repo_name}/")
+    return rule_path == code_repository_name or rule_path.startswith(f"{code_repository_name}/")
 
 
-def shared_repo_selected(repo_name: str, shared_root: Path) -> bool:
+def shared_code_repository_selected(code_repository_name: str, shared_root: Path) -> bool:
     if not shared_root.exists():
         return False
-    if (shared_root / "memory-repos" / f"ar-{repo_name}").exists():
+    if (shared_root / "memory-repos" / f"ar-{code_repository_name}").exists():
         return True
-    if (shared_root / "onboarding" / repo_name).exists():
+    if (shared_root / "onboarding" / code_repository_name).exists():
         return True
 
     settings_path = shared_root / "system" / "settings.md"
-    storage, _ = parse_management_settings(settings_path, "shared")
-    return any(rule_selects_repo(rule, repo_name) for rule in storage.path_rules)
+    storage, _ = parse_coordination_settings(settings_path, "shared")
+    return any(rule_selects_code_repository(rule, code_repository_name) for rule in storage.path_rules)
 
 
 def require_shared_root(shared_root: Path | None, agents_repo: Path | None = None) -> Path:
@@ -808,16 +806,16 @@ def require_shared_root(shared_root: Path | None, agents_repo: Path | None = Non
 def resolve_contract(
     contract_path: Path | None,
     coordination_root: Path,
-    repo_name: str,
+    code_repository_name: str,
     task_name: str | None,
 ) -> tuple[Any | None, Path | None]:
     candidate: Path | None = contract_path.resolve() if contract_path else None
     if candidate is None and task_name:
         candidates: list[Path] = []
         if task_root_candidates is not None:
-            candidates = task_root_candidates(coordination_root, repo_name, task_name)
+            candidates = task_root_candidates(coordination_root, code_repository_name, task_name)
         elif task_root_for is not None:
-            candidates = [task_root_for(coordination_root, repo_name, task_name)]
+            candidates = [task_root_for(coordination_root, code_repository_name, task_name)]
         for task_root in candidates:
             possible = task_root / "contract.md"
             if possible.exists():
@@ -956,77 +954,76 @@ def _entry_with_state(
     )
 
 
-def detect_management_selection(
-    repo_name: str,
-    target_repo: Path,
+def detect_coordination_selection(
+    code_repository_name: str,
+    code_repository_root: Path,
     requested_topology: Literal["internal", "shared"] | None = None,
     shared_root_hint: Path | None = None,
     settings_path: Path | None = None,
     agents_repo: Path | None = None,
-) -> ManagementSelection:
+) -> CoordinationSelection:
     if settings_path is not None:
         resolved_settings = settings_path.resolve()
         inferred_topology = requested_topology
         if inferred_topology is None:
             settings_root = resolved_settings.parent.parent
-            inferred_topology = "shared" if settings_root != internal_coordination_root(target_repo) and settings_root != internal_memory_root(target_repo) else "internal"
-        coordination_root, memory_root = memory_roots_from_settings(resolved_settings, target_repo, repo_name, inferred_topology)
-        return ManagementSelection(
+            inferred_topology = "shared" if settings_root != internal_coordination_root(code_repository_root) and settings_root != internal_memory_root(code_repository_root) else "internal"
+        coordination_root, memory_root = memory_roots_from_settings(resolved_settings, code_repository_root, code_repository_name, inferred_topology)
+        return CoordinationSelection(
             topology=inferred_topology,
-            management_root=coordination_root,
             coordination_root=coordination_root,
             memory_root=memory_root,
             settings_path=resolved_settings,
         )
 
     if requested_topology == "internal":
-        coordination_root = internal_coordination_root(target_repo)
-        memory_root = internal_memory_root(target_repo)
-        settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "internal")
-        return ManagementSelection("internal", coordination_root, coordination_root, memory_root, settings)
+        coordination_root = internal_coordination_root(code_repository_root)
+        memory_root = internal_memory_root(code_repository_root)
+        settings = settings_path_for_roots(memory_root, coordination_root, "internal")
+        return CoordinationSelection("internal", coordination_root, memory_root, settings)
     if requested_topology == "shared":
         coordination_root = require_shared_root(shared_root_hint, agents_repo)
-        memory_root = shared_memory_root(coordination_root, repo_name)
-        settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "shared")
-        return ManagementSelection("shared", coordination_root, coordination_root, memory_root, settings)
+        memory_root = shared_memory_root(coordination_root, code_repository_name)
+        settings = settings_path_for_roots(memory_root, coordination_root, "shared")
+        return CoordinationSelection("shared", coordination_root, memory_root, settings)
 
     shared_root = resolve_shared_root_hint(shared_root_hint, agents_repo)
-    if shared_root is not None and shared_repo_selected(repo_name, shared_root):
+    if shared_root is not None and shared_code_repository_selected(code_repository_name, shared_root):
         coordination_root = shared_root
-        memory_root = shared_memory_root(coordination_root, repo_name)
-        settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "shared")
-        return ManagementSelection("shared", coordination_root, coordination_root, memory_root, settings)
-    coordination_root = internal_coordination_root(target_repo)
-    memory_root = internal_memory_root(target_repo)
-    settings = existing_memory_or_legacy_settings_path(memory_root, coordination_root, "internal")
-    return ManagementSelection("internal", coordination_root, coordination_root, memory_root, settings)
+        memory_root = shared_memory_root(coordination_root, code_repository_name)
+        settings = settings_path_for_roots(memory_root, coordination_root, "shared")
+        return CoordinationSelection("shared", coordination_root, memory_root, settings)
+    coordination_root = internal_coordination_root(code_repository_root)
+    memory_root = internal_memory_root(code_repository_root)
+    settings = settings_path_for_roots(memory_root, coordination_root, "internal")
+    return CoordinationSelection("internal", coordination_root, memory_root, settings)
 
 
-def resolve_management_context(
-    repo_name: str | None = None,
+def resolve_coordination_context(
+    code_repository_name: str | None = None,
     workspace_root: Path | None = None,
     requested_topology: Literal["internal", "shared"] | None = None,
     shared_root: Path | None = None,
     settings_path: Path | None = None,
     onboarding_root: Path | None = None,
-    target_repo: Path | None = None,
+    code_repository_root: Path | None = None,
     agents_repo: Path | None = None,
     contract_path: Path | None = None,
     task_name: str | None = None,
     worktree_name: str | None = None,
-) -> ManagementContext:
+) -> CoordinationContext:
     resolved_workspace_root = (workspace_root or Path.cwd()).resolve()
     resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
 
-    if target_repo is not None:
-        resolved_target_repo = target_repo.resolve()
-        resolved_repo_name = repo_name or resolved_target_repo.name
-        resolved_workspace_root = workspace_root.resolve() if workspace_root else resolved_target_repo.parent
+    if code_repository_root is not None:
+        resolved_code_repository_root = code_repository_root.resolve()
+        resolved_code_repository_name = code_repository_name or resolved_code_repository_root.name
+        resolved_workspace_root = workspace_root.resolve() if workspace_root else resolved_code_repository_root.parent
     else:
-        if not repo_name:
-            raise ValueError("repo_name is required when target_repo is not supplied")
-        resolved_repo_name = repo_name
-        resolved_target_repo = find_repo(resolved_workspace_root, resolved_repo_name)
+        if not code_repository_name:
+            raise ValueError("code_repository_name is required when code_repository_root is not supplied")
+        resolved_code_repository_name = code_repository_name
+        resolved_code_repository_root = find_code_repository_root(resolved_workspace_root, resolved_code_repository_name)
 
     if onboarding_root is not None:
         resolved_onboarding_root = onboarding_root.resolve()
@@ -1034,14 +1031,14 @@ def resolve_management_context(
         resolved_topology = requested_topology or infer_topology_from_onboarding_root(resolved_onboarding_root)
         coordination_root, memory_root = memory_roots_from_settings(
             resolved_settings_path,
-            resolved_target_repo,
-            resolved_repo_name,
+            resolved_code_repository_root,
+            resolved_code_repository_name,
             resolved_topology,
         )
-        storage, cross_repo = parse_management_settings(resolved_settings_path, resolved_topology)
-        return build_management_context(
-            repo_name=resolved_repo_name,
-            target_repo=resolved_target_repo,
+        storage, cross_repo = parse_coordination_settings(resolved_settings_path, resolved_topology)
+        return build_coordination_context(
+            code_repository_name=resolved_code_repository_name,
+            code_repository_root=resolved_code_repository_root,
             topology=resolved_topology,
             coordination_root=coordination_root,
             memory_root=memory_root,
@@ -1055,26 +1052,26 @@ def resolve_management_context(
             workspace_root=resolved_workspace_root,
         )
 
-    selection = detect_management_selection(
-        repo_name=resolved_repo_name,
-        target_repo=resolved_target_repo,
+    selection = detect_coordination_selection(
+        code_repository_name=resolved_code_repository_name,
+        code_repository_root=resolved_code_repository_root,
         requested_topology=requested_topology,
         shared_root_hint=shared_root,
         settings_path=settings_path,
         agents_repo=resolved_agents_repo,
     )
     resolved_settings_path = settings_path.resolve() if settings_path else selection.settings_path
-    legacy_onboarding_root = (
+    coordination_onboarding_root = (
         selection.coordination_root / "onboarding"
         if selection.topology == "internal"
-        else selection.coordination_root / "onboarding" / resolved_repo_name
+        else selection.coordination_root / "onboarding" / resolved_code_repository_name
     )
     memory_onboarding_root = selection.memory_root / "onboarding"
-    resolved_onboarding_root = memory_onboarding_root if memory_onboarding_root.exists() or not legacy_onboarding_root.exists() else legacy_onboarding_root
-    storage, cross_repo = parse_management_settings(resolved_settings_path, selection.topology)
-    return build_management_context(
-        repo_name=resolved_repo_name,
-        target_repo=resolved_target_repo,
+    resolved_onboarding_root = memory_onboarding_root if memory_onboarding_root.exists() or not coordination_onboarding_root.exists() else coordination_onboarding_root
+    storage, cross_repo = parse_coordination_settings(resolved_settings_path, selection.topology)
+    return build_coordination_context(
+        code_repository_name=resolved_code_repository_name,
+        code_repository_root=resolved_code_repository_root,
         topology=selection.topology,
         coordination_root=selection.coordination_root,
         memory_root=selection.memory_root,
@@ -1089,9 +1086,9 @@ def resolve_management_context(
     )
 
 
-def build_management_context(
-    repo_name: str,
-    target_repo: Path,
+def build_coordination_context(
+    code_repository_name: str,
+    code_repository_root: Path,
     topology: Literal["internal", "shared"],
     coordination_root: Path,
     memory_root: Path,
@@ -1103,20 +1100,20 @@ def build_management_context(
     task_name: str | None = None,
     worktree_name: str | None = None,
     workspace_root: Path | None = None,
-) -> ManagementContext:
+) -> CoordinationContext:
     memory_system_root = memory_root / "system"
-    legacy_system_root = coordination_root / "system"
-    system_root = memory_system_root if memory_system_root.exists() else legacy_system_root
+    coordination_system_root = coordination_root / "system"
+    system_root = memory_system_root if memory_system_root.exists() else coordination_system_root
     path_settings_path = path_settings_path_for(settings_path)
-    resolved_contract = resolve_contract(contract_path, coordination_root, repo_name, task_name)
+    resolved_contract = resolve_contract(contract_path, coordination_root, code_repository_name, task_name)
     contract = resolved_contract[0]
     resolved_contract_path = resolved_contract[1]
     task_root = contract.task_root if contract is not None else (
-        task_root_for(coordination_root, repo_name, task_name) if task_name and task_root_for is not None else coordination_root / "tasks"
+        task_root_for(coordination_root, code_repository_name, task_name) if task_name and task_root_for is not None else coordination_root / "tasks"
     )
     temp_root = coordination_root / "temp"
     worktree_group = contract.worktree_group if contract is not None else (
-        worktree_group_for(coordination_root, repo_name, worktree_name) if worktree_name and worktree_group_for is not None else None
+        worktree_group_for(coordination_root, code_repository_name, worktree_name) if worktree_name and worktree_group_for is not None else None
     )
     code_worktree = contract.code_worktree if contract is not None else None
     memory_worktree = contract.memory_worktree if contract is not None else None
@@ -1134,16 +1131,15 @@ def build_management_context(
     effective_docs_root = effective_memory_root / "docs" if (effective_memory_root / "docs").exists() else coordination_root / "docs"
     resolved_cross_repo = resolve_cross_repo_settings(
         cross_repo,
-        workspace_root or target_repo.parent,
+        workspace_root or code_repository_root.parent,
         coordination_root,
     )
-    return ManagementContext(
+    return CoordinationContext(
         topology=topology,
-        repo_name=repo_name,
-        target_repo=target_repo,
+        code_repository_name=code_repository_name,
+        code_repository_root=code_repository_root,
         coordination_root=coordination_root,
         memory_root=effective_memory_root,
-        management_root=coordination_root,
         onboarding_root=effective_onboarding_root,
         settings_path=settings_path,
         path_settings_path=path_settings_path if path_settings_path.exists() else None,
@@ -1217,15 +1213,14 @@ def cross_repo_to_dict(cross_repo: CrossRepoSettings) -> dict[str, object]:
     return payload
 
 
-def context_to_dict(context: ManagementContext) -> dict[str, object]:
+def context_to_dict(context: CoordinationContext) -> dict[str, object]:
     return {
         "topology": context.topology,
-        "repo_name": context.repo_name,
-        "target_repo": path_to_string(context.target_repo),
+        "code_repository_name": context.code_repository_name,
+        "code_repository_root": path_to_string(context.code_repository_root),
         "coordination_root": path_to_string(context.coordination_root),
         "memory_root": path_to_string(context.memory_root),
         "memory_mode": context.memory_mode,
-        "management_root": path_to_string(context.management_root),
         "onboarding_root": path_to_string(context.onboarding_root),
         "settings_path": path_to_string(context.settings_path),
         "path_settings_path": path_to_string(context.path_settings_path) if context.path_settings_path else "",
@@ -1246,14 +1241,13 @@ def context_to_dict(context: ManagementContext) -> dict[str, object]:
     }
 
 
-def print_text(context: ManagementContext) -> None:
+def print_text(context: CoordinationContext) -> None:
     print(f"topology\t{context.topology}")
-    print(f"repo_name\t{context.repo_name}")
-    print(f"target_repo\t{context.target_repo.as_posix()}")
+    print(f"code_repository_name\t{context.code_repository_name}")
+    print(f"code_repository_root\t{context.code_repository_root.as_posix()}")
     print(f"coordination_root\t{context.coordination_root.as_posix()}")
     print(f"memory_root\t{context.memory_root.as_posix()}")
     print(f"memory_mode\t{context.memory_mode}")
-    print(f"management_root\t{context.management_root.as_posix()}")
     print(f"onboarding_root\t{context.onboarding_root.as_posix()}")
     print(f"settings_path\t{context.settings_path.as_posix()}")
     if context.path_settings_path is not None:
@@ -1276,29 +1270,29 @@ def print_text(context: ManagementContext) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-name", help="Repository name to resolve. This is the normal agent-facing input.")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --repo-name.")
-    parser.add_argument("--repo", type=Path, help="Compatibility input for callers that already have the repository root path.")
+    parser.add_argument("--code-repository-name", help="Code repository name to resolve. This is the normal agent-facing input.")
+    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
+    parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
     parser.add_argument("--topology", choices=("internal", "shared"), help="Optional topology override.")
-    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-management root hint or override.")
+    parser.add_argument("--shared-root", type=Path, help="Optional shared coordination root hint or override.")
     parser.add_argument("--settings-path", type=Path, help="Optional active settings.md override. A sibling settings.json is preferred for machine-readable path settings when present.")
-    parser.add_argument("--onboarding-root", type=Path, help="Compatibility override for an already resolved repo onboarding root.")
+    parser.add_argument("--onboarding-root", type=Path, help="Override for an already resolved code repository onboarding root.")
     parser.add_argument("--contract-path", type=Path, help="Optional worktree task contract.md path to resolve task/worktree context.")
-    parser.add_argument("--task-name", help="Optional task name used to locate ar-management/tasks/<repo>/<task-name>-ar/contract.md.")
+    parser.add_argument("--task-name", help="Optional task name used to locate coordination tasks under ar-coordination/tasks/<code-repository-name>/<task-name>-ar/contract.md.")
     parser.add_argument("--worktree-name", help="Optional worktree name used to compute the worktree group when no contract exists.")
     parser.add_argument("--agents-repo", type=Path, help="Optional agents-remember-md checkout path for .env discovery.")
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format.")
     args = parser.parse_args(argv)
 
     try:
-        context = resolve_management_context(
-            repo_name=args.repo_name,
+        context = resolve_coordination_context(
+            code_repository_name=args.code_repository_name,
             workspace_root=args.workspace_root,
             requested_topology=args.topology,
             shared_root=args.shared_root,
             settings_path=args.settings_path,
             onboarding_root=args.onboarding_root,
-            target_repo=args.repo,
+            code_repository_root=args.code_repository_root,
             agents_repo=args.agents_repo,
             contract_path=args.contract_path,
             task_name=args.task_name,

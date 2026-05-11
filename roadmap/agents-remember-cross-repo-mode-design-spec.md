@@ -3,7 +3,7 @@
 **Status:** finalized alpha design for implementation  
 **Revision:** v3 — aligned with current `settings.json` shape  
 **Audience:** coding agents and maintainers implementing safe cross-repo context retrieval  
-**Scope:** cross-repo mode after the `ar-memory` / `ar-management` split and the worktree-backed memory design
+**Scope:** cross-repo mode after the `ar-memory` / `ar-coordination` split and the worktree-backed memory design
 
 ---
 
@@ -20,7 +20,7 @@ A cross-repo source is included only when its code checkout is on the expected b
 If memory clues are enabled, its memory checkout must also be on that expected branch.
 ```
 
-The current repo's committed memory settings decide which external repos may be used. The untracked shared `ar-management/` coordinator may help resolve local paths, but it cannot grant cross-repo permission.
+The current repo's committed memory settings decide which external repos may be used. The untracked shared `ar-coordination/` coordinator may help resolve local paths, but it cannot grant cross-repo permission.
 
 This spec intentionally reuses the existing settings model:
 
@@ -89,13 +89,13 @@ The settings shape is reused, but locations change because the system now separa
 ### 3.2 Shared memory mode
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/settings/settings.json
+ar-coordination/memory-repos/ar-<repo-name>/settings/settings.json
 ```
 
 ### 3.3 Local shared coordinator
 
 ```text
-ar-management/settings/settings.json
+ar-coordination/settings/settings.json
 ```
 
 The local coordinator settings are untracked. They may contain path hints, but not cross-repo policy.
@@ -138,7 +138,7 @@ Internal:
 Shared:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/settings/settings.json
+ar-coordination/memory-repos/ar-<repo-name>/settings/settings.json
 ```
 
 It must not be enabled from the local shared coordinator.
@@ -484,10 +484,10 @@ Optional boolean. Defaults to false.
 
 ## 7. Local coordinator settings
 
-The shared `ar-management/` coordinator may have local path hints:
+The shared `ar-coordination/` coordinator may have local path hints:
 
 ```text
-ar-management/settings/settings.json
+ar-coordination/settings/settings.json
 ```
 
 Example:
@@ -498,11 +498,11 @@ Example:
   "repoLocations": {
     "repo-a": {
       "codePath": "/workspace/repos/repo-a",
-      "memoryPath": "/workspace/ar-management/memory-repos/ar-repo-a"
+      "memoryPath": "/workspace/ar-coordination/memory-repos/ar-repo-a"
     },
     "repo-b": {
       "codePath": "/workspace/repos/repo-b",
-      "memoryPath": "/workspace/ar-management/memory-repos/ar-repo-b"
+      "memoryPath": "/workspace/ar-coordination/memory-repos/ar-repo-b"
     }
   }
 }
@@ -531,7 +531,7 @@ Permission must come from `repo-a`'s committed memory settings.
 Shared memory repos use:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/memory.md
+ar-coordination/memory-repos/ar-<repo-name>/memory.md
 ```
 
 `memory.md` is the per-branch ledger. It must be parseable without YAML dependencies.
@@ -675,9 +675,9 @@ memory.md trackedCodeBranch mismatch
           "head": "abc123"
         },
         "memory": {
-          "path": "/workspace/ar-management/memory-repos/ar-repo-b",
+          "path": "/workspace/ar-coordination/memory-repos/ar-repo-b",
           "branch": "dev",
-          "ledgerPath": "/workspace/ar-management/memory-repos/ar-repo-b/memory.md",
+          "ledgerPath": "/workspace/ar-coordination/memory-repos/ar-repo-b/memory.md",
           "lastVerifiedCodeCommit": "abc123",
           "lastMemoryContentCommit": "def456"
         }
@@ -859,7 +859,7 @@ Minimum tests:
 ```text
 1. cross-repo disabled when crossRepo.allow is missing or empty
 2. cross-repo disabled when settings.json is invalid JSON
-3. local ar-management settings cannot enable cross-repo by itself
+3. local ar-coordination settings cannot enable cross-repo by itself
 4. legacy string crossRepo.allow entry rejected because expectedBranch is missing
 5. external repo included code-only when branch matches and includeMemory false
 6. external repo excluded when code branch mismatches expectedBranch

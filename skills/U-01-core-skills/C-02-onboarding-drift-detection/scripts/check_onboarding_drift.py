@@ -19,21 +19,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-RESOLVER_SCRIPT_DIR = Path(__file__).resolve().parents[2] / "C-08-ar-management-resolver" / "scripts"
-RESOLVER_MODULE_PATH = RESOLVER_SCRIPT_DIR / "ar_management_resolver.py"
-RESOLVER_SPEC = importlib.util.spec_from_file_location("ar_management_resolver", RESOLVER_MODULE_PATH)
+RESOLVER_SCRIPT_DIR = Path(__file__).resolve().parents[2] / "C-08-ar-coordination-context-resolver" / "scripts"
+RESOLVER_MODULE_PATH = RESOLVER_SCRIPT_DIR / "ar_coordination_context_resolver.py"
+RESOLVER_SPEC = importlib.util.spec_from_file_location("coordination_resolver", RESOLVER_MODULE_PATH)
 if RESOLVER_SPEC is None or RESOLVER_SPEC.loader is None:
     raise ImportError(f"Unable to load C-08 resolver module from {RESOLVER_MODULE_PATH}")
-ar_management_resolver = importlib.util.module_from_spec(RESOLVER_SPEC)
-sys.modules[RESOLVER_SPEC.name] = ar_management_resolver
-RESOLVER_SPEC.loader.exec_module(ar_management_resolver)
+coordination_resolver = importlib.util.module_from_spec(RESOLVER_SPEC)
+sys.modules[RESOLVER_SPEC.name] = coordination_resolver
+RESOLVER_SPEC.loader.exec_module(coordination_resolver)
 
-StorageSettings = ar_management_resolver.StorageSettings
-clean_scalar = ar_management_resolver.clean_scalar
-normalize_rel_path = ar_management_resolver.normalize_rel_path
-resolve_management_context = ar_management_resolver.resolve_management_context
-resolve_storage_for_source = ar_management_resolver.resolve_storage_for_source
-sidecar_storage_label = ar_management_resolver.sidecar_storage_label
+StorageSettings = coordination_resolver.StorageSettings
+clean_scalar = coordination_resolver.clean_scalar
+normalize_rel_path = coordination_resolver.normalize_rel_path
+resolve_coordination_context = coordination_resolver.resolve_coordination_context
+resolve_storage_for_source = coordination_resolver.resolve_storage_for_source
+sidecar_storage_label = coordination_resolver.sidecar_storage_label
 
 
 CLASSIFICATIONS = (
@@ -711,21 +711,21 @@ def print_csv(rows: list[DriftRow], onboarding_root: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", required=True, type=Path, help="Path to the source repository root.")
+    parser.add_argument("--code-repository-root", required=True, type=Path, help="Root directory of the code repository to check.")
     parser.add_argument(
         "--onboarding-root",
         type=Path,
-        help="Compatibility override for the resolved repo onboarding root.",
+        help="Override for the resolved code repository onboarding root.",
     )
     parser.add_argument(
         "--topology",
         choices=("internal", "shared"),
-        help="Management topology for this repo. Defaults to internal when no onboarding root is supplied.",
+        help="Topology for this code repository. Defaults to internal when no onboarding root is supplied.",
     )
     parser.add_argument(
         "--shared-root",
         type=Path,
-        help="Shared ar-management root. Required for --topology shared unless --onboarding-root is supplied.",
+        help="Shared ar-coordination root. Required for --topology shared unless --onboarding-root is supplied.",
     )
     parser.add_argument(
         "--settings-path",
@@ -745,39 +745,39 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    repo_root = args.repo.resolve()
-    if not repo_root.exists():
-        parser.error(f"repo path does not exist: {repo_root}")
+    code_repository_root = args.code_repository_root.resolve()
+    if not code_repository_root.exists():
+        parser.error(f"code repository root does not exist: {code_repository_root}")
     try:
-        context = resolve_management_context(
-            repo_name=repo_root.name,
-            workspace_root=repo_root.parent,
+        context = resolve_coordination_context(
+            code_repository_name=code_repository_root.name,
+            workspace_root=code_repository_root.parent,
             requested_topology=args.topology,
             shared_root=args.shared_root,
             settings_path=args.settings_path,
             onboarding_root=args.onboarding_root,
-            target_repo=repo_root,
+            code_repository_root=code_repository_root,
         )
     except ValueError as error:
         parser.error(str(error))
     if not context.onboarding_root.exists():
         parser.error(f"onboarding root does not exist: {context.onboarding_root}")
 
-    git_check = run_git(repo_root, ["rev-parse", "--show-toplevel"])
+    git_check = run_git(code_repository_root, ["rev-parse", "--show-toplevel"])
     if git_check.returncode != 0:
-        parser.error(f"repo path is not a git repository: {repo_root}\n{git_check.stderr.strip()}")
+        parser.error(f"code repository root is not a git repository: {code_repository_root}\n{git_check.stderr.strip()}")
     settings = context.storage
     rows = [
-        classify_sidecar_onboarding(path, repo_root, context.onboarding_root, settings)
+        classify_sidecar_onboarding(path, code_repository_root, context.onboarding_root, settings)
         for path in discover_onboarding_files(context.onboarding_root)
     ]
-    rows.extend(classify_inline_source(path, repo_root) for path in discover_inline_onboarding_sources(repo_root, settings))
+    rows.extend(classify_inline_source(path, code_repository_root) for path in discover_inline_onboarding_sources(code_repository_root, settings))
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
 
     write_markdown_report(
         rows,
-        resolve_report_path(args.report, context.coordination_root, context.temp_root, repo_root, context.memory_root),
-        repo_root,
+        resolve_report_path(args.report, context.coordination_root, context.temp_root, code_repository_root, context.memory_root),
+        code_repository_root,
         context.onboarding_root,
     )
 

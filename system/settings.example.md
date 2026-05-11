@@ -3,7 +3,7 @@
 `settings.md` and `settings.json` exist in both supported topologies.
 
 - Internal topology uses `<target-repo>/ar-memory/system/settings.md`.
-- Shared topology uses `ar-management/memory-repos/ar-<repo-name>/system/settings.md`.
+- Shared topology uses `ar-coordination/memory-repos/ar-<repo-name>/system/settings.md`.
 - Machine-readable storage, path-rule, and cross-repo settings live in the sibling `system/settings.json` file.
 
 Default setup is internal and local-first. Shared setup is an explicit advanced choice for teams that want one memory repo per selected code repository.
@@ -44,7 +44,7 @@ Internal `repo-sidecar` storage keeps eligible onboarding artifacts under the re
 
 ## Shared Memory JSON Settings
 
-Use this shape in `ar-management/memory-repos/ar-<repo-name>/system/settings.json` for an explicitly selected shared memory repo:
+Use this shape in `ar-coordination/memory-repos/ar-<repo-name>/system/settings.json` for an explicitly selected shared memory repo:
 
 ```json
 {
@@ -77,7 +77,7 @@ Use this shape in `ar-management/memory-repos/ar-<repo-name>/system/settings.jso
 }
 ```
 
-Shared memory storage keeps eligible onboarding artifacts under the selected per-repo memory root, usually below `ar-management/memory-repos/ar-<repo-name>/onboarding/`.
+Shared memory storage keeps eligible onboarding artifacts under the selected per-repo memory root, usually below `ar-coordination/memory-repos/ar-<repo-name>/onboarding/`.
 
 Shared memory repos normally use unscoped `pathRules` because the memory repo already maps to exactly one code repo. The local coordinator may still use scoped rules as path hints for compatibility and migration, but cross-repo policy belongs in the committed memory settings.
 
@@ -107,7 +107,7 @@ ar-memory/
 The local coordinator uses:
 
 ```text
-ar-management/
+ar-coordination/
 ├── system/
 ├── memory-repos/
 ├── tasks/

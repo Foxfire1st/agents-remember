@@ -9,7 +9,7 @@ Use this retained global utility skill when the current surface is unfamiliar an
 
 Its job is to keep investigation ordered: onboarding first, reference context next, cross-repo relationships after that, and code only once the surrounding meaning is clear enough.
 
-Before starting the discovery order, invoke `C-08-ar-management-resolver` for the target repository and use its resolved onboarding root, docs root, settings, `pathRules`, and cross-repo allowances.
+Before starting the discovery order, invoke `C-08-ar-coordination-context-resolver` for the target repository and use its resolved onboarding root, docs root, settings, `pathRules`, and cross-repo allowances.
 
 ## When To Use It
 

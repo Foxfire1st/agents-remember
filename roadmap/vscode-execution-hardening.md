@@ -115,9 +115,9 @@ skills/P-99-review/R-01-adversarial-review
 → skills/p-99-review/r-01-adversarial-review
   name: r-01-adversarial-review
 
-skills/U-01-core-skills/C-00-initialize-management-root
-→ skills/u-01-core-skills/c-00-initialize-management-root
-  name: c-00-initialize-management-root
+skills/U-01-core-skills/C-00-initialize-coordination-root
+→ skills/u-01-core-skills/c-00-initialize-coordination-root
+  name: c-00-initialize-coordination-root
 
 skills/U-01-core-skills/C-01-findings-capture
 → skills/u-01-core-skills/c-01-findings-capture
@@ -139,9 +139,9 @@ skills/U-01-core-skills/C-05-create-or-update-onboarding-files
 → skills/u-01-core-skills/c-05-create-or-update-onboarding-files
   name: c-05-create-or-update-onboarding-files
 
-skills/U-01-core-skills/C-08-ar-management-resolver
-→ skills/u-01-core-skills/c-08-ar-management-resolver
-  name: c-08-ar-management-resolver
+skills/U-01-core-skills/C-08-ar-coordination-context-resolver
+→ skills/u-01-core-skills/c-08-ar-coordination-context-resolver
+  name: c-08-ar-coordination-context-resolver
 
 skills/W-01-heavy-task-workflow
 → skills/w-01-heavy-task-workflow
@@ -782,7 +782,7 @@ The guard should not let an agent silently weaken the guard.
 
 ## 11. Make the C-08 resolver execution-ready
 
-The `c-08-ar-management-resolver` skill should become the source of truth for execution-layer preflight.
+The `c-08-ar-coordination-context-resolver` skill should become the source of truth for execution-layer preflight.
 
 Hooks need structured status, not prose.
 
@@ -792,14 +792,14 @@ Example resolver output:
 {
   "status": "uninitialized",
   "topology": "internal",
-  "target_repo": "/path/to/repo",
-  "management_root": "/path/to/repo/ar-management",
-  "management_root_exists": false,
-  "onboarding_root": "/path/to/repo/ar-management/onboarding",
+  "code_repository_root": "/path/to/repo",
+  "coordination_root": "/path/to/repo/ar-coordination",
+  "coordination_root_exists": false,
+  "onboarding_root": "/path/to/repo/ar-coordination/onboarding",
   "onboarding_root_exists": false,
-  "settings_path": "/path/to/repo/ar-management/system/settings.md",
+  "settings_path": "/path/to/repo/ar-coordination/system/settings.md",
   "settings_path_exists": false,
-  "recommended_next_skill": "c-00-initialize-management-root"
+  "recommended_next_skill": "c-00-initialize-coordination-root"
 }
 ```
 
@@ -807,8 +807,8 @@ Then the VS Code `SessionStart` hook can inject a clear state:
 
 ```text
 Resolved repo: /path/to/repo
-Management status: uninitialized
-Recommended action: run c-00-initialize-management-root
+Coordination status: uninitialized
+Recommended action: run c-00-initialize-coordination-root
 ```
 
 That is cleaner than letting downstream scripts fail with missing-directory errors.
@@ -822,7 +822,7 @@ Once the worktree layer lands, the hook should not infer boundaries from chat. I
 Suggested file:
 
 ```text
-ar-management/tasks/<task-id>/execution-context.json
+ar-coordination/tasks/<task-id>/execution-context.json
 ```
 
 Example:
@@ -832,13 +832,13 @@ Example:
   "taskId": "tas-link-expand",
   "targetRepo": "device-management",
   "codeWorktree": "/home/example/worktrees/device-management/tas-link-expand",
-  "memoryRoot": "/home/example/ar-management",
-  "onboardingRoot": "/home/example/ar-management/onboarding/device-management",
-  "coordinationRoot": "/home/example/ar-management/tasks/tas-link-expand",
+  "memoryRoot": "/home/example/ar-coordination",
+  "onboardingRoot": "/home/example/ar-coordination/onboarding/device-management",
+  "coordinationRoot": "/home/example/ar-coordination/tasks/tas-link-expand",
   "allowedWriteRoots": [
     "/home/example/worktrees/device-management/tas-link-expand",
-    "/home/example/ar-management/onboarding/device-management",
-    "/home/example/ar-management/tasks/tas-link-expand"
+    "/home/example/ar-coordination/onboarding/device-management",
+    "/home/example/ar-coordination/tasks/tas-link-expand"
   ],
   "commitAllowed": false,
   "pushAllowed": false
@@ -962,7 +962,7 @@ harnesses/vscode/
 examples/vscode/
   Reusable workspace configuration.
 
-ar-management/tasks/<task-id>/execution-context.json
+ar-coordination/tasks/<task-id>/execution-context.json
   Active worktree/memory/write-boundary contract.
 
 hooks

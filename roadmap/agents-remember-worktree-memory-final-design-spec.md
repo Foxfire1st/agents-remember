@@ -12,10 +12,10 @@ Agents Remember needs two separate units:
 
 ```text
 ar-memory     = durable repo memory
-ar-management = local coordination and worktree orchestration
+ar-coordination = local coordination and worktree orchestration
 ```
 
-Internal memory lives inside a code repo as `ar-memory/` and is committed with the code. Shared memory lives as a separate Git repo under the local shared coordinator at `ar-management/memory-repos/ar-<repo-name>/`. The shared coordinator itself is not the canonical memory repo and is not tracked as a single Git repository.
+Internal memory lives inside a code repo as `ar-memory/` and is committed with the code. Shared memory lives as a separate Git repo under the local shared coordinator at `ar-coordination/memory-repos/ar-<repo-name>/`. The shared coordinator itself is not the canonical memory repo and is not tracked as a single Git repository.
 
 The final shared-mode invariant is:
 
@@ -33,7 +33,7 @@ Shared memory uses a per-branch `memory.md` ledger. Each memory branch tracks ex
 
 ## 2. Locked decisions
 
-### 2.1 `ar-memory` replaces internal `ar-management`
+### 2.1 `ar-memory` replaces internal `ar-coordination`
 
 Internal memory must live in:
 
@@ -41,25 +41,25 @@ Internal memory must live in:
 <code-repo>/ar-memory/
 ```
 
-The old idea of an internal `<code-repo>/ar-management/` is removed. The project is still alpha, so the implementation should focus on the new architecture and avoid spending effort on legacy alias support.
+The old idea of an internal `<code-repo>/ar-coordination/` is removed. The project is still alpha, so the implementation should focus on the new architecture and avoid spending effort on legacy alias support.
 
 Use this terminology everywhere:
 
 ```text
 memory_root       = ar-memory/ or a shared memory repo root
-coordination_root = ar-management/
+coordination_root = ar-coordination/
 ```
 
-### 2.2 `ar-management` is local coordination only
+### 2.2 `ar-coordination` is local coordination only
 
-The shared `ar-management/` folder exists to coordinate work. It owns task contracts, task artifacts, notes, worktree folders, local shared settings, and checked-out memory repos.
+The shared `ar-coordination/` folder exists to coordinate work. It owns task contracts, task artifacts, notes, worktree folders, local shared settings, and checked-out memory repos.
 
 It is not the canonical memory layer.
 
 Recommended shared coordinator structure:
 
 ```text
-ar-management/
+ar-coordination/
   settings/
   memory-repos/
   tasks/
@@ -107,7 +107,7 @@ Use `ar-`, not `ar_`.
 The system does not need to care where companies host those repos. The boundary of Agents Remember is local checkout/integration. A developer can clone an existing memory repo into:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/
+ar-coordination/memory-repos/ar-<repo-name>/
 ```
 
 or provide an explicit remote/path during setup.
@@ -119,7 +119,7 @@ Tasks are operational artifacts, not the truth layer.
 They belong in:
 
 ```text
-ar-management/tasks/<repo-name>/<task-id-or-name>/
+ar-coordination/tasks/<repo-name>/<task-id-or-name>/
 ```
 
 Each task folder contains:
@@ -153,7 +153,7 @@ Internal memory root:
 Shared memory repo root:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/
+ar-coordination/memory-repos/ar-<repo-name>/
   onboarding/
     overview.md
   docs/
@@ -170,7 +170,7 @@ The memory layer does not contain `tasks/`, `notes/`, or `worktrees/` by default
 The shared coordinator owns the noisy local/operational artifacts:
 
 ```text
-ar-management/
+ar-coordination/
   worktrees/      # operational code and memory worktrees
   notes/          # local scratch notes
   tasks/          # contracts and workflow artifacts
@@ -250,10 +250,10 @@ Internal memory is committed in the same Git history as code. It does not need `
 
 ### 3.3 Shared coordinator
 
-The local `ar-management/` folder used for orchestration:
+The local `ar-coordination/` folder used for orchestration:
 
 ```text
-ar-management/
+ar-coordination/
 ```
 
 It holds worktrees, task contracts, notes, settings, and local checkouts of per-repo memory repositories.
@@ -265,7 +265,7 @@ A separate Git repository that holds memory for exactly one code repo.
 Example:
 
 ```text
-ar-management/memory-repos/ar-device-management/
+ar-coordination/memory-repos/ar-device-management/
 ```
 
 This repo contains `onboarding/`, `docs/`, `settings/`, and `memory.md`.
@@ -277,13 +277,13 @@ A filesystem group for paired code/memory worktrees.
 Structure:
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/
 ```
 
 For shared memory, this folder contains both code and memory worktrees:
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/
   <worktree-name>/
   memory-<worktree-name>/
 ```
@@ -291,7 +291,7 @@ ar-management/worktrees/<repo-name>/<worktree-name>-ar/
 For internal memory, it only needs the code worktree because memory lives inside the code repo:
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/
   <worktree-name>/
 ```
 
@@ -302,7 +302,7 @@ A local markdown file under the shared coordinator that records the relationship
 Path:
 
 ```text
-ar-management/tasks/<repo-name>/<task-id-or-name>/contract.md
+ar-coordination/tasks/<repo-name>/<task-id-or-name>/contract.md
 ```
 
 The contract lets an agent recover:
@@ -329,7 +329,7 @@ The shared memory branch ledger.
 It lives at the root of each shared memory repo branch:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/memory.md
+ar-coordination/memory-repos/ar-<repo-name>/memory.md
 ```
 
 It declares which code branch the current memory branch tracks and maps code commits to memory commits.
@@ -353,7 +353,7 @@ It declares which code branch the current memory branch tracks and maps code com
 ### 4.2 Shared coordinator
 
 ```text
-ar-management/
+ar-coordination/
   settings/
   memory-repos/
     ar-<repo-name>/
@@ -371,7 +371,7 @@ ar-management/
 ### 4.3 Shared memory repo
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/
+ar-coordination/memory-repos/ar-<repo-name>/
   .git/
   onboarding/
     overview.md
@@ -383,7 +383,7 @@ ar-management/memory-repos/ar-<repo-name>/
 ### 4.4 Internal worktree group
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/
   <worktree-name>/
     src/
     ar-memory/
@@ -395,7 +395,7 @@ ar-management/worktrees/<repo-name>/<worktree-name>-ar/
 ### 4.5 Shared worktree group
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/
   <worktree-name>/
     src/
   memory-<worktree-name>/
@@ -416,7 +416,7 @@ A worktree group is not the same thing as a task.
 Use:
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/
 ```
 
 Inside it:
@@ -696,13 +696,13 @@ Re-enabling memory later is out of scope for v1, but should remain possible thro
 Task contracts live under the shared coordinator:
 
 ```text
-ar-management/tasks/<repo-name>/<task-id-or-name>/contract.md
+ar-coordination/tasks/<repo-name>/<task-id-or-name>/contract.md
 ```
 
 The task folder may also contain the selected workflow's artifacts:
 
 ```text
-ar-management/tasks/<repo-name>/<task-id-or-name>/task/
+ar-coordination/tasks/<repo-name>/<task-id-or-name>/task/
 ```
 
 ### 8.2 Purpose
@@ -734,24 +734,24 @@ memory_mode: shared
 workflow_kind: light-task
 
 coordination:
-  root: /workspace/ar-management
-  task_root: /workspace/ar-management/tasks/device-management/ARWT-123
-  worktree_group: /workspace/ar-management/worktrees/device-management/fix-platform-status-ar
+  root: /workspace/ar-coordination
+  task_root: /workspace/ar-coordination/tasks/device-management/ARWT-123
+  worktree_group: /workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar
 
 code:
   repo_path: /workspace/repos/device-management
   source_branch: dev
   work_branch: feature/fix-platform-status
   base_commit: abc123
-  worktree: /workspace/ar-management/worktrees/device-management/fix-platform-status-ar/fix-platform-status
+  worktree: /workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/fix-platform-status
 
 memory:
-  repo_path: /workspace/ar-management/memory-repos/ar-device-management
+  repo_path: /workspace/ar-coordination/memory-repos/ar-device-management
   source_branch: dev
   work_branch: feature/fix-platform-status
   base_commit: def456
-  worktree: /workspace/ar-management/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status
-  ledger: /workspace/ar-management/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status/memory.md
+  worktree: /workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status
+  ledger: /workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status/memory.md
   state: compatible
 ---
 
@@ -836,7 +836,7 @@ Internal mode:
 
 ```json
 {
-  "coordination_root": "/workspace/ar-management",
+  "coordination_root": "/workspace/ar-coordination",
   "memory_mode": "internal",
   "code_root": "/workspace/repos/device-management",
   "memory_root": "/workspace/repos/device-management/ar-memory",
@@ -850,15 +850,15 @@ Shared mode without task worktree:
 
 ```json
 {
-  "coordination_root": "/workspace/ar-management",
+  "coordination_root": "/workspace/ar-coordination",
   "memory_mode": "shared",
   "code_root": "/workspace/repos/device-management",
-  "memory_repo": "/workspace/ar-management/memory-repos/ar-device-management",
-  "memory_root": "/workspace/ar-management/memory-repos/ar-device-management",
-  "onboarding_root": "/workspace/ar-management/memory-repos/ar-device-management/onboarding",
-  "docs_root": "/workspace/ar-management/memory-repos/ar-device-management/docs",
-  "settings_root": "/workspace/ar-management/memory-repos/ar-device-management/settings",
-  "ledger_path": "/workspace/ar-management/memory-repos/ar-device-management/memory.md"
+  "memory_repo": "/workspace/ar-coordination/memory-repos/ar-device-management",
+  "memory_root": "/workspace/ar-coordination/memory-repos/ar-device-management",
+  "onboarding_root": "/workspace/ar-coordination/memory-repos/ar-device-management/onboarding",
+  "docs_root": "/workspace/ar-coordination/memory-repos/ar-device-management/docs",
+  "settings_root": "/workspace/ar-coordination/memory-repos/ar-device-management/settings",
+  "ledger_path": "/workspace/ar-coordination/memory-repos/ar-device-management/memory.md"
 }
 ```
 
@@ -866,16 +866,16 @@ Shared mode with worktree:
 
 ```json
 {
-  "coordination_root": "/workspace/ar-management",
+  "coordination_root": "/workspace/ar-coordination",
   "memory_mode": "shared",
-  "task_root": "/workspace/ar-management/tasks/device-management/ARWT-123",
-  "contract_path": "/workspace/ar-management/tasks/device-management/ARWT-123/contract.md",
-  "worktree_group": "/workspace/ar-management/worktrees/device-management/fix-platform-status-ar",
-  "code_worktree": "/workspace/ar-management/worktrees/device-management/fix-platform-status-ar/fix-platform-status",
-  "memory_worktree": "/workspace/ar-management/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status",
-  "memory_root": "/workspace/ar-management/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status",
-  "onboarding_root": "/workspace/ar-management/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status/onboarding",
-  "ledger_path": "/workspace/ar-management/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status/memory.md"
+  "task_root": "/workspace/ar-coordination/tasks/device-management/ARWT-123",
+  "contract_path": "/workspace/ar-coordination/tasks/device-management/ARWT-123/contract.md",
+  "worktree_group": "/workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar",
+  "code_worktree": "/workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/fix-platform-status",
+  "memory_worktree": "/workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status",
+  "memory_root": "/workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status",
+  "onboarding_root": "/workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status/onboarding",
+  "ledger_path": "/workspace/ar-coordination/worktrees/device-management/fix-platform-status-ar/memory-fix-platform-status/memory.md"
 }
 ```
 
@@ -926,7 +926,7 @@ Do not create `memory.md` in internal mode.
 For shared coordination, scaffold:
 
 ```text
-ar-management/
+ar-coordination/
   settings/
   memory-repos/
   tasks/
@@ -941,7 +941,7 @@ The shared coordinator is operational/local.
 Given a code repo and current code branch, scaffold:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/
+ar-coordination/memory-repos/ar-<repo-name>/
   onboarding/
     overview.md
   docs/
@@ -971,7 +971,7 @@ Agents Remember does not need remote-discovery logic.
 A human can:
 
 ```text
-cd ar-management/memory-repos/
+cd ar-coordination/memory-repos/
 git clone <memory-repo-url> ar-<repo-name>
 ```
 
@@ -1012,24 +1012,24 @@ selected workflow kind
 C-09 should:
 
 1. Resolve shared coordinator.
-2. Resolve or create task folder under `ar-management/tasks/<repo-name>/...`.
+2. Resolve or create task folder under `ar-coordination/tasks/<repo-name>/...`.
 3. Create/read `contract.md`.
 4. Create code worktree first:
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/<worktree-name>/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/<worktree-name>/
 ```
 
 5. If shared memory is enabled, resolve memory repo:
 
 ```text
-ar-management/memory-repos/ar-<repo-name>/
+ar-coordination/memory-repos/ar-<repo-name>/
 ```
 
 6. Validate or create memory branch/worktree:
 
 ```text
-ar-management/worktrees/<repo-name>/<worktree-name>-ar/memory-<worktree-name>/
+ar-coordination/worktrees/<repo-name>/<worktree-name>-ar/memory-<worktree-name>/
 ```
 
 7. Validate ledger compatibility.
@@ -1265,7 +1265,7 @@ use divergent memory as reference memory
 Change all internal-memory references from:
 
 ```text
-ar-management/
+ar-coordination/
 ```
 
 to:
@@ -1299,7 +1299,7 @@ Add support for:
 
 ```text
 internal ar-memory bootstrap
-shared ar-management coordinator bootstrap
+shared ar-coordination coordinator bootstrap
 new shared memory repo bootstrap
 existing shared memory repo validation
 ```
@@ -1344,7 +1344,7 @@ It must not assume memory lives inside the code repo.
 Docs must explain:
 
 ```text
-ar-memory vs ar-management
+ar-memory vs ar-coordination
 internal mode
 shared mode
 one code repo <=> one memory repo
@@ -1361,13 +1361,13 @@ These invariants should be enforced by tooling where possible.
 
 ```text
 1. Internal durable memory lives in ar-memory/.
-2. Shared coordination lives in ar-management/.
+2. Shared coordination lives in ar-coordination/.
 3. One code repo maps to exactly one memory repo.
 4. Memory repos use ar-<repo-name> by default.
 5. Shared memory branches track exactly one code branch.
 6. memory.md is newest-first.
 7. The first ledger row matches the header's last verified commits.
-8. Worktree contracts live in ar-management/tasks/, not in worktrees and not in memory.
+8. Worktree contracts live in ar-coordination/tasks/, not in worktrees and not in memory.
 9. Worktrees are grouped by repo and worktree name, not by task.
 10. Tasks and notes are local operational artifacts, not durable memory truth.
 11. Divergent memory is not used as reference memory.
@@ -1412,11 +1412,11 @@ Recommended order:
 
 1. Rename internal memory root to `ar-memory/` across docs, templates, resolver, and skills.
 2. Refactor resolver output to distinguish `coordination_root` and `memory_root`.
-3. Update bootstrap/scaffold for internal `ar-memory/` and shared `ar-management/`.
+3. Update bootstrap/scaffold for internal `ar-memory/` and shared `ar-coordination/`.
 4. Add shared memory repo scaffold under `memory-repos/ar-<repo-name>/`.
 5. Implement `memory.md` parser, validator, and writer.
 6. Implement ledger branch lookup and ledger-anchor discovery.
-7. Add task contract format under `ar-management/tasks/<repo-name>/...`.
+7. Add task contract format under `ar-coordination/tasks/<repo-name>/...`.
 8. Implement C-09 worktree manager start/status/attach flows.
 9. Implement C-09 closeout flow with human approval gate.
 10. Integrate drift detection with resolver-provided roots.
@@ -1431,4 +1431,4 @@ Internal mode gets code-memory coherence by storing memory inside the code repo 
 
 Shared mode gets the same coherence by pairing each code repo with exactly one `ar-<repo-name>` memory repo and using a per-branch `memory.md` ledger to map code commits to memory commits.
 
-Worktree mode makes this productive by keeping task contracts, worktree paths, and memory compatibility in the local `ar-management/` coordination layer while preserving memory as a small, durable, Git-tracked truth layer.
+Worktree mode makes this productive by keeping task contracts, worktree paths, and memory compatibility in the local `ar-coordination/` coordination layer while preserving memory as a small, durable, Git-tracked truth layer.

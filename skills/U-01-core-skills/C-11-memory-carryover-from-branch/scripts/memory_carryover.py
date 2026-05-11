@@ -145,7 +145,7 @@ def onboarding_path(memory_root: Path, source_path: str) -> Path:
 
 def candidate_for_path(
     *,
-    code_repo: Path,
+    code_repository_root: Path,
     old_base: str,
     official_ref: str,
     source_ref: str,
@@ -157,7 +157,7 @@ def candidate_for_path(
     branch_onboarding = onboarding_path(source_memory, source_path)
     official_onboarding = onboarding_path(official_memory, source_path)
     official_exists = official_onboarding.exists()
-    evidence, reason = evidence_for_path(code_repo, old_base, official_ref, source_ref, source_path)
+    evidence, reason = evidence_for_path(code_repository_root, old_base, official_ref, source_ref, source_path)
     decision = "auto-carry" if evidence in PROVEN_EVIDENCE else "review-required" if evidence == "same-path-changed" else "reject"
     if not branch_onboarding.exists():
         decision = "reject"
@@ -177,17 +177,17 @@ def candidate_for_path(
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, object]:
-    code_repo = args.code_repo.resolve()
+    code_repository_root = args.code_repository_root.resolve()
     official_memory = args.official_memory.resolve()
     source_memory = args.source_memory.resolve()
-    official_head = head_commit(code_repo, args.official_code_ref)
-    source_head = head_commit(code_repo, args.source_code_ref)
-    old_base = head_commit(code_repo, args.old_base)
-    official_changed = changed_paths(code_repo, old_base, args.official_code_ref)
-    source_changed = changed_paths(code_repo, old_base, args.source_code_ref)
+    official_head = head_commit(code_repository_root, args.official_code_ref)
+    source_head = head_commit(code_repository_root, args.source_code_ref)
+    old_base = head_commit(code_repository_root, args.old_base)
+    official_changed = changed_paths(code_repository_root, old_base, args.official_code_ref)
+    source_changed = changed_paths(code_repository_root, old_base, args.source_code_ref)
     candidates = [
         candidate_for_path(
-            code_repo=code_repo,
+            code_repository_root=code_repository_root,
             old_base=old_base,
             official_ref=args.official_code_ref,
             source_ref=args.source_code_ref,
@@ -219,8 +219,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, object]:
         counts[candidate.decision] = counts.get(candidate.decision, 0) + 1
     return {
         "state": "would-carryover",
-        "repo_name": args.repo_name,
-        "code_repo": code_repo.as_posix(),
+        "code_repository_name": args.code_repository_name,
+        "code_repository_root": code_repository_root.as_posix(),
         "official_code_ref": args.official_code_ref,
         "official_code_head": official_head,
         "source_code_ref": args.source_code_ref,
@@ -270,7 +270,7 @@ def apply_carryover(args: argparse.Namespace) -> dict[str, object]:
     ledger_path = official_memory / "memory.md"
     ledger = load_ledger(ledger_path)
     official_head = str(plan["official_code_head"])
-    official_date = commit_date(args.code_repo.resolve(), official_head)
+    official_date = commit_date(args.code_repository_root.resolve(), official_head)
     include_review_required = set(args.include_review_required or [])
     carried = []
     for candidate in selected_candidates(plan, include_review_required):
@@ -300,13 +300,13 @@ def apply_carryover(args: argparse.Namespace) -> dict[str, object]:
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--code-repo", type=Path, required=True)
+    parser.add_argument("--code-repository-root", type=Path, required=True)
     parser.add_argument("--official-code-ref", required=True)
     parser.add_argument("--source-code-ref", required=True)
     parser.add_argument("--old-base", required=True)
     parser.add_argument("--official-memory", type=Path, required=True)
     parser.add_argument("--source-memory", type=Path, required=True)
-    parser.add_argument("--repo-name", required=True)
+    parser.add_argument("--code-repository-name", required=True)
     parser.add_argument("--replace-existing", action="store_true", help="Allow proven candidates to replace existing different official onboarding.")
 
 

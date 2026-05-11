@@ -14,17 +14,19 @@ C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It o
 The bundled helper exposes these subcommands:
 
 ```bash
-<this-skill-dir>/scripts/git_worktree_manager.py start --repo-name <repo> --task-name <task> --worktree-name <name>
-<this-skill-dir>/scripts/git_worktree_manager.py attach --repo-name <repo> --task-name <task>
-<this-skill-dir>/scripts/git_worktree_manager.py status --repo-name <repo> --task-name <task>
-<this-skill-dir>/scripts/git_worktree_manager.py bootstrap-memory --repo-name <repo>
+<this-skill-dir>/scripts/git_worktree_manager.py start --code-repository-name <code-repository-name> --task-name <task> --worktree-name <name>
+<this-skill-dir>/scripts/git_worktree_manager.py attach --code-repository-name <code-repository-name> --task-name <task>
+<this-skill-dir>/scripts/git_worktree_manager.py status --code-repository-name <code-repository-name> --task-name <task>
+<this-skill-dir>/scripts/git_worktree_manager.py bootstrap-memory --code-repository-name <code-repository-name>
 <this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --dry-run ...
 <this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --approved --approval-note <note> ...
-<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --repo-name <repo> --dry-run ...
-<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --repo-name <repo> --approved --approval-note <note> ...
+<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --code-repository-name <code-repository-name> --dry-run ...
+<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --code-repository-name <code-repository-name> --approved --approval-note <note> ...
 <this-skill-dir>/scripts/git_worktree_manager.py integrate --contract-path <contract.md> --approved --strategy ff-only
 <this-skill-dir>/scripts/git_worktree_manager.py cleanup --contract-path <contract.md> --approved
 ```
+
+Callers that already know the checkout path may pass `--code-repository-root <code-repository-root>` instead of relying on `--workspace-root` lookup.
 
 ## Pre-Worktree Intake
 

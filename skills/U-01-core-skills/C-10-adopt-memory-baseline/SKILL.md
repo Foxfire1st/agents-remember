@@ -12,15 +12,17 @@ This skill does not decide that stale onboarding is true. It makes the trust bou
 ## Command
 
 ```bash
-<this-skill-dir>/scripts/adopt_memory_baseline.py status --repo-name <repo> --workspace-root <workspace>
-<this-skill-dir>/scripts/adopt_memory_baseline.py adopt --repo-name <repo> --workspace-root <workspace> --accept-drift
+<this-skill-dir>/scripts/adopt_memory_baseline.py status --code-repository-name <code-repository-name> --workspace-root <workspace>
+<this-skill-dir>/scripts/adopt_memory_baseline.py adopt --code-repository-name <code-repository-name> --workspace-root <workspace> --accept-drift
 ```
+
+Callers that already know the checkout path may pass `--code-repository-root <code-repository-root>` instead of relying on `--workspace-root` lookup.
 
 Use `status` first. Use `adopt` only after the developer approves the baseline decision.
 
 ## Workflow
 
-1. Resolve the repo with C-08 and confirm shared topology.
+1. Resolve the code repository with C-08 and confirm shared topology.
 2. Run C-02 drift classification against the resolved onboarding root; its reusable report is written under C-08's resolved temp root unless `--report` is supplied.
 3. Inspect the shared memory repo for an existing `memory.md`.
 4. If a ledger already exists, report it and stop.

@@ -31,31 +31,31 @@ This skill's standard workflow operates on one repository at a time.
 
 ### Preferred helper
 
-Use `C-08-ar-management-resolver` to resolve the target repository's active memory and coordination context, then use the bundled helper for repo-wide checks instead of rewriting shell loops:
+Use `C-08-ar-coordination-context-resolver` to resolve the target repository's active memory and coordination context, then use the bundled helper for repo-wide checks instead of rewriting shell loops:
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
-  --repo <repo-root>
+  --code-repository-root <code-repository-root>
 ```
 
 By default the helper writes the Markdown report to `<coordination_root>/temp/drift-reports/<repo-name>/<repo-name>_<branch-name>_drift-report.md`. That keeps temporary drift artifacts out of task contract folders while still keeping them under the local coordination root, and each repository/branch run gets a collision-resistant filename.
 
-The helper passes compatibility CLI inputs through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the repository target explicit:
+The helper passes the explicit code repository root through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the code repository root explicit:
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
-  --repo <repo-root> \
+  --code-repository-root <code-repository-root> \
   --topology shared \
-  --shared-root <shared-ar-management-root>
+  --shared-root <shared-ar-coordination-root>
 ```
 
 If `--report` is supplied, C-08's resolved `coordination_root` still owns report placement. Relative paths are resolved from the resolved `temp_root`. Absolute paths are only used as-is when they are already inside the resolved coordination root and outside the resolved `memory_root`; paths inside the durable memory repo are redirected to `<coordination_root>/temp/drift-reports/<repo-name>/` so temporary reports do not dirty versioned memory. Absolute paths outside the coordination root are redirected the same way. The repo/branch-prefixed default filename applies whenever `--report` is omitted.
 
-The compatibility `--onboarding-root` override remains available when a caller already resolved the repo onboarding root. Topology detection, management-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
+The `--onboarding-root` override remains available when a caller already resolved the code repository onboarding root. Topology detection, coordination-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
 
 ### 1. Resolve onboarding units in the repository
 
-Invoke `C-08-ar-management-resolver` for the target repository and use the resolved context. Internal repositories use `<repo-root>/ar-memory/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; shared repositories use the same pair under `ar-management/memory-repos/ar-<repo-name>/system/` when a shared memory repo exists. During migration, C-08 may still return a legacy shared onboarding root so existing verified onboarding remains readable until the memory repo is bootstrapped.
+Invoke `C-08-ar-coordination-context-resolver` for the target repository and use the resolved context. Internal repositories use `<repo-root>/ar-memory/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; shared repositories use the same pair under `ar-coordination/memory-repos/ar-<repo-name>/system/` when a shared memory repo exists. During migration, C-08 may still return a legacy shared onboarding root so existing verified onboarding remains readable until the memory repo is bootstrapped.
 
 C-08 resolves `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared JSON settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
 
@@ -146,7 +146,7 @@ If actionable files exist, consult this repo's [AGENTS.md](../../../AGENTS.md) "
 ## Rules
 
 1. Drift detection remains evidence qualification and maintenance routing, not deep Research.
-2. It must use the canonical onboarding root returned by `C-08-ar-management-resolver` for the target repository.
+2. It must use the canonical onboarding root returned by `C-08-ar-coordination-context-resolver` for the target repository.
 3. It hands maintenance work to `C-05-create-or-update-onboarding-files` instead of performing that maintenance itself.
 4. Stale onboarding may remain directional evidence until refreshed or disproven, but that trust level must be made explicit.
 5. Missing verification metadata is itself actionable drift.

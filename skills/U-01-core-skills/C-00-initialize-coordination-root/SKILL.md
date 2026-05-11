@@ -1,19 +1,19 @@
 ---
-name: C-00-initialize-management-root
-description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-management coordination; use shared scaffolding only when the developer explicitly asks for it."
+name: C-00-initialize-coordination-root
+description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-coordination state; use shared scaffolding only when the developer explicitly asks for it."
 ---
 
-# C-00 Initialize Management Root
+# C-00 Initialize Coordination Root
 
-Create the minimal `ar-memory/` durable-memory scaffold and `ar-management/` coordination scaffold expected by `agents-remember-md/AGENTS.md`.
+Create the minimal `ar-memory/` durable-memory scaffold and `ar-coordination/` coordination scaffold expected by `agents-remember-md/AGENTS.md`.
 
-This skill is for first-run setup and repair of missing memory or coordination infrastructure. By default it creates the target repository's internal `ar-memory/` folder and a local coordination `ar-management/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
+This skill is for first-run setup and repair of missing memory or coordination infrastructure. By default it creates the code repository's internal `ar-memory/` folder and a local coordination `ar-coordination/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
 
-Use `C-08-ar-management-resolver` when an agent needs to inspect an existing repository's active management context. This skill creates or repairs scaffold files; it does not replace C-08 as the normal resolver.
+Use `C-08-ar-coordination-context-resolver` when an agent needs to inspect an existing repository's active coordination context. This skill creates or repairs scaffold files; it does not replace C-08 as the normal resolver.
 
 ## Inputs
 
-- `target_repo`: path to the repository being initialized. Default to the repository the developer asked to work on.
+- `code_repository_root`: root directory of the code repository being initialized. Default to the repository the developer asked to work on.
 - `topology`: `internal` by default. Use `shared` only when the developer explicitly asks for shared scaffolding.
 - `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit shared scaffolding that resolves `.env` or `.env.example`.
 - `coordination_root`: optional override for explicit shared coordination scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
@@ -21,7 +21,7 @@ Use `C-08-ar-management-resolver` when an agent needs to inspect an existing rep
 
 ## Safety Rules
 
-1. Never overwrite an existing management file without explicit user approval.
+1. Never overwrite an existing coordination file without explicit user approval.
 2. Create missing directories and files only.
 3. Keep starter files generic; do not invent project-specific tools, docs, sources, or onboarding.
 4. If the resolved memory root or coordination root points outside the intended workspace, state the resolved absolute path before writing.
@@ -34,18 +34,18 @@ Use `C-08-ar-management-resolver` when an agent needs to inspect an existing rep
 
 Default internal scaffolding:
 
-1. Resolve `target_repo`.
-2. Set the memory root to `<target_repo>/ar-memory`.
-3. Set the local coordination root to `<target_repo>/ar-management` unless the developer explicitly provided another coordination root.
-4. Do not resolve or create a shared `AR_MANAGEMENT_ROOT`.
+1. Resolve `code_repository_root`.
+2. Set the memory root to `<code_repository_root>/ar-memory`.
+3. Set the local coordination root to `<code_repository_root>/ar-coordination` unless the developer explicitly provided another coordination root.
+4. Do not resolve or create a shared `AR_COORDINATION_ROOT`.
 
 Explicit shared scaffolding:
 
 1. Use `coordination_root` when the developer provided one.
 2. Otherwise read `<agents_repo>/.env` if it exists; if it is absent, read `<agents_repo>/.env.example`.
-3. Parse `AR_MANAGEMENT_ROOT=<path>`.
+3. Parse `AR_COORDINATION_ROOT=<path>`.
 4. Resolve relative paths from the file that declared the value.
-5. If neither file exists or no value is declared, use `../ar-management` relative to `<agents_repo>` and state that fallback.
+5. If neither file exists or no value is declared, use `../ar-coordination` relative to `<agents_repo>` and state that fallback.
 
 ### 2. Inspect Existing State
 
@@ -157,14 +157,14 @@ For explicit shared memory scaffolding, use the same file path under the per-rep
       "mode": "memory-repo"
     },
     "pathRules": {
-        "include": {
-          "paths": ["README.md", "docs/**", "src/**"],
-          "fileTypes": [".md", ".py", ".ts", ".tsx"]
-        },
-        "exclude": {
-          "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
-          "fileTypes": [".png", ".jpg", ".zip"]
-        }
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "fileTypes": [".png", ".jpg", ".zip"]
+      }
     }
   },
   "crossRepo": {
@@ -173,7 +173,7 @@ For explicit shared memory scaffolding, use the same file path under the per-rep
 }
 ```
 
-Place this file in `ar-management/memory-repos/ar-<repo-name>/system/settings.json` for shared memory repos. The shared coordinator may have its own local `system/settings.json` for path hints, but cross-repo policy belongs in the committed memory layer.
+Place this file in `ar-coordination/memory-repos/ar-<repo-name>/system/settings.json` for shared memory repos. The shared coordinator may have its own local `system/settings.json` for path hints, but cross-repo policy belongs in the committed memory layer.
 
 #### `system/sources.md`
 

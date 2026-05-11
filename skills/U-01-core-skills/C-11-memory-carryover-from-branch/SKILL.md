@@ -13,22 +13,22 @@ C-11 is not a Git merge. It is a selective memory reconciliation step. It proves
 
 ```bash
 <this-skill-dir>/scripts/memory_carryover.py plan \
-  --code-repo <repo> \
+  --code-repository-root <code-repository-root> \
   --official-code-ref <official-ref> \
   --source-code-ref <source-ref> \
   --old-base <base-ref-or-sha> \
   --official-memory <official-memory-repo> \
   --source-memory <source-memory-repo> \
-  --repo-name <repo-name>
+  --code-repository-name <code-repository-name>
 
 <this-skill-dir>/scripts/memory_carryover.py apply \
-  --code-repo <repo> \
+  --code-repository-root <code-repository-root> \
   --official-code-ref <official-ref> \
   --source-code-ref <source-ref> \
   --old-base <base-ref-or-sha> \
   --official-memory <official-memory-repo> \
   --source-memory <source-memory-repo> \
-  --repo-name <repo-name> \
+  --code-repository-name <code-repository-name> \
   --approved \
   --approval-note "<developer approval>"
 ```

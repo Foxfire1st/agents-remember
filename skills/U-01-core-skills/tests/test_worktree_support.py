@@ -28,8 +28,8 @@ from agents_remember.memory_ledger import (  # noqa: E402
 from agents_remember.worktree_contract import default_contract, load_contract, task_root_candidates, write_contract  # noqa: E402
 
 
-RESOLVER_PATH = CORE_ROOT / "C-08-ar-management-resolver" / "scripts" / "ar_management_resolver.py"
-RESOLVER_SPEC = importlib.util.spec_from_file_location("ar_management_resolver", RESOLVER_PATH)
+RESOLVER_PATH = CORE_ROOT / "C-08-ar-coordination-context-resolver" / "scripts" / "ar_coordination_context_resolver.py"
+RESOLVER_SPEC = importlib.util.spec_from_file_location("coordination_context_resolver", RESOLVER_PATH)
 assert RESOLVER_SPEC is not None and RESOLVER_SPEC.loader is not None
 resolver = importlib.util.module_from_spec(RESOLVER_SPEC)
 sys.modules[RESOLVER_SPEC.name] = resolver
@@ -143,7 +143,7 @@ def initialized_memory_repo(memory_repo: Path, repo_name: str, code_branch: str,
 def open_shared_contract_fixture(root: Path):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
-    memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
     write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_seed))
     git(memory_repo, "add", "memory.md")
@@ -154,7 +154,7 @@ def open_shared_contract_fixture(root: Path):
         repo_name="repo-a",
         workflow_kind="chat",
         memory_mode="shared",
-        coordination_root=root / "ar-management",
+        coordination_root=root / "ar-coordination",
         code_repo_path=code_repo,
         code_source_branch="main",
         code_work_branch="ar/commit-approval-thing",
@@ -183,7 +183,7 @@ def direct_shared_memory_fixture(root: Path, include_feature_onboarding: bool = 
     code_repo = root / "repo-a"
     init_repo(code_repo, "main")
     code_base = commit_file(code_repo, "feature.txt", "old\n", "Add feature baseline")
-    memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     init_repo(memory_repo, "main")
     if include_feature_onboarding:
         write_file_onboarding(memory_repo / "onboarding", "repo-a", "feature.txt", code_base)
@@ -203,7 +203,7 @@ def direct_shared_memory_fixture(root: Path, include_feature_onboarding: bool = 
 def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
-    memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
     write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_seed))
     git(memory_repo, "add", "memory.md")
@@ -214,7 +214,7 @@ def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", c
         repo_name="repo-a",
         workflow_kind="chat",
         memory_mode="shared",
-        coordination_root=root / "ar-management",
+        coordination_root=root / "ar-coordination",
         code_repo_path=code_repo,
         code_source_branch="main",
         code_work_branch="ar/integrate-thing",
@@ -294,7 +294,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_start_blocks_branch_mismatched_memory_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_repo.mkdir(parents=True)
             write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "dev", "dev", "c1", "m1"))
             contract = default_contract(
@@ -302,7 +302,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 repo_name="repo-a",
                 workflow_kind="light-task",
                 memory_mode="shared",
-                coordination_root=root / "ar-management",
+                coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
                 code_work_branch="ar/fix-thing",
@@ -320,7 +320,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_start_blocks_dirty_shared_memory_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_seed = init_repo(memory_repo, "main")
             write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", "c1", memory_seed))
             git(memory_repo, "add", "memory.md")
@@ -332,7 +332,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 repo_name="repo-a",
                 workflow_kind="light-task",
                 memory_mode="shared",
-                coordination_root=root / "ar-management",
+                coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
                 code_work_branch="ar/fix-thing",
@@ -351,7 +351,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_start_reports_compatible_shared_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            memory_repo = root / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_repo.mkdir(parents=True)
             write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", "c1", "m1"))
             contract = default_contract(
@@ -359,7 +359,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 repo_name="repo-a",
                 workflow_kind="light-task",
                 memory_mode="shared",
-                coordination_root=root / "ar-management",
+                coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
                 code_work_branch="ar/fix-thing",
@@ -382,7 +382,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 repo_name="repo-a",
                 workflow_kind="light-task",
                 memory_mode="internal",
-                coordination_root=root / "ar-management",
+                coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
                 code_work_branch="ar/fix-thing",
@@ -400,29 +400,29 @@ class WorktreeSupportTests(unittest.TestCase):
                 repo_name="device-management",
                 workflow_kind="light-task",
                 memory_mode="shared",
-                coordination_root=root / "ar-management",
+                coordination_root=root / "ar-coordination",
                 code_repo_path=root / "device-management",
                 code_source_branch="dev",
                 code_work_branch="feature/fix-platform-status",
                 code_base_commit="abc123",
                 worktree_name="fix-platform-status",
-                memory_repo_path=root / "ar-management" / "memory-repos" / "ar-device-management",
+                memory_repo_path=root / "ar-coordination" / "memory-repos" / "ar-device-management",
                 memory_source_branch="dev",
                 memory_work_branch="feature/fix-platform-status",
                 memory_base_commit="def456",
             )
             write_contract(contract.contract_path, contract)
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.task_root, root / "ar-management" / "tasks" / "device-management" / "fix-platform-status")
+            self.assertEqual(loaded.task_root, root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status")
             self.assertEqual(loaded.task_artifact, loaded.task_root / "task.md")
-            self.assertEqual(loaded.worktree_group, root / "ar-management" / "worktrees" / "device-management" / "fix-platform-status-ar")
+            self.assertEqual(loaded.worktree_group, root / "ar-coordination" / "worktrees" / "device-management" / "fix-platform-status-ar")
             self.assertEqual(loaded.memory_mode, "shared")
             self.assertEqual(loaded.ledger_path, loaded.memory_worktree / "memory.md")
             self.assertEqual(
-                task_root_candidates(root / "ar-management", "device-management", "Fix Platform Status"),
+                task_root_candidates(root / "ar-coordination", "device-management", "Fix Platform Status"),
                 [
-                    root / "ar-management" / "tasks" / "device-management" / "fix-platform-status",
-                    root / "ar-management" / "tasks" / "device-management" / "fix-platform-status-ar",
+                    root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status",
+                    root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status-ar",
                 ],
             )
             output = io.StringIO()
@@ -549,11 +549,11 @@ class WorktreeSupportTests(unittest.TestCase):
             code_repo, memory_repo, code_base = direct_shared_memory_fixture(root)
             memory_head = git(memory_repo, "rev-parse", "HEAD")
             args = Namespace(
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 workspace_root=root,
-                repo=code_repo,
+                code_repository_root=code_repo,
                 topology="shared",
-                shared_root=root / "ar-management",
+                shared_root=root / "ar-coordination",
                 contract_path=None,
                 task_name=None,
                 source_branch=None,
@@ -581,11 +581,11 @@ class WorktreeSupportTests(unittest.TestCase):
             root = Path(tmp)
             code_repo, memory_repo, _code_base = direct_shared_memory_fixture(root)
             args = Namespace(
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 workspace_root=root,
-                repo=code_repo,
+                code_repository_root=code_repo,
                 topology="shared",
-                shared_root=root / "ar-management",
+                shared_root=root / "ar-coordination",
                 contract_path=None,
                 task_name=None,
                 source_branch=None,
@@ -613,11 +613,11 @@ class WorktreeSupportTests(unittest.TestCase):
             root = Path(tmp)
             code_repo, _memory_repo, code_base = direct_shared_memory_fixture(root, include_feature_onboarding=False)
             args = Namespace(
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 workspace_root=root,
-                repo=code_repo,
+                code_repository_root=code_repo,
                 topology="shared",
-                shared_root=root / "ar-management",
+                shared_root=root / "ar-coordination",
                 contract_path=None,
                 task_name=None,
                 source_branch=None,
@@ -749,22 +749,22 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             repo = workspace / "my-app"
             repo.mkdir()
-            context = resolver.resolve_management_context(
-                repo_name="my-app",
+            context = resolver.resolve_coordination_context(
+                code_repository_name="my-app",
                 workspace_root=workspace,
                 requested_topology="internal",
             )
-            self.assertEqual(context.coordination_root, repo / "ar-management")
+            self.assertEqual(context.coordination_root, repo / "ar-coordination")
             self.assertEqual(context.memory_root, repo / "ar-memory")
             self.assertEqual(context.onboarding_root, repo / "ar-memory" / "onboarding")
-            self.assertEqual(context.temp_root, repo / "ar-management" / "temp")
+            self.assertEqual(context.temp_root, repo / "ar-coordination" / "temp")
 
     def test_drift_report_paths_use_temp_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "repo-a"
             init_repo(repo, "main")
-            coordination_root = workspace / "ar-management"
+            coordination_root = workspace / "ar-coordination"
             temp_root = coordination_root / "temp"
             memory_root = coordination_root / "memory-repos" / "ar-repo-a"
             drift = adopt_baseline.drift
@@ -813,14 +813,14 @@ class WorktreeSupportTests(unittest.TestCase):
             settings = resolver.CrossRepoSettings(
                 allow=[resolver.CrossRepoAllowEntry(repo="repo-b", expected_branch="main", include_code=True, include_memory=False)]
             )
-            resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-management")
+            resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-coordination")
             self.assertEqual(resolved.allow[0].state, "included-code-only")
 
     def test_cross_repo_v2_memory_include(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             code_head = init_repo(workspace / "repo-b", "main")
-            memory_repo = workspace / "ar-management" / "memory-repos" / "ar-repo-b"
+            memory_repo = workspace / "ar-coordination" / "memory-repos" / "ar-repo-b"
             memory_head = init_repo(memory_repo, "main")
             write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-b", "main", "main", code_head, memory_head))
             git(memory_repo, "add", "memory.md")
@@ -828,29 +828,29 @@ class WorktreeSupportTests(unittest.TestCase):
             settings = resolver.CrossRepoSettings(
                 allow=[resolver.CrossRepoAllowEntry(repo="repo-b", expected_branch="main", include_code=True, include_memory=True)]
             )
-            resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-management")
+            resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-coordination")
             self.assertEqual(resolved.allow[0].state, "included")
 
     def test_adopt_memory_baseline_status_ready_without_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             code_head = init_repo(workspace / "repo-a", "main")
-            memory_root = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_root = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
             args = Namespace(
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 workspace_root=workspace,
                 topology="shared",
-                shared_root=workspace / "ar-management",
-                repo=None,
+                shared_root=workspace / "ar-coordination",
+                code_repository_root=None,
                 report=None,
             )
             context = adopt_baseline.resolve_context(args)
             rows, report = adopt_baseline.run_drift(context, None)
             payload = adopt_baseline.base_payload(context, rows, report)
-            self.assertEqual(report, workspace / "ar-management" / "temp" / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
+            self.assertEqual(report, workspace / "ar-coordination" / "temp" / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
             self.assertTrue(report.exists())
-            self.assertFalse((workspace / "ar-management" / "tasks" / "repo-a" / "repo-a_main_drift-report.md").exists())
+            self.assertFalse((workspace / "ar-coordination" / "tasks" / "repo-a" / "repo-a_main_drift-report.md").exists())
             self.assertEqual(payload["state"], "ready")
             self.assertEqual(payload["drift"]["actionable"], 0)
             self.assertFalse(payload["ledger"]["exists"])
@@ -863,14 +863,14 @@ class WorktreeSupportTests(unittest.TestCase):
             (repo / "README.md").write_text("# Changed\n", encoding="utf-8")
             git(repo, "add", "README.md")
             git(repo, "commit", "-m", "Change README")
-            memory_root = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_root = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
             args = Namespace(
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 workspace_root=workspace,
                 topology="shared",
-                shared_root=workspace / "ar-management",
-                repo=None,
+                shared_root=workspace / "ar-coordination",
+                code_repository_root=None,
                 report=None,
                 accept_drift=False,
                 source_branch=None,
@@ -884,14 +884,14 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             code_head = init_repo(workspace / "repo-a", "main")
-            memory_root = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            memory_root = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
             args = Namespace(
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 workspace_root=workspace,
                 topology="shared",
-                shared_root=workspace / "ar-management",
-                repo=None,
+                shared_root=workspace / "ar-coordination",
+                code_repository_root=None,
                 report=None,
                 accept_drift=False,
                 source_branch=None,
@@ -916,21 +916,21 @@ class WorktreeSupportTests(unittest.TestCase):
             official_head = git(code_repo, "rev-parse", "main")
             self.assertEqual(official_head, source_head)
 
-            official_memory = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
-            source_memory = workspace / "ar-management" / "memory-source-branch" / "ar-repo-a"
+            source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
             onboarding_file = source_memory / "onboarding" / "feature.py.md"
             onboarding_file.write_text(onboarding_file.read_text(encoding="utf-8") + "Branch-learned behavior.\n", encoding="utf-8")
 
             args = Namespace(
-                code_repo=code_repo,
+                code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
                 official_memory=official_memory,
                 source_memory=source_memory,
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 replace_existing=False,
                 approved=True,
                 approval_note="developer approved C-11 carryover",
@@ -962,19 +962,19 @@ class WorktreeSupportTests(unittest.TestCase):
             git(code_repo, "checkout", "main")
             commit_file(code_repo, "feature.py", "value = 'official'\n", "Update feature differently")
 
-            official_memory = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
-            source_memory = workspace / "ar-management" / "memory-source-branch" / "ar-repo-a"
+            source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
 
             args = Namespace(
-                code_repo=code_repo,
+                code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
                 official_memory=official_memory,
                 source_memory=source_memory,
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 replace_existing=False,
                 approved=True,
                 approval_note="developer approved C-11 carryover",
@@ -998,19 +998,19 @@ class WorktreeSupportTests(unittest.TestCase):
             source_head = commit_file(code_repo, "feature.py", "value = 'pending'\n", "Add pending feature")
             git(code_repo, "checkout", "main")
 
-            official_memory = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
-            source_memory = workspace / "ar-management" / "memory-source-branch" / "ar-repo-a"
+            source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
 
             args = Namespace(
-                code_repo=code_repo,
+                code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
                 official_memory=official_memory,
                 source_memory=source_memory,
-                repo_name="repo-a",
+                code_repository_name="repo-a",
                 replace_existing=False,
             )
             plan = memory_carryover.build_plan(args)

@@ -93,7 +93,7 @@ No. Chat mode is the default. It's four steps:
 1. Check onboarding drift for the files in scope (`C-02-onboarding-drift-detection`).
 2. Read onboarding alongside code, propose changes in chat with concrete code examples.
 3. Wait for explicit developer approval.
-4. Implement, update onboarding through `C-05`, run the checks from `<AR_MANAGEMENT_ROOT>/system/tools.md`.
+4. Implement, update onboarding through `C-05`, run the checks from `<AR_COORDINATION_ROOT>/system/tools.md`.
 
 Most work happens in chat mode. Light task adds a written single-page plan when the work will outlive a session. Heavy task exists for migrations, cross-repo contracts, and work where a silent mistake would be expensive to unwind.
 

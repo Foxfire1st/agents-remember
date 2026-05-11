@@ -14,7 +14,7 @@ Inline onboarding does not replace the file-level content model. It reuses the s
 
 Planning stays in task artifacts. This package defines how onboarding itself is created, updated, and kept structurally consistent.
 
-Before maintaining onboarding, use `C-08-ar-management-resolver` to resolve the target repository's active management context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
+Before maintaining onboarding, use `C-08-ar-coordination-context-resolver` to resolve the target repository's active coordination context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
 
 ## Routing
 
