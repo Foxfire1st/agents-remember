@@ -49,6 +49,13 @@ adopt_baseline = importlib.util.module_from_spec(ADOPT_BASELINE_SPEC)
 sys.modules[ADOPT_BASELINE_SPEC.name] = adopt_baseline
 ADOPT_BASELINE_SPEC.loader.exec_module(adopt_baseline)
 
+MEMORY_CARRYOVER_PATH = CORE_ROOT / "C-11-memory-carryover-from-branch" / "scripts" / "memory_carryover.py"
+MEMORY_CARRYOVER_SPEC = importlib.util.spec_from_file_location("memory_carryover", MEMORY_CARRYOVER_PATH)
+assert MEMORY_CARRYOVER_SPEC is not None and MEMORY_CARRYOVER_SPEC.loader is not None
+memory_carryover = importlib.util.module_from_spec(MEMORY_CARRYOVER_SPEC)
+sys.modules[MEMORY_CARRYOVER_SPEC.name] = memory_carryover
+MEMORY_CARRYOVER_SPEC.loader.exec_module(memory_carryover)
+
 
 def git(repo: Path, *args: str) -> str:
     result = subprocess.run(
@@ -122,6 +129,14 @@ def commit_memory_ledger(memory_repo: Path, code_commit: str, memory_content_com
     write_ledger(ledger_path, prepend_mapping(ledger, code_commit, memory_content_commit))
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", message)
+    return git(memory_repo, "rev-parse", "HEAD")
+
+
+def initialized_memory_repo(memory_repo: Path, repo_name: str, code_branch: str, memory_branch: str, code_commit: str) -> str:
+    memory_content = init_repo(memory_repo, memory_branch)
+    write_ledger(memory_repo / "memory.md", create_initial_ledger(repo_name, code_branch, memory_branch, code_commit, memory_content))
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "Add memory ledger")
     return git(memory_repo, "rev-parse", "HEAD")
 
 
@@ -888,6 +903,119 @@ class WorktreeSupportTests(unittest.TestCase):
             ledger = parse_ledger_text((memory_root / "memory.md").read_text(encoding="utf-8"))
             self.assertEqual(ledger.last_verified_code_commit, code_head)
             self.assertTrue((memory_root / "docs" / ".gitkeep").exists())
+
+    def test_memory_carryover_applies_landed_branch_onboarding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            old_base = init_repo(code_repo, "main")
+            git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
+            source_head = commit_file(code_repo, "feature.py", "def feature():\n    return 'landed'\n", "Add feature")
+            git(code_repo, "checkout", "main")
+            git(code_repo, "merge", "--ff-only", "workbench/reado/v1.2")
+            official_head = git(code_repo, "rev-parse", "main")
+            self.assertEqual(official_head, source_head)
+
+            official_memory = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
+            source_memory = workspace / "ar-management" / "memory-source-branch" / "ar-repo-a"
+            write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
+            onboarding_file = source_memory / "onboarding" / "feature.py.md"
+            onboarding_file.write_text(onboarding_file.read_text(encoding="utf-8") + "Branch-learned behavior.\n", encoding="utf-8")
+
+            args = Namespace(
+                code_repo=code_repo,
+                official_code_ref="main",
+                source_code_ref="workbench/reado/v1.2",
+                old_base=old_base,
+                official_memory=official_memory,
+                source_memory=source_memory,
+                repo_name="repo-a",
+                replace_existing=False,
+                approved=True,
+                approval_note="developer approved C-11 carryover",
+                include_review_required=[],
+                memory_commit_message="Carry over landed memory",
+                ledger_commit_message="Record carryover ledger",
+            )
+            plan = memory_carryover.build_plan(args)
+            self.assertEqual(plan["counts"], {"auto-carry": 1})
+
+            payload = memory_carryover.apply_carryover(args)
+            official_onboarding = official_memory / "onboarding" / "feature.py.md"
+            ledger = parse_ledger_text((official_memory / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(payload["state"], "carried-over")
+            self.assertEqual(payload["carried"][0]["source_path"], "feature.py")
+            self.assertIn("Branch-learned behavior.", official_onboarding.read_text(encoding="utf-8"))
+            self.assertEqual(read_onboarding_field(official_onboarding, "lastVerifiedCommitHash"), official_head)
+            self.assertEqual(ledger.rows[0].code_commit, official_head)
+            self.assertEqual(ledger.rows[0].memory_commit, payload["memory_content_commit"])
+
+    def test_memory_carryover_requires_review_for_same_path_ambiguity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            init_repo(code_repo, "main")
+            old_base = commit_file(code_repo, "feature.py", "value = 'base'\n", "Add feature base")
+            git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
+            source_head = commit_file(code_repo, "feature.py", "value = 'source branch'\n", "Update feature on source branch")
+            git(code_repo, "checkout", "main")
+            commit_file(code_repo, "feature.py", "value = 'official'\n", "Update feature differently")
+
+            official_memory = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
+            source_memory = workspace / "ar-management" / "memory-source-branch" / "ar-repo-a"
+            write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
+
+            args = Namespace(
+                code_repo=code_repo,
+                official_code_ref="main",
+                source_code_ref="workbench/reado/v1.2",
+                old_base=old_base,
+                official_memory=official_memory,
+                source_memory=source_memory,
+                repo_name="repo-a",
+                replace_existing=False,
+                approved=True,
+                approval_note="developer approved C-11 carryover",
+                include_review_required=[],
+                memory_commit_message="Carry over landed memory",
+                ledger_commit_message="Record carryover ledger",
+            )
+            plan = memory_carryover.build_plan(args)
+            self.assertEqual(plan["candidates"][0]["decision"], "review-required")
+            self.assertEqual(plan["candidates"][0]["evidence"], "same-path-changed")
+            payload = memory_carryover.apply_carryover(args)
+            self.assertEqual(payload["state"], "nothing-to-carryover")
+            self.assertFalse((official_memory / "onboarding" / "feature.py.md").exists())
+
+    def test_memory_carryover_rejects_branch_memory_when_code_did_not_land(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            old_base = init_repo(code_repo, "main")
+            git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
+            source_head = commit_file(code_repo, "feature.py", "value = 'pending'\n", "Add pending feature")
+            git(code_repo, "checkout", "main")
+
+            official_memory = workspace / "ar-management" / "memory-repos" / "ar-repo-a"
+            initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
+            source_memory = workspace / "ar-management" / "memory-source-branch" / "ar-repo-a"
+            write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
+
+            args = Namespace(
+                code_repo=code_repo,
+                official_code_ref="main",
+                source_code_ref="workbench/reado/v1.2",
+                old_base=old_base,
+                official_memory=official_memory,
+                source_memory=source_memory,
+                repo_name="repo-a",
+                replace_existing=False,
+            )
+            plan = memory_carryover.build_plan(args)
+            self.assertEqual(plan["candidates"][0]["decision"], "reject")
+            self.assertEqual(plan["candidates"][0]["evidence"], "not-landed")
 
 
 if __name__ == "__main__":
