@@ -14,7 +14,7 @@ In the normal workflow, pass the code repository name. C-08 decides whether that
 - `code_repository_name`: name of the code repository being worked on. This is the normal input.
 - `workspace_root`: optional workspace root used to find `code_repository_name` when the caller is not already in the workspace root.
 - `requested_topology`: optional `internal` or `shared` override for repair or explicit shared operations.
-- `shared_root`: optional shared-root hint. Normal resolution may infer an already selected shared root from `agents-remember-md/.env` or `.env.example`.
+- `shared_root`: optional shared-root hint. Normal resolution uses explicit input first, then `agents-remember-md/.env`, then the built-in default `../ar-coordination`. `.env.example` is documentation only and is not runtime input.
 - `settings_path`: optional override for repair cases.
 - `onboarding_root`: optional override when a caller has already resolved the repository onboarding root.
 - `code_repository_root`: optional root directory of the code repository for callers that already have the path. This does not replace `code_repository_name` as the normal agent-facing contract.
@@ -54,12 +54,13 @@ The resolver returns one coordination context for the target repository:
 
 ## Resolution Rules
 
-1. If `onboarding_root` is supplied, treat it as an explicit override and infer the surrounding roots and settings path from that root.
-2. If `requested_topology` is `internal`, use `<code-repository-root>/ar-memory/` as `memory_root` and `<code-repository-root>/ar-coordination/` as `coordination_root`.
-3. If `requested_topology` is `shared`, use the supplied or inferred shared `ar-coordination/` root as `coordination_root` and `ar-coordination/memory-repos/ar-<code-repository-name>/` as `memory_root`.
-4. If no topology override is supplied, inspect the active shared root and resolved settings. A repository uses shared memory only when the shared root contains repository-specific evidence such as `memory-repos/ar-<code-repository-name>/`, `onboarding/<code-repository-name>/`, or a scoped `pathRules` entry for `path: <code-repository-name>` or `path: <code-repository-name>/<subtree>`.
-5. If a worktree contract exists, use it for task root, worktree group, code worktree, memory worktree, and ledger path. Do not guess missing contract values from folder names.
-6. If no shared selection applies, default to internal topology and use `<code-repository-root>/ar-memory/` for memory.
+1. If `onboarding_root` is supplied, treat it as an explicit override only when it points under a supported memory location: `<code-repository-root>/ar-memory/onboarding` or `<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding`.
+2. If a worktree contract path is supplied, use the contract's `coordination_root` before validating memory so task worktrees resolve against their own coordinator.
+3. Resolve the shared coordinator from explicit `shared_root`, `agents-remember-md/.env`, or the built-in default `../ar-coordination`.
+4. If `requested_topology` is `internal`, require `<code-repository-root>/ar-memory/` to exist and use it as `memory_root`.
+5. If `requested_topology` is `shared`, require `<coordination-root>/memory-repos/ar-<code-repository-name>/` to exist and use it as `memory_root`.
+6. If no topology override is supplied, check `<code-repository-root>/ar-memory/` first, then `<coordination-root>/memory-repos/ar-<code-repository-name>/`.
+7. If neither supported memory location exists, fail with a missing-memory error that lists both checked paths. The agent should ask the developer whether to bootstrap memory, explain that C-00 creates the scaffold/settings, and then run C-03 only if onboarding content should be generated.
 
 Mixed workspaces are resolved per target repository. One shared-memory repository does not move neighboring local repositories onto the shared root, and one local repository does not prevent another repository from using shared memory.
 
@@ -88,7 +89,7 @@ The helper uses only the Python standard library, including the built-in JSON pa
 
 ## Boundaries
 
-1. C-08 owns topology detection, coordination-root and memory-root resolution, JSON-first settings parsing with legacy Markdown fallback, storage semantics, `pathRules`, task-contract fact loading, and cross-repo allowance parsing.
+1. C-08 owns topology detection, coordination-root and memory-root resolution, JSON-first settings parsing with Markdown fallback, storage semantics, `pathRules`, task-contract fact loading, and cross-repo allowance parsing.
 2. Other skills may import or call the C-08 helper, but they must not keep parallel resolver implementations.
 3. The top `AGENTS.md` topology explanation remains fallback guidance for humans and agents if the helper cannot run.
 4. C-08 resolves where context lives; it does not create missing scaffolding or Git worktrees. Use `C-00-initialize-coordination-root` for scaffold creation and C-09 for worktree lifecycle mutation.

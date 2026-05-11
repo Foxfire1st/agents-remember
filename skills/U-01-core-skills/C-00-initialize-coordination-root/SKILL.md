@@ -15,7 +15,7 @@ Use `C-08-ar-coordination-context-resolver` when an agent needs to inspect an ex
 
 - `code_repository_root`: root directory of the code repository being initialized. Default to the repository the developer asked to work on.
 - `topology`: `internal` by default. Use `shared` only when the developer explicitly asks for shared scaffolding.
-- `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit shared scaffolding that resolves `.env` or `.env.example`.
+- `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit shared scaffolding that resolves `.env` or the built-in `../ar-coordination` default.
 - `coordination_root`: optional override for explicit shared coordination scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
 - `mode`: `create-missing` by default. Use `repair` only when the user explicitly asks to fix existing scaffold files.
 
@@ -42,10 +42,10 @@ Default internal scaffolding:
 Explicit shared scaffolding:
 
 1. Use `coordination_root` when the developer provided one.
-2. Otherwise read `<agents_repo>/.env` if it exists; if it is absent, read `<agents_repo>/.env.example`.
+2. Otherwise read `<agents_repo>/.env` if it exists; do not read `.env.example` at runtime.
 3. Parse `AR_COORDINATION_ROOT=<path>`.
 4. Resolve relative paths from the file that declared the value.
-5. If neither file exists or no value is declared, use `../ar-coordination` relative to `<agents_repo>` and state that fallback.
+5. If `.env` is absent or no value is declared, use `../ar-coordination` relative to `<agents_repo>` and state that default.
 
 ### 2. Inspect Existing State
 

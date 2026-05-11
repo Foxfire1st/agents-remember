@@ -377,7 +377,7 @@ For bulk coverage the `C-03-repo-bootstrap` skill can do more. After `overview.m
 
 Most users should start with repo-local internal memory. Shared mode is for teams that intentionally want a separate memory repo for one or more selected repositories.
 
-In shared mode, create or choose a shared `ar-coordination/` root and configure `AR_COORDINATION_ROOT` through `.env` or `.env.example`:
+In shared mode, create or choose a shared `ar-coordination/` root. C-08 defaults to `../ar-coordination` relative to the `agents-remember-md` checkout. To use a different coordinator, configure `AR_COORDINATION_ROOT` in `agents-remember-md/.env`:
 
 ```dotenv
 AR_COORDINATION_ROOT=../ar-coordination
@@ -459,7 +459,7 @@ projects/
     src/
 ```
 
-When the target repo is `repo-a`, C-08 returns `repo-a/ar-memory/` as `memory_root` and `ar-coordination/` as `coordination_root`. When the target repo is `repo-b` and shared memory is selected, C-08 returns `ar-coordination/memory-repos/ar-repo-b/` as `memory_root` and `ar-coordination/` as `coordination_root`. A shared-memory repo does not force its neighbors into shared mode, and a locally managed repo does not prevent another repo from using shared mode.
+When the target repo is `repo-a`, C-08 returns `repo-a/ar-memory/` as `memory_root` and `repo-a/ar-coordination/` as `coordination_root`. When the target repo is `repo-b`, C-08 first checks `repo-b/ar-memory/`, then checks `ar-coordination/memory-repos/ar-repo-b/`; because the shared memory repo exists, it returns that folder as `memory_root` and the shared `ar-coordination/` folder as `coordination_root`. A shared-memory repo does not force its neighbors into shared mode, and a locally managed repo does not prevent another repo from using shared mode.
 
 ---
 
@@ -467,7 +467,7 @@ When the target repo is `repo-a`, C-08 returns `repo-a/ar-memory/` as `memory_ro
 
 Agents use `C-08-ar-coordination-context-resolver` to resolve a code repository's active coordination context. In normal use, the agent passes `code_repository_name` or `code_repository_root` and receives the resolved topology, `coordination_root`, `memory_root`, onboarding root, settings path, machine path-settings path when present, task root, docs root, storage settings, `pathRules`, worktree/ledger fields when a contract exists, and branch-gated cross-repo allowances.
 
-For local-first repositories, C-08 resolves repo-local `ar-memory/` as durable memory and `ar-coordination/` as local coordination. For repositories intentionally selected for shared memory, C-08 resolves `ar-coordination/memory-repos/ar-<code-repository-name>/` as durable memory and the shared `ar-coordination/` folder as `coordination_root`.
+For each repository, C-08 resolves durable memory by checking exactly two supported locations: repo-local `<code-repository-root>/ar-memory/` first, then shared `<coordination-root>/memory-repos/ar-<code-repository-name>/`. If neither exists, C-08 fails with a missing-memory error instead of inventing an empty context. The agent should show the checked paths, ask whether to bootstrap memory, explain that C-00 creates the scaffold/settings, and then run C-03 only if the developer wants onboarding content generated.
 
 `C-02-onboarding-drift-detection` consumes that resolved context to classify stale onboarding. It is not the topology resolver.
 

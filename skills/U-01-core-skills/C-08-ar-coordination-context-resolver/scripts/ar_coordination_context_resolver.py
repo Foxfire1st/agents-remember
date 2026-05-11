@@ -42,6 +42,25 @@ except ImportError:  # pragma: no cover - keeps compatibility if shared helpers 
     worktree_group_for = None  # type: ignore[assignment]
 
 
+DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"
+
+
+class MissingMemoryError(ValueError):
+    """Raised when neither supported durable memory location exists."""
+
+    def __init__(self, code_repository_name: str, internal_root: Path, shared_root: Path, shared_memory: Path) -> None:
+        self.code_repository_name = code_repository_name
+        self.internal_root = internal_root
+        self.shared_root = shared_root
+        self.shared_memory = shared_memory
+        super().__init__(
+            "Agents Remember memory is missing for "
+            f"{code_repository_name!r}. Checked internal memory at {internal_root.as_posix()} "
+            f"and shared memory at {shared_memory.as_posix()} using coordination root {shared_root.as_posix()}. "
+            "Ask the developer whether to bootstrap memory with C-00, then run C-03 if they want onboarding content generated."
+        )
+
+
 class StorageRule(TypedDict, total=False):
     path: str
     storage: str
@@ -198,17 +217,15 @@ def resolve_path_from_declaring_file(value: str, declaring_file: Path) -> Path:
     return (declaring_file.parent / candidate).resolve()
 
 
-def resolve_shared_root_hint(shared_root: Path | None, agents_repo: Path | None = None) -> Path | None:
+def resolve_shared_root_hint(shared_root: Path | None, agents_repo: Path | None = None) -> Path:
     if shared_root is not None:
         return shared_root.resolve()
 
     resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
-    for env_path in (resolved_agents_repo / ".env", resolved_agents_repo / ".env.example"):
-        values = parse_env_file(env_path)
-        root = values.get("AR_COORDINATION_ROOT")
-        if root:
-            return resolve_path_from_declaring_file(root, env_path)
-    return None
+    env_path = resolved_agents_repo / ".env"
+    values = parse_env_file(env_path)
+    root = values.get("AR_COORDINATION_ROOT", DEFAULT_AR_COORDINATION_ROOT)
+    return resolve_path_from_declaring_file(root, env_path)
 
 
 def find_code_repository_root(workspace_root: Path, code_repository_name: str) -> Path:
@@ -243,7 +260,15 @@ def path_settings_path_for(settings_path: Path) -> Path:
 
 
 def infer_topology_from_onboarding_root(onboarding_root: Path) -> Literal["internal", "shared"]:
-    return "shared" if onboarding_root.parent.name == "onboarding" else "internal"
+    if onboarding_root.parent.name == "ar-memory":
+        return "internal"
+    if onboarding_root.parent.parent.name == "memory-repos" and onboarding_root.parent.name.startswith("ar-"):
+        return "shared"
+    raise ValueError(
+        "onboarding_root must point to a supported memory location: "
+        "<code-repository-root>/ar-memory/onboarding or "
+        "<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding"
+    )
 
 
 def parse_coordination_settings(
@@ -778,31 +803,6 @@ def resolve_storage_for_source(source_file: str, settings: StorageSettings, scop
     return (settings.default or "external") if settings.mode == "hybrid" else "disabled"
 
 
-def rule_selects_code_repository(rule: StorageRule, code_repository_name: str) -> bool:
-    rule_path = normalize_rel_path(str(rule.get("path", "")))
-    return rule_path == code_repository_name or rule_path.startswith(f"{code_repository_name}/")
-
-
-def shared_code_repository_selected(code_repository_name: str, shared_root: Path) -> bool:
-    if not shared_root.exists():
-        return False
-    if (shared_root / "memory-repos" / f"ar-{code_repository_name}").exists():
-        return True
-    if (shared_root / "onboarding" / code_repository_name).exists():
-        return True
-
-    settings_path = shared_root / "system" / "settings.md"
-    storage, _ = parse_coordination_settings(settings_path, "shared")
-    return any(rule_selects_code_repository(rule, code_repository_name) for rule in storage.path_rules)
-
-
-def require_shared_root(shared_root: Path | None, agents_repo: Path | None = None) -> Path:
-    resolved = resolve_shared_root_hint(shared_root, agents_repo)
-    if resolved is None:
-        raise ValueError("shared topology requires a shared root when no selected shared context can be inferred")
-    return resolved
-
-
 def resolve_contract(
     contract_path: Path | None,
     coordination_root: Path,
@@ -962,13 +962,20 @@ def detect_coordination_selection(
     settings_path: Path | None = None,
     agents_repo: Path | None = None,
 ) -> CoordinationSelection:
+    internal_coordination = internal_coordination_root(code_repository_root)
+    internal_root = internal_memory_root(code_repository_root)
+    shared_root = resolve_shared_root_hint(shared_root_hint, agents_repo)
+    shared_root_for_repo = shared_memory_root(shared_root, code_repository_name)
+
     if settings_path is not None:
         resolved_settings = settings_path.resolve()
         inferred_topology = requested_topology
         if inferred_topology is None:
             settings_root = resolved_settings.parent.parent
-            inferred_topology = "shared" if settings_root != internal_coordination_root(code_repository_root) and settings_root != internal_memory_root(code_repository_root) else "internal"
+            inferred_topology = "shared" if settings_root in (shared_root, shared_root_for_repo) else "internal"
         coordination_root, memory_root = memory_roots_from_settings(resolved_settings, code_repository_root, code_repository_name, inferred_topology)
+        if not memory_root.exists():
+            raise MissingMemoryError(code_repository_name, internal_root, shared_root, shared_root_for_repo)
         return CoordinationSelection(
             topology=inferred_topology,
             coordination_root=coordination_root,
@@ -977,26 +984,23 @@ def detect_coordination_selection(
         )
 
     if requested_topology == "internal":
-        coordination_root = internal_coordination_root(code_repository_root)
-        memory_root = internal_memory_root(code_repository_root)
-        settings = settings_path_for_roots(memory_root, coordination_root, "internal")
-        return CoordinationSelection("internal", coordination_root, memory_root, settings)
+        if not internal_root.exists():
+            raise MissingMemoryError(code_repository_name, internal_root, shared_root, shared_root_for_repo)
+        settings = settings_path_for_roots(internal_root, internal_coordination, "internal")
+        return CoordinationSelection("internal", internal_coordination, internal_root, settings)
     if requested_topology == "shared":
-        coordination_root = require_shared_root(shared_root_hint, agents_repo)
-        memory_root = shared_memory_root(coordination_root, code_repository_name)
-        settings = settings_path_for_roots(memory_root, coordination_root, "shared")
-        return CoordinationSelection("shared", coordination_root, memory_root, settings)
+        if not shared_root_for_repo.exists():
+            raise MissingMemoryError(code_repository_name, internal_root, shared_root, shared_root_for_repo)
+        settings = settings_path_for_roots(shared_root_for_repo, shared_root, "shared")
+        return CoordinationSelection("shared", shared_root, shared_root_for_repo, settings)
 
-    shared_root = resolve_shared_root_hint(shared_root_hint, agents_repo)
-    if shared_root is not None and shared_code_repository_selected(code_repository_name, shared_root):
-        coordination_root = shared_root
-        memory_root = shared_memory_root(coordination_root, code_repository_name)
-        settings = settings_path_for_roots(memory_root, coordination_root, "shared")
-        return CoordinationSelection("shared", coordination_root, memory_root, settings)
-    coordination_root = internal_coordination_root(code_repository_root)
-    memory_root = internal_memory_root(code_repository_root)
-    settings = settings_path_for_roots(memory_root, coordination_root, "internal")
-    return CoordinationSelection("internal", coordination_root, memory_root, settings)
+    if internal_root.exists():
+        settings = settings_path_for_roots(internal_root, internal_coordination, "internal")
+        return CoordinationSelection("internal", internal_coordination, internal_root, settings)
+    if shared_root_for_repo.exists():
+        settings = settings_path_for_roots(shared_root_for_repo, shared_root, "shared")
+        return CoordinationSelection("shared", shared_root, shared_root_for_repo, settings)
+    raise MissingMemoryError(code_repository_name, internal_root, shared_root, shared_root_for_repo)
 
 
 def resolve_coordination_context(
@@ -1052,22 +1056,23 @@ def resolve_coordination_context(
             workspace_root=resolved_workspace_root,
         )
 
+    contract_shared_root = shared_root
+    if contract_path is not None and contract_path.exists() and load_contract is not None:
+        try:
+            contract_shared_root = load_contract(contract_path.resolve()).coordination_root
+        except ContractError:
+            contract_shared_root = shared_root
+
     selection = detect_coordination_selection(
         code_repository_name=resolved_code_repository_name,
         code_repository_root=resolved_code_repository_root,
         requested_topology=requested_topology,
-        shared_root_hint=shared_root,
+        shared_root_hint=contract_shared_root,
         settings_path=settings_path,
         agents_repo=resolved_agents_repo,
     )
     resolved_settings_path = settings_path.resolve() if settings_path else selection.settings_path
-    coordination_onboarding_root = (
-        selection.coordination_root / "onboarding"
-        if selection.topology == "internal"
-        else selection.coordination_root / "onboarding" / resolved_code_repository_name
-    )
-    memory_onboarding_root = selection.memory_root / "onboarding"
-    resolved_onboarding_root = memory_onboarding_root if memory_onboarding_root.exists() or not coordination_onboarding_root.exists() else coordination_onboarding_root
+    resolved_onboarding_root = selection.memory_root / "onboarding"
     storage, cross_repo = parse_coordination_settings(resolved_settings_path, selection.topology)
     return build_coordination_context(
         code_repository_name=resolved_code_repository_name,

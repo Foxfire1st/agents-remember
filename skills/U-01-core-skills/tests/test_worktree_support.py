@@ -744,11 +744,12 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(loaded.integration_status, "blocked")
             self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "integration-blocked")
 
-    def test_resolver_internal_defaults_to_ar_memory(self) -> None:
+    def test_resolver_explicit_internal_uses_existing_ar_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "my-app"
             repo.mkdir()
+            (repo / "ar-memory").mkdir()
             context = resolver.resolve_coordination_context(
                 code_repository_name="my-app",
                 workspace_root=workspace,
@@ -758,6 +759,130 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(context.memory_root, repo / "ar-memory")
             self.assertEqual(context.onboarding_root, repo / "ar-memory" / "onboarding")
             self.assertEqual(context.temp_root, repo / "ar-coordination" / "temp")
+
+    def test_resolver_prefers_existing_internal_memory_over_shared_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            (repo / "ar-memory").mkdir()
+            shared_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            shared_memory.mkdir(parents=True)
+            agents_repo = workspace / "agents-remember-md"
+            agents_repo.mkdir()
+            context = resolver.resolve_coordination_context(
+                code_repository_name="repo-a",
+                workspace_root=workspace,
+                agents_repo=agents_repo,
+            )
+            self.assertEqual(context.topology, "internal")
+            self.assertEqual(context.memory_root, repo / "ar-memory")
+            self.assertEqual(context.coordination_root, repo / "ar-coordination")
+
+    def test_resolver_uses_shared_memory_repo_when_internal_memory_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            shared_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            shared_memory.mkdir(parents=True)
+            agents_repo = workspace / "agents-remember-md"
+            agents_repo.mkdir()
+            context = resolver.resolve_coordination_context(
+                code_repository_name="repo-a",
+                workspace_root=workspace,
+                agents_repo=agents_repo,
+            )
+            self.assertEqual(context.topology, "shared")
+            self.assertEqual(context.coordination_root, workspace / "ar-coordination")
+            self.assertEqual(context.memory_root, shared_memory)
+            self.assertEqual(context.onboarding_root, shared_memory / "onboarding")
+
+    def test_resolver_uses_dot_env_override_for_coordination_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            agents_repo = workspace / "agents-remember-md"
+            agents_repo.mkdir()
+            (agents_repo / ".env").write_text("AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8")
+            shared_memory = agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a"
+            shared_memory.mkdir(parents=True)
+            context = resolver.resolve_coordination_context(
+                code_repository_name="repo-a",
+                workspace_root=workspace,
+                agents_repo=agents_repo,
+            )
+            self.assertEqual(context.topology, "shared")
+            self.assertEqual(context.coordination_root, agents_repo / "custom-coordination")
+            self.assertEqual(context.memory_root, shared_memory)
+
+    def test_resolver_ignores_dot_env_example_at_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            agents_repo = workspace / "agents-remember-md"
+            agents_repo.mkdir()
+            (agents_repo / ".env.example").write_text("AR_COORDINATION_ROOT=example-coordination\n", encoding="utf-8")
+            (agents_repo / "example-coordination" / "memory-repos" / "ar-repo-a").mkdir(parents=True)
+            with self.assertRaises(resolver.MissingMemoryError) as raised:
+                resolver.resolve_coordination_context(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    agents_repo=agents_repo,
+                )
+            self.assertEqual(raised.exception.shared_root, workspace / "ar-coordination")
+
+    def test_resolver_does_not_select_legacy_shared_onboarding_without_memory_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            coordination_root = workspace / "ar-coordination"
+            (coordination_root / "onboarding" / "repo-a").mkdir(parents=True)
+            with self.assertRaises(resolver.MissingMemoryError):
+                resolver.resolve_coordination_context(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    shared_root=coordination_root,
+                )
+
+    def test_resolver_does_not_select_shared_from_path_rules_without_memory_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            coordination_root = workspace / "ar-coordination"
+            system_root = coordination_root / "system"
+            system_root.mkdir(parents=True)
+            (system_root / "settings.json").write_text(
+                json.dumps({"version": 2, "onboarding": {"pathRules": {"path": "repo-a"}}}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(resolver.MissingMemoryError):
+                resolver.resolve_coordination_context(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    shared_root=coordination_root,
+                )
+
+    def test_resolver_errors_when_memory_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            agents_repo = workspace / "agents-remember-md"
+            agents_repo.mkdir()
+            with self.assertRaises(resolver.MissingMemoryError) as raised:
+                resolver.resolve_coordination_context(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    agents_repo=agents_repo,
+                )
+            self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
+            self.assertEqual(raised.exception.shared_memory, workspace / "ar-coordination" / "memory-repos" / "ar-repo-a")
+            self.assertIn("bootstrap memory with C-00", str(raised.exception))
 
     def test_drift_report_paths_use_temp_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
