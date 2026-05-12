@@ -33,6 +33,8 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 Onboarding files are companion context for source files. Their main purpose is to be read alongside the code they describe, at the moment that code is
 inspected. They can be found using the ar-coordination resolver.
 
+Before trusting the onboarding documentation, check the [Memory Layer Instructions](system/AGENTS.md)
+
 ---
 
 ## Ar-coordination & Memory Layer Resolver
