@@ -1,5 +1,5 @@
 ---
-name: C-00-initialize-coordination-root
+name: c-00-initialize-coordination-root
 description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-coordination state; use shared scaffolding only when the developer explicitly asks for it."
 ---
 

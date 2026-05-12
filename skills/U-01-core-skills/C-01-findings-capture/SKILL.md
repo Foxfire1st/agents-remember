@@ -1,5 +1,5 @@
 ---
-name: C-01-findings-capture
+name: c-01-findings-capture
 description: "Capture confirmed findings, route them to the right durable task-local path, and propagate factual current-state clarifications into onboarding immediately when allowed."
 ---
 

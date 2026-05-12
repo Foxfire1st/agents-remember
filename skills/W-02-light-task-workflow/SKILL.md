@@ -1,5 +1,5 @@
 ---
-name: W-02-light-task-workflow
+name: w-02-light-task-workflow
 description: "In-between task workflow for work that needs a durable task file, distinct implementation examples, and an approval gate but still fits a single-page implementation plan as a rule of thumb."
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: C-11-memory-carryover-from-branch
+name: c-11-memory-carryover-from-branch
 description: "Carry richer onboarding memory from a source branch into official memory only when the corresponding code has landed on the official branch."
 ---
 

@@ -62,154 +62,105 @@ The repo should not depend on accidental tolerance from a specific harness. If a
 
 ## 2. Normalize the canonical skill tree
 
-### 2.1 Rename skill package folders to lowercase
+### 2.1 Nest phase skill packages under the heavy workflow
 
-Keep the phase numbering, but normalize skill package paths and frontmatter names to lowercase.
+The `P-*` skill packages are not standalone workflow entrypoints. They are the phase-local implementation packages for `W-01-heavy-task-workflow`, so their source location should sit under that workflow:
 
 ```text
 skills/P-00-creation/C-01-task-folder-creation
-→ skills/p-00-creation/c-01-task-folder-creation
-  name: c-01-task-folder-creation
+-> skills/W-01-heavy-task-workflow/skills/P-00-creation/C-01-task-folder-creation
+   name: c-01-task-folder-creation
 
 skills/P-01-research/R-01-requirements-normalization
-→ skills/p-01-research/r-01-requirements-normalization
-  name: r-01-requirements-normalization
+-> skills/W-01-heavy-task-workflow/skills/P-01-research/R-01-requirements-normalization
+   name: r-01-requirements-normalization
 
 skills/P-01-research/R-02-input-documentation
-→ skills/p-01-research/r-02-input-documentation
-  name: r-02-input-documentation
+-> skills/W-01-heavy-task-workflow/skills/P-01-research/R-02-input-documentation
+   name: r-02-input-documentation
 
 skills/P-02-synthesis/S-01-requirement-question-framing
-→ skills/p-02-synthesis/s-01-requirement-question-framing
-  name: s-01-requirement-question-framing
+-> skills/W-01-heavy-task-workflow/skills/P-02-synthesis/S-01-requirement-question-framing
+   name: s-01-requirement-question-framing
 
 skills/P-02-synthesis/S-02-architecture-question-framing
-→ skills/p-02-synthesis/s-02-architecture-question-framing
-  name: s-02-architecture-question-framing
+-> skills/W-01-heavy-task-workflow/skills/P-02-synthesis/S-02-architecture-question-framing
+   name: s-02-architecture-question-framing
 
 skills/P-03-design/D-01-requirement-clarification
-→ skills/p-03-design/d-01-requirement-clarification
-  name: d-01-requirement-clarification
+-> skills/W-01-heavy-task-workflow/skills/P-03-design/D-01-requirement-clarification
+   name: d-01-requirement-clarification
 
 skills/P-03-design/D-02-architecture-deliberation
-→ skills/p-03-design/d-02-architecture-deliberation
-  name: d-02-architecture-deliberation
+-> skills/W-01-heavy-task-workflow/skills/P-03-design/D-02-architecture-deliberation
+   name: d-02-architecture-deliberation
 
 skills/P-03-design/D-03-output-dry-run-planning
-→ skills/p-03-design/d-03-output-dry-run-planning
-  name: d-03-output-dry-run-planning
+-> skills/W-01-heavy-task-workflow/skills/P-03-design/D-03-output-dry-run-planning
+   name: d-03-output-dry-run-planning
 
 skills/P-03-design/D-04-output-documentation
-→ skills/p-03-design/d-04-output-documentation
-  name: d-04-output-documentation
+-> skills/W-01-heavy-task-workflow/skills/P-03-design/D-04-output-documentation
+   name: d-04-output-documentation
 
 skills/P-04-planning/P-01-implementation-planning
-→ skills/p-04-planning/p-01-implementation-planning
-  name: p-01-implementation-planning
+-> skills/W-01-heavy-task-workflow/skills/P-04-planning/P-01-implementation-planning
+   name: p-01-implementation-planning
 
 skills/P-05-implementation/I-01-implementation
-→ skills/p-05-implementation/i-01-implementation
-  name: i-01-implementation
+-> skills/W-01-heavy-task-workflow/skills/P-05-implementation/I-01-implementation
+   name: i-01-implementation
 
 skills/P-99-review/R-01-adversarial-review
-→ skills/p-99-review/r-01-adversarial-review
-  name: r-01-adversarial-review
+-> skills/W-01-heavy-task-workflow/skills/P-99-review/R-01-adversarial-review
+   name: r-01-adversarial-review
+```
 
-skills/U-01-core-skills/C-00-initialize-coordination-root
-→ skills/u-01-core-skills/c-00-initialize-coordination-root
+### 2.2 Lowercase all skill frontmatter names
+
+Every `SKILL.md` frontmatter `name` should be lowercase and should use the package identifier, even when the package folder keeps the uppercase taxonomy prefix for readability:
+
+```text
+skills/U-01-core-skills/C-00-initialize-coordination-root/SKILL.md
   name: c-00-initialize-coordination-root
 
-skills/U-01-core-skills/C-01-findings-capture
-→ skills/u-01-core-skills/c-01-findings-capture
-  name: c-01-findings-capture
-
-skills/U-01-core-skills/C-02-onboarding-drift-detection
-→ skills/u-01-core-skills/c-02-onboarding-drift-detection
-  name: c-02-onboarding-drift-detection
-
-skills/U-01-core-skills/C-03-repo-bootstrap
-→ skills/u-01-core-skills/c-03-repo-bootstrap
-  name: c-03-repo-bootstrap
-
-skills/U-01-core-skills/C-04-discovery
-→ skills/u-01-core-skills/c-04-discovery
-  name: c-04-discovery
-
-skills/U-01-core-skills/C-05-create-or-update-onboarding-files
-→ skills/u-01-core-skills/c-05-create-or-update-onboarding-files
+skills/U-01-core-skills/C-05-create-or-update-onboarding-files/SKILL.md
   name: c-05-create-or-update-onboarding-files
 
-skills/U-01-core-skills/C-08-ar-coordination-context-resolver
-→ skills/u-01-core-skills/c-08-ar-coordination-context-resolver
-  name: c-08-ar-coordination-context-resolver
-
-skills/W-01-heavy-task-workflow
-→ skills/w-01-heavy-task-workflow
+skills/W-01-heavy-task-workflow/SKILL.md
   name: w-01-heavy-task-workflow
 
-skills/W-02-light-task-workflow
-→ skills/w-02-light-task-workflow
+skills/W-02-light-task-workflow/SKILL.md
   name: w-02-light-task-workflow
 ```
 
-### 2.2 Fix the two direct name/folder mismatches
-
-Two current issues are not just casing issues.
+This also fixes the two direct stale-name mismatches:
 
 ```text
-skills/P-01-research/R-02-input-documentation/SKILL.md
-  folder: R-02-input-documentation
-  current name: R-01-input-documentation
-  should become: r-02-input-documentation
+skills/W-01-heavy-task-workflow/skills/P-01-research/R-02-input-documentation/SKILL.md
+  name: r-02-input-documentation
 
 skills/U-01-core-skills/C-05-create-or-update-onboarding-files/SKILL.md
-  folder: C-05-create-or-update-onboarding-files
-  current name: create_or_update-onboarding-file
-  should become: c-05-create-or-update-onboarding-files
+  name: c-05-create-or-update-onboarding-files
 ```
 
-### 2.3 Remove empty phase folders
+### 2.3 Do not create empty phase skill folders
 
-Remove the empty folder until it contains a real skill:
+Do not create a source skill package for `P-06-closing` until it contains a real skill. Empty phase folders in a public or shared repo look accidental.
 
-```text
-skills/P-06-closing
-```
+### 2.4 Keep source package paths separate from task artifact paths
 
-After normalization, this would become either:
+There is an important distinction between source skill package paths and generated task artifact paths.
 
 ```text
-skills/p-06-closing/<real-closing-skill>/SKILL.md
-```
-
-or it should not exist.
-
-Empty phase folders in a public or shared repo look accidental.
-
-### 2.4 Do not lowercase task artifact folders blindly
-
-There is an important distinction between skill package paths and generated task artifact paths.
-
-```text
-Skill package path:
-skills/p-03-design/d-04-output-documentation
+Source skill package path:
+skills/W-01-heavy-task-workflow/skills/P-03-design/D-04-output-documentation
 
 Task artifact path:
-<task-folder>/P-03-design/D-04-output-documentation/ // dev note: If we make one thing lowercase we should make both lowercase.
+<task-folder>/P-03-design/D-04-output-documentation/
 ```
 
-The first should be lowercase because it is a skill package identifier. The second can remain uppercase if it is part of the workflow taxonomy.
-
-Add this note to the repo docs:
-
-```md
-Skill package IDs are lowercase because agent skill loaders require lowercase
-skill names and parent-directory matches.
-
-Task artifact phase folders may keep the workflow taxonomy, for example
-`P-03-design/D-04-output-documentation`, because those are generated task
-outputs rather than skill identifiers.
-```
+The frontmatter skill identifier must be lowercase because agent skill loaders can require lowercase names. Task artifact phase folders keep the workflow taxonomy because those are generated task outputs rather than skill identifiers.
 
 ---
 
@@ -258,25 +209,22 @@ Return the files created or updated, the evidence used, and any unresolved uncer
 
 ## 4. Update the VS Code workspace skill locations
 
-After lowercasing the canonical skill tree, update the workspace file to point at normalized paths.
+After nesting the heavy workflow phase skills, update the workspace file to point at their current source paths.
 
 Example:
 
 ```jsonc
 "chat.agentSkillsLocations": {
   "agents-remember-md/skills": true,
-  "agents-remember-md/skills/p-00-creation": true,
-  "agents-remember-md/skills/p-01-research": true,
-  "agents-remember-md/skills/p-02-synthesis": true,
-  "agents-remember-md/skills/p-03-design": true,
-  "agents-remember-md/skills/p-04-planning": true,
-  "agents-remember-md/skills/p-05-implementation": true,
-  "agents-remember-md/skills/p-99-review": true,
-  "agents-remember-md/skills/u-01-core-skills": true
+  "agents-remember-md/skills/U-01-core-skills": true,
+  "agents-remember-md/skills/W-01-heavy-task-workflow": true,
+  "agents-remember-md/skills/W-01-heavy-task-workflow/skills": true,
+  "agents-remember-md/skills/W-02-light-task-workflow": true,
+  "agents-remember-md/skills/W-03-chat-task-workflow": true
 }
 ````
 
-Do not include `p-06-closing` until it contains a real skill.
+Do not include a `P-06-closing` source skill package until it contains a real skill.
 
 ---
 

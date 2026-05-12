@@ -1,5 +1,5 @@
 ---
-name: create_or_update-onboarding-file
+name: c-05-create-or-update-onboarding-files
 description: "Create and maintain onboarding artifacts including file-level onboarding MDs and repo-level entity catalogs. Covers template, folder organization, section conventions, and metadata. Enforces strict 1-to-1 mapping for source files and one entity catalog per repo. Use this whenever creating new onboarding files, repo entity catalogs, or auditing existing onboarding artifacts for format compliance."
 ---
 

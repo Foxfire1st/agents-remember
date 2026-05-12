@@ -1,5 +1,5 @@
 ---
-name: C-04-discovery
+name: c-04-discovery
 description: "Perform top-down discovery across onboarding, reference docs, cross-repo relationships, and code before acting on unfamiliar surfaces."
 ---
 

@@ -282,15 +282,16 @@ Open (or create) a `.code-workspace` file that includes both repositories as fol
       "agents-remember-md/skills": true,
       "agents-remember-md/skills/U-01-core-skills": true,
       "agents-remember-md/skills/W-01-heavy-task-workflow": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-00-creation": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-01-research": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-02-synthesis": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-03-design": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-04-planning": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-05-implementation": true,
+      "agents-remember-md/skills/W-01-heavy-task-workflow/skills/P-99-review": true,
       "agents-remember-md/skills/W-02-light-task-workflow": true,
-      "agents-remember-md/skills/P-00-creation": true,
-      "agents-remember-md/skills/P-01-research": true,
-      "agents-remember-md/skills/P-02-synthesis": true,
-      "agents-remember-md/skills/P-03-design": true,
-      "agents-remember-md/skills/P-04-planning": true,
-      "agents-remember-md/skills/P-05-implementation": true,
-      "agents-remember-md/skills/P-06-closing": true,
-      "agents-remember-md/skills/P-99-review": true
+      "agents-remember-md/skills/W-03-chat-task-workflow": true
     }
   }
 }
@@ -476,7 +477,9 @@ For each repository, C-08 resolves durable memory by checking exactly two suppor
 ## What's in this repo
 
 - `skills/W-01-heavy-task-workflow/` — the seven-phase workflow for high-stakes tasks
+- `skills/W-01-heavy-task-workflow/skills/` — phase-local heavy workflow skill packages and checkpoint review packages
 - `skills/W-02-light-task-workflow/` — the single-page-plan workflow for medium tasks
+- `skills/W-03-chat-task-workflow/` — the chat-mode workflow for current-session tasks
 - `skills/U-01-core-skills/` — supporting skills used by all modes:
   - `C-00-initialize-coordination-root` — create the first-run repo-local `ar-memory` scaffold and local coordination folders
   - `C-02-onboarding-drift-detection` — staleness detection (used by every mode)
@@ -486,8 +489,10 @@ For each repository, C-08 resolves durable memory by checking exactly two suppor
   - `C-08-ar-coordination-context-resolver` — resolve the active memory and coordination context from a repository name
   - `C-09-git-worktree-manager` — create, attach, report, human-approved close out worktree-backed tasks, and direct-closeout approved current-checkout edits
   - `C-10-adopt-memory-baseline` — turn existing shared-memory onboarding into the first ledgered `memory.md` baseline after drift review
-- `skills/P-99-review/` — the adversarial review package used by heavy task
-- `AGENTS.md` — operational principles, including the chat-mode loop
+- `AGENTS.md` — root task routing and memory resolver fallback guidance
+- `skills/AGENTS.md` — collaboration doctrine for skill and workflow files, including reframing, evidence, examples, and planning expectations
+- `system/AGENTS.md` — hard start-of-task memory repo onboarding maintenance gate for system guidance work
+- `system/coding-guidelines.md` — compatibility, legacy-code, deletion, and cleanup rules
 - `<resolved-onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available
 
 ---

@@ -1,5 +1,5 @@
 ---
-name: C-09-git-worktree-manager
+name: c-09-git-worktree-manager
 description: "Create, attach to, report on, and close out Agents Remember worktree-backed tasks while preserving human approval gates and shared-memory ledger alignment."
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: C-10-adopt-memory-baseline
+name: c-10-adopt-memory-baseline
 description: "Adopt existing shared-memory onboarding as the first ledgered memory baseline after resolving context, checking drift, and requiring explicit acceptance when onboarding is not proven current."
 ---
 

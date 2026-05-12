@@ -1,5 +1,5 @@
 ---
-name: W-01-heavy-task-workflow
+name: w-01-heavy-task-workflow
 description: "Orchestrate the full heavy-task lifecycle, maintain the root task contracts, present Creation naming options, ask D-01 and D-02 questions one by one, and route work to the phase-local skills."
 ---
 
@@ -22,6 +22,20 @@ This skill is the thin orchestration contract for the full heavy-task workflow. 
 1. `templates/task-structure.md`
 2. `templates/requirement-change-candidates-template.md`
 
+## Phase Skill Packages
+
+Phase-local skill packages live under `skills/` inside this workflow package:
+
+1. `skills/P-00-creation/`
+2. `skills/P-01-research/`
+3. `skills/P-02-synthesis/`
+4. `skills/P-03-design/`
+5. `skills/P-04-planning/`
+6. `skills/P-05-implementation/`
+7. `skills/P-99-review/`
+
+These are source skill packages, not generated task artifact folders. Runtime task artifacts keep the canonical `P-XX-<phase>/...` layout described in `templates/task-structure.md`.
+
 ## Orchestrator Responsibilities
 
 The orchestrator should:
@@ -32,9 +46,9 @@ The orchestrator should:
 4. maintain `task.md`, `requirements.md`, `architecture.md`, `requirement_change_candidates.md`, `architecture_open_questions.md`, and each phase `progress.md`
    - decision, progress, issue, and history logs in those artifacts are append-only; preserve superseded entries and add later entries that override, reject, or clarify them
 5. route work to the appropriate phase-local skill instead of absorbing every phase locally
-6. trigger `R-01-adversarial-review` at the defined checkpoints
-7. route factual current-state findings through `C-01-findings-capture` and `C-05-create-or-update-onboarding-files` when allowed
-8. ensure durable implementation discoveries are captured through `C-05-create-or-update-onboarding-files` during implementation when stable, or at latest in the immediate closure pass, so later sessions do not need to rediscover them
+6. trigger `r-01-adversarial-review` at the defined checkpoints
+7. route factual current-state findings through `c-01-findings-capture` and `c-05-create-or-update-onboarding-files` when allowed
+8. ensure durable implementation discoveries are captured through `c-05-create-or-update-onboarding-files` during implementation when stable, or at latest in the immediate closure pass, so later sessions do not need to rediscover them
 
 ## When To Use
 
@@ -76,8 +90,8 @@ Before continuing, confirm that `task.md` still reflects the latest approved dev
 2. Requirement and architecture approvals remain explicit developer actions.
 3. Root contracts stay separate from phase-owned working artifacts.
 4. Planning remains scheduling-only.
-5. Implementation runs through the sequential `I-01-implementation` package.
-6. Durable current-state findings are documented through `C-05-create-or-update-onboarding-files` during the task rather than left only in chat history.
+5. Implementation runs through the sequential `i-01-implementation` package.
+6. Durable current-state findings are documented through `c-05-create-or-update-onboarding-files` during the task rather than left only in chat history.
 
 ## Relationship To Other Instructions
 

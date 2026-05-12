@@ -1,5 +1,5 @@
 ---
-name: C-03-repo-bootstrap
+name: c-03-repo-bootstrap
 description: "Bootstrap onboarding for an undocumented or under-documented repo. Uses parallel specialized agents to scout structure, deep-dive areas, and synthesise a repo overview. Designed for context efficiency — orchestrator stays thin, agents write to disk, findings carry confidence levels. Can stop after any phase."
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: C-08-ar-coordination-context-resolver
+name: c-08-ar-coordination-context-resolver
 description: "Resolve the active Agents Remember context for a target repository, including topology, coordination root, memory root, settings, storage, pathRules, worktree contract facts, ledger path, and branch-gated cross-repo allowances."
 ---
 

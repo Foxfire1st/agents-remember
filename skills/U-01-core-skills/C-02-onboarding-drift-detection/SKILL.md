@@ -1,5 +1,5 @@
 ---
-name: C-02-onboarding-drift-detection
+name: c-02-onboarding-drift-detection
 description: "Detect onboarding drift against the resolved internal or shared onboarding root, classify how trustworthy existing onboarding remains, and hand actionable maintenance work to C-05-create-or-update-onboarding-files."
 ---
 
