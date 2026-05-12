@@ -42,11 +42,7 @@ Then it refreshes only the stale onboarding and plans against current context, n
 
 The same pattern can also live in a shared memory repo.
 
-For this project, the code repository is:
-
-[https://github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st/agents-remember-md)
-
-and the working memory layer can be inspected here:
+This repo's working memory layer can be inspected here as an example:
 
 [https://github.com/Foxfire1st/ar-agents-remember-md](https://github.com/Foxfire1st/ar-agents-remember-md)
 

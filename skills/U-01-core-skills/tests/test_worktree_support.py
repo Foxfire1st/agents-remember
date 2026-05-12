@@ -132,9 +132,9 @@ def commit_memory_ledger(memory_repo: Path, code_commit: str, memory_content_com
     return git(memory_repo, "rev-parse", "HEAD")
 
 
-def initialized_memory_repo(memory_repo: Path, repo_name: str, code_branch: str, memory_branch: str, code_commit: str) -> str:
+def initialized_memory_repo(memory_repo: Path, repo_name: str, _code_branch: str, memory_branch: str, code_commit: str) -> str:
     memory_content = init_repo(memory_repo, memory_branch)
-    write_ledger(memory_repo / "memory.md", create_initial_ledger(repo_name, code_branch, memory_branch, code_commit, memory_content))
+    write_ledger(memory_repo / "memory.md", create_initial_ledger(repo_name, code_commit, memory_content))
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     return git(memory_repo, "rev-parse", "HEAD")
@@ -145,7 +145,7 @@ def open_shared_contract_fixture(root: Path):
     code_base = init_repo(code_repo, "main")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_seed))
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
@@ -190,7 +190,7 @@ def direct_shared_memory_fixture(root: Path, include_feature_onboarding: bool = 
         git(memory_repo, "add", "onboarding")
         git(memory_repo, "commit", "-m", "Document feature baseline")
     memory_content = git(memory_repo, "rev-parse", "HEAD")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_content))
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_content))
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     (code_repo / "feature.txt").write_text("new\n", encoding="utf-8")
@@ -205,7 +205,7 @@ def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", c
     code_base = init_repo(code_repo, "main")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", code_base, memory_seed))
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
@@ -245,8 +245,12 @@ def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", c
 
 class WorktreeSupportTests(unittest.TestCase):
     def test_memory_ledger_roundtrip_and_prepend(self) -> None:
-        ledger = create_initial_ledger("repo-a", "main", "main", "c1", "m1")
-        parsed = parse_ledger_text(ledger_to_text(ledger))
+        ledger = create_initial_ledger("repo-a", "c1", "m1")
+        text = ledger_to_text(ledger)
+        self.assertIn("# Memory Ledger", text)
+        self.assertNotIn("trackedCodeBranch", text)
+        self.assertNotIn("memoryBranch", text)
+        parsed = parse_ledger_text(text)
         self.assertEqual(parsed.last_verified_code_commit, "c1")
         updated = prepend_mapping(parsed, "c2", "m2")
         reparsed = parse_ledger_text(ledger_to_text(updated))
@@ -254,49 +258,80 @@ class WorktreeSupportTests(unittest.TestCase):
         self.assertEqual(reparsed.last_memory_content_commit, "m2")
 
     def test_memory_ledger_rejects_bad_top_row(self) -> None:
-        text = """# Memory Branch Ledger
-
-```json ar-memory-ledger
-{
-  "schema": "ar-memory-branch-ledger/v1",
-  "repoName": "repo-a",
-  "trackedCodeBranch": "main",
-  "memoryBranch": "main",
-  "baseCodeCommit": "c1",
-  "baseMemoryCommit": "m1",
-  "lastVerifiedCodeCommit": "c2",
-  "lastMemoryContentCommit": "m2",
-  "sortOrder": "newest-first"
-}
-```
-
-| Code commit | Memory commit |
-| ----------- | ------------- |
-| c1 | m1 |
-"""
+        text = "\n".join(
+            [
+                "# Memory Ledger",
+                "",
+                "```json ar-memory-ledger",
+                "{",
+                '  "schema": "ar-memory-ledger/v1",',
+                '  "repoName": "repo-a",',
+                '  "baseCodeCommit": "c1",',
+                '  "baseMemoryCommit": "m1",',
+                '  "lastVerifiedCodeCommit": "c2",',
+                '  "lastMemoryContentCommit": "m2",',
+                '  "sortOrder": "newest-first"',
+                "}",
+                "```",
+                "",
+                "| Code commit | Memory commit |",
+                "| ----------- | ------------- |",
+                "| c1 | m1 |",
+            ]
+        )
         with self.assertRaises(LedgerError):
             parse_ledger_text(text)
 
     def test_memory_ledger_rejects_malformed_metadata(self) -> None:
-        text = """# Memory Branch Ledger
-
-```json ar-memory-ledger
-{"schema": "ar-memory-branch-ledger/v1",
-```
-
-| Code commit | Memory commit |
-| ----------- | ------------- |
-| c1 | m1 |
-"""
+        text = "\n".join(
+            [
+                "# Memory Ledger",
+                "",
+                "```json ar-memory-ledger",
+                '{"schema": "ar-memory-ledger/v1",',
+                "```",
+                "",
+                "| Code commit | Memory commit |",
+                "| ----------- | ------------- |",
+                "| c1 | m1 |",
+            ]
+        )
         with self.assertRaises(LedgerError):
             parse_ledger_text(text)
 
-    def test_start_blocks_branch_mismatched_memory_ledger(self) -> None:
+    def test_start_ignores_legacy_ledger_branch_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_repo.mkdir(parents=True)
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "dev", "dev", "c1", "m1"))
+            (memory_repo / "memory.md").write_text(
+                "\n".join(
+                    [
+                        "# Memory Branch Ledger",
+                        "",
+                        "```json ar-memory-ledger",
+                        "{",
+                        '  "schema": "ar-memory-branch-ledger/v1",',
+                        '  "repoName": "repo-a",',
+                        '  "trackedCodeBranch": "dev",',
+                        '  "memoryBranch": "dev",',
+                        '  "baseCodeCommit": "c1",',
+                        '  "baseMemoryCommit": "m1",',
+                        '  "lastVerifiedCodeCommit": "c1",',
+                        '  "lastMemoryContentCommit": "m1",',
+                        '  "sortOrder": "newest-first"',
+                        "}",
+                        "```",
+                        "",
+                        "Newest entries are always inserted at the top.",
+                        "",
+                        "| Code commit | Memory commit |",
+                        "| ----------- | ------------- |",
+                        "| c1 | m1 |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
             contract = default_contract(
                 task_name="Fix Thing",
                 repo_name="repo-a",
@@ -314,15 +349,15 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_base_commit="m1",
             )
             result = worktree_manager.prepare_memory_for_start(contract, Namespace(memory_choice=None, dry_run=True))
-            self.assertEqual(result["state"], "blocked")
-            self.assertIn("branch metadata", result["reason"])
+            self.assertEqual(result["state"], "compatible")
+            self.assertEqual(result["worktree"], "would-create")
 
     def test_start_blocks_dirty_shared_memory_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_seed = init_repo(memory_repo, "main")
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", "c1", memory_seed))
+            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", memory_seed))
             git(memory_repo, "add", "memory.md")
             git(memory_repo, "commit", "-m", "Add memory ledger")
             (memory_repo / "onboarding" / "fresh.md").parent.mkdir(parents=True, exist_ok=True)
@@ -353,7 +388,7 @@ class WorktreeSupportTests(unittest.TestCase):
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_repo.mkdir(parents=True)
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "main", "main", "c1", "m1"))
+            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", "m1"))
             contract = default_contract(
                 task_name="Fix Thing",
                 repo_name="repo-a",
@@ -947,7 +982,7 @@ class WorktreeSupportTests(unittest.TestCase):
             code_head = init_repo(workspace / "repo-b", "main")
             memory_repo = workspace / "ar-coordination" / "memory-repos" / "ar-repo-b"
             memory_head = init_repo(memory_repo, "main")
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-b", "main", "main", code_head, memory_head))
+            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-b", code_head, memory_head))
             git(memory_repo, "add", "memory.md")
             git(memory_repo, "commit", "-m", "Add memory ledger")
             settings = resolver.CrossRepoSettings(
@@ -1026,7 +1061,10 @@ class WorktreeSupportTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(adopt_baseline.command_adopt(args), 0)
             ledger = parse_ledger_text((memory_root / "memory.md").read_text(encoding="utf-8"))
+            ledger_text = (memory_root / "memory.md").read_text(encoding="utf-8")
             self.assertEqual(ledger.last_verified_code_commit, code_head)
+            self.assertNotIn("trackedCodeBranch", ledger_text)
+            self.assertNotIn("memoryBranch", ledger_text)
             self.assertTrue((memory_root / "docs" / ".gitkeep").exists())
 
     def test_memory_carryover_applies_landed_branch_onboarding(self) -> None:

@@ -14,7 +14,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 
-LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
+LEDGER_SCHEMA = "ar-memory-ledger/v1"
+LEGACY_LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
 LEDGER_FENCE_RE = re.compile(r"```json\s+ar-memory-ledger\s*\n(.*?)\n```", re.DOTALL)
 
 
@@ -27,8 +28,6 @@ class LedgerRow:
 @dataclass(frozen=True)
 class MemoryLedger:
     repo_name: str
-    tracked_code_branch: str
-    memory_branch: str
     base_code_commit: str
     base_memory_commit: str
     last_verified_code_commit: str
@@ -63,8 +62,6 @@ def parse_ledger_text(text: str) -> MemoryLedger:
 
     schema = _metadata_get(metadata, "schema")
     repo_name = _metadata_get(metadata, "repoName", "repo_name")
-    tracked_code_branch = _metadata_get(metadata, "trackedCodeBranch", "tracked_code_branch")
-    memory_branch = _metadata_get(metadata, "memoryBranch", "memory_branch")
     base_code_commit = _metadata_get(metadata, "baseCodeCommit", "base_code_commit")
     base_memory_commit = _metadata_get(metadata, "baseMemoryCommit", "base_memory_commit")
     last_verified_code_commit = _metadata_get(metadata, "lastVerifiedCodeCommit", "last_verified_code_commit")
@@ -74,8 +71,6 @@ def parse_ledger_text(text: str) -> MemoryLedger:
     required = {
         "schema": schema,
         "repoName": repo_name,
-        "trackedCodeBranch": tracked_code_branch,
-        "memoryBranch": memory_branch,
         "baseCodeCommit": base_code_commit,
         "baseMemoryCommit": base_memory_commit,
         "lastVerifiedCodeCommit": last_verified_code_commit,
@@ -85,15 +80,13 @@ def parse_ledger_text(text: str) -> MemoryLedger:
     missing = [name for name, value in required.items() if not value]
     if missing:
         raise LedgerError(f"memory.md ledger metadata is missing required fields: {', '.join(missing)}")
-    if schema != LEDGER_SCHEMA:
+    if schema not in {LEDGER_SCHEMA, LEGACY_LEDGER_SCHEMA}:
         raise LedgerError(f"unsupported memory ledger schema: {schema}")
 
     rows = parse_ledger_rows(text[match.end() :])
     ledger = MemoryLedger(
         schema=schema,
         repo_name=repo_name,
-        tracked_code_branch=tracked_code_branch,
-        memory_branch=memory_branch,
         base_code_commit=base_code_commit,
         base_memory_commit=base_memory_commit,
         last_verified_code_commit=last_verified_code_commit,
@@ -156,10 +149,8 @@ def validate_ledger(ledger: MemoryLedger) -> None:
 def ledger_to_text(ledger: MemoryLedger) -> str:
     validate_ledger(ledger)
     metadata = {
-        "schema": ledger.schema,
+        "schema": LEDGER_SCHEMA,
         "repoName": ledger.repo_name,
-        "trackedCodeBranch": ledger.tracked_code_branch,
-        "memoryBranch": ledger.memory_branch,
         "baseCodeCommit": ledger.base_code_commit,
         "baseMemoryCommit": ledger.base_memory_commit,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
@@ -167,13 +158,11 @@ def ledger_to_text(ledger: MemoryLedger) -> str:
         "sortOrder": ledger.sort_order,
     }
     lines = [
-        "# Memory Branch Ledger",
+        "# Memory Ledger",
         "",
         "```json ar-memory-ledger",
         json.dumps(metadata, indent=2),
         "```",
-        "",
-        f"This memory branch tracks code branch `{ledger.tracked_code_branch}`.",
         "",
         "Newest entries are always inserted at the top.",
         "",
@@ -217,15 +206,11 @@ def find_mapping(ledger: MemoryLedger, code_commit: str) -> LedgerRow | None:
 
 def create_initial_ledger(
     repo_name: str,
-    tracked_code_branch: str,
-    memory_branch: str,
     code_commit: str,
     memory_commit: str,
 ) -> MemoryLedger:
     return MemoryLedger(
         repo_name=repo_name,
-        tracked_code_branch=tracked_code_branch,
-        memory_branch=memory_branch,
         base_code_commit=code_commit,
         base_memory_commit=memory_commit,
         last_verified_code_commit=code_commit,

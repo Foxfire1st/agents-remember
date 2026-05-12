@@ -93,8 +93,6 @@ def ledger_status(path: Path) -> dict[str, object]:
     return {
         "exists": True,
         "valid": True,
-        "trackedCodeBranch": ledger.tracked_code_branch,
-        "memoryBranch": ledger.memory_branch,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
     }

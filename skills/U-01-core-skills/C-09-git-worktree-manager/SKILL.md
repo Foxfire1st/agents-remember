@@ -84,7 +84,7 @@ Use `direct-closeout` only for small approved edits made in the current source c
 
 Direct closeout is still explicitly human-gated. Agents must run `direct-closeout --dry-run` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout requires both `--approved` and `--approval-note`.
 
-Direct closeout resolves the current C-08 context, requires shared memory mode, requires the code checkout and memory repo to be on the same selected branch, and requires `memory.md` branch metadata to match that branch.
+Direct closeout resolves the current C-08 context, requires shared memory mode, and requires the code checkout and memory repo to be on the same selected branch. Ledger compatibility is based on code-to-memory commit mappings, not branch metadata.
 
 Shared-memory direct closeout order is:
 
@@ -96,7 +96,7 @@ Shared-memory direct closeout order is:
 6. prepend `C2 | M2` to `memory.md`
 7. commit the ledger update as `L2`
 
-Direct closeout fails without mutation when required onboarding is missing, verification metadata is missing, shared memory is not resolved, branch metadata does not match, or no code or memory changes exist. Missing onboarding is the expected hard failure when the implementation/update pass somehow did not produce a required onboarding file; the next step is to run C-05 for that source file, then rerun the direct closeout preview.
+Direct closeout fails without mutation when required onboarding is missing, verification metadata is missing, shared memory is not resolved, the code and memory checkouts are on different selected branches, or no code or memory changes exist. Missing onboarding is the expected hard failure when the implementation/update pass somehow did not produce a required onboarding file; the next step is to run C-05 for that source file, then rerun the direct closeout preview.
 
 ## Integration
 

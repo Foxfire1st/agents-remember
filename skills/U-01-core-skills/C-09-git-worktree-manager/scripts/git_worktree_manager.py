@@ -360,15 +360,6 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
             "reason": str(error),
             "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
         }
-    if ledger.tracked_code_branch != contract.code_source_branch or ledger.memory_branch != contract.memory_source_branch:
-        return {
-            "state": "blocked",
-            "reason": "memory ledger branch metadata does not match the selected code branch",
-            "trackedCodeBranch": ledger.tracked_code_branch,
-            "memoryBranch": ledger.memory_branch,
-            "expectedBranch": contract.code_source_branch,
-            "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
-        }
     mapping = find_mapping(ledger, contract.code_base_commit)
     if mapping is None:
         return {
@@ -446,8 +437,6 @@ def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str
     memory_content_commit = commit_if_dirty(contract.memory_repo_path, f"[{contract.task_id}] Bootstrap shared memory content")
     ledger = create_initial_ledger(
         contract.repo_name,
-        contract.code_source_branch,
-        contract.memory_source_branch or contract.code_source_branch,
         contract.code_base_commit,
         memory_content_commit,
     )
@@ -746,11 +735,6 @@ def validate_direct_shared_context(context, source_branch: str) -> object:
     if memory_branch != source_branch:
         raise RuntimeError(f"memory repo is on {memory_branch}, expected {source_branch}")
     ledger = load_ledger(context.memory_root / "memory.md")
-    if ledger.tracked_code_branch != source_branch or ledger.memory_branch != memory_branch:
-        raise RuntimeError(
-            "memory ledger branch metadata does not match the current direct closeout branches: "
-            f"trackedCodeBranch={ledger.tracked_code_branch}, memoryBranch={ledger.memory_branch}, expected={source_branch}"
-        )
     return ledger
 
 

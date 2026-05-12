@@ -924,14 +924,8 @@ def resolve_cross_repo_entry(
         {
             "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
             "lastMemoryContentCommit": ledger.last_memory_content_commit,
-            "trackedCodeBranch": ledger.tracked_code_branch,
-            "memoryBranch": ledger.memory_branch,
         }
     )
-    if ledger.tracked_code_branch != entry.expected_branch:
-        return _entry_with_state(entry, "included-code-only", f"memory.md trackedCodeBranch is {ledger.tracked_code_branch}, expected {entry.expected_branch}", code_info, memory_info)
-    if ledger.memory_branch != entry.expected_branch:
-        return _entry_with_state(entry, "included-code-only", f"memory.md memoryBranch is {ledger.memory_branch}, expected {entry.expected_branch}", code_info, memory_info)
     return _entry_with_state(entry, "included", "", code_info, memory_info)
 
 
