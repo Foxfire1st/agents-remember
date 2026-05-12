@@ -101,7 +101,7 @@ Just markdown files and conventions.
 
 ## Quickstart
 
-Clone this repository somewhere next to your existing code. The default setup keeps durable memory artifacts inside the repository you are onboarding, under that repository's own `ar-memory/` folder. Local coordination state such as tasks, notes, and worktrees belongs in `ar-coordination/`:
+Clone this repository wherever it makes sense for your setup. The examples below place `agents-remember-md` beside the code repository because that is easy to inspect, but the checkout does not have to live inside the same workspace as the code. The default setup keeps durable memory artifacts inside the repository you are onboarding, under that repository's own `ar-memory/` folder. Local coordination state such as tasks, notes, and worktrees belongs in `ar-coordination/`:
 
 ```text
 projects/
@@ -125,6 +125,50 @@ projects/
     notes/
     worktrees/
 ```
+
+---
+
+### Install Skills Into Your Harness
+
+Some harnesses can read skills directly from a repository you add to the workspace. Others only discover skills from specific skills folders such as `.agents/skills`, `.cursor/skills`, `.claude/skills`, `.windsurf/skills`, or their user-wide equivalents. For those harnesses, do not copy the Agents Remember skill files. Use the installer to create symlinks from the harness skills folder back to the canonical checkout.
+
+The default layout creates one namespace symlink to the full canonical skill tree:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.agents/skills
+```
+
+The command creates:
+
+```text
+<install-root>/agents-remember-md -> <agents-remember-md-checkout>/skills
+```
+
+The namespace folder is intentional for harnesses with recursive skill discovery, including Codex and Claude Code. They can discover the nested `SKILL.md` files through this symlink while the scripts still resolve back to the real checkout.
+
+For harnesses that expect direct `<skill-name>/SKILL.md` folders, use the flat symlink layout:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.windsurf/skills \
+  --layout flat
+```
+
+That creates lowercase, frontmatter-named symlinks such as:
+
+```text
+<install-root>/c-08-ar-coordination-context-resolver -> <agents-remember-md-checkout>/skills/U-01-core-skills/C-08-ar-coordination-context-resolver
+```
+
+For a checkout outside the workspace, keep the checkout where it is and point the install command at the workspace or harness skills folder:
+
+```bash
+/opt/agents-remember-md/scripts/install-skills.sh \
+  --install-root /work/my-app/.agents/skills
+```
+
+The symlink matters because several core helper scripts resolve sibling skills and shared modules from the canonical skill tree. Copying individual skill folders can break those relative paths and can also make local `.env` configuration invisible to the resolver.
 
 ---
 
@@ -205,10 +249,11 @@ Inline onboarding reuses the same file-level onboarding content model as sidecar
 The steps are the same regardless of which tool you use:
 
 1. Wire up the agent so it reads `AGENTS.md` from this repo at session start (tool-specific instructions below).
-2. Run `C-00-initialize-coordination-root` for the target repo if its local `ar-memory` scaffold or local coordination root does not exist yet.
-3. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure under the C-08 resolved `onboarding_root`, usually `<target-repo>/ar-memory/onboarding/` in internal mode. A bare repo-level `overview.md` is enough; deeper area sections are folded back into that same file as the repo is explored.
-4. Start using the agent normally. Chat handles most tasks. The agent reads the resolved onboarding unit alongside the source file and updates it as it goes.
-5. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when the task needs a written plan or needs to survive beyond a single session.
+2. If the harness requires skills to live in a dedicated skills folder, run `scripts/install-skills.sh --install-root <that-folder>` from the Agents Remember checkout. Use the default tree layout for recursive scanners, and add `--layout flat` for harnesses that require direct `<skill-name>/SKILL.md` folders.
+3. Run `C-00-initialize-coordination-root` for the target repo if its local `ar-memory` scaffold or local coordination root does not exist yet.
+4. Run `C-03-repo-bootstrap` to scaffold the initial onboarding structure under the C-08 resolved `onboarding_root`, usually `<target-repo>/ar-memory/onboarding/` in internal mode. A bare repo-level `overview.md` is enough; deeper area sections are folded back into that same file as the repo is explored.
+5. Start using the agent normally. Chat handles most tasks. The agent reads the resolved onboarding unit alongside the source file and updates it as it goes.
+6. Escalate to `W-02-light-task-workflow` or `W-01-heavy-task-workflow` when the task needs a written plan or needs to survive beyond a single session.
 
 Coverage builds from real work. The first task on a file usually creates or refreshes its onboarding unit; every task after benefits from that local context.
 
@@ -216,7 +261,7 @@ Coverage builds from real work. The first task on a file usually creates or refr
 
 ### Codex
 
-Add a `AGENTS.md` at the root of your projects folder:
+Codex reads `AGENTS.md` for workspace instructions, but its `/` skill picker discovers skills from Codex skill locations such as `.agents/skills` or `~/.agents/skills`. Add an `AGENTS.md` at the root of your projects folder:
 
 ```markdown
 # Workspace Agent Instructions
@@ -227,9 +272,34 @@ Treat these rules as workspace instructions!
 @agents-remember-md/AGENTS.md
 ```
 
+Then install the skills into the Codex-visible folder for that workspace:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.agents/skills
+```
+
+If the `agents-remember-md` checkout lives outside the workspace, run the installer from that checkout and point `--install-root` at the workspace Codex skills folder:
+
+```bash
+/opt/agents-remember-md/scripts/install-skills.sh \
+  --install-root /work/my-app/.agents/skills
+```
+
+For user-wide Codex skills, target the home skills folder:
+
+```bash
+/opt/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.agents/skills
+```
+
+In all cases, make sure the `AGENTS.md` instruction points to the actual checkout path the harness can read.
+
 ---
 
 ### Claude Code
+
+Claude Code has two separate setup pieces: `CLAUDE.md` for always-loaded workspace instructions, and `.claude/skills` or `~/.claude/skills` for native skill discovery.
 
 Add a `CLAUDE.md` at the root of your projects folder:
 
@@ -242,11 +312,147 @@ Treat these rules as workspace instructions!
 @agents-remember-md/AGENTS.md
 ```
 
-Claude Code imports the file into context at session start. When a skill applies, the agent reads the corresponding `SKILL.md` using its normal file tools — no extra configuration needed since `agents-remember-md` is already accessible on disk.
+Claude Code imports the file into context at session start. This does not install native skills by itself, so also install the canonical skill tree into a Claude-visible skills folder.
+
+For project-local Claude Code skills:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.claude/skills
+```
+
+For user-wide Claude Code skills:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.claude/skills
+```
+
+If the `agents-remember-md` checkout lives outside the workspace, run the installer from that checkout and target the project's `.claude/skills` folder:
+
+```bash
+/opt/agents-remember-md/scripts/install-skills.sh \
+  --install-root /work/my-app/.claude/skills
+```
+
+Claude Code discovers skills from personal `~/.claude/skills`, project `.claude/skills`, plugin skills, and `.claude/skills` folders inside directories added with `--add-dir`. Current Claude Code also supports nested skill discovery, so the installer-created namespace symlink is enough; do not create or maintain per-skill symlinks. If the checkout is outside the workspace, point `CLAUDE.md` at the actual path Claude Code can read.
+
+---
+
+### Hermes.md
+
+Hermes Agent discovers project context files such as `.hermes.md`, `HERMES.md`, `AGENTS.md`, and `CLAUDE.md`. Use `AGENTS.md` when you want the same workspace instruction pattern as Codex and Pi, or `HERMES.md` when you want Hermes-specific priority.
+
+For a shared projects folder, add `AGENTS.md` or `HERMES.md` at the root:
+
+```markdown
+# Workspace Agent Instructions
+
+Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+Treat these rules as workspace instructions!
+
+@agents-remember-md/AGENTS.md
+```
+
+Hermes stores local skills under `~/.hermes/skills/`, with category folders allowed. Install a flat Agents Remember category so each visible skill folder matches its lowercase `name`:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.hermes/skills/agents-remember-md \
+  --layout flat
+```
+
+If you prefer a shared skills folder, install there and add it to `~/.hermes/config.yaml`:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.agents/skills/agents-remember-md \
+  --layout flat
+```
+
+```yaml
+skills:
+  external_dirs:
+    - ~/.agents/skills
+```
+
+---
+
+### Pi.dev
+
+Pi loads `AGENTS.md` or `CLAUDE.md` from the current directory, parent directories, and `~/.pi/agent/AGENTS.md`. Add the same workspace `AGENTS.md` used by Codex:
+
+```markdown
+# Workspace Agent Instructions
+
+Read and follow `agents-remember-md/AGENTS.md` before working in any sibling project.
+Treat these rules as workspace instructions!
+
+@agents-remember-md/AGENTS.md
+```
+
+Pi loads skills from project `.pi/skills`, project `.agents/skills`, global `~/.pi/agent/skills`, global `~/.agents/skills`, settings paths, and repeated `--skill <path>` flags. Use the flat layout so each symlink folder matches the lowercase skill name:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.pi/skills \
+  --layout flat
+```
+
+For a cross-agent project install:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.agents/skills \
+  --layout flat
+```
+
+For global Pi skills:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.pi/agent/skills \
+  --layout flat
+```
+
+---
+
+### OpenClaw
+
+OpenClaw uses a dedicated agent workspace. Put the Agents Remember instruction in that workspace's `AGENTS.md`, pointing at the actual checkout path OpenClaw can read:
+
+```markdown
+# Workspace Agent Instructions
+
+Read and follow `/path/to/agents-remember-md/AGENTS.md` before working in any target project.
+Treat these rules as workspace instructions!
+
+@/path/to/agents-remember-md/AGENTS.md
+```
+
+OpenClaw loads workspace skills from `<workspace>/skills` and shared local skills from `~/.openclaw/skills`. Workspace skills have higher precedence, so install there when the guidance is project-specific:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root /path/to/openclaw-workspace/skills \
+  --layout flat
+```
+
+For shared skills visible to all OpenClaw agents on the machine:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.openclaw/skills \
+  --layout flat
+```
+
+OpenClaw can also load extra skills folders through `skills.load.extraDirs` in `~/.openclaw/openclaw.json`, but direct workspace or shared installs are the clearest setup for Agents Remember.
 
 ---
 
 ### Cursor
+
+Cursor has both persistent instructions and native Agent Skills. For instructions, use either a root-level `AGENTS.md` or a project rule. In a workspace with multiple sibling repositories, a project rule is usually more explicit.
 
 Create `.cursor/rules/agents-remember.mdc` in your projects folder:
 
@@ -262,7 +468,31 @@ Treat these rules as workspace instructions!
 @agents-remember-md/AGENTS.md
 ```
 
-Alternatively, use Cursor's built-in GitHub import to sync rules directly from this repo. Skills are read on demand by the agent using standard file access.
+Then install the skills into a Cursor-visible skills folder. Cursor discovers skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`, and `~/.cursor/skills`, and it also scans Claude/Codex compatibility folders. It walks skill roots recursively and exposes skills through the `/` menu, but its current skill format expects the frontmatter `name` to match the containing folder. Agents Remember keeps uppercase canonical folder IDs, so use the flat symlink layout for Cursor:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.cursor/skills \
+  --layout flat
+```
+
+For a shared project-level install that other harnesses can also read:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.agents/skills \
+  --layout flat
+```
+
+For user-wide Cursor skills:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root ~/.cursor/skills \
+  --layout flat
+```
+
+If the checkout is outside the workspace, run the installer from that checkout and target the workspace or user skills folder. Make sure the Cursor rule or `AGENTS.md` points at the actual checkout path Cursor can read.
 
 ---
 
@@ -295,11 +525,36 @@ Open (or create) a `.code-workspace` file that includes both repositories as fol
 
 You can add a `.github/copilot-instructions.md` in the code repo to layer on any repo-specific overrides.
 
+If your Copilot or VS Code setup cannot point directly at the checkout, install the symlink into a workspace-local skills folder and point `chat.agentSkillsLocations` at the symlinked tree:
+
+```bash
+/path/to/agents-remember-md/scripts/install-skills.sh \
+  --install-root /path/to/workspace/.agents/skills
+```
+
 ---
 
 ### Windsurf
 
-Add both repositories to your workspace. Windsurf automatically discovers `AGENTS.md` files within the workspace tree and reads skills on demand from there. You can add repo-specific additions in `.windsurf/rules/*.md` inside the code repo if needed.
+Windsurf Cascade automatically discovers `AGENTS.md` files in the workspace. A root-level `AGENTS.md` is always on, and nested `AGENTS.md` files are scoped to their directories. Add both repositories to the workspace when possible, or point the root instruction at the actual readable checkout path.
+
+Windsurf also has native Skills. Workspace skills live in `.windsurf/skills/<skill-name>/SKILL.md`; global skills live in `~/.codeium/windsurf/skills/<skill-name>/SKILL.md`. Cascade can invoke skills automatically or manually with `@skill-name`. It also scans `.agents/skills` and `~/.agents/skills` for cross-agent compatibility, and scans `.claude/skills` / `~/.claude/skills` when Claude Code config reading is enabled.
+
+Use the flat symlink layout so Windsurf sees direct skill folders with lowercase names:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.windsurf/skills \
+  --layout flat
+```
+
+For a shared project-level install:
+
+```bash
+./agents-remember-md/scripts/install-skills.sh \
+  --install-root ./.agents/skills \
+  --layout flat
+```
 
 ---
 
@@ -322,31 +577,6 @@ All three modes share the same three-part discipline:
 3. **Onboarding update after approved changes.** Onboarding reflects approved code, not speculation. The update happens after the developer approves the change, not before.
 
 The drift check establishes a start-of-task baseline for pre-existing files. It does not mean the agent must refuse to read files it just created or dirtied during the current task; those are task-local working state and stay pending verification until the next verification pass.
-
-The modes differ in _how approval happens_ — a chat turn, a task file review, a phase-gate checkpoint — not in what the discipline is. One system at three resolutions.
-
-In chat mode, the whole loop is small enough to state in full. It lives in `AGENTS.md` and reads:
-
-```markdown
-1. When planning code changes against onboarding documentation, invoke
-   `C-02-onboarding-drift-detection` to find drifted onboardings for the
-   pre-existing files in question. Do not plan against drifted or
-   missing-verification onboarding until the drift report has been handed off
-   to `C-05-create-or-update-onboarding-files` or the caller has explicitly
-   accepted directional-only trust. This establishes a start-of-task baseline;
-   it does not re-trigger solely because the current task later creates or
-   modifies files in that scope.
-
-2. Once planned, show the changes to the developer in chat including
-   code examples for every distinct change you intend to make. Wait for
-   explicit developer approval before changing any code.
-
-3. After approval, apply the code changes, update the onboarding
-   documentation, and use the appropriate code quality checks from
-   `<resolved-system-root>/tools.md`.
-```
-
-No task folder, no phase structure. The same discipline the heavier modes enforce through artifacts is carried by chat turns.
 
 ---
 
@@ -374,10 +604,31 @@ For bulk coverage the `C-03-repo-bootstrap` skill can do more. After `overview.m
 
 Most users should start with repo-local internal memory. Shared mode is for teams that intentionally want a separate memory repo for one or more selected repositories.
 
-In shared mode, create or choose a shared `ar-coordination/` root. C-08 defaults to `../ar-coordination` relative to the `agents-remember-md` checkout. To use a different coordinator, configure `AR_COORDINATION_ROOT` in `agents-remember-md/.env`:
+In shared mode, create or choose a shared `ar-coordination/` root. C-08 defaults to `../ar-coordination` relative to the `agents-remember-md` checkout. That default is only a convenience; the coordinator can live anywhere. To use a different coordinator, configure `AR_COORDINATION_ROOT` in `agents-remember-md/.env`:
 
 ```dotenv
 AR_COORDINATION_ROOT=../ar-coordination
+```
+
+Absolute paths are valid too:
+
+```dotenv
+AR_COORDINATION_ROOT=/srv/agents/ar-coordination
+```
+
+This setting is independent from skill installation. `scripts/install-skills.sh` only creates a symlink so a harness can discover the skills. C-08 follows that symlink back to the real checkout and reads the `.env` beside the checkout, so this layout is supported:
+
+```text
+/opt/agents-remember-md/
+  .env                    # AR_COORDINATION_ROOT=/srv/agents/ar-coordination
+  skills/
+  scripts/install-skills.sh
+
+/srv/agents/ar-coordination/
+
+/work/my-app/
+  .agents/skills/
+    agents-remember-md -> /opt/agents-remember-md/skills
 ```
 
 Shared mode keeps local coordination under `ar-coordination/`, but durable memory lives in one memory repo per code repo under `ar-coordination/memory-repos/ar-<repo-name>/`. Each memory repo has its own `system/settings.md` for prose guidance and `system/settings.json` for machine-readable settings:
@@ -487,6 +738,7 @@ For each repository, C-08 resolves durable memory by checking exactly two suppor
   - `C-10-adopt-memory-baseline` — turn existing shared-memory onboarding into the first ledgered `memory.md` baseline after drift review
 - `AGENTS.md` — root task routing and memory resolver fallback guidance
 - `skills/AGENTS.md` — collaboration doctrine for skill and workflow files, including reframing, evidence, examples, and planning expectations
+- `scripts/install-skills.sh` — symlink installer for harnesses that require skills to live in a dedicated skills folder
 - `system/AGENTS.md` — hard start-of-task memory repo onboarding maintenance gate for system guidance work
 - `system/coding-guidelines.md` — compatibility, legacy-code, deletion, and cleanup rules
 - `<resolved-onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available

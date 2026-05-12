@@ -2,8 +2,7 @@
 
 ## Task Format Routing
 
-This workspace has exactly three task/work formats. Choose deliberately before
-creating or updating task artifacts.
+This workspace has exactly three task/work formats. Choose deliberately before creating or updating task artifacts.
 
 ### 1. Chat Mode
 
@@ -22,7 +21,9 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 ---
 
-Do not change code without following one of the above workflows!
+**IMPORTANT:** Do not change code without following one of the above workflows!
+
+---
 
 ## Memory System
 
