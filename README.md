@@ -740,7 +740,7 @@ For each repository, C-08 resolves durable memory by checking exactly two suppor
 - `skills/AGENTS.md` — collaboration doctrine for skill and workflow files, including reframing, evidence, examples, and planning expectations
 - `scripts/install-skills.sh` — symlink installer for harnesses that require skills to live in a dedicated skills folder
 - `system/AGENTS.md` — hard start-of-task memory repo onboarding maintenance gate for system guidance work
-- `system/coding-guidelines.md` — compatibility, legacy-code, deletion, and cleanup rules
+- `system/examples/` — folder-shaped coordinator/global and memory-repo-specific scaffold examples, including `AGENTS.md`, settings, sources, tools, and coding-guidelines examples where applicable
 - `<resolved-onboarding-root>/heavy-task-workflow/` — this workflow's self-documentation, written in its own format when available
 
 ---

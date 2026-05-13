@@ -1,8 +1,8 @@
 # Sources Example
 
-Copy or rename this file to `<AR_COORDINATION_ROOT>/system/sources.md` when scaffolding a coordination root.
+Copy or rename this file to the memory layer's `system/sources.md` when scaffolding a memory repo.
 
-Use this file as the starter template for the active sources inventory. The derived path locations are documented in `<AR_COORDINATION_ROOT>/system/settings.md`.
+Use this file as the starter template for the active sources inventory. The derived path locations are documented in the same memory layer's `system/settings.md`.
 
 ## Task Sources (e.g. Github/Gitlab, MCPs, etc.)
 
@@ -11,7 +11,7 @@ Use this file as the starter template for the active sources inventory. The deri
 ## Domain Documentation
 
 - **<primary-domain-docs>** — the primary online/intranet source of technical domain knowledge, architecture docs, protocol definitions, and design decisions.
-- **<local-mirror-if-any>** — local exports or cached copies of the most useful domain docs when they exist. By default, local domain documentation lives under `<AR_COORDINATION_ROOT>/docs`.
+- **<local-mirror-if-any>** — local exports or cached copies of the most useful domain docs when they exist. By default, local domain documentation lives under the resolved memory layer's `docs/`.
 
 ## Techstack Documentation
 

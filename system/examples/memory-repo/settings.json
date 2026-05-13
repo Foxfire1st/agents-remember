@@ -2,11 +2,11 @@
   "version": 2,
   "onboarding": {
     "storage": {
-      "mode": "repo-sidecar"
+      "mode": "memory-repo"
     },
     "pathRules": {
       "include": {
-        "paths": ["README.md", "docs/**", "src/**", "skills/**", "system/**"],
+        "paths": ["README.md", "docs/**", "src/**"],
         "fileTypes": [".md", ".py", ".ts", ".tsx"]
       },
       "exclude": {
@@ -16,6 +16,13 @@
     }
   },
   "crossRepo": {
-    "allow": []
+    "allow": [
+      {
+        "repo": "neighbor-repo",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": false
+      }
+    ]
   }
 }

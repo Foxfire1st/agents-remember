@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "coordination": {
+    "tasksDir": "tasks",
+    "worktreesDir": "worktrees",
+    "notesDir": "notes",
+    "memoryReposDir": "memory-repos"
+  },
+  "memoryRepos": {
+    "defaultTopology": "shared",
+    "repositories": []
+  }
+}
