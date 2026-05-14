@@ -1,14 +1,18 @@
 # <repo> — Onboarding Overview
 
-> **Status:** <bootstrap status>
-
-Use this template for `<onboarding-root>/<repo>/overview.md`.
+| Field | Value |
+|---|---|
+| repository | <repo-name> |
+| doc_type | `repo-overview` |
+| sourceRoute | `<repo-root>` |
+| lastUpdated | <YYYY-MM-DDThh:mm> |
+| lastVerifiedCommitHash | `<full 40-char SHA or empty during bootstrap>` |
 
 ## What This Repo Is
 
 <Purpose, deployment model, core responsibilities, and the technologies that define the repo.>
 
-## Architecture at a Glance
+## Architecture At A Glance
 
 ```text
 <ASCII diagram showing the major components and how they interact>
@@ -16,23 +20,23 @@ Use this template for `<onboarding-root>/<repo>/overview.md`.
 
 ## Code Structure
 
-| Area   | Path                                         | Tech   | Purpose                             |
-| ------ | -------------------------------------------- | ------ | ----------------------------------- |
-| <area> | [<path/from/repo-root>](path/from/repo-root) | <tech> | <what lives here and why it exists> |
+| Area | Source Route | Tech | Purpose | Local Overview |
+|---|---|---|---|---|
+| <area> | [`<path>`](path) | <tech> | <what lives here> | [`<path>/overview.md`](path/overview.md) / planned / deferred |
 
 ## Functional Areas
 
 ### <Area Name>
 
-<Short, high-signal summary of the area and how it fits into the repo.>
+<Short, high-signal summary. Keep detailed local routing in the route-local overview once it exists.>
 
 ## Cross-Repo References
 
-<Start with prose that explains the important cross-repo or cross-boundary behavior in this repo. Then add the citation table to back that explanation up. Preserve and correct useful existing explanation rather than replacing it with the table. If nothing relevant exists, keep the table and record what was checked plus `No relevant cross-repo evidence found.`>
+<Explain important repo-level cross-repo or external-boundary behavior. Back the explanation with the table below. If nothing relevant exists, keep the table and record what was checked plus `No relevant cross-repo evidence found.`>
 
-| Finding                                                                                                 | Citations | Source Path                                                           |
-| ------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------- |
-| <Concise summary of the cross-repo tie, interface, or service boundary established by the cited lines.> | L10-L18   | [<source-or-onboarding.md>](relative/path/to/source-or-onboarding.md) |
+| Finding | Citations | Source Path |
+|---|---|---|
+| <Concise summary of the cross-repo tie, interface, or service boundary.> | L10-L18 | [<source-or-onboarding.md>](relative/path/to/source-or-onboarding.md) |
 
 ## Build & Dev
 
@@ -47,38 +51,28 @@ Use this template for `<onboarding-root>/<repo>/overview.md`.
 
 ## Glossary Terms
 
-| Term   | Meaning      | Notes                      |
-| ------ | ------------ | -------------------------- |
+| Term | Meaning | Notes |
+|---|---|---|
 | <term> | <definition> | <optional scope or nuance> |
 
 ## Docs References
 
-<Start with prose that explains the documentation context that matters for understanding this repo. Then add the citation table to back that explanation up. Preserve and correct useful existing explanation rather than replacing it with the table. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
+<Explain documentation context that matters for understanding this repo. Back the explanation with the table below. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
 
-| Finding                                                                               | Citations | Source Path                                                |
-| ------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------------- |
-| <Concise summary of the cited lines and why they matter for understanding this repo.> | L20-L33   | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
+| Finding | Citations | Source Path |
+|---|---|---|
+| <Concise summary of the cited lines and why they matter.> | L20-L33 | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
 
-## What to Explore Next
+## What To Explore Next
 
-| Priority | Area / Path                                                                              | Why Next                                                         |
-| -------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| high     | [<repo overview anchor or source-area path>](<repo overview anchor or source-area path>) | <why this area should be researched next and then merged into the relevant repo overview sections> |
+| Priority | Area / Path | Why Next | Suggested Artifact |
+|---|---|---|---|
+| high | [`<source-route>`](source-route) | <why this area should be researched next> | route-local overview / file card / docs pack / boundary pack |
 
 ## Needs Verification
 
-- <Any unresolved or low-confidence findings that should not be stated as settled fact>
+- <Any unresolved or low-confidence findings that should not be stated as settled fact.>
 
-## Last Verified
+## Update History
 
-<Verification status or commit/date note>
-
-## Notes
-
-- New overviews should use the canonical headings `## Cross-Repo References` and `## Docs References`.
-- When later work adds area-specific detail, merge it into the appropriate existing overview sections instead of appending a standalone deep-dive block.
-- These sections are explanation-first surfaces backed by citation tables, not table-only replacements for narrative context.
-- In `Cross-Repo References`, `Source Path` must be a workspace-relative link to the cited code or onboarding file.
-- In `Docs References`, `Source Path` must be the canonical online document link, even if a local mirror was used for reading.
-- `Citations` should use exact line ranges like `L10-L18` or `L10-L18; L42-L47`.
-- `Finding` should be a concise summary of what the cited lines establish.
+<!-- newest first; append-only -->

@@ -10,10 +10,15 @@ This is the canonical file-level onboarding content model. External onboarding m
 | lastUpdated            | <YYYY-MM-DDThh:mm>                    |
 | lastVerifiedCommitHash | `<full 40-char SHA>`                  |
 | lastVerifiedCommitDate | <YYYY-MM-DDThh:mm>                    |
+| governingOverview       | `<nearest governing overview.md>`     |
+
+## Governing Overview
+
+<Backlink to the nearest route-local `overview.md` that governs this file. If no route-local overview exists yet, link to the closest ancestor overview, falling back to the root `overview.md`.>
 
 ## Purpose
 
-<What this source file is responsible for and why it matters.>
+<What this source file is responsible for and why it matters. Do not replace this with a generic “see overview.md”; the file onboarding must remain useful when opened directly.>
 
 ## Code Commentary
 
@@ -23,7 +28,7 @@ This is the canonical file-level onboarding content model. External onboarding m
 
 ### Conventions
 
-<Patterns, naming conventions, or local style choices specific to this file or area.>
+<Patterns, naming conventions, or local style choices specific to this file or area. Mention route-local conventions only when they specifically affect this file.>
 
 ### Invariants And Boundaries
 

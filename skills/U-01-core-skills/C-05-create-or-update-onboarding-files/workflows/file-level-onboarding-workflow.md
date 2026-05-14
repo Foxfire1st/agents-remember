@@ -12,8 +12,9 @@ Create or update the file-level onboarding content for one concrete source file.
 
 1. one file-level onboarding unit per source file
 2. external storage keeps the strict mirrored path directly under the repo root using the source file's repo-relative path
-3. inline storage reuses the same content model but follows storage-specific syntax and placement rules
-4. durable commentary only; planning stays in task artifacts
+3. file-level onboarding records the nearest governing route-local `overview.md` when one exists
+4. inline storage reuses the same content model but follows storage-specific syntax and placement rules
+5. durable commentary only; planning stays in task artifacts
 
 ## Source Discovery Rules
 
@@ -31,13 +32,16 @@ Create or update the file-level onboarding content for one concrete source file.
 <onboarding-root>/
   <repo>/
     overview.md
+    <mirrored-source-folder>/
+      overview.md
     <mirrored-source-path>.md
 ```
 
 1. File name matches the source file name with `.md` appended.
 2. Never group multiple source files into one onboarding file.
 3. Keep the mirrored path stable so reviewers can move directly between source and onboarding.
-4. When inline storage is configured, keep the section semantics identical and use `inline-onboarding-workflow.md` only for syntax, placement, digesting, and fallback behavior.
+4. Add `governingOverview` metadata and a `## Governing Overview` section pointing to the nearest route-local overview. If no route-local overview exists, point to the closest ancestor overview, falling back to root `overview.md`.
+5. When inline storage is configured, keep the section semantics identical and use `inline-onboarding-workflow.md` only for syntax, placement, digesting, and fallback behavior.
 
 ## Metadata Rules
 
@@ -49,12 +53,13 @@ Create or update the file-level onboarding content for one concrete source file.
 
 Required top-level sections:
 
-1. metadata table
-2. `## Purpose`
-3. `## Code Commentary`
-4. `## Repo-Internal References`
-5. `## Cross-Repo References`
-6. `## Update History`
+1. metadata table, including `governingOverview`
+2. `## Governing Overview`
+3. `## Purpose`
+4. `## Code Commentary`
+5. `## Repo-Internal References`
+6. `## Cross-Repo References`
+7. `## Update History`
 
 `## Update History` is append-only and newest-first. Preserve earlier entries even when they are superseded; add a later entry that corrects, supersedes, or clarifies them.
 
@@ -83,13 +88,14 @@ Citation requirements for reference sections:
 
 1. identify the exact source file path
 2. confirm the mirrored onboarding path
-3. read the C-08 resolved `system/sources.md`, then read the source file and the relevant materials from its `Domain Documentation` category, capturing the exact citation ranges needed for `Docs References`, `Repo-Internal References`, and `Cross-Repo References`
-4. gather metadata:
+3. identify the nearest governing route-local overview by walking ancestor onboarding paths from the source file folder toward the root; read it when it exists
+4. read the C-08 resolved `system/sources.md`, then read the source file and the relevant materials from its `Domain Documentation` category, capturing the exact citation ranges needed for `Docs References`, `Repo-Internal References`, and `Cross-Repo References`
+5. gather metadata:
    - current time via MCP time tool
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
-5. fill the template from `../templates/file-level-onboarding-template.md`
-6. update the repo-level overview if the file should be indexed or cross-referenced there
-7. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, ensure repo-internal rows use same-repository workspace-relative links, ensure cross-repo rows still represent a real external or sibling boundary, health-check the cited targets when retrieval tools are available, and ensure every table row has exact line ranges plus a concise finding summary
+6. fill the template from `../templates/file-level-onboarding-template.md`, including `governingOverview` and the `## Governing Overview` backlink
+7. update the repo-level or route-local overview index if the file should be indexed or cross-referenced there
+8. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, ensure repo-internal rows use same-repository workspace-relative links, ensure cross-repo rows still represent a real external or sibling boundary, health-check the cited targets when retrieval tools are available, and ensure every table row has exact line ranges plus a concise finding summary
 
 ## Maintain Workflow
 

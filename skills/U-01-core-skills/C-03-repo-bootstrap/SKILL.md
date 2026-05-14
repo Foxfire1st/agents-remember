@@ -1,743 +1,1139 @@
 ---
 name: c-03-repo-bootstrap
-description: "Bootstrap onboarding for an undocumented or under-documented repo. Uses parallel specialized agents to scout structure, deep-dive areas, and synthesise a repo overview. Designed for context efficiency — orchestrator stays thin, agents write to disk, findings carry confidence levels. Can stop after any phase."
+description: "Bootstrap onboarding for an undocumented or under-documented repo. Builds a root overview first, then scales through route-local overview construction pillars, evidence packs, file cards, onboarding waves, and curator reviews. Keeps the orchestrator thin and supports gated or automated control modes."
 ---
 
 # Repo Bootstrap
 
-Bootstrap onboarding documentation for a repo that has little or no onboarding coverage. Produces a high-quality repo overview file and can later expand that same overview by merging area findings into the appropriate existing sections, alongside targeted file-level MDs.
+Bootstrap durable onboarding for a repository that has little or no memory coverage.
 
-**Core constraint:** LLM context is limited. A full repo cannot be understood in a single session. This skill breaks the work into bounded phases where each phase operates on a manageable scope and produces a durable artifact. Agents write findings to disk — the orchestrator never ingests raw code or structural data, only distilled reports.
+The minimum successful bootstrap is one root repo overview:
 
-**Design principles:**
+```text
+<onboarding-root>/<repo>/overview.md
+```
 
-- **Thin orchestrator.** The orchestrator dispatches agents and reads their distilled outputs. It never loads raw code, directory trees, or grep results into its own context.
-- **Parallel specialization.** Where possible, multiple narrow-focus agents analyse the same scope simultaneously, each with a fresh context window dedicated to its lens.
-- **Confidence-tagged findings.** Every factual claim in a report carries a confidence level so downstream consumers know what's verified vs. inferred.
-- **Goal-backward phases.** Each phase defines observable "done when" conditions, not just steps to perform.
-- **Durable checkpoints.** Each phase produces a standalone artifact. You can stop after any phase. A state file tracks progress across sessions.
-- **Topology-aware scope.** Bootstrap invokes `C-08-ar-coordination-context-resolver` for the target repository first. Internal repositories use their repo-local `ar-memory/`; shared-memory repositories use the selected per-repo shared memory root under `ar-coordination/memory-repos/ar-<repo-name>/`. Mixed workspaces are resolved per repository.
-- **Cross-repo awareness.** Existing onboarding from adjacent repos is used as seed context only when the active topology allows it. When no onboarding exists, the scout falls back to direct code scanning.
-- **Developer consultation.** The developer is consulted at review gates for intent, direction, and domain knowledge that code alone can't reveal.
-- **Artifacts compound.** The scout report feeds deep-dives, deep-dives feed synthesis, and later area passes enrich the existing repo overview instead of creating a parallel overview layer.
+For larger repositories, the scalable path is route-local and wave-based:
+
+```text
+root overview.md
+  -> area research
+  -> coverage plan
+  -> governing route map
+  -> route-local overview.md construction pillars
+  -> evidence packs where needed
+  -> file cards
+  -> file-level onboarding waves
+  -> curator review
+  -> handoff
+```
+
+**Core constraint:** LLM context is a rolling window. A full repository cannot be understood safely in one unbounded pass. This skill breaks bootstrap into bounded phases where agents write durable artifacts to disk and the orchestrator reads only distilled artifacts, not raw repo dumps.
 
 ---
 
-## Prerequisites
+## Design Philosophy
 
-- The target repo must be accessible in the workspace.
-- The target repo's `ar-memory/` scaffold must exist for default internal bootstrap, or the developer must explicitly select shared scaffolding and provide the shared coordination root or memory repo.
-- The `create_or_update-onboarding-file` skill must be available (for template compliance in later phases).
-- The `discovery` skill must be available (for cross-repo discovery techniques).
-- The `confluence-search` skill should be available for domain research.
-- The `mcp_time_get_current_time` tool must be available for timestamps.
-- For parallel agent execution: the workspace must support launching sub-agents, or the developer runs separate sessions manually.
+### Locality-first memory
+
+Durable memory must live where agents naturally look while traversing the codebase.
+
+A root `overview.md` explains the repository as a whole. A route-local `overview.md` explains a source subtree as if that subtree were a small repository of its own. A file-level onboarding document explains one concrete source file and links back to the nearest governing overview.
+
+Preferred durable placement:
+
+```text
+<onboarding-root>/<repo>/overview.md
+<onboarding-root>/<repo>/<mirrored-source-folder>/overview.md
+<onboarding-root>/<repo>/<mirrored-source-file>.md
+```
+
+Detached `bootstrap/areas/*` artifacts are allowed as temporary research and promotion artifacts. Durable agent-facing overviews exist to be discoverable through source-path traversal.
+
+### Overview as construction pillar
+
+Route-local `overview.md` files are intermediate durable memory artifacts created after area research has identified:
+
+1. where an area begins in the source tree
+2. what the area governs
+3. which files are load-bearing
+4. which concepts repeat across files
+5. which docs or cross-repo boundaries affect the area
+6. which files should later receive file-level onboarding
+
+Later file-level onboarding workers use the nearest governing `overview.md` as a construction pillar. The overview supplies the local area model; the file-level onboarding preserves concrete file-specific knowledge.
+
+### Progressive discovery read order
+
+When working on a source file, read onboarding from broadest to narrowest:
+
+```text
+<onboarding-root>/<repo>/overview.md
+<onboarding-root>/<repo>/<ancestor-folder>/overview.md
+<onboarding-root>/<repo>/<nearest-folder>/overview.md
+<onboarding-root>/<repo>/<source-file>.md
+```
+
+For example:
+
+```text
+source:
+  src/helpdesk/mappers/PlatformMapper.php
+
+onboarding read path:
+  overview.md
+  src/overview.md
+  src/helpdesk/overview.md
+  src/helpdesk/mappers/overview.md
+  src/helpdesk/mappers/PlatformMapper.php.md
+```
+
+This lets an agent reconstruct context whether it starts at the repo root or gets dropped directly onto a source file.
+
+### File-level self-sufficiency
+
+File-level onboarding stays first-class. It must not collapse into “see overview.md”.
+
+A file onboarding document must carry the file-specific facts that protect that file:
+
+- purpose
+- logic
+- conventions
+- invariants and boundaries
+- repo-internal relationships
+- docs references that affect this file
+- cross-repo behavior that affects this file
+- update history
+
+It must also backlink to the nearest governing overview so future agents discover the local area model.
+
+### Knowledge promotion pipeline
+
+Do not promote raw findings directly into durable memory. Use intermediate artifacts:
+
+```text
+raw repo observation
+  -> scout finding
+  -> area report
+  -> coverage plan
+  -> governing route map
+  -> overview card
+  -> route-local overview.md
+  -> evidence pack
+  -> file card
+  -> file-level onboarding
+  -> curator review
+```
+
+Exploration artifacts help agents understand. Promotion artifacts help agents and humans decide what becomes memory. Durable memory artifacts are the reviewed layer future agents will trust.
+
+---
+
+## Behavior To Preserve
+
+This skill intentionally keeps the strongest current bootstrap behavior.
+
+1. **Thin orchestrator** — the orchestrator coordinates, reads distilled artifacts, updates state, and enforces gates. It does not ingest raw code, directory trees, grep dumps, or full repo search output.
+2. **Bounded specialization** — scout, structure, interface, pattern, concern, docs, boundary, overview, file, and curator workers operate on narrow scopes.
+3. **Confidence tags** — all factual findings in research and promotion artifacts use `[HIGH]`, `[MEDIUM]`, or `[LOW]`.
+4. **Durable checkpoints** — every phase produces artifacts that allow the bootstrap to stop and resume.
+5. **Topology awareness** — bootstrap resolves the active memory root, path rules, storage rules, source registry, and cross-repo rules through `C-08-ar-coordination-context-resolver` before writing artifacts.
+6. **Cross-repo read-only semantics** — adjacent repos may be read only when allowed; only the target repo's memory is updated.
+7. **Developer consultation where it matters** — gated mode pauses at review gates; automated mode still parks uncertain claims and writes review artifacts.
+8. **C-05 ownership of file-level onboarding** — C-03 prepares file cards and waves, but C-05 owns the canonical file-level content model.
 
 ---
 
 ## Inputs
 
-| Input            | Required | Description                                                                                                                                                                            |
-| ---------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repo`           | Yes      | The repo name (e.g., `dema-platform-backend`, `TAS-Expand`)                                                                                                                            |
-| `topology`       | No       | Optional override passed through C-08. Normal bootstrap passes only `repo` and lets C-08 decide whether the repo is local or shared-memory.                                            |
-| `shared-root`    | No       | Optional shared-root hint passed through C-08 for explicit shared operations or repair.                                                                                                |
-| `depth`          | No       | How far to go: `overview-only` (default), `component-overviews` (accepted as a legacy input label for repo-overview expansion), or `full` (includes file-level MDs for priority areas) |
-| `seed-context`   | No       | Paths to existing onboarding files from adjacent repos that reference this repo. Auto-discovered if not provided.                                                                      |
-| `priority-areas` | No       | Areas to prioritise for deeper passes. If omitted, the scout phase identifies them.                                                                                                    |
+| Input            | Required | Description                                                                                                                                                             |
+| ---------------- | -------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo`           |      yes | Target repository name.                                                                                                                                                 |
+| `topology`       |       no | Optional override passed through C-08. Normal bootstrap passes only `repo` and lets C-08 resolve topology.                                                              |
+| `shared-root`    |       no | Optional shared-root hint for explicit shared operations or repair.                                                                                                     |
+| `control-mode`   |       no | `gated` or `automated`. If omitted, ask during Phase 0A.                                                                                                                |
+| `bootstrap-mode` |       no | `quick-orientation`, `safe-starter-memory`, `cross-repo-focused`, `domain-doc-focused`, or `full-bootstrap`. Defaults to `safe-starter-memory` when the user is unsure. |
+| `seed-context`   |       no | Optional paths to known onboarding or documentation that should seed the run.                                                                                           |
+| `priority-areas` |       no | Optional area names or source routes to prioritize. If omitted, scout identifies them.                                                                                  |
+
+Do not build compatibility behavior for older bootstrap depth labels. This repo is alpha; prefer clear current behavior over old aliases.
+
+---
+
+## Control Modes
+
+Bootstrap supports two control modes.
+
+### Gated workflow
+
+The orchestrator pauses after major phases for developer review:
+
+- source inventory review
+- scout / area map
+- root overview
+- governing route map
+- first route-local overview wave
+- first file onboarding wave
+- final handoff
+
+Use gated mode when the repo is business-critical, unfamiliar, or likely to contain hidden company intent.
+
+### Automated workflow
+
+The orchestrator may continue through the full bootstrap after setup without phase-by-phase developer approval, as long as hard stop conditions are not hit.
+
+Automated mode removes human approval gates after setup. It does **not** remove evidence gates, review artifacts, curator reviews, state updates, or final handoff.
+
+| Phase                     | Gated mode                   | Automated mode                                         |
+| ------------------------- | ---------------------------- | ------------------------------------------------------ |
+| Source inventory          | must present and ask         | must present and ask once unless user explicitly skips |
+| Scout                     | pause for area-map review    | continue, record assumptions                           |
+| Root overview             | pause for review             | continue after self-check                              |
+| Governing route map       | pause for review             | continue unless placement confidence is LOW            |
+| Route-local overview wave | pause after first wave       | continue after curator pass                            |
+| Docs evidence pack        | ask when sources are missing | continue using approved sources; park missing evidence |
+| Cross-repo boundary pack  | ask on LOW confidence        | continue only with HIGH/MEDIUM evidence; park LOW      |
+| File onboarding wave      | pause after wave             | continue after curator pass                            |
+| Handoff                   | present final                | present final                                          |
+
+### Automated uncertainty handling
+
+```text
+[HIGH]   -> may enter durable memory with evidence
+[MEDIUM] -> may enter durable memory with careful wording and evidence
+[LOW]    -> goes to Parking Lot / Open Questions / Handoff, not durable fact
+```
+
+### Hard stops in both modes
+
+Stop and ask the developer when:
+
+- memory root cannot be resolved
+- multiple memory roots are plausible
+- target repo is ambiguous
+- source inventory cannot be reviewed and the user did not explicitly allow skipping it
+- required source access is missing for a load-bearing evidence pass
+- cross-repo settings are ambiguous for a required boundary
+- adjacent repo branch mismatches for a required boundary
+- docs and code contradict each other on a load-bearing behavior
+- output would require updating a non-target repo
+- a `[LOW]` claim would otherwise become durable fact
+
+---
+
+## Source Inventory Review Rule
+
+Before asking the user for additional sources, the bootstrap orchestrator must present a reviewable source inventory.
+
+The inventory must show:
+
+1. sources discovered from the C-08 resolved `system/sources.md`
+2. source categories
+3. source locations
+4. whether each source is readable or unavailable
+5. what the orchestrator intends to use each source for
+6. which sources will be ignored or treated as unavailable
+7. which source categories appear missing or weak
+
+Ask only after showing the inventory:
+
+```text
+Here is what I found and plan to treat as sources. Is this correct, and is anything missing?
+```
+
+Do not ask “do you have additional sources?” before showing what was found.
+
+Write the reviewed result to:
+
+```text
+<onboarding-root>/<repo>/bootstrap/input-ledger.md
+```
+
+Use `templates/bootstrap-input-ledger-template.md`.
+
+---
 
 ## Topology And Eligibility
 
-Invoke `C-08-ar-coordination-context-resolver` before Phase 1 and use its resolved context:
+Invoke `C-08-ar-coordination-context-resolver` before selecting bootstrap candidates or writing artifacts.
 
-1. Default internal topology uses `<repo-root>/ar-memory/`, with prose instructions in `<repo-root>/ar-memory/system/settings.md` and machine-readable settings in the sibling `settings.json` when present.
-2. Selected shared topology uses `ar-coordination/memory-repos/ar-<repo-name>/` as the memory root, with the same `system/settings.md` and `system/settings.json` split under that memory repo.
-3. In mixed workspaces, one repository using shared scaffolding must not move neighboring internal repositories onto the shared root.
-4. In mixed workspaces, one repository using local internal memory must not prevent another repository from using shared scaffolding.
+Use the resolved context to determine:
 
-Apply the resolved `onboarding.pathRules` from the C-08 context before selecting bootstrap candidates. `pathRules` decide source path and file-type eligibility. In shared settings, scoped rules such as `path: <repo-name>` let each shared-memory repository define its own eligible paths and file types. They do not switch storage per path; storage is resolved separately from `onboarding.storage`.
+1. active memory root
+2. onboarding storage mode
+3. source path eligibility rules
+4. file-type eligibility rules
+5. `system/settings.md`
+6. `system/settings.json` when present
+7. `system/sources.md`
+8. cross-repo allow rules
+9. branch safeguards
 
----
+Apply resolved `onboarding.pathRules` before selecting source paths. In shared settings, scoped rules such as `path: <repo-name>` define eligible source paths and file types for that repository. Storage is resolved separately from `onboarding.storage`.
 
-## Overview Templates
-
-Use explicit templates instead of inferring structure only from legacy examples:
-
-- Repo overview: `templates/repo-overview-template.md`
-- Repo-overview merge guide for area findings: `templates/component-overview-template.md`
-
-Legacy overviews may still use headings like `Reference Docs` or `Cross-Repo Ties`. New output from this skill uses the canonical headings `## Docs References` and `## Cross-Repo References`.
-
-## Citation Rules
-
-All `Docs References` and `Cross-Repo References` sections produced by this skill must include explanation-first prose where behavior or boundaries need explanation, backed by citation-supported markdown tables.
-
-1. Required columns: `Finding`, `Citations`, `Source Path`.
-2. In `Docs References`, `Source Path` is a clickable markdown link to the canonical online document URL. In `Cross-Repo References`, `Source Path` is a workspace-relative markdown link to the cited code or onboarding file.
-3. `Citations` records exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
-4. `Finding` is a concise summary of what the cited lines establish.
-5. Do not rely on uncited prose alone in either section.
-6. Preserve or restore useful explanatory prose about system boundaries, flows, and contracts; correct it if needed, then support it with the citation table.
-7. Never emit absolute filesystem paths in onboarding output.
-8. If no relevant source exists, keep the table and record what was checked plus that no relevant evidence was found.
+In mixed workspaces, resolving one repo must not move neighboring repos onto a different memory root.
 
 ---
 
-## Bootstrap State File
+## Artifact Paths
 
-Every bootstrap produces a state file at `<onboarding-root>/<repo>/bootstrap/STATE.md`. This is the first file read at the start of every session and the last file updated at the end.
+All paths below are relative to `<onboarding-root>/<repo>/`.
 
-**Purpose:** Track progress, decisions, and open questions across sessions. When a bootstrap spans multiple sessions (the recommended approach), the state file is the thread that ties them together.
-
-**Template:**
-
-```markdown
-# Bootstrap State — <repo>
-
-**Started:** <date>
-**Current phase:** <phase and substep>
-**Last updated:** <date>
-
-## Areas
-
-| Area   | Priority | Scout | Deep-dive   | Brief | Merged | Synthesis |
-| ------ | -------- | ----- | ----------- | ----- | ------ | --------- |
-| <area> | high     | done  | done        | done  | done   | done      |
-| <area> | high     | done  | in-progress | —     | —      | —         |
-| <area> | medium   | done  | —           | —     | —      | —         |
-
-## Decisions
-
-| #   | Date   | Decision           | Context               |
-| --- | ------ | ------------------ | --------------------- |
-| 1   | <date> | <what was decided> | <why — who said what> |
-
-## Parking Lot
-
-- <questions, observations, and uncertainties for future sessions>
+```text
+overview.md
+entities.md
+bootstrap/
+  STATE.md
+  input-ledger.md
+  scout-report.md
+  coverage-plan.md
+  governing-route-map.md
+  areas/
+    <area>.md
+    <area>.brief.md
+    <area>/
+      structure.md
+      interfaces.md
+      patterns.md
+      concerns.md
+  overview-cards/
+    <mirrored-source-route>.overview-card.md
+  evidence/
+    docs/
+      <area-or-route>.docs-pack.md
+    cross-repo/
+      <area-or-route>.boundary-pack.md
+  file-cards/
+    <mirrored-source-path>.card.md
+  waves/
+    overview-wave-001.md
+    onboarding-wave-001.md
+  reviews/
+    overview-wave-001.curator.md
+    onboarding-wave-001.curator.md
+  handoff.md
+<mirrored-source-folder>/overview.md
+<mirrored-source-file>.md
 ```
 
-**Rules:**
+---
 
-- Created during Phase 1 (scout), updated at every phase transition.
-- Read at the start of every session — before the scout report, before area reports.
-- Tracks decisions so they don't need to be re-asked across sessions.
-- "Parking lot" captures questions and observations that can't be resolved in the current session.
-- Area table columns track progress through the pipeline: scout → deep-dive → brief → merged → synthesis.
+## Templates
+
+Use explicit templates instead of inferring artifact shape from prior examples:
+
+| Artifact                  | Template                                          |
+| ------------------------- | ------------------------------------------------- |
+| Root repo overview        | `templates/repo-overview-template.md`             |
+| Bootstrap input ledger    | `templates/bootstrap-input-ledger-template.md`    |
+| Bootstrap state           | `templates/bootstrap-state-template.md`           |
+| Coverage plan             | `templates/coverage-plan-template.md`             |
+| Governing route map       | `templates/governing-route-map-template.md`       |
+| Route-local overview card | `templates/route-local-overview-card-template.md` |
+| Route-local overview      | `templates/route-local-overview-template.md`      |
+| Docs evidence pack        | `templates/docs-evidence-pack-template.md`        |
+| Cross-repo boundary pack  | `templates/cross-repo-boundary-pack-template.md`  |
+| File card                 | `templates/file-card-template.md`                 |
+| Onboarding wave           | `templates/onboarding-wave-template.md`           |
+| Curator review            | `templates/curator-review-template.md`            |
+| Bootstrap handoff         | `templates/bootstrap-handoff-template.md`         |
+
+---
+
+## Citation And Reference Rules
+
+`Docs References`, `Repo-Internal References`, and `Cross-Repo References` are explanation-first sections backed by citation tables when they carry behavioral or boundary context.
+
+Required table columns:
+
+```markdown
+| Finding | Citations | Source Path |
+| ------- | --------- | ----------- |
+```
+
+Rules:
+
+1. `Finding` is a concise summary of what the cited lines establish.
+2. `Citations` records exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
+3. `Docs References` uses canonical documentation links, even when a local mirror was read for line access.
+4. `Repo-Internal References` uses same-repo source, test, config, generated artifact, or onboarding evidence.
+5. `Cross-Repo References` uses workspace-relative links to adjacent repo code/onboarding or external boundary proof.
+6. Never emit absolute filesystem paths in onboarding output.
+7. Treat `system/sources.md`, search registries, embedding hits, and source lists as routing inputs only. Never cite them as proof.
+8. If no relevant source exists, keep the section and record what was checked plus that no relevant evidence was found.
 
 ---
 
 ## Confidence Levels
 
-All factual claims in scout reports, area reports, and area briefs carry a confidence tag:
+All factual claims in scout reports, area reports, briefs, coverage plans, route maps, evidence packs, cards, waves, and curator reviews carry a confidence tag when they are not directly self-evident.
 
-- **`[HIGH]`** — Confirmed by developer, documented in Confluence/docs, or verified across repos (same interface matched on both sides).
-- **`[MEDIUM]`** — Clear from code reading, follows established patterns, but not externally confirmed.
-- **`[LOW]`** — Inferred, speculative, or based on indirect evidence (naming, comments, partial patterns).
+- **`[HIGH]`** — confirmed by developer, authoritative docs, or matched producer/consumer evidence across a boundary.
+- **`[MEDIUM]`** — clear from code reading or repeated local patterns, but not externally confirmed.
+- **`[LOW]`** — inferred, speculative, naming-based, config-only, partial, or uncertain.
 
-**Rules:**
+Promotion rules:
 
-- Default to `[MEDIUM]` for code-derived findings. Only promote to `[HIGH]` with external confirmation.
-- During synthesis: `[LOW]` findings are flagged as "Needs verification" rather than stated as fact.
-- During developer review: the developer can promote or dismiss findings at any level.
-- The confidence tag appears inline next to the claim: `[HIGH] Device commands are sent via MQTT topic devices/{id}/commands`.
+| Confidence | Durable memory handling                            |
+| ---------- | -------------------------------------------------- |
+| `[HIGH]`   | may be stated as fact with evidence                |
+| `[MEDIUM]` | may be stated carefully with source evidence       |
+| `[LOW]`    | must be parked as unresolved; do not state as fact |
+
+---
+
+## Bootstrap State File
+
+Every bootstrap produces and maintains:
+
+```text
+bootstrap/STATE.md
+```
+
+The state file is the first file read at the start of every bootstrap session and the last file updated at the end.
+
+Use `templates/bootstrap-state-template.md`.
+
+The state file tracks:
+
+- current control mode
+- current bootstrap mode
+- topology and memory root
+- source inventory status
+- phase status
+- areas
+- governing routes
+- route-local overview waves
+- file onboarding waves
+- decisions
+- blockers
+- parking lot
+- deferred files
+- next recommended action
+
+---
+
+## Phase 0 — Setup, Topology, Control Mode, And Source Intake
+
+### 0.1 Resolve topology
+
+Invoke `C-08-ar-coordination-context-resolver` with the target repo and optional topology/shared-root hints.
+
+Done when:
+
+- memory root is known
+- repo-relative source path eligibility is known
+- onboarding storage is known
+- `system/settings.md` and `system/settings.json` are resolved if present
+- `system/sources.md` is resolved or its absence is recorded
+- cross-repo rules and branch safeguards are known
+
+### 0.2 Ask or record control mode
+
+If `control-mode` was not supplied, present the two control modes and ask the user to choose `gated` or `automated`.
+
+If `bootstrap-mode` was not supplied, ask for a mode or default to `safe-starter-memory` when the user is unsure.
+
+Bootstrap modes:
+
+| Mode                  | Use when                                  | Output target                                                               |
+| --------------------- | ----------------------------------------- | --------------------------------------------------------------------------- |
+| `quick-orientation`   | user wants repo understanding only        | source inventory + scout + root overview                                    |
+| `safe-starter-memory` | default for most repos                    | root overview + first route-local overview wave + first high-risk file wave |
+| `cross-repo-focused`  | repo participates in multi-repo flows     | root overview + boundary packs + boundary route/file coverage               |
+| `domain-doc-focused`  | behavior depends on domain docs           | root overview + docs packs + docs-sensitive coverage                        |
+| `full-bootstrap`      | mature/critical repo needs broad coverage | full pass model in waves                                                    |
+
+### 0.3 Present source inventory before asking for additions
+
+Read the resolved `system/sources.md` and present a source inventory:
+
+```markdown
+## Source Inventory Review
+
+### Sources I Plan To Use
+
+| Source   | Category             | Location           | Status   | Planned Use                      |
+| -------- | -------------------- | ------------------ | -------- | -------------------------------- |
+| `<name>` | Domain Documentation | `<path/url label>` | readable | docs evidence packs for `<area>` |
+
+### Sources I Will Not Use
+
+| Source   | Category     | Reason                                         |
+| -------- | ------------ | ---------------------------------------------- |
+| `<name>` | `<category>` | unavailable / stale / unrelated / wrong branch |
+
+### Missing Or Weak Source Categories
+
+| Category             | Why It May Matter                                             |
+| -------------------- | ------------------------------------------------------------- |
+| Domain Documentation | area reports suggest business rules not fully visible in code |
+```
+
+Then ask:
+
+1. Are these sources correct?
+2. Should any source be excluded?
+3. Are any important docs missing?
+4. Are there Confluence pages, internal docs, vendor docs, schemas, protocol specs, or adjacent repos I should add?
+
+### 0.4 Write input ledger and state
+
+Write:
+
+```text
+bootstrap/input-ledger.md
+bootstrap/STATE.md
+```
+
+Done when:
+
+- source inventory has been presented or explicitly skipped by the user
+- approved/excluded/user-added sources are recorded
+- cross-repo context from settings is recorded
+- control mode is recorded
+- bootstrap mode is recorded
+- hard stops for the run are recorded
 
 ---
 
 ## Phase 1 — Scout
 
-**Goal:** Map the repo's top-level structure, tech stack, and cross-repo interfaces. Identify distinct functional areas.
+### Goal
 
-**Scope:** Broad but shallow. Read structure and configuration, not implementation.
+Map repository structure broadly without deep implementation analysis.
 
-**Execution model:** The scout runs as a **sub-agent** to keep the orchestrator's context clean. The orchestrator dispatches the scout with the repo path and any known seed context. The scout writes its report to disk. The orchestrator receives only a confirmation and reads the finished report.
+The scout is broad but shallow. It may read top-level structure, package manifests, build files, entrypoint hints, routing/config files, existing onboarding, approved source inventory, and allowed adjacent onboarding/code signals.
 
-> **Fallback for tiny repos (< 10 files):** The orchestrator can run the scout inline — the overhead of a sub-agent exceeds the context savings.
+It must not read every file deeply.
 
-**Done when:**
+### Procedure
 
-- Every top-level directory is assigned to exactly one area (or explicitly marked as out-of-scope, e.g., `node_modules`, `bin`).
-- Every area has file boundaries, a priority, tech profile, and seed context.
-- A cross-repo interface map exists (even if empty, with reasoning for why no ties were found).
-- The developer has confirmed the area map.
+1. Gather structural signals.
+2. Build a tech profile.
+3. Discover cross-repo signals allowed by topology.
+4. Identify functional areas.
+5. Assign every eligible top-level source path to one area or mark it excluded.
+6. Prioritize areas.
+7. Write `bootstrap/scout-report.md`.
+8. In gated mode, ask the developer to confirm the area map.
 
-### 1.1 Gather structural signals
-
-Read these (in parallel where possible) without going deep into any single file:
-
-```bash
-# Directory structure (2 levels deep)
-find <repo-root> -maxdepth 2 -type d | head -100
-
-# Entry points and config
-# Look for: README, setup.py/pyproject.toml/package.json/composer.json,
-# Dockerfile, docker-compose, Makefile, config files
-
-# Route/endpoint definitions (language-dependent)
-# Python: grep for @app.route, @router, urlpatterns, etc.
-# PHP: grep for Route::, ->get(, ->post(
-# JS/TS: grep for app.get, router.
-# C#: grep for [Route], [HttpGet], [HttpPost], MapGet, MapPost
-
-# Module boundaries
-# Python: find all __init__.py or top-level .py files in src/
-# PHP: find namespace declarations
-# C#: find .csproj files, namespace declarations
-# C: find .mak files, header files with module definitions
-```
-
-### 1.2 Build tech profile
-
-Catalog the technology in use so deep-dive agents know what they're looking at:
-
-1. **Read package manifests** — `package.json`, `*.csproj`, `pyproject.toml`, `composer.json`, `go.mod`, `Cargo.toml`, etc.
-2. **Identify:** languages (with rough % split), frameworks, key libraries and their versions.
-3. **Note infrastructure patterns** — Dockerfile, docker-compose, CI/CD config, cloud platform references.
-4. **Map tech to areas** where possible — "MQTT area uses MQTTnet 4.x", "API area uses NestJS + TypeORM".
-5. **Identify build system** — npm/yarn/dotnet/make/cargo/etc., and build commands.
-
-The tech profile becomes a section in the scout report. Deep-dive agents receive it as seed context.
-
-### 1.3 Cross-repo discovery
-
-Before exploring blind, discover what's known about this repo's external interfaces. Use the active topology to decide which adjacent onboarding roots may be read.
-
-For default internal repositories, keep discovery local unless `crossRepo.allow` in the repo-local memory settings names additional repositories. For shared-memory repositories, use the shared memory root selected for that repository. In a mixed workspace, shared-memory repositories may use shared memory while neighboring internal repositories remain local.
-
-Use two paths depending on whether allowed adjacent repos have onboarding.
-
-#### Path A — Onboarding exists in adjacent repos
-
-1. **Read the current (possibly placeholder) overview** at `<onboarding-root>/<repo>/overview.md`.
-2. **Search bootstrapped repos' onboarding** for references to this repo:
-   ```bash
-   grep -r "<repo-name>" "<onboarding-root>" --include="*.md" -l
-   ```
-3. **Read the cross-repo sections** of those files. These name specific files, interfaces, event types, and communication paths — use them as seed points for the deep-dive.
-4. **Check the glossary** for terms associated with this repo.
-5. **Check `docs/Confluence/`** for domain docs relevant to this repo.
-
-#### Path B — No onboarding available (first bootstrap in workspace)
-
-When adjacent repos have little or no onboarding, go directly to code:
-
-1. **Scan the target repo for outbound signals:**
-   - HTTP client calls, base URLs, service hostnames in config/environment variables
-   - MQTT publish calls, WebSocket connection URLs
-   - Shared type imports or cross-repo package references
-   - Environment variables referencing other services (e.g., `WPS_URL`, `IOT_HUB_CONNECTION`)
-
-2. **For each outbound signal, search the likely receiving repo:**
-   - Match endpoint URLs to route definitions
-   - Match MQTT topics to subscription handlers
-   - Match event/message type names across repos
-
-3. **Scan adjacent repos for inbound references to the target repo:**
-   - Same technique in reverse — look for URLs, topics, or type names that point here
-
-4. **Produce a cross-repo interface map** with confidence levels:
-   - `[HIGH]` — matched on both sides (outbound call in repo A, handler in repo B)
-   - `[MEDIUM]` — found outbound signal, likely target repo identified but handler not confirmed
-   - `[LOW]` — env var or config reference suggests a tie, but no code-level confirmation
-
-Use the techniques described in the `discovery` skill's Cross-Repo Discovery section for systematic coverage.
-
-### 1.4 Identify areas
-
-Divide the repo into **functional areas**. An area is a cohesive group of files that:
-
-- Serve a single purpose (e.g., "WebSocket handling", "telemetry processing", "MQTT integration")
-- Can be understood somewhat independently
-- Map roughly to what will become component-level overviews
-
-**Output per area:**
-
-- **Name** — short descriptive label
-- **File boundaries** — which directories/files belong to this area
-- **File count** — for sizing the deep-dive (determines whether parallel agents are warranted)
-- **Priority** — high/medium/low based on: cross-repo coupling, complexity, and relevance to active work
-- **Tech** — frameworks/libraries specific to this area (from the tech profile)
-- **Seed context** — any cross-repo references or docs that mention this area
-- **Initial observations** — 1-2 sentences on what this area appears to do
-
-### 1.5 Write the scout report
-
-Write to: `<onboarding-root>/<repo>/bootstrap/scout-report.md`
-
-**Scout report template:**
+### Scout report required sections
 
 ```markdown
 # Scout Report — <repo>
 
-**Generated:** <date>
-**Repo root:** <path>
-**Total files:** <count>
-**Total directories:** <count>
-
 ## Tech Profile
 
-| Technology  | Version   | Areas   | Notes                |
-| ----------- | --------- | ------- | -------------------- |
-| <framework> | <version> | <areas> | <role in the system> |
-
-**Languages:** <list with rough % split>
-**Infrastructure:** <Docker, CI/CD, cloud platform>
-**Build system:** <tool and key commands>
-
-## Areas
-
-### <Area Name>
-
-- **Files:** <count>
-- **Boundaries:** <directories/file patterns>
-- **Priority:** <high/medium/low> — <reason>
-- **Tech:** <frameworks/libraries specific to this area>
-- **Seed context:** <cross-repo refs, docs, glossary terms>
-- **Initial observations:** <1-2 sentences>
-
-### <Area Name>
-
-...
+## Functional Areas
 
 ## Cross-Repo Interface Map
 
-| Direction | This Repo (file/function) | Other Repo    | Interface Type                | Confidence        |
-| --------- | ------------------------- | ------------- | ----------------------------- | ----------------- |
-| outbound  | <source location>         | <target repo> | <MQTT/HTTP/WS/etc.>: <detail> | [HIGH/MEDIUM/LOW] |
-| inbound   | <handler location>        | <source repo> | <type>: <detail>              | [HIGH/MEDIUM/LOW] |
+## Out Of Scope
 
 ## Unresolved
 
-- <things the scout couldn't determine — feeds developer review and parking lot>
-
 ## Developer Review Questions
-
-- Are the area boundaries correct? Should any be split or merged?
-- Are the priorities right? What areas are you most likely to work on next?
-- Is there domain context the scout missed?
-- <specific questions based on unresolved items>
 ```
 
-### 1.6 Developer review
+Functional areas should include boundaries, priority, reason for priority, seed context, initial observations, and suggested deep-dive mode.
 
-Present the area list and cross-repo interface map to the developer. Ask the questions from the scout report's "Developer Review Questions" section. Also ask:
+Done when:
 
-- Is there domain context the scout missed? (e.g., "that module is deprecated", "those two areas are actually tightly coupled")
-- For `[LOW]` confidence cross-repo ties: can you confirm or dismiss these?
-
-Update the scout report with corrections. Create the bootstrap state file.
+- every top-level eligible source path is assigned to an area or excluded
+- every area has boundaries and priority
+- cross-repo hints are recorded, even if empty
+- `STATE.md` is updated
 
 ---
 
 ## Phase 2 — Area Deep-Dives
 
-**Goal:** Produce a thorough, confidence-tagged area report for each identified area.
+### Goal
 
-**Done when:** For each area, a reader of the area report (who has not read the code) can answer: What does this area do? How does data flow through it? What external systems does it talk to? What would break if you changed it carelessly? Every factual claim carries a confidence tag.
+Produce confidence-tagged area knowledge that explains structure, interfaces, patterns, and concerns.
 
-### 2.1 Execution model — parallel specialized agents
+### Execution model
 
-For each area, spawn up to **4 focused sub-agents** in parallel. Each agent gets a fresh context window dedicated to its lens.
+For each high-priority area, use up to four focused agents:
 
-| Agent               | Focus                                                                              | Output file                  |
-| ------------------- | ---------------------------------------------------------------------------------- | ---------------------------- |
-| **Structure agent** | Internal architecture: classes, modules, data flow, state management               | `areas/<area>/structure.md`  |
-| **Interface agent** | APIs exposed/consumed, cross-repo ties, shared types, communication protocols      | `areas/<area>/interfaces.md` |
-| **Pattern agent**   | Conventions, error handling, testing patterns, naming, code style, domain concepts | `areas/<area>/patterns.md`   |
-| **Concerns agent**  | Invariants, traps, tech debt, fragile code, concurrency, implicit contracts        | `areas/<area>/concerns.md`   |
+| Agent           | Focus                                     | Output                                 |
+| --------------- | ----------------------------------------- | -------------------------------------- |
+| Structure agent | architecture, modules, data flow, state   | `bootstrap/areas/<area>/structure.md`  |
+| Interface agent | APIs, events, protocols, cross-repo hints | `bootstrap/areas/<area>/interfaces.md` |
+| Pattern agent   | conventions, errors, tests, domain terms  | `bootstrap/areas/<area>/patterns.md`   |
+| Concerns agent  | invariants, traps, fragility, security    | `bootstrap/areas/<area>/concerns.md`   |
 
-**Each sub-agent receives:**
+For small areas, use one combined area agent instead.
 
-1. The scout report (for orientation and tech profile).
-2. Seed context for this specific area — cross-repo onboarding sections, Confluence docs.
-3. The file list for this area (from the scout report's area boundaries).
-4. The confidence level definitions (from this skill).
-5. Instructions to write findings to its designated output file with confidence tags.
+### Sizing rules
 
-**Each sub-agent does NOT receive:**
+|     Area size | Recommended model                    |
+| ------------: | ------------------------------------ |
+|  `< 10` files | inline or single area agent          |
+| `10–25` files | single area agent or two lenses      |
+| `25–75` files | specialized agents                   |
+|   `75+` files | split area first or process subareas |
 
-- Content from other areas.
-- Output from other sub-agents (they run in parallel).
-- The full repo file listing beyond this area.
+### Merge step
 
-**The orchestrator never reads the section files.** It only receives confirmation that they were written.
+A merge agent reads only the section reports for one area and writes:
 
-> **Fallback for small areas (< 15 files):** Skip parallelization. Run a single agent that covers all four lenses sequentially and writes a unified area report directly. The overhead of 4 agents isn't justified for a small scope.
-
-### 2.2 Sub-agent procedures
-
-#### Structure agent
-
-1. Read all code files in the area boundaries (for large areas 50+ files: entry points first, then core logic, then utilities, then DTOs/types).
-2. Map key classes/functions and their responsibilities.
-3. Trace data flow: what calls what, what data goes where.
-4. Identify state management: databases, caches, in-memory state.
-5. Produce a structure diagram if relationships are complex.
-
-#### Interface agent
-
-1. Map APIs exposed: HTTP endpoints, WebSocket handlers, MQTT topic handlers, gRPC services.
-2. Map APIs consumed: calls to other services, database queries, external API clients.
-3. Match cross-repo communication against seed context from the scout report.
-4. Identify shared types, enums, constants that must stay in sync across repos.
-5. Search Confluence via the `confluence-search` skill for protocol specs and API contracts.
-
-#### Pattern agent
-
-1. Identify coding conventions: naming, file organization, module patterns.
-2. Document error handling patterns: how errors are caught, propagated, logged.
-3. Identify testing patterns: test framework, coverage approach, fixtures.
-4. Extract domain concepts: terms, business rules, configuration dependencies.
-5. Check the glossary for unfamiliar terms; flag new terms for glossary addition.
-
-#### Concerns agent
-
-1. Identify invariants: ordering constraints, concurrency rules, cache invalidation logic.
-2. Flag traps: things that look simplifiable but aren't, implicit contracts.
-3. Note tech debt: TODOs, workarounds, deprecated patterns, version pinning.
-4. Identify fragile code: areas where small changes could have outsized impact.
-5. Note security-relevant patterns: auth checks, input validation, secret handling.
-
-### 2.3 Merge step
-
-After all sub-agents complete for an area, a **merge agent** (fresh context) composes the unified area report:
-
-1. Read the 4 section files for this area.
-2. Cross-reference findings — interfaces mentioned by the interface agent should appear in the structure agent's data flow.
-3. Resolve conflicts — if agents disagree on a finding, note both perspectives and tag as `[LOW]` until resolved.
-4. Consult the developer for anything tagged `[LOW]` or flagged as uncertain.
-5. Write the unified area report.
-
-Write to: `<onboarding-root>/<repo>/bootstrap/areas/<area-name>.md`
-
-**Area report template:**
-
-```markdown
-# <Area Name> — Area Report
-
-**Repo:** <repo>
-**Files:** <count>
-**Key paths:** <top-level directories/files>
-**Generated:** <date>
-
-## Summary
-
-<2-3 sentences: what this area does and why it exists.>
-
-## Internal Structure
-
-<Classes/modules, their responsibilities, how they relate.
-Include a diagram if the relationships are complex.
-Tag claims: [HIGH]/[MEDIUM]/[LOW].>
-
-## Data Flow
-
-<How data moves through this area. Entry points, transformations, outputs.>
-
-## External Interfaces
-
-<APIs exposed, APIs consumed, cross-repo communication paths.
-Name specific files, functions, endpoints.>
-
-## Domain Concepts
-
-<Terms, business rules, configuration.>
-
-## Invariants & Traps
-
-<What must hold true. What looks wrong but is right. What would break.>
-
-## Cross-repo Ties
-
-<Specific interfaces to/from other repos. Name files on both sides.
-Note sync requirements.>
-
-## Conventions & Patterns
-
-<Recurring patterns in this area. Naming, error handling, testing.>
-
-## Developer Notes
-
-<Anything the developer explained that isn't in the code.
-Migration direction, intent, planned changes.>
-
-## Key Files
-
-<Ranked list of the most important files with 1-line descriptions.>
-
-## Unverified / Low Confidence
-
-<Collected [LOW] findings from all agents. These need developer input or deeper investigation.>
+```text
+bootstrap/areas/<area>.md
+bootstrap/areas/<area>.brief.md
 ```
 
-### 2.4 Write the area brief
+The merge preserves confidence tags, resolves duplicates, records contradictions, identifies key files, and suggests route-local overview candidates.
 
-After the merged area report is complete, produce a **1-page area brief** — a distilled summary for the synthesis phase:
+Done when:
 
-Write to: `<onboarding-root>/<repo>/bootstrap/areas/<area-name>.brief.md`
-
-```markdown
-# <Area Name> — Brief
-
-**Files:** <count> | **Priority:** <high/medium/low> | **Generated:** <date>
-
-## What it does
-
-<2-3 sentences.>
-
-## Key interfaces
-
-<Bulleted list: APIs exposed, APIs consumed, cross-repo ties. Name files.>
-
-## Top invariants
-
-<Bulleted list: the 3-5 most important things that must hold true.>
-
-## Cross-repo ties
-
-<Bulleted list: interfaces to/from other repos with confidence tags.>
-
-## Unresolved
-
-<Anything tagged [LOW] or flagged for developer input.>
-```
-
-The brief exists so the synthesis phase can load lightweight summaries instead of full area reports.
-
-### 2.5 Update state
-
-After each area completes its deep-dive cycle (section files → merge → brief):
-
-1. Update `STATE.md` — mark the area's deep-dive, brief, and merged columns.
-2. Add any decisions made during developer consultation.
-3. Move resolved parking lot items; add new ones.
+- prioritized areas have area reports and briefs
+- `[LOW]` claims remain unresolved or parked
+- key files and possible governing routes are identified
+- `STATE.md` is updated
 
 ---
 
-## Phase 3 — Synthesis
+## Phase 3 — Root Repo Overview Synthesis
 
-**Goal:** Produce the repo-level overview from the area briefs and scout report.
+### Goal
 
-**This is a separate session** that reads distilled artifacts, not code or full area reports. The context budget goes to composing, not loading.
+Create or refresh the root repo overview from the scout report and area briefs.
 
-**Done when:** A new developer reading only the repo overview can orient themselves in the codebase, identify which area to look at for a given task, understand the cross-repo boundaries, and know what technology is in use. All `[LOW]`-confidence items are either resolved or explicitly flagged.
+Output:
 
-### 3.1 Session setup
+```text
+overview.md
+```
 
-Load into context:
+Use `templates/repo-overview-template.md`.
 
-1. **Area briefs** from `<onboarding-root>/<repo>/bootstrap/areas/*.brief.md` — not full reports.
-2. **The scout report** — for the area map, tech profile, and cross-repo interface map.
-3. **The bootstrap state file** — for decisions and unresolved items.
-4. **The existing placeholder overview** (if any).
-5. **The device-management overview** (as a quality reference — this is the gold standard).
-6. **Cross-repo onboarding sections** from adjacent repos.
+The synthesis agent reads:
 
-> If the synthesis agent needs detail beyond what a brief provides, it reads that one full area report on demand. It does not load all full reports upfront.
+- `bootstrap/STATE.md`
+- `bootstrap/input-ledger.md`
+- `bootstrap/scout-report.md`
+- area briefs
+- existing `overview.md` if present
+- specific full area reports only on demand
 
-### 3.2 Compose the repo overview
+It does not load all raw source code or all full area reports upfront.
 
-The overview follows `templates/repo-overview-template.md`. `<onboarding-root>/device-management/overview.md` remains a quality reference when available, but the template defines the required section names and citation-backed tables. It must include:
+Required root overview sections:
 
-1. **What This Repo Is** — purpose, tech stack, deployment model
-2. **Architecture at a Glance** — ASCII diagram showing major components and their relationships
-3. **Code Structure** — tables mapping areas to paths, tech, and purpose
-4. **Functional Areas** — prose summaries of each area (derived from area briefs), grouped by domain
-5. **Cross-Repo References** — explanatory prose plus citation-backed table with columns `Finding`, `Citations`, and `Source Path`, showing interfaces to each adjacent repo with workspace-relative links in the last column, exact line ranges, and concise finding summaries
-6. **Build & Dev** — how to build, run, test
-7. **Key Invariants** — repo-wide rules that must hold (aggregated from area briefs)
-8. **Glossary Terms** — terms introduced or heavily used by this repo
-9. **Docs References** — explanatory prose plus citation-backed table with columns `Finding`, `Citations`, and `Source Path`, covering Confluence/docs/onboarding sources relevant to this repo with the canonical online document link in the last column, exact line ranges, and concise finding summaries
-10. **What to Explore Next** — which areas should be researched next and then merged into the relevant repo overview sections
+```markdown
+## What This Repo Is
 
-**Confidence handling in the overview:**
+## Architecture At A Glance
 
-- `[HIGH]` and `[MEDIUM]` findings are stated as facts.
-- `[LOW]` findings are either omitted or placed in a "Needs Verification" callout, not stated as facts.
-- If many `[LOW]` items remain, flag this to the developer — it may indicate the area needs a targeted deep-dive with more developer consultation.
+## Code Structure
 
-Write to: `<onboarding-root>/<repo>/overview.md` (replacing the placeholder)
+## Functional Areas
 
-### 3.3 Developer review
+## Cross-Repo References
 
-Present the overview for review. This is the most important artifact — it sets the frame for everything below it. Get explicit sign-off before proceeding.
+## Build & Dev
 
-During review, ask the developer to:
+## Key Invariants
 
-- Confirm or dismiss any remaining `[LOW]`-confidence items.
-- Verify the cross-repo tie table is complete.
-- Flag any areas where the summary doesn't match their understanding.
+## Glossary Terms
 
-### 3.4 Update the onboarding index and state
+## Docs References
 
-1. Update `<onboarding-root>/index.md` to reflect the new status (e.g., "Bootstrapped — repo overview complete").
-2. Update `STATE.md` — mark synthesis complete, record any final decisions from the review.
+## What To Explore Next
+```
+
+Done when:
+
+- root overview exists
+- `STATE.md` records synthesis status
+- gated mode review is complete or automated mode self-check passed
 
 ---
 
-## Phase 4 — Deepen (optional)
+## Phase 4 — Bottom-Up Memory Build
 
-**Goal:** Use the overview + area reports to deepen repo coverage by merging area findings into the appropriate existing sections of the repo overview, plus file-level MDs where warranted.
+### Goal
 
-This phase is unbounded. It can be done incrementally, one area at a time, as needed. It is most valuable when a task is about to touch an area — expand the relevant repo-overview coverage just in time.
+Convert approved area findings into durable route-local overviews and file-level onboarding through small, evidence-backed, reviewable waves.
 
-**Done when:** For each area addressed: a developer about to work in that area can read the relevant repo-overview sections and understand the internal structure, key files, patterns, and pitfalls without reading every source file first. File-level MDs exist for the highest-risk files (those with invariants, cross-repo interfaces, or non-obvious logic).
+Core rule:
 
-### 4.0 Priority re-assessment
+```text
+Build the next safe memory wave, not the whole memory layer at once.
+```
 
-Before deepening, re-assess which components to tackle first. Priorities may have shifted since the scout phase:
+### 4A — Coverage Planning
 
-1. **Read the repo overview** — synthesis may have revealed that a medium-priority area has critical cross-repo ties.
-2. **Read `STATE.md`** — decisions and parking lot items may point to areas that need attention.
-3. **Check for just-in-time triggers** — if this phase was invoked by `heavy-task-workflow` because a task is about to touch a specific area, that area takes priority regardless of the scout's original ranking.
-4. **Produce a deepening order** — a ranked list of components to address. Update `STATE.md` with this list.
+Write:
 
-### 4.1 Merge area findings into the repo overview
+```text
+bootstrap/coverage-plan.md
+```
 
-Each area-deepening pass runs as a **sub-agent** to keep the orchestrator clean for managing the sequence across areas.
+Use `templates/coverage-plan-template.md`.
 
-**Sub-agent receives:**
+Inputs:
 
-1. **The repo overview** — for context on where this component fits in the whole.
-2. **The full area report** for this component (not just the brief — the brief was for synthesis, the full report has the detail needed here).
-3. **The Phase 2 section files** for this component — especially `concerns.md` (invariants, traps, fragile code) and `interfaces.md` (cross-repo ties, shared types). These are more detailed than the merged report for their specific lenses.
-4. **The scout report's tech profile** — so the overview accurately describes the component's tech stack.
-5. **The component's source files** — for re-reading key files where the area report lacks detail.
+- root `overview.md`
+- `STATE.md`
+- `scout-report.md`
+- area reports and briefs
+- concerns reports
+- interface reports
+- input ledger
+- developer review notes
 
-**Sub-agent does NOT receive:**
+Classify files and routes:
 
-- Area reports, section files, or source code from other components.
-- The full scout report (only the tech profile section).
+| Classification           | Meaning                          | Default action                              |
+| ------------------------ | -------------------------------- | ------------------------------------------- |
+| `landmine`               | hidden invariant / fragile logic | early file card + wave                      |
+| `cross-repo-boundary`    | can break another repo/system    | boundary pack + file card                   |
+| `core-logic`             | central behavior                 | route overview and/or file card             |
+| `entrypoint`             | user/system entry into area      | route overview and/or file card             |
+| `domain-mapper`          | transforms domain state          | route overview and file card if non-obvious |
+| `state-machine`          | state transitions                | route overview + early file card            |
+| `security-sensitive`     | auth, validation, permissions    | early file card                             |
+| `routine-support`        | helper with limited risk         | defer unless touched                        |
+| `simple-dto-config`      | passive data/config              | defer unless touched                        |
+| `generated-vendor-build` | generated/vendor/build output    | exclude                                     |
+| `unknown`                | not enough evidence              | investigate or ask                          |
 
-**Sub-agent procedure:**
+Done when:
 
-1. **Read the full area report and section files** — these are the primary inputs. Note any `[LOW]`-confidence findings that need resolution.
-2. **Re-read key source files** where the area report lacks detail on specific patterns, or where the concerns agent flagged traps/invariants that need more context to document clearly.
-3. **Write or refresh the relevant parts of** `<onboarding-root>/<repo>/overview.md` using `templates/component-overview-template.md` as a merge guide. Update the existing overview sections that own the new information instead of appending a standalone deep-dive block. Do not create or preserve a long-lived `<onboarding-root>/<repo>/<component>/overview.md` layer for that area.
-4. **Include an Onboarding File Index** section listing:
-   - Which file-level MDs should be created (ranked by priority — see 4.2 for criteria).
-   - Which file-level MDs exist (initially empty for a fresh bootstrap).
-5. **Propagate confidence tags** — claims carried from the area report retain their confidence level. New claims from re-reading code default to `[MEDIUM]`.
-6. **Populate `Docs References` and `Cross-Repo References` as explanation-first sections backed by citation tables** — preserve or restore useful prose, use the column order `Finding`, `Citations`, `Source Path`, ensure docs rows link to the canonical online reference, ensure code/onboarding rows use workspace-relative links, and ensure every row has exact line ranges plus a concise finding summary.
+- priority routes and files are classified
+- evidence needs are known
+- deferred files have reasons and revisit triggers
+- first overview wave candidates are known
 
-### 4.2 Developer review
+### 4B — Governing Route Map
 
-After each repo-overview merge pass is written, present the updated overview coverage to the developer for review. Ask:
+Write:
 
-- Does the overview match your understanding of this component?
-- Are there invariants or traps missing that you know about?
-- For `[LOW]`-confidence items: can you confirm or dismiss?
-- Is the file-level MD priority ranking correct?
+```text
+bootstrap/governing-route-map.md
+```
 
-Update the repo overview section with corrections. Update `STATE.md`.
+Use `templates/governing-route-map-template.md`.
 
-> This gate prevents misunderstandings from propagating into file-level MDs. Wrong repo-overview coverage produces wrong file-level docs.
+This artifact decides where durable route-local `overview.md` files should live in the mirrored onboarding hierarchy.
 
-### 4.3 File-level MDs
+Placement principles:
 
-For high-priority files within an approved component:
+1. Place `overview.md` at the source route where the area begins.
+2. Prefer locality over detached architecture folders.
+3. Do not create an overview merely because a folder exists.
+4. Create an overview when a subtree has shared models, workflows, repeated invariants, cross-repo boundaries, docs dependencies, multiple hotspots, or routing burden.
+5. For cross-cutting workflows, choose the most natural local anchor and add local mentions in participating route overviews.
 
-1. **Invoke the `create_or_update-onboarding-file` skill** — it handles the template, metadata, and procedures.
-2. **Prioritise using Phase 2 artifacts** — the concerns agent's output directly identifies which files need documentation most:
-   - Files flagged in `concerns.md` as having **invariants or implicit contracts** — these are the "landmine" files where a developer could easily break things without documentation.
-   - Files flagged in `interfaces.md` as **cross-repo interface points** — changes here can break other repos.
-   - **Entry points** and files with **complex, non-obvious logic** identified in `structure.md`.
-   - Files where the area report contains `[LOW]`-confidence claims — documentation forces investigation and resolution.
-3. **Don't try to cover everything.** File-level MDs for simple utilities, DTOs, or config can wait until a task touches them.
+Done when:
 
-### 4.4 Update state and clean up
+- proposed governing routes are listed
+- considered-but-deferred routes are recorded
+- cross-cutting concepts have primary local anchors
+- gated mode review is complete or automated mode can proceed with non-LOW placements
 
-After an area's repo-overview coverage is reviewed and its file-level MDs are written:
+### 4C — Route-Local Overview Cards
 
-1. **Update `STATE.md`** — mark the area as deepened.
-2. **Clean up per-component:**
-   - The section files for this component (`areas/<area>/structure.md`, `interfaces.md`, `patterns.md`, `concerns.md`) can now be deleted — their content is captured in the repo overview and file-level MDs.
-   - The area brief for this component can be deleted — it was only needed for synthesis.
-   - The full area report can be kept as reference or deleted — it's largely superseded by the repo overview and file-level MDs but may still be useful for historical context.
-3. **Do not delete section files for components that haven't been deepened yet** — they're still needed as input.
-4. **The scout report and state file are kept** as historical records throughout.
+For each selected governing route, write:
+
+```text
+bootstrap/overview-cards/<mirrored-source-route>.overview-card.md
+```
+
+Use `templates/route-local-overview-card-template.md`.
+
+Overview cards are work orders for route-local overview workers. They specify:
+
+- why this overview exists
+- what source subtree it governs
+- what structures it must explain
+- what files are load-bearing
+- what docs or cross-repo packs apply
+- what backlinks/downlinks are required
+- what open questions remain
+
+Done when:
+
+- every first-wave route overview has a card
+- cards list parent overview, child overview candidates, and governed files
+- cards constrain workers enough to avoid broad repo re-discovery
+
+### 4D — Route-Local Overview Waves
+
+Create wave manifests under:
+
+```text
+bootstrap/waves/overview-wave-001.md
+```
+
+A wave should include a small number of overview cards.
+
+Default wave sizing:
+
+| Route type                          |  Max scope |
+| ----------------------------------- | ---------: |
+| high-risk boundary route            |    1 route |
+| workflow-owning route               |    1 route |
+| module route with multiple hotspots | 1–3 routes |
+| routine directory                   |      defer |
+
+Overview workers write durable route-local overviews:
+
+```text
+<mirrored-source-folder>/overview.md
+```
+
+Use `templates/route-local-overview-template.md`.
+
+A route-local overview must include:
+
+- parent overview backlink
+- what belongs here / what does not
+- structures found here
+- operating model
+- main flows
+- load-bearing files
+- local invariants and traps
+- repo-internal references
+- cross-repo references
+- docs references
+- file-level onboarding map
+- child overviews
+- how to use this area
+- update history
+
+Done when:
+
+- all overview wave targets exist or have blockers
+- the wave has a curator review
+- `STATE.md` is updated
+
+### 4E — Domain Documentation Evidence Pass
+
+For each priority area or route where domain behavior, external protocol behavior, vendor/library behavior, or business rules matter, write:
+
+```text
+bootstrap/evidence/docs/<area-or-route>.docs-pack.md
+```
+
+Use `templates/docs-evidence-pack-template.md`.
+
+Rules:
+
+1. Use `system/sources.md` as a routing index only.
+2. Use its `Domain Documentation` category as the required discovery path.
+3. Cite actual documentation or local mirror evidence, not `system/sources.md`.
+4. If no relevant documentation exists, record what was checked.
+5. Embedding hits are pointers only; open and cite the source document.
+
+Done when:
+
+- each docs-dependent priority route has a docs pack or explicit no-evidence record
+- every docs finding points to direct evidence
+
+### 4F — Cross-Repo Boundary Pass
+
+For each priority route with inbound or outbound cross-repo signals, write:
+
+```text
+bootstrap/evidence/cross-repo/<area-or-route>.boundary-pack.md
+```
+
+Use `templates/cross-repo-boundary-pack-template.md`.
+
+Rules:
+
+1. Read adjacent repos only when topology and branch safeguards allow it.
+2. Treat adjacent repos as read-only context.
+3. Record real system-boundary evidence only.
+4. Same-repo implementation facts belong in repo-internal references, not boundary packs.
+5. Naming-only ties are `[LOW]` and must not become durable fact.
+
+Done when:
+
+- confirmed boundaries are listed with confidence
+- branch/topology notes are recorded
+- LOW-confidence ties are queued for review or handoff
+
+### 4G — File Card Generation
+
+For each priority source file, write:
+
+```text
+bootstrap/file-cards/<mirrored-source-path>.card.md
+```
+
+Use `templates/file-card-template.md`.
+
+A file card must include:
+
+- classification and priority
+- why the file matters
+- governing overview path
+- ancestor overviews
+- evidence packs to read
+- files the worker may read
+- files the worker must not read without escalation
+- required file onboarding sections
+- known traps
+- open questions
+
+Do not assign file-level onboarding work without a file card unless the repo is tiny.
+
+### 4H — File-Level Onboarding Waves
+
+Create wave manifests under:
+
+```text
+bootstrap/waves/onboarding-wave-001.md
+```
+
+Use `templates/onboarding-wave-template.md`.
+
+Each file worker receives one file card and follows `C-05-create-or-update-onboarding-files`.
+
+Default wave sizing:
+
+| File type                 |            Max scope |
+| ------------------------- | -------------------: |
+| landmine file             |            1–2 files |
+| cross-repo boundary file  |            1–2 files |
+| core logic cluster        |            2–3 files |
+| mapper cluster            |            3–5 files |
+| DTO/config/simple utility | defer unless touched |
+
+File onboarding workers must:
+
+1. read the file card first
+2. read the nearest governing overview and listed ancestor overviews
+3. read only listed source/evidence files unless escalating
+4. keep file-level onboarding self-sufficient
+5. add or update `governingOverview`
+6. keep planning notes out of durable onboarding
+7. preserve strict 1-to-1 source mapping
+
+### 4I — Curator Review
+
+After each overview or onboarding wave, write:
+
+```text
+bootstrap/reviews/<wave-name>.curator.md
+```
+
+Use `templates/curator-review-template.md`.
+
+The curator checks:
+
+- strict 1-to-1 mapping for file onboarding
+- route-local overview placement is mirrored and local
+- file onboarding backlinks to nearest governing overview
+- overview downlinks list governed files
+- no task-local planning in durable memory
+- docs references cite actual evidence
+- repo-internal and cross-repo references use correct buckets
+- no source registry or embedding hit is cited as proof
+- no absolute filesystem paths
+- update history is append-only
+- LOW-confidence claims are not stated as facts
+- deferred files are recorded
+- `STATE.md` is updated
+
+### 4J — Developer Review And Next-Wave Decision
+
+In gated mode, present each curator result and changed durable files to the developer.
+
+Ask only high-value questions:
+
+1. Do these overviews/onboarding files match your understanding?
+2. Are any invariants missing?
+3. Are any compatibility notes actually obsolete code or stale docs?
+4. Are any `[LOW]` claims confirmable or false?
+5. Should the next wave continue with the current priority order?
+
+In automated mode, record the same questions in `STATE.md` and `bootstrap/handoff.md` unless they are hard blockers.
+
+---
+
+## Phase 5 — Handoff
+
+When pausing or completing bootstrap, write:
+
+```text
+bootstrap/handoff.md
+```
+
+Use `templates/bootstrap-handoff-template.md`.
+
+The handoff lists:
+
+- control mode and bootstrap mode
+- trusted coverage
+- route-local overviews created
+- file onboarding created
+- evidence packs created
+- deferred coverage
+- open questions
+- known risks
+- completed waves and curator results
+- recommended next waves
+- how future agents should use the bootstrap artifacts
+
+---
+
+## Guided Mode Defaults
+
+If the developer does not know how to choose areas or depth, use `safe-starter-memory`:
+
+1. Resolve topology.
+2. Present source inventory and write input ledger.
+3. Run scout.
+4. Pick the top 3 high-risk areas by cross-repo coupling, entrypoints, command/control paths, state-machine logic, hidden invariants, and concerns reports.
+5. Run area deep-dives for those areas.
+6. Build or refresh root overview.
+7. Create coverage plan.
+8. Create governing route map.
+9. Create route-local overview cards for the highest-value routes.
+10. Build overview wave 1.
+11. Run docs evidence only where domain docs matter.
+12. Run cross-repo boundary pass only where signals exist.
+13. Create file cards only for high and medium priority files.
+14. Build onboarding wave 1 with no more than 5 file cards.
+15. Run curator review.
+16. Handoff or ask before wave 2 depending on control mode.
+
+Progress display for non-expert users:
+
+```markdown
+## Bootstrap Progress
+
+| Step                   | Status      | What It Means                                        |
+| ---------------------- | ----------- | ---------------------------------------------------- |
+| Resolve setup          | done        | The system knows where memory lives                  |
+| Review sources         | done        | The source universe is explicit                      |
+| Map repo               | done        | The system knows the main parts of the repo          |
+| Research risky areas   | in progress | Agents are checking places most likely to break      |
+| Build root overview    | pending     | A repo guide will be created                         |
+| Place local overviews  | pending     | Local construction pillars will be created           |
+| Create first file wave | pending     | High-risk files get direct onboarding                |
+| Review                 | pending     | Curator checks prevent bad memory from being trusted |
+```
+
+---
+
+## Implementation Guards
+
+Only guard against likely or proven bad behavior.
+
+1. **Do not create detached durable area overviews by default.** Use route-local `overview.md` files in the mirrored onboarding hierarchy.
+2. **Do not let overview files replace file onboarding.** File docs remain self-sufficient and backlink to governing overviews.
+3. **Do not generate markdown for every file.** Full coverage means every file is covered, deferred, or excluded — not that every file has a file doc.
+4. **Do not create an overview for every folder.** Create one only when the subtree has shared model, workflow, invariants, boundaries, docs dependencies, hotspots, or routing burden.
+5. **Do not cite `system/sources.md`, search registries, or embedding hits as evidence.** They are routing inputs only.
+6. **Do not update adjacent repo memory during target repo bootstrap.** Cross-repo context is read-only unless a separate task targets that repo.
+7. **Do not preserve stale code or stale docs under vague compatibility language.** Compatibility requires evidence of an active consumer, migration requirement, external contract, supported version boundary, or developer-confirmed constraint.
+8. **Do not let automated mode skip review artifacts.** Automated mode changes pause behavior, not artifact quality.
+9. **Do not ask for additional sources before showing found sources.** Source intake must be reviewable.
+10. **Do not promote `[LOW]` claims to durable fact.** Park them in state, handoff, or open questions.
 
 ---
 
 ## Multi-Agent Execution Model
 
-The ideal execution uses sub-agents to preserve context. The orchestrator stays thin throughout.
+```text
+Orchestrator
+  -> resolves topology and control mode
+  -> presents source inventory
+  -> maintains STATE.md
+  -> dispatches scoped workers
+  -> reads only distilled artifacts
 
+Scout agent
+  -> reads broad repo structure and approved source inventory
+  -> writes scout-report.md
+
+Area lens agents
+  -> read one area only
+  -> write structure/interfaces/patterns/concerns reports
+
+Area merge agent
+  -> reads area section reports
+  -> writes area report and brief
+
+Synthesis agent
+  -> reads scout + area briefs + state
+  -> writes root overview.md
+
+Coverage planner
+  -> reads overview + area artifacts
+  -> writes coverage-plan.md
+
+Route mapper
+  -> writes governing-route-map.md
+
+Overview card/worker agents
+  -> write route-local overview cards and route-local overview.md files
+
+Docs librarian
+  -> writes docs evidence packs from approved documentation sources
+
+Boundary mapper
+  -> writes cross-repo boundary packs from allowed adjacent context
+
+File card/file worker agents
+  -> write file cards and invoke/follow C-05 for file onboarding
+
+Curator
+  -> validates each wave and writes curator review
 ```
-Orchestrator:
-  → Dispatches all agents
-  → Reads only: STATE.md, scout-report.md, area briefs, repo overview
-  → Never reads: raw code, directory trees, full area reports, section files
 
-Scout sub-agent (Phase 1):
-  → Reads: repo structure, config files, cross-repo code/onboarding
-  → Writes: scout-report.md
-  → Returns to orchestrator: confirmation only
-  → Developer reviews and corrects
-
-Per-area deep-dive (Phase 2 — 4 parallel sub-agents per area):
-  → Each reads: scout report + seed context + code files in THIS area
-  → Each writes: areas/<area>/<lens>.md (structure/interfaces/patterns/concerns)
-  → Returns to orchestrator: confirmation only
-
-Per-area merge agent (Phase 2):
-  → Reads: the 4 section files for THIS area
-  → Writes: areas/<area-name>.md (merged report) + areas/<area-name>.brief.md
-  → Consults: developer for [LOW]-confidence items
-  → Returns to orchestrator: confirmation only
-
-Synthesis agent (Phase 3):
-  → Reads: area briefs + scout report + STATE.md + cross-repo context
-  → Reads on demand: specific full area reports if briefs lack detail
-  → Writes: overview.md
-  → Developer reviews
-
-Per-area deepen agent (Phase 4 — one per area):
-  → Reads: repo overview + full area report + section files (concerns, interfaces)
-  →         + scout tech profile + component source files
-   → Writes: <onboarding-root>/<repo>/overview.md (updated by merging area findings into the appropriate sections)
-  → Returns to orchestrator: confirmation only
-  → Developer reviews before file-level MDs proceed
-```
-
-**State file touchpoints:**
-
-- Created during Phase 1 after developer review.
-- Read at the start of every session.
-- Updated after each area completes its deep-dive cycle.
-- Updated after synthesis and developer review.
-- Updated after each component is deepened and reviewed.
-- Remains as historical record after bootstrap completes.
-
-**Single-session fallback:** If separate sessions aren't practical (small repo, few areas, developer prefers continuity):
-
-- Run the scout inline (skip sub-agent for the scout).
-- Process areas sequentially. For each area, run the 4 sub-agents (or a single agent for small areas), merge, and write the brief before starting the next area.
-- Write each artifact to disk as a checkpoint. Accept that later areas may have less context fidelity due to compression.
-- The state file is still maintained — it serves as a recovery point if the session is interrupted.
+The orchestrator remains thin throughout.
 
 ---
 
-## When to Use This Skill
+## When To Use This Skill
 
-| Situation                                                                                 | Use this skill?                                                                                                |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| New repo added to workspace, zero onboarding                                              | Yes — full pipeline                                                                                            |
-| Repo has placeholder overview, needs real content                                         | Yes — can skip to Phase 1 scout                                                                                |
-| Task will touch an un-bootstrapped area of a partially covered repo                       | Yes — run scout + targeted area deep-dive + synthesis update                                                   |
-| Repo is already well-bootstrapped, just needs one more area merged into the repo overview | No — update the repo overview directly, then use `create_or_update-onboarding-file` for any new file-level MDs |
-| Small script repo with 5 files                                                            | Probably not — write the overview directly                                                                     |
+| Situation                                                        | Use this skill?                            |
+| ---------------------------------------------------------------- | ------------------------------------------ |
+| New repo added to workspace, zero onboarding                     | yes                                        |
+| Repo has placeholder overview and needs real content             | yes                                        |
+| Task will touch an un-bootstrapped area                          | yes, targeted mode                         |
+| Repo root overview exists but agents still get lost in a subtree | yes, route-local overview wave             |
+| Cross-repo boundary is poorly understood                         | yes, cross-repo-focused mode               |
+| Domain docs influence code behavior                              | yes, domain-doc-focused mode               |
+| Repo is already well bootstrapped and one file changed           | no, use C-05 directly                      |
+| Small script repo with a few files                               | probably not; write root overview directly |
 
 ---
 
-## Relationship to Other Skills
+## Relationship To Other Skills
 
-| Skill                              | Relationship                                                                                                                                                                                                          |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `discovery`                        | This skill uses the same cross-repo discovery techniques during Phase 1 (scout) and Phase 2 (area deep-dives). The discovery skill's Cross-Repo Discovery section is the reference for systematic interface scanning. |
-| `create_or_update-onboarding-file` | This skill's Phase 4 invokes it for file-level MDs. The template and conventions defined there apply to all output.                                                                                                   |
-| `confluence-search`                | Invoked during scout (Phase 1) and area deep-dives (Phase 2) for domain research.                                                                                                                                     |
-| `onboarding-drift-detection`       | Not used during bootstrap (nothing to drift-check yet). Becomes relevant after bootstrap when code changes.                                                                                                           |
-| `heavy-task-workflow`              | The heavy-task-workflow can invoke this skill when it discovers that the area it needs to plan against has no onboarding.                                                                                             |
-| `brave-search`                     | May be invoked during area deep-dives for framework/library documentation not covered by Confluence.                                                                                                                  |
-| `context7-query`                   | May be invoked during area deep-dives for library API verification.                                                                                                                                                   |
+| Skill                                             | Relationship                                                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `C-08-ar-coordination-context-resolver`           | Required first step. Resolves memory root, settings, sources, path rules, storage, and cross-repo policy.     |
+| `C-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics. C-03 creates cards/waves and delegates file output rules to C-05. |
+| `C-04-discovery`                                  | Supplies cross-repo discovery techniques used by scout, interface, and boundary passes.                       |
+| `C-02-onboarding-drift-detection`                 | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
+| `W-01-heavy-task-workflow`                        | May trigger targeted bootstrap when an active task enters an uncovered area.                                  |
+| `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |
+
+---
+
+## Acceptance Criteria
+
+This skill implementation is successful when:
+
+1. the minimum bootstrap still produces a useful root `overview.md`
+2. source inventory is presented before asking for additions
+3. gated and automated control modes are explicit
+4. automated mode still writes review artifacts and curator reviews
+5. broad Phase 4 deepening is replaced with bottom-up passes
+6. route-local overviews are created in the mirrored onboarding hierarchy
+7. file-level onboarding remains self-sufficient and backlinks to governing overview
+8. docs evidence and cross-repo boundary evidence are separate passes
+9. file cards constrain file workers before C-05 is invoked
+10. curator review validates both overview waves and file onboarding waves
+11. current thin-orchestrator, confidence-tag, checkpoint, topology, and cross-repo read-only behavior is preserved
+12. guards prevent the likely bad behaviors without adding compatibility scaffolding for alpha-era labels

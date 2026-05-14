@@ -11,6 +11,10 @@ format: 1
 sourceDigest: sha256:<digest-of-source-with-this-block-removed>
 verifiedAt: <YYYY-MM-DDTHH:MM>
 scope: file
+governingOverview: <nearest governing overview.md>
+
+Governing Overview:
+- <Nearest route-local overview that governs this file, or root overview.md if none exists.>
 
 Purpose:
 - <What this source file is responsible for and why it matters.>

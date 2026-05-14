@@ -38,30 +38,33 @@ Storage-specific adapter additions for file-level onboarding:
   <repo>/
     overview.md
     entities.md
-    <component>/
+    <mirrored-source-folder>/
       overview.md
-      src/<mirrored-source-tree>.md
+      <mirrored-source-file>.md
 ```
 
 1. File-level onboarding keeps strict 1-to-1 mirroring with source files.
-2. Repo-level entity catalogs exist once per repo at `<onboarding-root>/<repo>/entities.md`.
-3. Use `mcp_time_get_current_time` for onboarding timestamps; never guess.
-4. Keep durable onboarding commentary separate from task-local planning and output docs.
+2. Route-local `overview.md` files live in the mirrored onboarding hierarchy at the source folder they govern. They are governing context, not replacements for file-level onboarding.
+3. File-level onboarding should record the nearest `governingOverview` when one exists; otherwise point to the closest ancestor overview, falling back to the root `overview.md`.
+4. Repo-level entity catalogs exist once per repo at `<onboarding-root>/<repo>/entities.md`.
+5. Use `mcp_time_get_current_time` for onboarding timestamps; never guess.
+6. Keep durable onboarding commentary separate from task-local planning and output docs.
 
 ## Quick Rules
 
 1. Prefer updating an existing onboarding artifact over creating parallel duplicates.
-2. File-level onboarding explains one concrete source file.
-3. The canonical file-level onboarding content model is shared by external and inline storage.
-4. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
-5. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
-6. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
-7. When updating `Docs References`, `Repo-Internal References`, or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
-8. Start reference discovery from the C-08 resolved `system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
-9. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
-10. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence, and never let it stand in for the direct proof that belongs in `Docs References`, `Repo-Internal References`, or `Cross-Repo References`.
-11. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References`, `Repo-Internal References`, or `Cross-Repo References` are still valid.
-12. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
+2. File-level onboarding explains one concrete source file and has to be self-sufficient;
+3. File-level onboarding links back to the nearest governing route-local overview so agents can reconstruct local area context from a file drop point. When updating onboarding, check whether the nearest governing overview has changed and update the link if needed.
+4. The canonical file-level onboarding content model is shared by external and inline storage.
+5. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
+6. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
+7. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
+8. When updating `Docs References`, `Repo-Internal References`, or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
+9. Start reference discovery from the C-08 resolved `system/sources.md`, then use its `Domain Documentation` category as the required domain-evidence input for the file or entity being documented.
+10. Treat onboarding as supporting context, not as a substitute for the `Domain Documentation` category.
+11. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence, and never let it stand in for the direct proof that belongs in `Docs References`, `Repo-Internal References`, or `Cross-Repo References`.
+12. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References`, `Repo-Internal References`, or `Cross-Repo References` are still valid.
+13. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
 
 ## Source Discovery Rule
 
