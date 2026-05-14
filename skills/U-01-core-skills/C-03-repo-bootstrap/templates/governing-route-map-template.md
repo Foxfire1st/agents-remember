@@ -24,6 +24,14 @@ This file decides where durable route-local `overview.md` files should be placed
 |---|---|---|
 | `src/dto/` | mostly passive data containers | promote if DTOs encode behavior or cross-repo schema |
 
+## Moved Or Deleted Routes
+
+Use this section for `existing-memory-slice-maintenance` when source routes no longer match durable memory placement.
+
+| Previous Source Route | Current Source Route | Onboarding Artifacts | Decision | Confidence |
+|---|---|---|---|---|
+| `src/old-module/` | deleted / `src/new-module/` | overview + child file onboarding + bootstrap artifacts | remove / move / retire / preserve | [HIGH/MEDIUM/LOW] |
+
 ## Cross-Cutting Concepts
 
 | Concept | Primary Local Anchor | Secondary Local Mentions |
@@ -41,3 +49,4 @@ This file decides where durable route-local `overview.md` files should be placed
 - Is this the right local anchor for `<area>`?
 - Does this route actually own the concept, or only participate in it?
 - Are any folders missing that new developers usually misunderstand?
+- Should any moved or deleted route memory be removed, moved, retired, or preserved for history?

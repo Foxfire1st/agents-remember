@@ -1,6 +1,6 @@
 # Repo Entity Catalog Workflow
 
-Use this workflow when creating or maintaining a repo-level entity catalog at `<onboarding-root>/<repo>/entities.md`.
+Use this workflow when creating or maintaining the repo-level entity catalog at `entities.md` under the C-08 resolved `onboarding_root`.
 
 Template: `../templates/repo-entity-catalog-template.md`
 
@@ -25,13 +25,12 @@ Create or update one repo-level entity catalog documenting load-bearing real ent
 ## Placement Rules
 
 ```text
-<onboarding-root>/
-  <repo>/
-    overview.md
-    entities.md
+<resolved-onboarding-root>/
+  overview.md
+  entities.md
 ```
 
-1. The file lives directly under the repo onboarding folder.
+1. The file lives directly under the resolved onboarding root.
 2. It complements `overview.md`; it does not replace it.
 
 ## Metadata Rules

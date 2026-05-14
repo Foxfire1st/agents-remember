@@ -21,7 +21,7 @@
 
 | Source Route | Classification | Priority | Reason | Suggested Action |
 |---|---|---|---|---|
-| `<path>` | core-logic / cross-repo-boundary / workflow / routine-support | high / medium / low | <why> | overview card / defer / exclude |
+| `<path>` | core-logic / cross-repo-boundary / workflow / routine-support / deleted-route / moved-route / stale-onboarding-route | high / medium / low | <why> | overview card / refresh / move / cleanup / defer / exclude |
 
 ## File Classification Queue
 
@@ -41,6 +41,14 @@
 |---|---|---|
 | `<path>` | simple DTO / generated / routine helper | when modified / when promoted by task |
 
+## Slice Cleanup Queue
+
+Use this section for existing-memory slice maintenance when source routes moved or disappeared.
+
+| Source Route | Memory Artifacts Affected | Cleanup Decision | Review Needed |
+|---|---|---|---|
+| `<path>` | route overview / child file onboarding / bootstrap artifacts | remove / move / retire / preserve | curator / developer / none |
+
 ## Developer Review Questions
 
 1. Are these the right routes to document first?
@@ -48,6 +56,7 @@
 3. Are any high-priority files deprecated or scheduled for deletion?
 4. Are any classifications wrong?
 5. Which route should be the first overview wave?
+6. Should any stale route memory be removed, moved, retired, or preserved for history?
 
 ## Decision Log
 

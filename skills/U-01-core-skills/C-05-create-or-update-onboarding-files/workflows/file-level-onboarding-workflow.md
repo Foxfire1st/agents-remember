@@ -1,6 +1,6 @@
 # File-Level Onboarding Workflow
 
-Use this workflow when creating or maintaining the common file-level onboarding content model for one concrete source file. Sidecar onboarding stores that content under `<onboarding-root>/<repo>/...` using the source file's repo-relative path directly; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
+Use this workflow when creating or maintaining the common file-level onboarding content model for one concrete source file. Sidecar onboarding stores that content under the C-08 resolved `onboarding_root` using the source file's repo-relative path directly; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
 
 Template: `../templates/file-level-onboarding-template.md`
 
@@ -15,6 +15,7 @@ Create or update the file-level onboarding content for one concrete source file.
 3. file-level onboarding records the nearest governing route-local `overview.md` when one exists
 4. inline storage reuses the same content model but follows storage-specific syntax and placement rules
 5. durable commentary only; planning stays in task artifacts
+6. route-level slice creation, refresh, move, or deletion is out of scope for this workflow and routes to C-03 `existing-memory-slice-maintenance`
 
 ## Source Discovery Rules
 
@@ -29,12 +30,11 @@ Create or update the file-level onboarding content for one concrete source file.
 ## Placement Rules
 
 ```text
-<onboarding-root>/
-  <repo>/
+<resolved-onboarding-root>/
+  overview.md
+  <mirrored-source-folder>/
     overview.md
-    <mirrored-source-folder>/
-      overview.md
-    <mirrored-source-path>.md
+  <mirrored-source-path>.md
 ```
 
 1. File name matches the source file name with `.md` appended.
@@ -86,6 +86,8 @@ Citation requirements for reference sections:
 
 ## Create Workflow
 
+Before creating file-level onboarding, confirm the target is one concrete source file. If the changed paths imply a new or newly important route-local slice, route to C-03 `existing-memory-slice-maintenance` first so the governing overview placement is decided before file docs are created.
+
 1. identify the exact source file path
 2. confirm the mirrored onboarding path
 3. identify the nearest governing route-local overview by walking ancestor onboarding paths from the source file folder toward the root; read it when it exists
@@ -109,6 +111,7 @@ When code changes:
 
 When code is deleted or moved:
 
-1. delete or move the onboarding file to match the source tree
+1. for a one-to-one file move or delete, delete or move the onboarding file to match the source tree
 2. update affected repo-level overview indexes and cross-links
 3. check whether repo-level entity catalogs or nearby onboarding need follow-up because of the move or deletion
+4. if the move or deletion affects a whole package, module, feature area, or source route, route to C-03 `existing-memory-slice-maintenance` for coordinated cleanup or move handling

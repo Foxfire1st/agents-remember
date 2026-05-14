@@ -1,16 +1,16 @@
 ---
 name: c-03-repo-bootstrap
-description: "Bootstrap onboarding for an undocumented or under-documented repo. Builds a root overview first, then scales through route-local overview construction pillars, evidence packs, file cards, onboarding waves, and curator reviews. Keeps the orchestrator thin and supports gated or automated control modes."
+description: "Bootstrap onboarding for undocumented repos or existing memory slices. Builds root overviews, route-local overview pillars, evidence packs, file cards, onboarding waves, deleted-slice cleanup, curator reviews, and handoff while keeping the orchestrator thin."
 ---
 
 # Repo Bootstrap
 
-Bootstrap durable onboarding for a repository that has little or no memory coverage.
+Bootstrap durable onboarding for a repository that has little or no memory coverage, or for an already-ledgered memory repo whose source slices need targeted creation, refresh, move handling, or cleanup.
 
-The minimum successful bootstrap is one root repo overview:
+The minimum successful bootstrap is one root repo overview under the C-08 resolved `onboarding_root`:
 
 ```text
-<onboarding-root>/<repo>/overview.md
+overview.md
 ```
 
 For larger repositories, the scalable path is route-local and wave-based:
@@ -40,12 +40,12 @@ Durable memory must live where agents naturally look while traversing the codeba
 
 A root `overview.md` explains the repository as a whole. A route-local `overview.md` explains a source subtree as if that subtree were a small repository of its own. A file-level onboarding document explains one concrete source file and links back to the nearest governing overview.
 
-Preferred durable placement:
+Preferred durable placement, with every path relative to the resolved `onboarding_root`:
 
 ```text
-<onboarding-root>/<repo>/overview.md
-<onboarding-root>/<repo>/<mirrored-source-folder>/overview.md
-<onboarding-root>/<repo>/<mirrored-source-file>.md
+overview.md
+<mirrored-source-folder>/overview.md
+<mirrored-source-file>.md
 ```
 
 Detached `bootstrap/areas/*` artifacts are allowed as temporary research and promotion artifacts. Durable agent-facing overviews exist to be discoverable through source-path traversal.
@@ -68,10 +68,10 @@ Later file-level onboarding workers use the nearest governing `overview.md` as a
 When working on a source file, read onboarding from broadest to narrowest:
 
 ```text
-<onboarding-root>/<repo>/overview.md
-<onboarding-root>/<repo>/<ancestor-folder>/overview.md
-<onboarding-root>/<repo>/<nearest-folder>/overview.md
-<onboarding-root>/<repo>/<source-file>.md
+overview.md
+<ancestor-folder>/overview.md
+<nearest-folder>/overview.md
+<source-file>.md
 ```
 
 For example:
@@ -152,7 +152,7 @@ This skill intentionally keeps the strongest current bootstrap behavior.
 | `topology`       |       no | Optional override passed through C-08. Normal bootstrap passes only `repo` and lets C-08 resolve topology.                                                              |
 | `coordination-root` |    no | Optional coordination-root hint for explicit external-memory operations or repair.                                                                                       |
 | `control-mode`   |       no | `gated` or `automated`. If omitted, ask during Phase 0A.                                                                                                                |
-| `bootstrap-mode` |       no | `quick-orientation`, `safe-starter-memory`, `cross-repo-focused`, `domain-doc-focused`, or `full-bootstrap`. Defaults to `safe-starter-memory` when the user is unsure. |
+| `bootstrap-mode` |       no | `quick-orientation`, `safe-starter-memory`, `cross-repo-focused`, `domain-doc-focused`, `existing-memory-slice-maintenance`, or `full-bootstrap`. Defaults to `safe-starter-memory` when the user is unsure. |
 | `seed-context`   |       no | Optional paths to known onboarding or documentation that should seed the run.                                                                                           |
 | `priority-areas` |       no | Optional area names or source routes to prioritize. If omitted, scout identifies them.                                                                                  |
 
@@ -184,9 +184,11 @@ The orchestrator may continue through the full bootstrap after setup without pha
 
 Automated mode removes human approval gates after setup. It does **not** remove evidence gates, review artifacts, curator reviews, state updates, or final handoff.
 
+Automated execution starts only after the Phase 0 source inventory has been presented, corrected or accepted by the user, and recorded in `bootstrap/input-ledger.md`.
+
 | Phase                     | Gated mode                   | Automated mode                                         |
 | ------------------------- | ---------------------------- | ------------------------------------------------------ |
-| Source inventory          | must present and ask         | must present and ask once unless user explicitly skips |
+| Source inventory          | pre-automation intake gate   | pre-automation intake gate                             |
 | Scout                     | pause for area-map review    | continue, record assumptions                           |
 | Root overview             | pause for review             | continue after self-check                              |
 | Governing route map       | pause for review             | continue unless placement confidence is LOW            |
@@ -194,7 +196,7 @@ Automated mode removes human approval gates after setup. It does **not** remove 
 | Docs evidence pack        | ask when sources are missing | continue using approved sources; park missing evidence |
 | Cross-repo boundary pack  | ask on LOW confidence        | continue only with HIGH/MEDIUM evidence; park LOW      |
 | File onboarding wave      | pause after wave             | continue after curator pass                            |
-| Handoff                   | present final                | present final                                          |
+| Handoff                   | present final                | present final and ask whether separate closeout should run |
 
 ### Automated uncertainty handling
 
@@ -211,7 +213,7 @@ Stop and ask the developer when:
 - memory root cannot be resolved
 - multiple memory roots are plausible
 - target repo is ambiguous
-- source inventory cannot be reviewed and the user did not explicitly allow skipping it
+- source inventory cannot be reviewed before automation begins
 - required source access is missing for a load-bearing evidence pass
 - cross-repo settings are ambiguous for a required boundary
 - adjacent repo branch mismatches for a required boundary
@@ -246,7 +248,7 @@ Do not ask “do you have additional sources?” before showing what was found.
 Write the reviewed result to:
 
 ```text
-<onboarding-root>/<repo>/bootstrap/input-ledger.md
+bootstrap/input-ledger.md
 ```
 
 Use `templates/bootstrap-input-ledger-template.md`.
@@ -273,11 +275,36 @@ Apply resolved `onboarding.pathRules` before selecting source paths. In shared s
 
 In mixed workspaces, resolving one repo must not move neighboring repos onto a different memory root.
 
+Bootstrap candidate selection is governed by the resolved `onboarding.pathRules` from `system/settings.json`. Starter settings should include a standard exclusion baseline so broad repo rules do not select generated, vendored, build-output, cache, IDE, local-machine, or downloaded metadata files unless the developer explicitly includes them for the run.
+
+Recommended `settings.json` path-rule excludes:
+
+```text
+node_modules/**
+vendor/**
+dist/**
+build/**
+coverage/**
+.cache/**
+.pytest_cache/**
+.venv/**
+.idea/**
+.vscode/**
+.env
+.env.*
+**/generated/**
+**/*.generated.*
+**/*.Zone.Identifier
+**/*:Zone.Identifier
+```
+
+Use the same settings baseline for fresh bootstrap and `existing-memory-slice-maintenance`. If a repository's resolved path rules are missing these common excludes, record that during source inventory review and prefer updating `settings.json` rather than relying on an agent-local filter.
+
 ---
 
 ## Artifact Paths
 
-All paths below are relative to `<onboarding-root>/<repo>/`.
+All paths below are relative to the C-08 resolved `onboarding_root`.
 
 ```text
 overview.md
@@ -436,13 +463,54 @@ If `bootstrap-mode` was not supplied, ask for a mode or default to `safe-starter
 
 Bootstrap modes:
 
-| Mode                  | Use when                                  | Output target                                                               |
-| --------------------- | ----------------------------------------- | --------------------------------------------------------------------------- |
-| `quick-orientation`   | user wants repo understanding only        | source inventory + scout + root overview                                    |
-| `safe-starter-memory` | default for most repos                    | root overview + first route-local overview wave + first high-risk file wave |
-| `cross-repo-focused`  | repo participates in multi-repo flows     | root overview + boundary packs + boundary route/file coverage               |
-| `domain-doc-focused`  | behavior depends on domain docs           | root overview + docs packs + docs-sensitive coverage                        |
-| `full-bootstrap`      | mature/critical repo needs broad coverage | full pass model in waves                                                    |
+| Mode                                  | Use when                                                                                 | Output target                                                                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `quick-orientation`                   | user wants repo understanding only                                                       | source inventory + scout + root overview                                                                                     |
+| `safe-starter-memory`                 | default for most repos                                                                   | root overview + first route-local overview wave + first high-risk file wave                                                  |
+| `cross-repo-focused`                  | repo participates in multi-repo flows                                                    | root overview + boundary packs + boundary route/file coverage                                                                |
+| `domain-doc-focused`                  | behavior depends on domain docs                                                          | root overview + docs packs + docs-sensitive coverage                                                                         |
+| `existing-memory-slice-maintenance`   | already-ledgered memory needs coverage or cleanup for an added, moved, deleted, or newly important route | source inventory delta + route overview/card or cleanup plan + evidence packs as needed + targeted file wave or removal list + curator review + handoff |
+| `full-bootstrap`                      | mature/critical repo needs broad coverage                                                | full pass model in waves                                                                                                     |
+
+### Existing-memory slice maintenance
+
+Use `existing-memory-slice-maintenance` when the repository already has a usable memory layer and the work is structural rather than a single-file update.
+
+Use it for:
+
+1. a new package, module, feature area, or source route
+2. a moved package or module route
+3. a deleted package, module, feature area, or source route
+4. a newly important source area that lacks a governing route-local overview
+5. a stale route-local overview whose governed source slice changed meaning
+6. many files appearing or disappearing together
+7. targeted onboarding expansion where file-by-file maintenance would lose the structural context
+
+This mode does not pretend the repository is blank. It starts from the existing root `overview.md`, `entities.md` when present, route-local overviews, verified file-level onboarding, bootstrap artifacts, and the source delta that triggered the maintenance.
+
+Expansion outputs may include:
+
+1. source inventory delta
+2. route-local overview card
+3. route-local overview
+4. docs or cross-repo evidence packs where needed
+5. file cards for load-bearing files
+6. targeted onboarding wave
+7. curator review
+8. handoff
+
+Cleanup outputs may include:
+
+1. stale route assessment
+2. cleanup or removal plan
+3. affected route-local overview list
+4. affected child file-level onboarding list
+5. related bootstrap artifact list
+6. preserved-history decision
+7. curator review
+8. handoff
+
+C-05 remains the user-facing entry point for create/update onboarding requests. When C-05 detects that the change is route-level create, refresh, move, or delete work, it should route to this C-03 mode instead of flattening the work into independent file-level onboarding edits.
 
 ### 0.3 Present source inventory before asking for additions
 
@@ -488,7 +556,7 @@ bootstrap/STATE.md
 
 Done when:
 
-- source inventory has been presented or explicitly skipped by the user
+- source inventory has been presented and accepted or corrected by the user
 - approved/excluded/user-added sources are recorded
 - cross-repo context from settings is recorded
 - control mode is recorded
@@ -687,19 +755,22 @@ Inputs:
 
 Classify files and routes:
 
-| Classification           | Meaning                          | Default action                              |
-| ------------------------ | -------------------------------- | ------------------------------------------- |
-| `landmine`               | hidden invariant / fragile logic | early file card + wave                      |
-| `cross-repo-boundary`    | can break another repo/system    | boundary pack + file card                   |
-| `core-logic`             | central behavior                 | route overview and/or file card             |
-| `entrypoint`             | user/system entry into area      | route overview and/or file card             |
-| `domain-mapper`          | transforms domain state          | route overview and file card if non-obvious |
-| `state-machine`          | state transitions                | route overview + early file card            |
-| `security-sensitive`     | auth, validation, permissions    | early file card                             |
-| `routine-support`        | helper with limited risk         | defer unless touched                        |
-| `simple-dto-config`      | passive data/config              | defer unless touched                        |
-| `generated-vendor-build` | generated/vendor/build output    | exclude                                     |
-| `unknown`                | not enough evidence              | investigate or ask                          |
+| Classification           | Meaning                                  | Default action                              |
+| ------------------------ | ---------------------------------------- | ------------------------------------------- |
+| `landmine`               | hidden invariant / fragile logic         | early file card + wave                      |
+| `cross-repo-boundary`    | can break another repo/system            | boundary pack + file card                   |
+| `core-logic`             | central behavior                         | route overview and/or file card             |
+| `entrypoint`             | user/system entry into area              | route overview and/or file card             |
+| `domain-mapper`          | transforms domain state                  | route overview and file card if non-obvious |
+| `state-machine`          | state transitions                        | route overview + early file card            |
+| `security-sensitive`     | auth, validation, permissions            | early file card                             |
+| `routine-support`        | helper with limited risk                 | defer unless touched                        |
+| `simple-dto-config`      | passive data/config                      | defer unless touched                        |
+| `deleted-route`          | source route disappeared                 | cleanup plan + affected memory list         |
+| `moved-route`            | source route moved or was renamed        | move plan + overview/link update list       |
+| `stale-onboarding-route` | route-local memory no longer matches code | refresh or retire plan                      |
+| `generated-vendor-build` | generated/vendor/build output            | exclude                                     |
+| `unknown`                | not enough evidence                      | investigate or ask                          |
 
 Done when:
 
@@ -732,6 +803,7 @@ Done when:
 
 - proposed governing routes are listed
 - considered-but-deferred routes are recorded
+- stale, moved, or deleted routes are recorded when running existing-memory slice maintenance
 - cross-cutting concepts have primary local anchors
 - gated mode review is complete or automated mode can proceed with non-LOW placements
 
@@ -973,6 +1045,7 @@ The handoff lists:
 - trusted coverage
 - route-local overviews created
 - file onboarding created
+- route-local overviews and file onboarding removed, moved, or retired
 - evidence packs created
 - deferred coverage
 - open questions
@@ -980,6 +1053,8 @@ The handoff lists:
 - completed waves and curator results
 - recommended next waves
 - how future agents should use the bootstrap artifacts
+
+Automated bootstrap stops at this handoff/review boundary. After presenting the handoff, ask whether a separate closeout should run.
 
 ---
 
@@ -1003,6 +1078,17 @@ If the developer does not know how to choose areas or depth, use `safe-starter-m
 14. Build onboarding wave 1 with no more than 5 file cards.
 15. Run curator review.
 16. Handoff or ask before wave 2 depending on control mode.
+
+If the selected mode is `existing-memory-slice-maintenance`:
+
+1. Resolve topology and read existing root, entity, route-local, and file-level onboarding for the affected slice.
+2. Present the source inventory delta and write input ledger after the user accepts or corrects it.
+3. Confirm the resolved `settings.json` path rules include the standard excludes before selecting added, moved, deleted, or refreshed paths.
+4. Classify the route as expansion, move, cleanup, refresh, or defer.
+5. Create or update the coverage plan and governing route map for that slice only.
+6. For expansion or refresh, produce route-local overview cards, route-local overviews, evidence packs, file cards, targeted onboarding waves, curator review, and handoff as needed.
+7. For move or deletion, produce a cleanup plan, affected onboarding list, preserved-history decision, curator review, and handoff.
+8. Ask whether separate closeout should run after handoff.
 
 Progress display for non-expert users:
 
@@ -1037,6 +1123,9 @@ Only guard against likely or proven bad behavior.
 8. **Do not let automated mode skip review artifacts.** Automated mode changes pause behavior, not artifact quality.
 9. **Do not ask for additional sources before showing found sources.** Source intake must be reviewable.
 10. **Do not promote `[LOW]` claims to durable fact.** Park them in state, handoff, or open questions.
+11. **Do not add an extra repo-name folder under the resolved `onboarding_root`.** The resolver already returns the target repo's onboarding root.
+12. **Do not run closeout as part of automated bootstrap.** Handoff is the automation boundary; closeout requires a separate approval.
+13. **Do not flatten route-level maintenance into unrelated file-level edits.** Use `existing-memory-slice-maintenance` when a slice is added, moved, deleted, or structurally refreshed.
 
 ---
 
@@ -1099,8 +1188,10 @@ The orchestrator remains thin throughout.
 | ---------------------------------------------------------------- | ------------------------------------------ |
 | New repo added to workspace, zero onboarding                     | yes                                        |
 | Repo has placeholder overview and needs real content             | yes                                        |
-| Task will touch an un-bootstrapped area                          | yes, targeted mode                         |
+| Task will touch an un-bootstrapped area                          | yes, `existing-memory-slice-maintenance` when repo memory already exists |
 | Repo root overview exists but agents still get lost in a subtree | yes, route-local overview wave             |
+| New package/module/source route appears in an already-ledgered repo | yes, `existing-memory-slice-maintenance` |
+| Package/module/source route disappears or moves                  | yes, `existing-memory-slice-maintenance` cleanup or move handling |
 | Cross-repo boundary is poorly understood                         | yes, cross-repo-focused mode               |
 | Domain docs influence code behavior                              | yes, domain-doc-focused mode               |
 | Repo is already well bootstrapped and one file changed           | no, use C-05 directly                      |
@@ -1113,7 +1204,7 @@ The orchestrator remains thin throughout.
 | Skill                                             | Relationship                                                                                                  |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `C-08-ar-coordination-context-resolver`           | Required first step. Resolves memory root, settings, sources, path rules, storage, and cross-repo policy.     |
-| `C-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics. C-03 creates cards/waves and delegates file output rules to C-05. |
+| `C-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to C-03. C-03 creates cards/waves and delegates file output rules to C-05. |
 | `C-04-discovery`                                  | Supplies cross-repo discovery techniques used by scout, interface, and boundary passes.                       |
 | `C-02-onboarding-drift-detection`                 | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `W-01-heavy-task-workflow`                        | May trigger targeted bootstrap when an active task enters an uncovered area.                                  |
@@ -1137,3 +1228,5 @@ This skill implementation is successful when:
 10. curator review validates both overview waves and file onboarding waves
 11. current thin-orchestrator, confidence-tag, checkpoint, topology, and cross-repo read-only behavior is preserved
 12. guards prevent the likely bad behaviors without adding compatibility scaffolding for alpha-era labels
+13. existing-memory slice maintenance can create, refresh, move, or clean up route-local memory without treating the repo as blank
+14. automated bootstrap ends at handoff and asks whether separate closeout should run

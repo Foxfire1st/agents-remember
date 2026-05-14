@@ -232,7 +232,24 @@ Repo-level architecture context stays in `ar-memory/onboarding/overview.md` for 
         "fileTypes": [".md", ".py", ".ts", ".tsx"]
       },
       "exclude": {
-        "paths": ["vendor/**", "node_modules/**", "dist/**"],
+        "paths": [
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
         "fileTypes": [".png", ".zip"]
       }
     }
@@ -646,7 +663,24 @@ External-memory mode keeps local coordination under `ar-coordination/`, but dura
         "fileTypes": [".md", ".py", ".ts", ".tsx"]
       },
       "exclude": {
-        "paths": ["vendor/**", "node_modules/**", "dist/**"],
+        "paths": [
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
         "fileTypes": [".png", ".zip"]
       }
     }

@@ -4,7 +4,7 @@
 |---|---|
 | generated | <YYYY-MM-DDThh:mm> |
 | controlMode | gated / automated |
-| bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / full-bootstrap |
+| bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / existing-memory-slice-maintenance / full-bootstrap |
 | currentStatus | complete / partial / paused / blocked |
 
 ## What Exists Now
@@ -18,6 +18,12 @@
 | Docs packs | `bootstrap/evidence/docs/` | complete / partial / none |
 | Boundary packs | `bootstrap/evidence/cross-repo/` | complete / partial / none |
 | File-level onboarding | `<paths>` | complete / partial |
+
+## Slice Maintenance Results
+
+| Source Route | Change Type | Memory Action | Artifacts |
+|---|---|---|---|
+| `<route>` | added / refreshed / moved / deleted | created / refreshed / moved / removed / retired / deferred | `<paths>` |
 
 ## Trusted Coverage
 
@@ -50,6 +56,14 @@
 | Wave | Focus | Why |
 |---|---|---|
 | wave-002 | <area/files> | <reason> |
+
+## Closeout Boundary
+
+Automated bootstrap stops at this handoff. Ask whether separate closeout should run.
+
+| Closeout Requested? | Notes |
+|---|---|
+| yes / no / pending | <developer decision or next ask> |
 
 ## Developer Decisions Recorded
 

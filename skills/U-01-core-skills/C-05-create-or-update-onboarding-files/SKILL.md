@@ -1,6 +1,6 @@
 ---
 name: c-05-create-or-update-onboarding-files
-description: "Create and maintain onboarding artifacts including file-level onboarding MDs and repo-level entity catalogs. Covers template, folder organization, section conventions, and metadata. Enforces strict 1-to-1 mapping for source files and one entity catalog per repo. Use this whenever creating new onboarding files, repo entity catalogs, or auditing existing onboarding artifacts for format compliance."
+description: "Create and maintain file-level onboarding and repo entity catalogs. Enforces strict 1-to-1 source mapping, governing overview links, metadata, and references, and routes package/module/source-slice create, refresh, move, or delete cases to C-03."
 ---
 
 # C-05 Create Or Update Onboarding Files
@@ -16,6 +16,8 @@ Planning stays in task artifacts. This package defines how onboarding itself is 
 
 Before maintaining onboarding, use `C-08-ar-coordination-context-resolver` to resolve the target repository's active coordination context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
 
+C-05 remains the normal public entry point for create or update onboarding requests. When the request is route-level slice creation, refresh, move handling, or deletion cleanup, C-05 should route the work to C-03 `existing-memory-slice-maintenance` instead of reducing it to unrelated file-level updates.
+
 ## Routing
 
 Choose the artifact type first, then use the matching workflow and template.
@@ -23,30 +25,51 @@ Choose the artifact type first, then use the matching workflow and template.
 | Artifact type             | Use when                                                                        | Workflow                                      | Template                                      |
 | ------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
 | File-level onboarding     | You are creating or updating file-level onboarding for one concrete source file | `workflows/file-level-onboarding-workflow.md` | `templates/file-level-onboarding-template.md` |
-| Repo-level entity catalog | You are creating or updating `<onboarding-root>/<repo>/entities.md`             | `workflows/repo-entity-catalog-workflow.md`   | `templates/repo-entity-catalog-template.md`   |
+| Repo-level entity catalog | You are creating or updating `entities.md` under the resolved onboarding root   | `workflows/repo-entity-catalog-workflow.md`   | `templates/repo-entity-catalog-template.md`   |
+| Route/slice maintenance   | A package, module, or source route was added, refreshed, moved, or deleted      | C-03 `existing-memory-slice-maintenance`      | C-03 bootstrap templates                      |
 
 Storage-specific adapter additions for file-level onboarding:
 
 1. `workflows/inline-onboarding-workflow.md`
 2. `templates/inline-onboarding-block-template.md`
 
+## Route-Level Maintenance Routing
+
+Before starting file-level maintenance, classify the change shape.
+
+Handle directly in C-05 when:
+
+1. one concrete source file needs onboarding creation or update
+2. a small file move has a clear one-to-one mirrored onboarding move
+3. a deleted file only requires deleting or moving its mirrored file-level onboarding and nearby links
+4. a repo-level entity catalog needs a targeted entry update
+
+Route to C-03 `existing-memory-slice-maintenance` when:
+
+1. a new package, module, feature area, or source route appears
+2. a deleted package, module, feature area, or source route requires coordinated route-local overview, child onboarding, and bootstrap artifact cleanup
+3. a package or module route moves and the route-local overview plus child file onboarding need to move together
+4. many files appear or disappear together
+5. a route purpose changes enough that the governing route-local overview should be created, refreshed, moved, retired, or removed before file-level work continues
+6. file-by-file C-05 work would lose the structural meaning of the source change
+
+When routing to C-03, pass the affected source routes, known old/new paths, existing onboarding paths, and whether the desired outcome is expansion, refresh, move handling, or deleted-slice cleanup.
+
 ## Sidecar Placement Rules
 
 ```text
-<onboarding-root>/
-  index.md
-  <repo>/
+<resolved-onboarding-root>/
+  overview.md
+  entities.md
+  <mirrored-source-folder>/
     overview.md
-    entities.md
-    <mirrored-source-folder>/
-      overview.md
-      <mirrored-source-file>.md
+    <mirrored-source-file>.md
 ```
 
 1. File-level onboarding keeps strict 1-to-1 mirroring with source files.
 2. Route-local `overview.md` files live in the mirrored onboarding hierarchy at the source folder they govern. They are governing context, not replacements for file-level onboarding.
 3. File-level onboarding should record the nearest `governingOverview` when one exists; otherwise point to the closest ancestor overview, falling back to the root `overview.md`.
-4. Repo-level entity catalogs exist once per repo at `<onboarding-root>/<repo>/entities.md`.
+4. Repo-level entity catalogs exist once per repo as `entities.md` under the resolved onboarding root.
 5. Use `mcp_time_get_current_time` for onboarding timestamps; never guess.
 6. Keep durable onboarding commentary separate from task-local planning and output docs.
 
@@ -65,6 +88,7 @@ Storage-specific adapter additions for file-level onboarding:
 11. Treat the C-08 resolved `system/sources.md` as a routing index only. Never cite it as evidence, and never let it stand in for the direct proof that belongs in `Docs References`, `Repo-Internal References`, or `Cross-Repo References`.
 12. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References`, `Repo-Internal References`, or `Cross-Repo References` are still valid.
 13. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
+14. When changed paths imply route-level creation, refresh, move, or deletion, route to C-03 `existing-memory-slice-maintenance` before creating piecemeal file-level onboarding.
 
 ## Source Discovery Rule
 
@@ -105,6 +129,7 @@ Before writing or revising onboarding content, read the C-08 resolved `system/so
 
 ### When code is deleted or moved
 
-1. delete or move the mirrored onboarding file to match the real source tree
+1. for one-to-one file moves or deletes, delete or move the mirrored onboarding file to match the real source tree
 2. update overview indexes and cross-references that point at the old location
 3. check whether repo-level entity catalogs or related onboarding now need cleanup
+4. if a package, module, feature area, or source route moved or disappeared, route to C-03 `existing-memory-slice-maintenance` for coordinated route-local overview, child onboarding, and bootstrap artifact cleanup

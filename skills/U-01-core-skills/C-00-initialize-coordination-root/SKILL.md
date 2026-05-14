@@ -134,7 +134,24 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
         "fileTypes": [".md", ".py", ".ts", ".tsx"]
       },
       "exclude": {
-        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "paths": [
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
         "fileTypes": [".png", ".jpg", ".zip"]
       }
     }
@@ -162,7 +179,24 @@ For explicit external-memory scaffolding, use the same file path under the per-r
         "fileTypes": [".md", ".py", ".ts", ".tsx"]
       },
       "exclude": {
-        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "paths": [
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
         "fileTypes": [".png", ".jpg", ".zip"]
       }
     }

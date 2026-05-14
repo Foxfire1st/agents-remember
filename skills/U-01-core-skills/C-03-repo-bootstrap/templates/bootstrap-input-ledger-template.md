@@ -4,11 +4,13 @@
 |---|---|
 | targetRepo | `<repo>` |
 | controlMode | gated / automated |
-| bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / full-bootstrap |
+| bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / existing-memory-slice-maintenance / full-bootstrap |
 | memoryRoot | `<path>` |
+| onboardingRoot | `<path>` |
 | topology | internal / external / mixed |
 | targetBranch | `<branch>` |
 | generated | <YYYY-MM-DDThh:mm> |
+| sourceInventoryGate | pending / accepted / corrected / blocked |
 
 ## Presented Source Inventory
 
@@ -39,6 +41,37 @@
 | Original Finding | Correction | Reason |
 |---|---|---|
 | `<agent finding>` | `<user correction>` | <reason> |
+
+## Source Inventory Delta
+
+Use this section for `existing-memory-slice-maintenance`.
+
+| Source Path | Change Type | Existing Memory Path | Intended Treatment |
+|---|---|---|---|
+| `<path>` | added / refreshed / moved / deleted | `<onboarding path or none>` | include / cleanup / move / ignore |
+
+## Settings Path-Rule Exclude Review
+
+Record whether the C-08 resolved `system/settings.json` already includes the standard path-rule excludes. Use this list as a settings review checklist, not as a hidden replacement for `pathRules`.
+
+```text
+node_modules/**
+vendor/**
+dist/**
+build/**
+coverage/**
+.cache/**
+.pytest_cache/**
+.venv/**
+.idea/**
+.vscode/**
+.env
+.env.*
+**/generated/**
+**/*.generated.*
+**/*.Zone.Identifier
+**/*:Zone.Identifier
+```
 
 ## Cross-Repo Context From Settings
 

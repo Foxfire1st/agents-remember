@@ -10,7 +10,24 @@
         "fileTypes": [".md", ".py", ".ts", ".tsx"]
       },
       "exclude": {
-        "paths": ["vendor/**", "node_modules/**", "dist/**", "build/**"],
+        "paths": [
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
         "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
       }
     }

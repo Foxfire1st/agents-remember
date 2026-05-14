@@ -6,10 +6,12 @@
 | lastUpdated | <YYYY-MM-DDThh:mm> |
 | currentPhase | <phase and substep> |
 | controlMode | gated / automated |
-| bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / full-bootstrap |
+| bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / existing-memory-slice-maintenance / full-bootstrap |
 | memoryRoot | `<path>` |
+| onboardingRoot | `<path>` |
 | targetRepoBranch | `<branch>` |
 | topology | internal / external / mixed |
+| sourceInventoryStatus | pending / presented / accepted / corrected / blocked |
 
 ## Phase Status
 
@@ -38,7 +40,13 @@
 
 | Source Route | Overview Path | Status | Confidence | Notes |
 |---|---|---|---|---|
-| `<route>` | `<route>/overview.md` | planned / created / deferred / blocked | [HIGH/MEDIUM/LOW] | <notes> |
+| `<route>` | `<route>/overview.md` | planned / created / refreshed / moved / cleanup-planned / removed / retired / deferred / blocked | [HIGH/MEDIUM/LOW] | <notes> |
+
+## Slice Maintenance
+
+| Source Route | Change Type | Existing Memory | Planned Action | Status |
+|---|---|---|---|---|
+| `<route>` | added / refreshed / moved / deleted | none / route overview / child file onboarding / bootstrap artifacts | create / refresh / move / remove / retire / defer | planned / in-progress / complete / blocked |
 
 ## Waves
 
@@ -68,6 +76,12 @@
 | File | Reason | Revisit Trigger |
 |---|---|---|
 | `<path>` | routine DTO | when modified or promoted by coverage plan |
+
+## Closeout Boundary
+
+| Handoff Presented | Closeout Requested? | Notes |
+|---|---|---|
+| yes / no | yes / no / pending | closeout is separate from automated bootstrap |
 
 ## Next Recommended Action
 
