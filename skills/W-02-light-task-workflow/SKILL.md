@@ -67,7 +67,7 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 2. The task file is the living contract for requirements, checklist state, decisions, and proposed code examples.
 3. When onboarding files are part of planning context, drift is checked before planning using `C-02-onboarding-drift-detection`.
 4. No implementation begins before explicit developer approval.
-5. Refreshed shared-memory onboarding and ledger changes are committed before C-09 starts worktrees.
+5. Refreshed external-memory onboarding and ledger changes are committed before C-09 starts worktrees.
 6. Implementation approval is separate from commit approval; worktree-backed closeout commits require a later explicit developer approval after a closeout preview.
 7. Implementation steps and substeps use checkbox state rather than freeform progress prose.
 8. Code-changing light tasks include code examples for each distinct implementation change.

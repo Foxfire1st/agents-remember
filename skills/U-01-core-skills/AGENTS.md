@@ -26,7 +26,7 @@
 8. Need worktrees, task contracts, closeout, memory ledger alignment, integration, or cleanup?
    → C-09
 
-9. Existing shared-memory onboarding should become the initial ledgered baseline?
+9. Existing external-memory onboarding should become the initial ledgered baseline?
    → C-10
 
 10. Need to carryover memory from one memory branch to another?

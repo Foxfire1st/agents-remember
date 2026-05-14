@@ -4,7 +4,7 @@ Use this file as the human-facing `system/settings.md` starter for a durable
 memory layer:
 
 - repo-local internal memory: `<repo>/ar-memory/system/settings.md`
-- shared memory repo: `ar-coordination/memory-repos/ar-<repo>/system/settings.md`
+- external memory repo: `ar-coordination/memory-repos/ar-<repo>/system/settings.md`
 
 Machine-readable storage, path-rule, and cross-repo policy belongs in the
 sibling `system/settings.json` file. Use the sibling `settings.json` example as
@@ -29,7 +29,7 @@ should not own rules that are valid only for this selected memory layer.
 Set `onboarding.storage.mode` in `settings.json` according to topology:
 
 - `repo-sidecar` for internal `<repo>/ar-memory`
-- `memory-repo` for shared `ar-coordination/memory-repos/ar-<repo>`
+- `memory-repo` for external `ar-coordination/memory-repos/ar-<repo>`
 
 ## Path Eligibility
 

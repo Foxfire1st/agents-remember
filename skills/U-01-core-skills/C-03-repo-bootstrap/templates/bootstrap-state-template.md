@@ -9,7 +9,7 @@
 | bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / full-bootstrap |
 | memoryRoot | `<path>` |
 | targetRepoBranch | `<branch>` |
-| topology | internal / shared / mixed |
+| topology | internal / external / mixed |
 
 ## Phase Status
 

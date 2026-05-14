@@ -1,11 +1,11 @@
 ---
 name: c-10-adopt-memory-baseline
-description: "Adopt existing shared-memory onboarding as the first ledgered memory baseline after resolving context, checking drift, and requiring explicit acceptance when onboarding is not proven current."
+description: "Adopt existing external-memory onboarding as the first ledgered memory baseline after resolving context, checking drift, and requiring explicit acceptance when onboarding is not proven current."
 ---
 
 # C-10 Adopt Memory Baseline
 
-Use this skill when a shared memory repo already contains onboarding content and the developer wants to create the initial `memory.md` ledger from that content.
+Use this skill when an external memory repo already contains onboarding content and the developer wants to create the initial `memory.md` ledger from that content.
 
 This skill does not decide that stale onboarding is true. It makes the trust boundary explicit: C-02 drift is checked first, and actionable drift blocks adoption unless the developer explicitly accepts the current onboarding as the baseline.
 
@@ -22,9 +22,9 @@ Use `status` first. Use `adopt` only after the developer approves the baseline d
 
 ## Workflow
 
-1. Resolve the code repository with C-08 and confirm shared topology.
+1. Resolve the code repository with C-08 and confirm external topology.
 2. Run C-02 drift classification against the resolved onboarding root; its reusable report is written under C-08's resolved temp root unless `--report` is supplied.
-3. Inspect the shared memory repo for an existing `memory.md`.
+3. Inspect the external memory repo for an existing `memory.md`.
 4. If a ledger already exists, report it and stop.
 5. If drift has actionable findings, stop unless `--accept-drift` is present.
 6. Bootstrap the memory repo through C-09 so the existing onboarding/system/docs content becomes the memory content commit and `memory.md` maps current code HEAD to that memory commit.

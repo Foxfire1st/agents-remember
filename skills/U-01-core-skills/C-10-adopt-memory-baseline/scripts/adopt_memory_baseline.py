@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adopt existing shared-memory onboarding as the first ledgered baseline.
+"""Adopt existing external-memory onboarding as the first ledgered baseline.
 
 Requires Python 3.10+ and git. Uses only the Python standard library.
 """
@@ -45,7 +45,7 @@ def resolve_context(args: argparse.Namespace):
         code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,
         requested_topology=args.topology,
-        shared_root=args.shared_root,
+        coordination_root=args.coordination_root,
         code_repository_root=args.code_repository_root,
     )
 
@@ -132,8 +132,8 @@ def command_status(args: argparse.Namespace) -> int:
 
 def command_adopt(args: argparse.Namespace) -> int:
     context = resolve_context(args)
-    if context.topology != "shared":
-        raise RuntimeError("adoption requires shared topology")
+    if context.topology != "external":
+        raise RuntimeError("adoption requires external topology")
     rows, report = run_drift(context, args.report)
     payload = base_payload(context, rows, report)
     if payload["ledger"]["exists"]:
@@ -154,7 +154,7 @@ def command_adopt(args: argparse.Namespace) -> int:
         task_name=f"adopt-{context.code_repository_name}-memory-baseline",
         repo_name=context.code_repository_name,
         workflow_kind="adopt-memory-baseline",
-        memory_mode="shared",
+        memory_mode="external",
         coordination_root=context.coordination_root,
         code_repo_path=context.code_repository_root,
         code_source_branch=source_branch,
@@ -178,8 +178,8 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--code-repository-name", help="Code repository name to resolve.")
     parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
     parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
-    parser.add_argument("--topology", choices=("internal", "shared"), help="Optional topology override.")
-    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-coordination root.")
+    parser.add_argument("--topology", choices=("internal", "external"), help="Optional topology override.")
+    parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument("--report", type=Path, help="Optional C-02 drift report path.")
 
 

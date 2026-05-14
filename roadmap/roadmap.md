@@ -300,7 +300,7 @@ Current scaffold behavior:
 - `C-00-initialize-coordination-root` is the first-run or repair scaffold skill.
 - Default C-00 setup creates repo-local `ar-memory/` plus local
   `ar-coordination/`.
-- Explicit shared C-00 setup can create or repair a per-repo shared memory root
+- Explicit external-memory C-00 setup can create or repair a per-repo external memory root
   under `ar-coordination/memory-repos/ar-<repo-name>/`.
 - C-00 creates missing directories and starter files only; it must not overwrite
   existing coordination or memory files without approval.
@@ -327,9 +327,9 @@ Current task and worktree behavior:
 
 Current memory behavior:
 
-- C-09 shared-memory start blocks when no compatible memory state exists and
+- C-09 external-memory start blocks when no compatible memory state exists and
   asks for an explicit recovery choice.
-- C-09 can bootstrap a shared memory repo only when explicitly requested, such
+- C-09 can bootstrap an external memory repo only when explicitly requested, such
   as `bootstrap-memory` or `start --memory-choice clean-start`.
 - C-09 memory bootstrap initializes the repo if needed, creates `onboarding/`,
   `docs/`, and `system/`, writes missing starter system files, commits memory

@@ -140,7 +140,7 @@ def initialized_memory_repo(memory_repo: Path, repo_name: str, _code_branch: str
     return git(memory_repo, "rev-parse", "HEAD")
 
 
-def open_shared_contract_fixture(root: Path):
+def open_external_contract_fixture(root: Path):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
@@ -153,7 +153,7 @@ def open_shared_contract_fixture(root: Path):
         task_name="Commit Approval Thing",
         repo_name="repo-a",
         workflow_kind="chat",
-        memory_mode="shared",
+        memory_mode="external",
         coordination_root=root / "ar-coordination",
         code_repo_path=code_repo,
         code_source_branch="main",
@@ -171,15 +171,15 @@ def open_shared_contract_fixture(root: Path):
     return contract
 
 
-def dirty_open_shared_contract_fixture(root: Path):
-    contract = open_shared_contract_fixture(root)
+def dirty_open_external_contract_fixture(root: Path):
+    contract = open_external_contract_fixture(root)
     (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
     assert contract.memory_worktree is not None
     write_file_onboarding(contract.memory_worktree / "onboarding", contract.repo_name, "feature.txt", contract.code_base_commit)
     return contract
 
 
-def direct_shared_memory_fixture(root: Path, include_feature_onboarding: bool = True):
+def direct_external_memory_fixture(root: Path, include_feature_onboarding: bool = True):
     code_repo = root / "repo-a"
     init_repo(code_repo, "main")
     code_base = commit_file(code_repo, "feature.txt", "old\n", "Add feature baseline")
@@ -200,7 +200,7 @@ def direct_shared_memory_fixture(root: Path, include_feature_onboarding: bool = 
     return code_repo, memory_repo, code_base
 
 
-def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
+def closed_external_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
@@ -213,7 +213,7 @@ def closed_shared_contract_fixture(root: Path, code_path: str = "feature.txt", c
         task_name="Integrate Thing",
         repo_name="repo-a",
         workflow_kind="chat",
-        memory_mode="shared",
+        memory_mode="external",
         coordination_root=root / "ar-coordination",
         code_repo_path=code_repo,
         code_source_branch="main",
@@ -336,7 +336,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 task_name="Fix Thing",
                 repo_name="repo-a",
                 workflow_kind="light-task",
-                memory_mode="shared",
+                memory_mode="external",
                 coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
@@ -352,7 +352,7 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
 
-    def test_start_blocks_dirty_shared_memory_source(self) -> None:
+    def test_start_blocks_dirty_external_memory_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
@@ -366,7 +366,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 task_name="Fix Thing",
                 repo_name="repo-a",
                 workflow_kind="light-task",
-                memory_mode="shared",
+                memory_mode="external",
                 coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
@@ -383,7 +383,7 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertIn("commit refreshed onboarding and ledger", result["reason"])
             self.assertIn("commit-memory-and-ledger-first", result["choices"])
 
-    def test_start_reports_compatible_shared_memory(self) -> None:
+    def test_start_reports_compatible_external_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
@@ -393,7 +393,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 task_name="Fix Thing",
                 repo_name="repo-a",
                 workflow_kind="light-task",
-                memory_mode="shared",
+                memory_mode="external",
                 coordination_root=root / "ar-coordination",
                 code_repo_path=root / "repo-a",
                 code_source_branch="main",
@@ -434,7 +434,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 task_name="Fix Platform Status",
                 repo_name="device-management",
                 workflow_kind="light-task",
-                memory_mode="shared",
+                memory_mode="external",
                 coordination_root=root / "ar-coordination",
                 code_repo_path=root / "device-management",
                 code_source_branch="dev",
@@ -451,7 +451,7 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(loaded.task_root, root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status")
             self.assertEqual(loaded.task_artifact, loaded.task_root / "task.md")
             self.assertEqual(loaded.worktree_group, root / "ar-coordination" / "worktrees" / "device-management" / "fix-platform-status-ar")
-            self.assertEqual(loaded.memory_mode, "shared")
+            self.assertEqual(loaded.memory_mode, "external")
             self.assertEqual(loaded.ledger_path, loaded.memory_worktree / "memory.md")
             self.assertEqual(
                 task_root_candidates(root / "ar-coordination", "device-management", "Fix Platform Status"),
@@ -468,7 +468,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_closeout_dry_run_without_approval_reports_commit_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = dirty_open_shared_contract_fixture(root)
+            contract = dirty_open_external_contract_fixture(root)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=False,
@@ -498,7 +498,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_closeout_requires_approval_note_for_real_commits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = dirty_open_shared_contract_fixture(root)
+            contract = dirty_open_external_contract_fixture(root)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -516,7 +516,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_closeout_records_commit_approval_note(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = dirty_open_shared_contract_fixture(root)
+            contract = dirty_open_external_contract_fixture(root)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -536,7 +536,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_closeout_refreshes_onboarding_metadata_to_new_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = dirty_open_shared_contract_fixture(root)
+            contract = dirty_open_external_contract_fixture(root)
             onboarding_file = contract.memory_worktree / "onboarding" / "feature.txt.md"
             args = Namespace(
                 contract_path=contract.contract_path,
@@ -562,7 +562,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_closeout_blocks_missing_onboarding_for_changed_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = open_shared_contract_fixture(root)
+            contract = open_external_contract_fixture(root)
             (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
             args = Namespace(
                 contract_path=contract.contract_path,
@@ -581,14 +581,14 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_direct_closeout_dry_run_reports_commit_plan_without_mutating(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code_repo, memory_repo, code_base = direct_shared_memory_fixture(root)
+            code_repo, memory_repo, code_base = direct_external_memory_fixture(root)
             memory_head = git(memory_repo, "rev-parse", "HEAD")
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=root,
                 code_repository_root=code_repo,
-                topology="shared",
-                shared_root=root / "ar-coordination",
+                topology="external",
+                coordination_root=root / "ar-coordination",
                 contract_path=None,
                 task_name=None,
                 source_branch=None,
@@ -614,13 +614,13 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_direct_closeout_refreshes_onboarding_and_updates_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code_repo, memory_repo, _code_base = direct_shared_memory_fixture(root)
+            code_repo, memory_repo, _code_base = direct_external_memory_fixture(root)
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=root,
                 code_repository_root=code_repo,
-                topology="shared",
-                shared_root=root / "ar-coordination",
+                topology="external",
+                coordination_root=root / "ar-coordination",
                 contract_path=None,
                 task_name=None,
                 source_branch=None,
@@ -646,13 +646,13 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_direct_closeout_blocks_missing_onboarding_before_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code_repo, _memory_repo, code_base = direct_shared_memory_fixture(root, include_feature_onboarding=False)
+            code_repo, _memory_repo, code_base = direct_external_memory_fixture(root, include_feature_onboarding=False)
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=root,
                 code_repository_root=code_repo,
-                topology="shared",
-                shared_root=root / "ar-coordination",
+                topology="external",
+                coordination_root=root / "ar-coordination",
                 contract_path=None,
                 task_name=None,
                 source_branch=None,
@@ -671,7 +671,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = closed_shared_contract_fixture(root)
+            contract = closed_external_contract_fixture(root)
             (contract.code_worktree / "followup.txt").write_text("follow-up\n", encoding="utf-8")
             payload = worktree_manager.status_payload(contract)
             self.assertEqual(payload["phase"], "commit-approval-pending")
@@ -680,7 +680,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = closed_shared_contract_fixture(root)
+            contract = closed_external_contract_fixture(root)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -722,7 +722,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_cleanup_blocks_before_integration_completed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = closed_shared_contract_fixture(root)
+            contract = closed_external_contract_fixture(root)
             args = Namespace(contract_path=contract.contract_path, approved=True, dry_run=False)
             with self.assertRaises(RuntimeError):
                 worktree_manager.command_cleanup(args)
@@ -730,7 +730,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_integrate_replay_handles_parallel_non_overlapping_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = closed_shared_contract_fixture(root)
+            contract = closed_external_contract_fixture(root)
             parallel_code = commit_file(contract.code_repo_path, "parallel.txt", "parallel\n", "Parallel code change")
             parallel_memory_content = commit_file(contract.memory_repo_path, "onboarding/parallel.txt.md", "# parallel\n", "Document parallel change")
             commit_memory_ledger(contract.memory_repo_path, parallel_code, parallel_memory_content, "Sync parallel ledger")
@@ -758,7 +758,7 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_integrate_replay_blocks_code_conflicts_before_main_moves(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = closed_shared_contract_fixture(root, code_path="README.md", code_content="# Task\n")
+            contract = closed_external_contract_fixture(root, code_path="README.md", code_content="# Task\n")
             parallel_code = commit_file(contract.code_repo_path, "README.md", "# Parallel\n", "Parallel conflicting change")
             args = Namespace(
                 contract_path=contract.contract_path,
@@ -795,14 +795,14 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(context.onboarding_root, repo / "ar-memory" / "onboarding")
             self.assertEqual(context.temp_root, repo / "ar-coordination" / "temp")
 
-    def test_resolver_prefers_existing_internal_memory_over_shared_memory(self) -> None:
+    def test_resolver_prefers_existing_internal_memory_over_external_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "repo-a"
             repo.mkdir()
             (repo / "ar-memory").mkdir()
-            shared_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
-            shared_memory.mkdir(parents=True)
+            external_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            external_memory.mkdir(parents=True)
             agents_repo = workspace / "agents-remember-md"
             agents_repo.mkdir()
             context = resolver.resolve_coordination_context(
@@ -814,13 +814,13 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(context.memory_root, repo / "ar-memory")
             self.assertEqual(context.coordination_root, repo / "ar-coordination")
 
-    def test_resolver_uses_shared_memory_repo_when_internal_memory_missing(self) -> None:
+    def test_resolver_uses_external_memory_repo_when_internal_memory_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "repo-a"
             repo.mkdir()
-            shared_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
-            shared_memory.mkdir(parents=True)
+            external_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            external_memory.mkdir(parents=True)
             agents_repo = workspace / "agents-remember-md"
             agents_repo.mkdir()
             context = resolver.resolve_coordination_context(
@@ -828,10 +828,10 @@ class WorktreeSupportTests(unittest.TestCase):
                 workspace_root=workspace,
                 agents_repo=agents_repo,
             )
-            self.assertEqual(context.topology, "shared")
+            self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, workspace / "ar-coordination")
-            self.assertEqual(context.memory_root, shared_memory)
-            self.assertEqual(context.onboarding_root, shared_memory / "onboarding")
+            self.assertEqual(context.memory_root, external_memory)
+            self.assertEqual(context.onboarding_root, external_memory / "onboarding")
 
     def test_resolver_uses_dot_env_override_for_coordination_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -841,16 +841,16 @@ class WorktreeSupportTests(unittest.TestCase):
             agents_repo = workspace / "agents-remember-md"
             agents_repo.mkdir()
             (agents_repo / ".env").write_text("AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8")
-            shared_memory = agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a"
-            shared_memory.mkdir(parents=True)
+            external_memory = agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a"
+            external_memory.mkdir(parents=True)
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
                 agents_repo=agents_repo,
             )
-            self.assertEqual(context.topology, "shared")
+            self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, agents_repo / "custom-coordination")
-            self.assertEqual(context.memory_root, shared_memory)
+            self.assertEqual(context.memory_root, external_memory)
 
     def test_resolver_ignores_dot_env_example_at_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -867,9 +867,9 @@ class WorktreeSupportTests(unittest.TestCase):
                     workspace_root=workspace,
                     agents_repo=agents_repo,
                 )
-            self.assertEqual(raised.exception.shared_root, workspace / "ar-coordination")
+            self.assertEqual(raised.exception.coordination_root, workspace / "ar-coordination")
 
-    def test_resolver_does_not_select_legacy_shared_onboarding_without_memory_repo(self) -> None:
+    def test_resolver_does_not_select_legacy_external_onboarding_without_memory_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "repo-a"
@@ -880,10 +880,10 @@ class WorktreeSupportTests(unittest.TestCase):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    shared_root=coordination_root,
+                    coordination_root=coordination_root,
                 )
 
-    def test_resolver_does_not_select_shared_from_path_rules_without_memory_repo(self) -> None:
+    def test_resolver_does_not_select_external_from_path_rules_without_memory_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "repo-a"
@@ -899,7 +899,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    shared_root=coordination_root,
+                    coordination_root=coordination_root,
                 )
 
     def test_resolver_errors_when_memory_is_missing(self) -> None:
@@ -916,7 +916,7 @@ class WorktreeSupportTests(unittest.TestCase):
                     agents_repo=agents_repo,
                 )
             self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
-            self.assertEqual(raised.exception.shared_memory, workspace / "ar-coordination" / "memory-repos" / "ar-repo-a")
+            self.assertEqual(raised.exception.external_memory, workspace / "ar-coordination" / "memory-repos" / "ar-repo-a")
             self.assertIn("bootstrap memory with C-00", str(raised.exception))
 
     def test_drift_report_paths_use_temp_root(self) -> None:
@@ -1000,8 +1000,8 @@ class WorktreeSupportTests(unittest.TestCase):
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                topology="shared",
-                shared_root=workspace / "ar-coordination",
+                topology="external",
+                coordination_root=workspace / "ar-coordination",
                 code_repository_root=None,
                 report=None,
             )
@@ -1028,8 +1028,8 @@ class WorktreeSupportTests(unittest.TestCase):
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                topology="shared",
-                shared_root=workspace / "ar-coordination",
+                topology="external",
+                coordination_root=workspace / "ar-coordination",
                 code_repository_root=None,
                 report=None,
                 accept_drift=False,
@@ -1049,8 +1049,8 @@ class WorktreeSupportTests(unittest.TestCase):
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                topology="shared",
-                shared_root=workspace / "ar-coordination",
+                topology="external",
+                coordination_root=workspace / "ar-coordination",
                 code_repository_root=None,
                 report=None,
                 accept_drift=False,

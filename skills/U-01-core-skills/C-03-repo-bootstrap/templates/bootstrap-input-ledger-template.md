@@ -6,7 +6,7 @@
 | controlMode | gated / automated |
 | bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / full-bootstrap |
 | memoryRoot | `<path>` |
-| topology | internal / shared / mixed |
+| topology | internal / external / mixed |
 | targetBranch | `<branch>` |
 | generated | <YYYY-MM-DDThh:mm> |
 

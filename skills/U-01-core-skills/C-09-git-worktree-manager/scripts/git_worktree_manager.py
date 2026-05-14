@@ -124,7 +124,7 @@ def resolve_context(args: argparse.Namespace):
         code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,
         requested_topology=args.topology,
-        shared_root=args.shared_root,
+        coordination_root=args.coordination_root,
         code_repository_root=args.code_repository_root,
         task_name=getattr(args, "task_name", None),
         worktree_name=getattr(args, "worktree_name", None),
@@ -249,7 +249,7 @@ def command_start(args: argparse.Namespace) -> int:
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
     base_commit = head_commit(repo, source_branch)
     memory_mode = args.memory_mode or context.memory_mode
-    memory_repo = context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}" if memory_mode == "shared" else None
+    memory_repo = context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}" if memory_mode == "external" else None
     memory_base = head_commit(memory_repo) if memory_repo is not None and memory_repo.exists() and (memory_repo / ".git").exists() else ""
     contract = default_contract(
         task_name=args.task_name,
@@ -263,8 +263,8 @@ def command_start(args: argparse.Namespace) -> int:
         code_base_commit=base_commit,
         worktree_name=args.worktree_name,
         memory_repo_path=memory_repo,
-        memory_source_branch=source_branch if memory_mode == "shared" else "",
-        memory_work_branch=work_branch if memory_mode == "shared" else "",
+        memory_source_branch=source_branch if memory_mode == "external" else "",
+        memory_work_branch=work_branch if memory_mode == "external" else "",
         memory_base_commit=memory_base,
     )
 
@@ -278,13 +278,13 @@ def command_start(args: argparse.Namespace) -> int:
     if memory_state["state"] == "blocked":
         print(json.dumps({
             "state": "blocked",
-            "summary": "Code worktree is prepared, but shared memory cannot be used until the developer selects a recovery path.",
+            "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
             "next_action": "choose-memory-recovery",
             "code_worktree": code_state,
             "memory": memory_state,
         }, indent=2))
         return 2
-    if contract.memory_mode == "shared" and memory_state["state"] == "disabled":
+    if contract.memory_mode == "external" and memory_state["state"] == "disabled":
         contract = replace(
             contract,
             memory_mode="disabled",
@@ -296,7 +296,7 @@ def command_start(args: argparse.Namespace) -> int:
             ledger_path=None,
             memory_state="disabled",
         )
-    if contract.memory_mode == "shared" and memory_state["state"] == "clean-start" and memory_state.get("ledgerCommit"):
+    if contract.memory_mode == "external" and memory_state["state"] == "clean-start" and memory_state.get("ledgerCommit"):
         contract = replace(contract, memory_base_commit=str(memory_state["ledgerCommit"]))
 
     if not args.dry_run:
@@ -338,7 +338,7 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
             return {"state": "disabled", "reason": "human selected disabled memory"}
         return {
             "state": "blocked",
-            "reason": "shared memory repo is missing",
+            "reason": "external memory repo is missing",
             "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
         }
     if (contract.memory_repo_path / ".git").exists() and has_changes(contract.memory_repo_path):
@@ -346,7 +346,7 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
             return {"state": "disabled", "reason": "human selected disabled memory"}
         return {
             "state": "blocked",
-            "reason": "shared memory source repo has uncommitted changes; commit refreshed onboarding and ledger before starting worktrees",
+            "reason": "external memory source repo has uncommitted changes; commit refreshed onboarding and ledger before starting worktrees",
             "choices": ["commit-memory-and-ledger-first", "disabled-memory", "custom"],
         }
     ledger_path = contract.memory_repo_path / "memory.md"
@@ -414,7 +414,7 @@ def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str
         docs_keep.write_text("", encoding="utf-8")
     overview = contract.memory_repo_path / "onboarding" / "overview.md"
     if not overview.exists():
-        overview.write_text(f"# {contract.repo_name} Memory Overview\n\nShared memory repo bootstrap placeholder.\n", encoding="utf-8")
+        overview.write_text(f"# {contract.repo_name} Memory Overview\n\nExternal memory repo bootstrap placeholder.\n", encoding="utf-8")
     settings = contract.memory_repo_path / "system" / "settings.json"
     if not settings.exists():
         settings.write_text(
@@ -434,7 +434,7 @@ def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str
         if not path.exists():
             path.write_text(f"# {name.removesuffix('.md').title()}\n\nNo entries configured yet.\n", encoding="utf-8")
     require_git(contract.memory_repo_path, ["add", "onboarding", "docs", "system"])
-    memory_content_commit = commit_if_dirty(contract.memory_repo_path, f"[{contract.task_id}] Bootstrap shared memory content")
+    memory_content_commit = commit_if_dirty(contract.memory_repo_path, f"[{contract.task_id}] Bootstrap external memory content")
     ledger = create_initial_ledger(
         contract.repo_name,
         contract.code_base_commit,
@@ -534,7 +534,7 @@ def validate_onboarding_refresh_plan_for_context(context, changed_paths: list[st
         if unsupported:
             details.append(f"unsupported onboarding storage for: {', '.join(unsupported)}")
         raise RuntimeError(
-            "shared closeout requires current onboarding for changed source files before memory commit; "
+            "external-memory closeout requires current onboarding for changed source files before memory commit; "
             + "; ".join(details)
             + ". Run C-05 create-or-update-onboarding-files, then rerun closeout."
         )
@@ -543,7 +543,7 @@ def validate_onboarding_refresh_plan_for_context(context, changed_paths: list[st
         text = onboarding_path.read_text(encoding="utf-8")
         if "lastVerifiedCommitHash" not in text or "lastVerifiedCommitDate" not in text:
             raise RuntimeError(
-                "shared closeout requires onboarding verification metadata before memory commit; "
+                "external-memory closeout requires onboarding verification metadata before memory commit; "
                 f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
                 "Run C-05 create-or-update-onboarding-files, then rerun closeout."
             )
@@ -569,7 +569,7 @@ def refresh_onboarding_metadata_for_context(
         text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
         if not hash_found or not date_found:
             raise RuntimeError(
-                "shared closeout requires onboarding verification metadata before memory commit; "
+                "external-memory closeout requires onboarding verification metadata before memory commit; "
                 f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
                 "Run C-05 create-or-update-onboarding-files, then rerun closeout."
             )
@@ -594,7 +594,7 @@ def command_bootstrap_memory(args: argparse.Namespace) -> int:
         task_name=args.task_name or f"bootstrap-{context.code_repository_name}-memory",
         repo_name=context.code_repository_name,
         workflow_kind="bootstrap-memory",
-        memory_mode="shared",
+        memory_mode="external",
         coordination_root=context.coordination_root,
         code_repo_path=context.code_repository_root,
         code_source_branch=source_branch,
@@ -612,9 +612,9 @@ def command_bootstrap_memory(args: argparse.Namespace) -> int:
 def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
     ledger_message = args.ledger_commit_message or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
     code_dirty = worktree_dirty(contract.code_worktree)
-    memory_dirty = contract.memory_mode == "shared" and worktree_dirty(contract.memory_worktree)
+    memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
     changed_paths = changed_worktree_paths(contract.code_worktree)
-    metadata_refresh = onboarding_refresh_plan(contract, changed_paths) if contract.memory_mode == "shared" else {
+    metadata_refresh = onboarding_refresh_plan(contract, changed_paths) if contract.memory_mode == "external" else {
         "required": [],
         "missing": [],
         "unsupported": [],
@@ -623,7 +623,7 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. Shared-memory closeout will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
+        "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
         "next_action": "request-commit-approval",
         "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved --approval-note <note>",
         "commit_approval_required": True,
@@ -648,10 +648,10 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
                 "would_commit": memory_dirty,
                 "message": args.memory_commit_message,
                 "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
-                "metadata_refresh_after_code_commit": contract.memory_mode == "shared",
+                "metadata_refresh_after_code_commit": contract.memory_mode == "external",
             },
             "ledger": {
-                "would_update": contract.memory_mode == "shared",
+                "would_update": contract.memory_mode == "external",
                 "message": ledger_message,
                 "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
             },
@@ -668,7 +668,7 @@ def command_closeout(args: argparse.Namespace) -> int:
             "code source branch moved since task start: "
             f"{contract.code_source_branch} is {current_code_source}, expected {contract.code_base_commit}"
         )
-    if contract.memory_mode == "shared" and contract.memory_repo_path is not None and contract.memory_base_commit:
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None and contract.memory_base_commit:
         current_memory_source = head_commit(contract.memory_repo_path, contract.memory_source_branch)
         if current_memory_source != contract.memory_base_commit:
             raise RuntimeError(
@@ -684,16 +684,16 @@ def command_closeout(args: argparse.Namespace) -> int:
     if not approval_note:
         raise RuntimeError("closeout requires --approval-note describing the developer's explicit commit approval")
     changed_paths = changed_worktree_paths(contract.code_worktree)
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         validate_onboarding_refresh_plan(contract, changed_paths)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory_commit = ""
     ledger_commit = ""
     refreshed_onboarding: list[dict[str, str]] = []
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         if contract.memory_worktree is None or contract.ledger_path is None:
-            raise RuntimeError("shared closeout requires memory worktree and ledger path")
+            raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
         refreshed_onboarding = refresh_onboarding_metadata(contract, changed_paths, code_commit, code_commit_date)
         memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
         ledger = load_ledger(contract.ledger_path)
@@ -724,11 +724,11 @@ def command_closeout(args: argparse.Namespace) -> int:
     return 0
 
 
-def validate_direct_shared_context(context, source_branch: str) -> object:
-    if context.memory_mode != "shared":
-        raise RuntimeError("direct closeout currently requires shared memory mode")
+def validate_direct_external_context(context, source_branch: str) -> object:
+    if context.memory_mode != "external":
+        raise RuntimeError("direct closeout currently requires external memory mode")
     if not context.memory_root.exists() or not (context.memory_root / ".git").exists():
-        raise RuntimeError(f"shared memory repo is missing or is not a Git repo: {context.memory_root.as_posix()}")
+        raise RuntimeError(f"external memory repo is missing or is not a Git repo: {context.memory_root.as_posix()}")
     if current_branch(context.code_repository_root) != source_branch:
         raise RuntimeError(f"code repository is on {current_branch(context.code_repository_root)}, expected {source_branch}")
     memory_branch = current_branch(context.memory_root)
@@ -739,7 +739,7 @@ def validate_direct_shared_context(context, source_branch: str) -> object:
 
 
 def direct_closeout_preview_payload(context, args: argparse.Namespace, source_branch: str) -> dict[str, object]:
-    validate_direct_shared_context(context, source_branch)
+    validate_direct_external_context(context, source_branch)
     code_dirty = worktree_dirty(context.code_repository_root)
     memory_dirty = worktree_dirty(context.memory_root)
     changed_paths = changed_worktree_paths(context.code_repository_root)
@@ -790,7 +790,7 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
 def command_direct_closeout(args: argparse.Namespace) -> int:
     context = resolve_context(args)
     source_branch = args.source_branch or current_branch(context.code_repository_root)
-    validate_direct_shared_context(context, source_branch)
+    validate_direct_external_context(context, source_branch)
     if args.dry_run:
         print(json.dumps(direct_closeout_preview_payload(context, args, source_branch), indent=2))
         return 0
@@ -872,11 +872,11 @@ def validate_integrate_contract(contract: WorktreeContract) -> None:
     require_clean(contract.code_worktree, "code worktree")
     if head_commit(contract.code_worktree) != contract.code_commit:
         raise RuntimeError("code worktree HEAD does not match closeout code_commit")
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         if contract.memory_repo_path is None or contract.memory_worktree is None or contract.ledger_path is None:
-            raise RuntimeError("shared integration requires memory repo, worktree, and ledger path")
+            raise RuntimeError("external-memory integration requires memory repo, worktree, and ledger path")
         if not contract.memory_content_commit or not contract.ledger_commit:
-            raise RuntimeError("shared integration requires closeout memory_content_commit and ledger_commit")
+            raise RuntimeError("external-memory integration requires closeout memory_content_commit and ledger_commit")
         if current_branch(contract.memory_repo_path) != contract.memory_source_branch:
             raise RuntimeError(f"memory source repo must have {contract.memory_source_branch} checked out")
         if current_branch(contract.memory_worktree) != contract.memory_work_branch:
@@ -963,7 +963,7 @@ def command_integrate(args: argparse.Namespace) -> int:
     current_memory_source = ""
     code_replay_required = not is_ancestor(contract.code_repo_path, current_code_source, contract.code_commit)
     memory_replay_required = False
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         assert contract.memory_repo_path is not None
         current_memory_source = head_commit(contract.memory_repo_path, contract.memory_source_branch)
         memory_replay_required = not is_ancestor(contract.memory_repo_path, current_memory_source, contract.ledger_commit)
@@ -1002,7 +1002,7 @@ def command_integrate(args: argparse.Namespace) -> int:
 
     integrated_memory_content_commit = contract.memory_content_commit
     integrated_ledger_commit = contract.ledger_commit
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         assert contract.memory_repo_path is not None
         needs_new_ledger = args.strategy == "replay" and (
             integrated_code_commit != contract.code_commit
@@ -1022,7 +1022,7 @@ def command_integrate(args: argparse.Namespace) -> int:
             raise RuntimeError("integrated memory ledger commit is not a fast-forward from the current memory source branch")
 
     require_git(contract.code_repo_path, ["merge", "--ff-only", integrated_code_commit])
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         assert contract.memory_repo_path is not None
         require_git(contract.memory_repo_path, ["merge", "--ff-only", integrated_ledger_commit])
         ledger = load_ledger(contract.memory_repo_path / "memory.md")
@@ -1105,13 +1105,13 @@ def command_cleanup(args: argparse.Namespace) -> int:
     removed_worktrees = {
         "code": remove_registered_worktree(contract.code_repo_path, contract.code_worktree, args.dry_run),
     }
-    if contract.memory_mode == "shared" and contract.memory_repo_path is not None and contract.memory_worktree is not None:
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None and contract.memory_worktree is not None:
         removed_worktrees["memory"] = remove_registered_worktree(contract.memory_repo_path, contract.memory_worktree, args.dry_run)
 
     branches = {
         "code": delete_branch_if_merged(contract.code_repo_path, contract.code_work_branch, args.dry_run),
     }
-    if contract.memory_mode == "shared" and contract.memory_repo_path is not None and contract.memory_work_branch:
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None and contract.memory_work_branch:
         branches["memory"] = delete_branch_if_merged(contract.memory_repo_path, contract.memory_work_branch, args.dry_run)
         integration_work_branch = integration_branch(contract)
         if branch_exists(contract.memory_repo_path, integration_work_branch):
@@ -1151,8 +1151,8 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--code-repository-name", help="Code repository name to resolve.")
     parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
     parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
-    parser.add_argument("--topology", choices=("internal", "shared"), help="Optional topology override.")
-    parser.add_argument("--shared-root", type=Path, help="Optional shared ar-coordination root.")
+    parser.add_argument("--topology", choices=("internal", "external"), help="Optional topology override.")
+    parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument("--contract-path", type=Path, help="Path to an existing contract.md.")
     parser.add_argument("--task-name", help="Task name used for task folder resolution.")
 
@@ -1167,7 +1167,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--workflow-kind", default="light-task")
     start.add_argument("--source-branch")
     start.add_argument("--work-branch")
-    start.add_argument("--memory-mode", choices=("internal", "shared", "disabled"))
+    start.add_argument("--memory-mode", choices=("internal", "external", "disabled"))
     start.add_argument("--memory-choice", choices=("reconciliation", "clean-start", "disabled-memory", "custom"))
     start.add_argument("--custom-instruction")
     start.add_argument("--dry-run", action="store_true")

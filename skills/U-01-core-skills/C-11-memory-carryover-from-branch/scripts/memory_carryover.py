@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Carry landed branch onboarding into official shared memory.
+"""Carry landed branch onboarding into official external memory.
 
 Requires Python 3.10+ and git. Uses only the Python standard library.
 """

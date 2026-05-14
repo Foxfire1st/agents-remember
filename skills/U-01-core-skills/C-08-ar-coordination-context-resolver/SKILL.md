@@ -7,14 +7,14 @@ description: "Resolve the active Agents Remember context for a target repository
 
 Use this skill whenever an agent needs the active Agents Remember context for a repository.
 
-In the normal workflow, pass the code repository name. C-08 decides whether that repository is using repo-local internal memory or selected shared memory, then returns the resolved code repository root, coordination, memory, settings, task, worktree, ledger, and cross-repo facts that downstream skills must use.
+In the normal workflow, pass the code repository name. C-08 decides whether that repository is using repo-local internal memory or selected external memory, then returns the resolved code repository root, coordination, memory, settings, task, worktree, ledger, and cross-repo facts that downstream skills must use.
 
 ## Inputs
 
 - `code_repository_name`: name of the code repository being worked on. This is the normal input.
 - `workspace_root`: optional workspace root used to find `code_repository_name` when the caller is not already in the workspace root.
-- `requested_topology`: optional `internal` or `shared` override for repair or explicit shared operations.
-- `shared_root`: optional shared-root hint. Normal resolution uses explicit input first, then `agents-remember-md/.env`, then the built-in default `../ar-coordination`. `.env.example` is documentation only and is not runtime input.
+- `requested_topology`: optional `internal` or `external` override for repair or explicit external-memory operations.
+- `coordination_root`: optional coordination-root hint. Normal resolution uses explicit input first, then `agents-remember-md/.env`, then the built-in default `../ar-coordination`. `.env.example` is documentation only and is not runtime input.
 - `settings_path`: optional override for repair cases.
 - `onboarding_root`: optional override when a caller has already resolved the repository onboarding root.
 - `code_repository_root`: optional root directory of the code repository for callers that already have the path. This does not replace `code_repository_name` as the normal agent-facing contract.
@@ -28,7 +28,7 @@ When a sibling `settings.json` exists beside `settings.md`, C-08 prefers that JS
 
 The resolver returns one coordination context for the target repository:
 
-- `topology`: `internal` or `shared`
+- `topology`: `internal` or `external`
 - `code_repository_name`
 - `code_repository_root`
 - `coordination_root`
@@ -56,13 +56,13 @@ The resolver returns one coordination context for the target repository:
 
 1. If `onboarding_root` is supplied, treat it as an explicit override only when it points under a supported memory location: `<code-repository-root>/ar-memory/onboarding` or `<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding`.
 2. If a worktree contract path is supplied, use the contract's `coordination_root` before validating memory so task worktrees resolve against their own coordinator.
-3. Resolve the shared coordinator from explicit `shared_root`, `agents-remember-md/.env`, or the built-in default `../ar-coordination`.
+3. Resolve the coordinator from explicit `coordination_root`, `agents-remember-md/.env`, or the built-in default `../ar-coordination`.
 4. If `requested_topology` is `internal`, require `<code-repository-root>/ar-memory/` to exist and use it as `memory_root`.
-5. If `requested_topology` is `shared`, require `<coordination-root>/memory-repos/ar-<code-repository-name>/` to exist and use it as `memory_root`.
+5. If `requested_topology` is `external`, require `<coordination-root>/memory-repos/ar-<code-repository-name>/` to exist and use it as `memory_root`.
 6. If no topology override is supplied, check `<code-repository-root>/ar-memory/` first, then `<coordination-root>/memory-repos/ar-<code-repository-name>/`.
 7. If neither supported memory location exists, fail with a missing-memory error that lists both checked paths. The agent should ask the developer whether to bootstrap memory, explain that C-00 creates the scaffold/settings, and then run C-03 only if onboarding content should be generated.
 
-Mixed workspaces are resolved per target repository. One shared-memory repository does not move neighboring local repositories onto the shared root, and one local repository does not prevent another repository from using shared memory.
+Mixed workspaces are resolved per target repository. One external memory repo does not move neighboring local repositories onto the coordination root, and one local repository does not prevent another repository from using external memory.
 
 ## Helper
 
@@ -75,7 +75,7 @@ Use the bundled helper as the single source of truth for resolver logic:
   --format json
 ```
 
-Callers that already have the code repository root can pass `--code-repository-root <code-repository-root>`. Explicit shared operations can pass `--topology shared --shared-root <shared-ar-coordination-root>`.
+Callers that already have the code repository root can pass `--code-repository-root <code-repository-root>`. Explicit external-memory operations can pass `--topology external --coordination-root <ar-coordination-root>`.
 Worktree-aware callers can pass `--task-name`, `--worktree-name`, or `--contract-path`.
 
 The helper uses only the Python standard library, including the built-in JSON parser for `settings.json`. If the executable bit is unavailable, invoke it with the machine's Python 3 interpreter.

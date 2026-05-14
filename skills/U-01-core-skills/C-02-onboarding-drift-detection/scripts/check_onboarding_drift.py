@@ -719,13 +719,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--topology",
-        choices=("internal", "shared"),
+        choices=("internal", "external"),
         help="Topology for this code repository. Defaults to internal when no onboarding root is supplied.",
     )
     parser.add_argument(
-        "--shared-root",
+        "--coordination-root",
         type=Path,
-        help="Shared ar-coordination root. Required for --topology shared unless --onboarding-root is supplied.",
+        help="Coordination root. Required for --topology external unless --onboarding-root is supplied.",
     )
     parser.add_argument(
         "--settings-path",
@@ -753,7 +753,7 @@ def main(argv: list[str] | None = None) -> int:
             code_repository_name=code_repository_root.name,
             workspace_root=code_repository_root.parent,
             requested_topology=args.topology,
-            shared_root=args.shared_root,
+            coordination_root=args.coordination_root,
             settings_path=args.settings_path,
             onboarding_root=args.onboarding_root,
             code_repository_root=code_repository_root,

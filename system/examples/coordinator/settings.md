@@ -17,12 +17,12 @@ The coordinator may store:
 - task roots
 - worktree roots
 - local notes and scratch paths
-- selected shared memory repo locations
+- selected external memory repo locations
 - local operator conventions that are not durable repo policy
 
 Rules that are valid only for one code repository belong in that repository's
 selected memory layer, usually `ar-coordination/memory-repos/ar-<repo>/system/`
-for shared memory repos.
+for external memory repos.
 
 ## Local Layout
 

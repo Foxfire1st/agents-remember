@@ -1,6 +1,6 @@
 ---
 name: c-00-initialize-coordination-root
-description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-coordination state; use shared scaffolding only when the developer explicitly asks for it."
+description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-coordination state; use external-memory scaffolding only when the developer explicitly asks for it."
 ---
 
 # C-00 Initialize Coordination Root
@@ -14,9 +14,9 @@ Use `C-08-ar-coordination-context-resolver` when an agent needs to inspect an ex
 ## Inputs
 
 - `code_repository_root`: root directory of the code repository being initialized. Default to the repository the developer asked to work on.
-- `topology`: `internal` by default. Use `shared` only when the developer explicitly asks for shared scaffolding.
-- `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit shared scaffolding that resolves `.env` or the built-in `../ar-coordination` default.
-- `coordination_root`: optional override for explicit shared coordination scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
+- `topology`: `internal` by default. Use `external` only when the developer explicitly asks for external-memory scaffolding.
+- `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit external-memory scaffolding that resolves `.env` or the built-in `../ar-coordination` default.
+- `coordination_root`: optional override for explicit external-memory scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
 - `mode`: `create-missing` by default. Use `repair` only when the user explicitly asks to fix existing scaffold files.
 
 ## Safety Rules
@@ -25,8 +25,8 @@ Use `C-08-ar-coordination-context-resolver` when an agent needs to inspect an ex
 2. Create missing directories and files only.
 3. Keep starter files generic; do not invent project-specific tools, docs, sources, or onboarding.
 4. If the resolved memory root or coordination root points outside the intended workspace, state the resolved absolute path before writing.
-5. Default internal scaffolding must not create or select a shared memory repo.
-6. If `.env` is absent, do not create it unless the user explicitly asks for shared configuration.
+5. Default internal scaffolding must not create or select an external memory repo.
+6. If `.env` is absent, do not create it unless the user explicitly asks for external-memory configuration.
 
 ## Procedure
 
@@ -37,9 +37,9 @@ Default internal scaffolding:
 1. Resolve `code_repository_root`.
 2. Set the memory root to `<code_repository_root>/ar-memory`.
 3. Set the local coordination root to `<code_repository_root>/ar-coordination` unless the developer explicitly provided another coordination root.
-4. Do not resolve or create a shared `AR_COORDINATION_ROOT`.
+4. Do not resolve or create an external `AR_COORDINATION_ROOT`.
 
-Explicit shared scaffolding:
+Explicit external-memory scaffolding:
 
 1. Use `coordination_root` when the developer provided one.
 2. Otherwise read `<agents_repo>/.env` if it exists; do not read `.env.example` at runtime.
@@ -147,7 +147,7 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
 
 `onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
 
-For explicit shared memory scaffolding, use the same file path under the per-repo memory repo:
+For explicit external-memory scaffolding, use the same file path under the per-repo memory repo:
 
 ```json
 {
@@ -173,7 +173,7 @@ For explicit shared memory scaffolding, use the same file path under the per-rep
 }
 ```
 
-Place this file in `ar-coordination/memory-repos/ar-<repo-name>/system/settings.json` for shared memory repos. The shared coordinator may have its own local `system/settings.json` for path hints, but cross-repo policy belongs in the committed memory layer.
+Place this file in `ar-coordination/memory-repos/ar-<repo-name>/system/settings.json` for external memory repos. The coordinator may have its own local `system/settings.json` for path hints, but cross-repo policy belongs in the committed memory layer.
 
 #### `system/sources.md`
 

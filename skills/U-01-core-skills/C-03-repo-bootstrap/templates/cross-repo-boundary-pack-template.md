@@ -5,7 +5,7 @@
 | repo | <repo> |
 | areaOrRoute | `<area-or-route>` |
 | generated | <YYYY-MM-DDThh:mm> |
-| topology | internal / shared / mixed |
+| topology | internal / external / mixed |
 | status | complete / partial / blocked / no-boundary-found |
 
 ## Allowed Adjacent Repos

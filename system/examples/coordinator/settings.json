@@ -7,7 +7,7 @@
     "memoryReposDir": "memory-repos"
   },
   "memoryRepos": {
-    "defaultTopology": "shared",
+    "defaultTopology": "external",
     "repositories": []
   }
 }

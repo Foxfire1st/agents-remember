@@ -1,13 +1,13 @@
 ---
 name: c-09-git-worktree-manager
-description: "Create, attach to, report on, and close out Agents Remember worktree-backed tasks while preserving human approval gates and shared-memory ledger alignment."
+description: "Create, attach to, report on, and close out Agents Remember worktree-backed tasks while preserving human approval gates and external-memory ledger alignment."
 ---
 
 # C-09 Git Worktree Manager
 
 Use this skill when a task should run through an explicit code/memory worktree wrapper or when an approved direct checkout edit needs the same code-memory-ledger closeout discipline.
 
-C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It owns Git worktree state, task contracts, direct checkout closeout, shared-memory compatibility checks, and approved closeout sequencing. It does not replace the workflow that performs the actual implementation.
+C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It owns Git worktree state, task contracts, direct checkout closeout, external-memory compatibility checks, and approved closeout sequencing. It does not replace the workflow that performs the actual implementation.
 
 ## Commands
 
@@ -40,15 +40,15 @@ The intended order is:
 4. decide whether the work is chat-only, W-02 light task, heavy task, or external workflow
 5. choose or review the task slug and workflow variables
 6. create the durable task wrapper when one is needed
-7. run C-09 `start` only after the task identity is stable and shared memory is clean
+7. run C-09 `start` only after the task identity is stable and external memory is clean
 
 For W-02 light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. C-09 then places `contract.md` beside that `task.md` when worktrees are created.
 
 ## Start / Attach / Status
 
-`start` resolves C-08 context, creates or loads `contract.md`, prepares the code worktree first, and then prepares shared-memory state when enabled. Shared-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
+`start` resolves C-08 context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
 
-When shared memory is enabled, C-09 validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. If no compatible memory state exists, it stops and reports the allowed human choices:
+When external memory is enabled, C-09 validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. If no compatible memory state exists, it stops and reports the allowed human choices:
 
 1. `reconciliation`
 2. `clean-start`
@@ -63,9 +63,9 @@ Closeout is explicitly human-gated. Implementation approval is not commit approv
 
 Real closeout creates commits and therefore requires both `--approved` and `--approval-note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
 
-Closeout stops if the recorded code or shared-memory source branch moved since task start.
+Closeout stops if the recorded code or external-memory source branch moved since task start.
 
-Shared-memory closeout order is:
+External-memory closeout order is:
 
 1. identify changed code worktree paths and their required sidecar onboarding files
 2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
@@ -84,9 +84,9 @@ Use `direct-closeout` only for small approved edits made in the current source c
 
 Direct closeout is still explicitly human-gated. Agents must run `direct-closeout --dry-run` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout requires both `--approved` and `--approval-note`.
 
-Direct closeout resolves the current C-08 context, requires shared memory mode, and requires the code checkout and memory repo to be on the same selected branch. Ledger compatibility is based on code-to-memory commit mappings, not branch metadata.
+Direct closeout resolves the current C-08 context, requires external memory mode, and requires the code checkout and memory repo to be on the same selected branch. Ledger compatibility is based on code-to-memory commit mappings, not branch metadata.
 
-Shared-memory direct closeout order is:
+External-memory direct closeout order is:
 
 1. identify changed current-checkout code paths and their required sidecar onboarding files
 2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
@@ -96,7 +96,7 @@ Shared-memory direct closeout order is:
 6. prepend `C2 | M2` to `memory.md`
 7. commit the ledger update as `L2`
 
-Direct closeout fails without mutation when required onboarding is missing, verification metadata is missing, shared memory is not resolved, the code and memory checkouts are on different selected branches, or no code or memory changes exist. Missing onboarding is the expected hard failure when the implementation/update pass somehow did not produce a required onboarding file; the next step is to run C-05 for that source file, then rerun the direct closeout preview.
+Direct closeout fails without mutation when required onboarding is missing, verification metadata is missing, external memory is not resolved, the code and memory checkouts are on different selected branches, or no code or memory changes exist. Missing onboarding is the expected hard failure when the implementation/update pass somehow did not produce a required onboarding file; the next step is to run C-05 for that source file, then rerun the direct closeout preview.
 
 ## Integration
 
@@ -120,11 +120,11 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 ## Boundaries
 
 1. C-09 may create or reuse worktrees and task contracts.
-2. C-09 may bootstrap a local shared memory repo when explicitly requested or when `start --memory-choice clean-start` is used.
+2. C-09 may bootstrap a local external memory repo when explicitly requested or when `start --memory-choice clean-start` is used.
 3. C-09 may directly close out approved current-checkout edits when a worktree wrapper would add ceremony without isolation value.
 4. C-09 must not use divergent memory as semi-trusted reference context.
 5. C-09 must not commit without explicit commit approval after a closeout preview.
-6. C-09 shared-memory closeout must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
+6. C-09 external-memory closeout must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
 7. C-09 must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
 8. C-09 must not clean up without explicit cleanup approval.
 9. C-08 remains the facts-only resolver; C-09 owns worktree and lifecycle mutation.

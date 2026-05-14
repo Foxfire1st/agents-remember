@@ -1,6 +1,6 @@
 ---
 name: c-02-onboarding-drift-detection
-description: "Detect onboarding drift against the resolved internal or shared onboarding root, classify how trustworthy existing onboarding remains, and hand actionable maintenance work to C-05-create-or-update-onboarding-files."
+description: "Detect onboarding drift against the resolved internal-memory or external-memory onboarding root, classify how trustworthy existing onboarding remains, and hand actionable maintenance work to C-05-create-or-update-onboarding-files."
 ---
 
 # C-02 Onboarding Drift Detection
@@ -40,13 +40,13 @@ Use `C-08-ar-coordination-context-resolver` to resolve the target repository's a
 
 By default the helper writes the Markdown report to `<coordination_root>/temp/drift-reports/<repo-name>/<repo-name>_<branch-name>_drift-report.md`. That keeps temporary drift artifacts out of task contract folders while still keeping them under the local coordination root, and each repository/branch run gets a collision-resistant filename.
 
-The helper passes the explicit code repository root through the C-08 resolver. For explicit shared scaffolding, pass the shared root and keep the code repository root explicit:
+The helper passes the explicit code repository root through the C-08 resolver. For explicit external-memory scaffolding, pass the coordination root and keep the code repository root explicit:
 
 ```bash
 <this-skill-dir>/scripts/check_onboarding_drift.py \
   --code-repository-root <code-repository-root> \
-  --topology shared \
-  --shared-root <shared-ar-coordination-root>
+  --topology external \
+  --coordination-root <ar-coordination-root>
 ```
 
 If `--report` is supplied, C-08's resolved `coordination_root` still owns report placement. Relative paths are resolved from the resolved `temp_root`. Absolute paths are only used as-is when they are already inside the resolved coordination root and outside the resolved `memory_root`; paths inside the durable memory repo are redirected to `<coordination_root>/temp/drift-reports/<repo-name>/` so temporary reports do not dirty versioned memory. Absolute paths outside the coordination root are redirected the same way. The repo/branch-prefixed default filename applies whenever `--report` is omitted.
@@ -55,11 +55,11 @@ The `--onboarding-root` override remains available when a caller already resolve
 
 ### 1. Resolve onboarding units in the repository
 
-Invoke `C-08-ar-coordination-context-resolver` for the target repository and use the resolved context. Internal repositories use `<repo-root>/ar-memory/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; shared repositories use the same pair under `ar-coordination/memory-repos/ar-<repo-name>/system/` when a shared memory repo exists. During migration, C-08 may still return a legacy shared onboarding root so existing verified onboarding remains readable until the memory repo is bootstrapped.
+Invoke `C-08-ar-coordination-context-resolver` for the target repository and use the resolved context. Internal-memory repositories use `<repo-root>/ar-memory/system/settings.md` for prose instructions and prefer a sibling `system/settings.json` for machine-readable settings when present; external-memory repositories use the same pair under `ar-coordination/memory-repos/ar-<repo-name>/system/` when an external memory repo exists.
 
-C-08 resolves `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal and shared mode. In shared JSON settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
+C-08 resolves `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal-memory and external-memory mode. In external-memory JSON settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
 
-Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal memory or shared memory. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
+Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal memory or external memory. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 
 If repo-level entity catalogs or overview files are in scope, treat them as follow-up maintenance surfaces rather than trying to diff them directly against one source file.
 

@@ -150,7 +150,7 @@ This skill intentionally keeps the strongest current bootstrap behavior.
 | ---------------- | -------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repo`           |      yes | Target repository name.                                                                                                                                                 |
 | `topology`       |       no | Optional override passed through C-08. Normal bootstrap passes only `repo` and lets C-08 resolve topology.                                                              |
-| `shared-root`    |       no | Optional shared-root hint for explicit shared operations or repair.                                                                                                     |
+| `coordination-root` |    no | Optional coordination-root hint for explicit external-memory operations or repair.                                                                                       |
 | `control-mode`   |       no | `gated` or `automated`. If omitted, ask during Phase 0A.                                                                                                                |
 | `bootstrap-mode` |       no | `quick-orientation`, `safe-starter-memory`, `cross-repo-focused`, `domain-doc-focused`, or `full-bootstrap`. Defaults to `safe-starter-memory` when the user is unsure. |
 | `seed-context`   |       no | Optional paths to known onboarding or documentation that should seed the run.                                                                                           |
@@ -417,7 +417,7 @@ The state file tracks:
 
 ### 0.1 Resolve topology
 
-Invoke `C-08-ar-coordination-context-resolver` with the target repo and optional topology/shared-root hints.
+Invoke `C-08-ar-coordination-context-resolver` with the target repo and optional topology/coordination-root hints.
 
 Done when:
 

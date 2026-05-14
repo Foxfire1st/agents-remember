@@ -30,7 +30,7 @@ Storage-specific adapter additions for file-level onboarding:
 1. `workflows/inline-onboarding-workflow.md`
 2. `templates/inline-onboarding-block-template.md`
 
-## Shared Placement Rules
+## Sidecar Placement Rules
 
 ```text
 <onboarding-root>/
@@ -55,7 +55,7 @@ Storage-specific adapter additions for file-level onboarding:
 1. Prefer updating an existing onboarding artifact over creating parallel duplicates.
 2. File-level onboarding explains one concrete source file and has to be self-sufficient;
 3. File-level onboarding links back to the nearest governing route-local overview so agents can reconstruct local area context from a file drop point. When updating onboarding, check whether the nearest governing overview has changed and update the link if needed.
-4. The canonical file-level onboarding content model is shared by external and inline storage.
+4. The canonical file-level onboarding content model is common to sidecar and inline storage.
 5. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
 6. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
 7. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.

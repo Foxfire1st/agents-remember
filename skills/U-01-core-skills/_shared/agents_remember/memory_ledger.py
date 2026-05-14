@@ -1,4 +1,4 @@
-"""Parse, validate, and write Agents Remember shared-memory ledgers.
+"""Parse, validate, and write Agents Remember external-memory ledgers.
 
 The canonical ledger format is a fenced JSON metadata block followed by the
 first markdown table with exactly two semantic columns: Code commit and Memory
@@ -232,4 +232,3 @@ def find_ledger_anchor_commit(memory_repo: Path, code_commit: str, memory_commit
     if result.returncode != 0:
         return None
     return result.stdout.splitlines()[0].strip() if result.stdout.splitlines() else None
-

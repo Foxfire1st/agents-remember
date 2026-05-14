@@ -50,7 +50,7 @@ If the task plan relies on onboarding files:
 1. invoke `C-02-onboarding-drift-detection` before planning against those files
 2. do not plan against drifted or missing-verification pre-existing onboarding until the drift report has been handed off to `C-05-create-or-update-onboarding-files` or the developer has explicitly accepted directional-only trust
 3. treat files created or modified during the current task as task-local working state after that initial gate passes; they remain pending verification, but they do not by themselves re-block planning for the same task
-4. before any C-09 worktree starts, commit refreshed shared-memory onboarding and the ledger so the worktree starts from a clean, mapped memory baseline
+4. before any C-09 worktree starts, commit refreshed external-memory onboarding and the ledger so the worktree starts from a clean, mapped memory baseline
 
 ### 5. Gather context before writing the plan
 

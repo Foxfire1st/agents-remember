@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 CONTRACT_SCHEMA = "ar-worktree-contract/v1"
-VALID_MEMORY_MODES = {"internal", "shared", "disabled"}
+VALID_MEMORY_MODES = {"internal", "external", "disabled"}
 
 
 class ContractError(ValueError):
@@ -122,7 +122,7 @@ def default_contract(
     task_artifact = task_root / "task.md"
     worktree_group = worktree_group_for(coordination_root, repo_name, worktree_name)
     code_worktree = worktree_group / slugify(worktree_name)
-    memory_worktree = worktree_group / f"memory-{slugify(worktree_name)}" if memory_mode == "shared" else None
+    memory_worktree = worktree_group / f"memory-{slugify(worktree_name)}" if memory_mode == "external" else None
     ledger_path = memory_worktree / "memory.md" if memory_worktree else None
     return WorktreeContract(
         task_id=task_id,
@@ -288,14 +288,14 @@ def validate_contract(contract: WorktreeContract) -> None:
         raise ContractError(f"contract missing required fields: {', '.join(missing)}")
     if contract.memory_mode not in VALID_MEMORY_MODES:
         raise ContractError(f"invalid memory mode: {contract.memory_mode}")
-    if contract.memory_mode == "shared":
+    if contract.memory_mode == "external":
         for name, value in {
             "memory_repo_path": contract.memory_repo_path,
             "memory_worktree": contract.memory_worktree,
             "ledger_path": contract.ledger_path,
         }.items():
             if value is None:
-                raise ContractError(f"shared-memory contract missing {name}")
+                raise ContractError(f"external-memory contract missing {name}")
 
 
 def _extract_front_matter(text: str) -> str:

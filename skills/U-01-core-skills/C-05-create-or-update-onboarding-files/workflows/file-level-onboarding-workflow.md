@@ -1,6 +1,6 @@
 # File-Level Onboarding Workflow
 
-Use this workflow when creating or maintaining the shared file-level onboarding content model for one concrete source file. External onboarding stores that content under `<onboarding-root>/<repo>/...` using the source file's repo-relative path directly; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
+Use this workflow when creating or maintaining the common file-level onboarding content model for one concrete source file. Sidecar onboarding stores that content under `<onboarding-root>/<repo>/...` using the source file's repo-relative path directly; inline onboarding uses the same sections with storage-specific rules from `inline-onboarding-workflow.md`.
 
 Template: `../templates/file-level-onboarding-template.md`
 
@@ -11,7 +11,7 @@ Create or update the file-level onboarding content for one concrete source file.
 ## Scope
 
 1. one file-level onboarding unit per source file
-2. external storage keeps the strict mirrored path directly under the repo root using the source file's repo-relative path
+2. sidecar storage keeps the strict mirrored path directly under the repo root using the source file's repo-relative path
 3. file-level onboarding records the nearest governing route-local `overview.md` when one exists
 4. inline storage reuses the same content model but follows storage-specific syntax and placement rules
 5. durable commentary only; planning stays in task artifacts
