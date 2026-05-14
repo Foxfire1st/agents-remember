@@ -43,3 +43,33 @@ Before trusting the onboarding documentation, check the [Memory Layer Instructio
 Infer which code repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is the code repository for resolver inputs.
 
 Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
+
+### Coordination User Settings & Instructions
+
+- Use `system/settings.md` for global agent instructions, cross-repo defaults,
+  layout, and operator notes.
+- Use `system/settings.json` for machine-readable coordinator layout hints.
+- Use `system/tools.md` for tools and commands that are valid across all or many
+  repositories.
+- Use `system/sources.md` for workspace-wide source registries.
+- Do not put rules that are valid for only one code repository in coordinator
+  files; put them in that repository's memory layer.
+- After C-08 resolves a `memory_root`, read that memory layer's `AGENTS.md` when
+  present, then read its `system/settings.md` and `system/tools.md`.
+
+### Memory Repo User Settings, Instructions, and Guidelines
+
+- `system/settings.md` for human and agent instructions.
+- `system/settings.json` for storage, path-rule, and cross-repo policy.
+- `system/tools.md` for repo-specific checks, branch workflow, and local command
+  notes.
+- `system/sources.md` for domain documentation and external references.
+- `system/coding-guidelines.md` when present for repo-specific coding rules.
+
+### Boundaries
+
+- Do not move protected branches unless the developer explicitly asks.
+- Do not create, close out, integrate, push, or clean up worktrees without the
+  approval gates required by the selected workflow.
+- When coordinator-wide guidance and memory-layer guidance conflict, prefer the
+  memory-layer rule for that repository.
