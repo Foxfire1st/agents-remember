@@ -1107,8 +1107,9 @@ def build_coordination_context(
     resolved_contract = resolve_contract(contract_path, coordination_root, code_repository_name, task_name)
     contract = resolved_contract[0]
     resolved_contract_path = resolved_contract[1]
+    repository_task_root = coordination_root / "tasks" / code_repository_name
     task_root = contract.task_root if contract is not None else (
-        task_root_for(coordination_root, code_repository_name, task_name) if task_name and task_root_for is not None else coordination_root / "tasks"
+        task_root_for(coordination_root, code_repository_name, task_name) if task_name and task_root_for is not None else repository_task_root
     )
     temp_root = coordination_root / "temp"
     worktree_group = contract.worktree_group if contract is not None else (

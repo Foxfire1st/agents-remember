@@ -299,6 +299,24 @@ class WorktreeSupportTests(unittest.TestCase):
         with self.assertRaises(LedgerError):
             parse_ledger_text(text)
 
+    def test_resolver_returns_repo_task_root_without_task_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo = root / "repo-a"
+            code_repo.mkdir()
+            memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            (memory_repo / "system").mkdir(parents=True)
+            (memory_repo / "onboarding").mkdir()
+            (memory_repo / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=root / "ar-coordination",
+            )
+
+            self.assertEqual(context.task_root, root / "ar-coordination" / "tasks" / "repo-a")
+
     def test_start_ignores_legacy_ledger_branch_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
