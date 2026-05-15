@@ -1,75 +1,75 @@
-# AGENTS.md
+# Agents Remember Source Checkout Instructions
+
+This repository is the source package for Agents Remember. It is not the live
+coordination runtime after installation.
+
+If this file is being read from a workspace-level pointer while you are working
+on a sibling repository, use the installed runtime instructions instead:
+
+```text
+<workspace>/ar-coordination/AGENTS.md
+```
+
+When working on this repository itself, use `agents-remember-md` as the target
+code repository for resolver, onboarding, workflow, and closeout commands.
 
 ## Task Format Routing
 
-This workspace has exactly three task/work formats. Choose deliberately before creating or updating task artifacts.
+Choose one work format before changing files:
 
-### 1. Chat Mode
+1. Use `w-03-chat-task-workflow` by default for small changes that can finish in
+   the current session and do not need a durable task file.
+2. Use `W-02-light-task-workflow` when the work needs a durable task file.
+3. Use `W-01-heavy-task-workflow` only when the developer explicitly asks for a
+   heavy task or the full phased workflow.
 
-Use chat mode `w-03-chat-task-workflow` by default when the work is small enough to finish in the current session and does not need a durable task file.
+Do not change code or documentation without following one of these workflows.
 
-### 2. Light Task Workflow
+## Memory And Onboarding
 
-Use `W-02-light-task-workflow` whenever a task file is needed. This is the
-standard durable-task format for planning and implementation work in this
-workspace.
+Before relying on onboarding, task files, docs, or tools, resolve the active
+Agents Remember context with `C-08-ar-coordination-context-resolver`.
 
-### 3. Heavy Task Workflow
+For this source checkout, the normal resolver input is:
 
-Use `W-01-heavy-task-workflow` only when the developer explicitly asks for the
-heavy task workflow, a heavy task, or the full phased workflow.
+```text
+code_repository_name = agents-remember-md
+```
 
----
+Then run `C-02-onboarding-drift-detection` for the resolved context before
+reasoning from onboarding or source files.
 
-**IMPORTANT:** Do not change code without following one of the above workflows!
+After C-08 resolves `memory_root`, read that memory layer's repository-specific
+guidance:
 
----
+- `system/settings.md`
+- `system/settings.json`
+- `system/tools.md`
+- `system/sources.md`
+- `system/coding-guidelines.md`, when present
 
-## Memory System
+Do not assume this source checkout has active root-level `system/` settings.
+Runtime settings examples live under `runtime/system/defaults/`, and installed
+runtime settings live under the selected `ar-coordination/` or memory root.
 
-This workspace uses a layered memory system. Make sure to read the below rules before performing actions.
+## Source Layout
 
-### Onboarding Documentation
+- `installer/` contains the runtime installer.
+- `runtime/agents-md-files/` contains package-owned `AGENTS.md` templates for
+  the installed coordinator runtime.
+- `runtime/skills/` contains the package-owned skill source tree.
+- `runtime/scripts/` contains scripts installed into the runtime.
+- `runtime/system/defaults/` contains starter examples that initialization
+  skills may use when creating user-owned settings.
+- `README.md` documents the current user-facing install and usage model.
+- `roadmap/` contains future design notes, not active runtime behavior.
 
-Onboarding files are companion context for source files. Their main purpose is to be read alongside the code they describe, at the moment that code is
-inspected. They can be found using the ar-coordination resolver.
+## Boundaries
 
-Before trusting the onboarding documentation, check the [Memory Layer Instructions](system/AGENTS.md)
-
----
-
-## Ar-coordination & Memory Layer Resolver
-
-Infer which code repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is the code repository for resolver inputs.
-
-Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
-
-### Coordination User Settings & Instructions
-
-- Use `system/settings.md` for global agent instructions, cross-repo defaults,
-  layout, and operator notes.
-- Use `system/settings.json` for machine-readable coordinator layout hints.
-- Use `system/tools.md` for tools and commands that are valid across all or many
-  repositories.
-- Use `system/sources.md` for workspace-wide source registries.
-- Do not put rules that are valid for only one code repository in coordinator
-  files; put them in that repository's memory layer.
-- After C-08 resolves a `memory_root`, read that memory layer's `AGENTS.md` when
-  present, then read its `system/settings.md` and `system/tools.md`.
-
-### Memory Repo User Settings, Instructions, and Guidelines
-
-- `system/settings.md` for human and agent instructions.
-- `system/settings.json` for storage, path-rule, and cross-repo policy.
-- `system/tools.md` for repo-specific checks, branch workflow, and local command
-  notes.
-- `system/sources.md` for domain documentation and external references.
-- `system/coding-guidelines.md` when present for repo-specific coding rules.
-
-### Boundaries
-
-- Do not move protected branches unless the developer explicitly asks.
+- Keep this root `AGENTS.md` scoped to working on the source checkout.
+- Keep installed coordinator instructions in `runtime/agents-md-files/`.
+- Keep user-specific behavior, project notes, and repo policy in the resolved
+  memory layer, not in package-owned installed `AGENTS.md` templates.
 - Do not create, close out, integrate, push, or clean up worktrees without the
   approval gates required by the selected workflow.
-- When coordinator-wide guidance and memory-layer guidance conflict, prefer the
-  memory-layer rule for that repository.
+- Do not move protected branches unless the developer explicitly asks.

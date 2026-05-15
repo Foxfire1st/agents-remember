@@ -54,19 +54,14 @@ Resolve the active memory and coordination context for the code repository befor
 - Use `system/sources.md` for workspace-wide source registries.
 - Do not put rules that are valid for only one code repository in coordinator
   files; put them in that repository's memory layer.
-- After C-08 resolves a `memory_root`, read that memory layer's `AGENTS.md` when
-  present, then read its `system/settings.md` and `system/tools.md`.
-
-### Boundaries
-
-- Do not move protected branches unless the developer explicitly asks.
-- Do not create, close out, integrate, push, or clean up worktrees without the
-  approval gates required by the selected workflow.
-- When coordinator-wide guidance and memory-layer guidance conflict, prefer the
-  memory-layer rule for that repository.
+- After C-08 resolves a `memory_root`, read that memory layer's `system/settings.md`
+  and `system/tools.md`; also read `system/sources.md` and
+  `system/coding-guidelines.md` when present.
 
 ### Memory Repo User Settings, Instructions, and Guidelines
 
+- Memory repos are not expected to provide a root-level `AGENTS.md`; repo-specific
+  guidance belongs in the memory layer's `system/*` files.
 - `system/settings.md` for human and agent instructions.
 - `system/settings.json` for storage, path-rule, and cross-repo policy.
 - `system/tools.md` for repo-specific checks, branch workflow, and local command
@@ -83,3 +78,11 @@ when they are more restrictive.
 
 Coordinator-wide guidance may still apply as a default, but this memory layer is
 the more specific authority for its code repository.
+
+### Boundaries
+
+- Do not move protected branches unless the developer explicitly asks.
+- Do not create, close out, integrate, push, or clean up worktrees without the
+  approval gates required by the selected workflow.
+- When coordinator-wide guidance and memory-layer guidance conflict, prefer the
+  memory-layer rule for that repository.
