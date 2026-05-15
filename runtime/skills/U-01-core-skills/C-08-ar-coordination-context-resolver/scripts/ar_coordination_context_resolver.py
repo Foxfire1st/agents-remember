@@ -57,7 +57,7 @@ class MissingMemoryError(ValueError):
             "Agents Remember memory is missing for "
             f"{code_repository_name!r}. Checked internal memory at {internal_root.as_posix()} "
             f"and external memory at {external_memory.as_posix()} using coordination root {coordination_root.as_posix()}. "
-            "Ask the developer whether to bootstrap memory with C-00, then run C-03 if they want onboarding content generated."
+            "Ask the developer whether to initialize memory with C-00-initialize-memory-repo, then run C-03 if they want onboarding content generated."
         )
 
 
@@ -130,8 +130,23 @@ class CoordinationContext:
     ledger_path: Path | None = None
 
 
+def looks_like_installed_coordination_root(path: Path) -> bool:
+    return (
+        (path / "skills").is_dir()
+        and (path / "system").is_dir()
+        and (path / "memory-repos").is_dir()
+        and (path / "tasks").is_dir()
+    )
+
+
 def agents_repo_from_script() -> Path:
-    return Path(__file__).resolve().parents[4]
+    script_path = Path(__file__).resolve()
+    for parent in script_path.parents:
+        if (parent / "runtime" / "skills").exists() and (parent / "AGENTS.md").exists():
+            return parent
+        if looks_like_installed_coordination_root(parent):
+            return parent
+    return script_path.parents[5]
 
 
 def clean_scalar(value: str) -> str:
@@ -224,6 +239,8 @@ def resolve_coordination_root_hint(coordination_root: Path | None, agents_repo: 
     resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
     env_path = resolved_agents_repo / ".env"
     values = parse_env_file(env_path)
+    if "AR_COORDINATION_ROOT" not in values and looks_like_installed_coordination_root(resolved_agents_repo):
+        return resolved_agents_repo
     root = values.get("AR_COORDINATION_ROOT", DEFAULT_AR_COORDINATION_ROOT)
     return resolve_path_from_declaring_file(root, env_path)
 

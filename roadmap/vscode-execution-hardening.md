@@ -44,7 +44,7 @@ That means:
 AGENTS.md
   Portable operating policy.
 
-skills/
+runtime/skills/
   Canonical portable skills.
   These should be valid as real skill packages.
 
@@ -67,52 +67,52 @@ The repo should not depend on accidental tolerance from a specific harness. If a
 The `P-*` skill packages are not standalone workflow entrypoints. They are the phase-local implementation packages for `W-01-heavy-task-workflow`, so their source location should sit under that workflow:
 
 ```text
-skills/P-00-creation/C-01-task-folder-creation
--> skills/W-01-heavy-task-workflow/skills/P-00-creation/C-01-task-folder-creation
+runtime/skills/P-00-creation/C-01-task-folder-creation
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-00-creation/C-01-task-folder-creation
    name: c-01-task-folder-creation
 
-skills/P-01-research/R-01-requirements-normalization
--> skills/W-01-heavy-task-workflow/skills/P-01-research/R-01-requirements-normalization
+runtime/skills/P-01-research/R-01-requirements-normalization
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-01-research/R-01-requirements-normalization
    name: r-01-requirements-normalization
 
-skills/P-01-research/R-02-input-documentation
--> skills/W-01-heavy-task-workflow/skills/P-01-research/R-02-input-documentation
+runtime/skills/P-01-research/R-02-input-documentation
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-01-research/R-02-input-documentation
    name: r-02-input-documentation
 
-skills/P-02-synthesis/S-01-requirement-question-framing
--> skills/W-01-heavy-task-workflow/skills/P-02-synthesis/S-01-requirement-question-framing
+runtime/skills/P-02-synthesis/S-01-requirement-question-framing
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-02-synthesis/S-01-requirement-question-framing
    name: s-01-requirement-question-framing
 
-skills/P-02-synthesis/S-02-architecture-question-framing
--> skills/W-01-heavy-task-workflow/skills/P-02-synthesis/S-02-architecture-question-framing
+runtime/skills/P-02-synthesis/S-02-architecture-question-framing
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-02-synthesis/S-02-architecture-question-framing
    name: s-02-architecture-question-framing
 
-skills/P-03-design/D-01-requirement-clarification
--> skills/W-01-heavy-task-workflow/skills/P-03-design/D-01-requirement-clarification
+runtime/skills/P-03-design/D-01-requirement-clarification
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-03-design/D-01-requirement-clarification
    name: d-01-requirement-clarification
 
-skills/P-03-design/D-02-architecture-deliberation
--> skills/W-01-heavy-task-workflow/skills/P-03-design/D-02-architecture-deliberation
+runtime/skills/P-03-design/D-02-architecture-deliberation
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-03-design/D-02-architecture-deliberation
    name: d-02-architecture-deliberation
 
-skills/P-03-design/D-03-output-dry-run-planning
--> skills/W-01-heavy-task-workflow/skills/P-03-design/D-03-output-dry-run-planning
+runtime/skills/P-03-design/D-03-output-dry-run-planning
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-03-design/D-03-output-dry-run-planning
    name: d-03-output-dry-run-planning
 
-skills/P-03-design/D-04-output-documentation
--> skills/W-01-heavy-task-workflow/skills/P-03-design/D-04-output-documentation
+runtime/skills/P-03-design/D-04-output-documentation
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-03-design/D-04-output-documentation
    name: d-04-output-documentation
 
-skills/P-04-planning/P-01-implementation-planning
--> skills/W-01-heavy-task-workflow/skills/P-04-planning/P-01-implementation-planning
+runtime/skills/P-04-planning/P-01-implementation-planning
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-04-planning/P-01-implementation-planning
    name: p-01-implementation-planning
 
-skills/P-05-implementation/I-01-implementation
--> skills/W-01-heavy-task-workflow/skills/P-05-implementation/I-01-implementation
+runtime/skills/P-05-implementation/I-01-implementation
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-05-implementation/I-01-implementation
    name: i-01-implementation
 
-skills/P-99-review/R-01-adversarial-review
--> skills/W-01-heavy-task-workflow/skills/P-99-review/R-01-adversarial-review
+runtime/skills/P-99-review/R-01-adversarial-review
+-> runtime/skills/W-01-heavy-task-workflow/skills/P-99-review/R-01-adversarial-review
    name: r-01-adversarial-review
 ```
 
@@ -121,26 +121,26 @@ skills/P-99-review/R-01-adversarial-review
 Every `SKILL.md` frontmatter `name` should be lowercase and should use the package identifier, even when the package folder keeps the uppercase taxonomy prefix for readability:
 
 ```text
-skills/U-01-core-skills/C-00-initialize-coordination-root/SKILL.md
-  name: c-00-initialize-coordination-root
+runtime/skills/U-01-core-skills/C-00-initialize-memory-repo/SKILL.md
+  name: c-00-initialize-memory-repo
 
-skills/U-01-core-skills/C-05-create-or-update-onboarding-files/SKILL.md
+runtime/skills/U-01-core-skills/C-05-create-or-update-onboarding-files/SKILL.md
   name: c-05-create-or-update-onboarding-files
 
-skills/W-01-heavy-task-workflow/SKILL.md
+runtime/skills/W-01-heavy-task-workflow/SKILL.md
   name: w-01-heavy-task-workflow
 
-skills/W-02-light-task-workflow/SKILL.md
+runtime/skills/W-02-light-task-workflow/SKILL.md
   name: w-02-light-task-workflow
 ```
 
 This also fixes the two direct stale-name mismatches:
 
 ```text
-skills/W-01-heavy-task-workflow/skills/P-01-research/R-02-input-documentation/SKILL.md
+runtime/skills/W-01-heavy-task-workflow/skills/P-01-research/R-02-input-documentation/SKILL.md
   name: r-02-input-documentation
 
-skills/U-01-core-skills/C-05-create-or-update-onboarding-files/SKILL.md
+runtime/skills/U-01-core-skills/C-05-create-or-update-onboarding-files/SKILL.md
   name: c-05-create-or-update-onboarding-files
 ```
 
@@ -154,7 +154,7 @@ There is an important distinction between source skill package paths and generat
 
 ```text
 Source skill package path:
-skills/W-01-heavy-task-workflow/skills/P-03-design/D-04-output-documentation
+runtime/skills/W-01-heavy-task-workflow/skills/P-03-design/D-04-output-documentation
 
 Task artifact path:
 <task-folder>/P-03-design/D-04-output-documentation/
@@ -215,12 +215,12 @@ Example:
 
 ```jsonc
 "chat.agentSkillsLocations": {
-  "agents-remember-md/skills": true,
-  "agents-remember-md/skills/U-01-core-skills": true,
-  "agents-remember-md/skills/W-01-heavy-task-workflow": true,
-  "agents-remember-md/skills/W-01-heavy-task-workflow/skills": true,
-  "agents-remember-md/skills/W-02-light-task-workflow": true,
-  "agents-remember-md/skills/W-03-chat-task-workflow": true
+  "agents-remember-md/runtime/skills": true,
+  "agents-remember-md/runtime/skills/U-01-core-skills": true,
+  "agents-remember-md/runtime/skills/W-01-heavy-task-workflow": true,
+  "agents-remember-md/runtime/skills/W-01-heavy-task-workflow/skills": true,
+  "agents-remember-md/runtime/skills/W-02-light-task-workflow": true,
+  "agents-remember-md/runtime/skills/W-03-chat-task-workflow": true
 }
 ````
 
@@ -361,7 +361,7 @@ examples/
 This keeps responsibilities clean:
 
 ```text
-skills/
+runtime/skills/
   Portable canonical skills.
 
 AGENTS.md
@@ -747,7 +747,7 @@ Example resolver output:
   "onboarding_root_exists": false,
   "settings_path": "/path/to/repo/ar-coordination/system/settings.md",
   "settings_path_exists": false,
-  "recommended_next_skill": "c-00-initialize-coordination-root"
+  "recommended_next_skill": "c-00-initialize-memory-repo"
 }
 ```
 
@@ -756,7 +756,7 @@ Then the VS Code `SessionStart` hook can inject a clear state:
 ```text
 Resolved repo: /path/to/repo
 Coordination status: uninitialized
-Recommended action: run c-00-initialize-coordination-root
+Recommended action: run c-00-initialize-memory-repo
 ```
 
 That is cleaner than letting downstream scripts fail with missing-directory errors.
@@ -898,7 +898,7 @@ Scope:
 AGENTS.md
   Portable operating policy.
 
-skills/
+runtime/skills/
   Canonical lowercase portable skills.
 
 scripts/validate_skills.py
@@ -937,7 +937,7 @@ Final architecture:
 
 ```text
 AGENTS.md        = portable policy
-skills/          = portable procedures
+runtime/skills/          = portable procedures
 harnesses/vscode = VS Code execution layer
 examples/vscode  = reusable workspace examples
 scripts/         = validation and packaging gates

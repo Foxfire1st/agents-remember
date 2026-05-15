@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Expose this agents-remember-md checkout's skills to a harness-specific
-# skills directory without moving or copying the canonical skill sources.
+# Expose an Agents Remember runtime's skills to a harness-specific skills
+# directory without moving or copying the installed skill tree.
 
 usage() {
   cat <<'EOF'
@@ -10,37 +10,37 @@ Usage:
   install-skills.sh --install-root PATH [options]
 
 Examples:
-  # Recursive skill scanners such as Codex and Claude Code
-  ./agents-remember-md/scripts/install-skills.sh \
+  # Installed runtime for recursive skill scanners such as Codex and Claude Code
+  ./ar-coordination/scripts/install-skills.sh \
     --install-root ./.agents/skills
 
-  # Direct skill folder scanners such as Windsurf
-  ./agents-remember-md/scripts/install-skills.sh \
+  # Installed runtime for direct skill folder scanners such as Windsurf
+  ./ar-coordination/scripts/install-skills.sh \
     --install-root ./.windsurf/skills \
     --layout flat
 
-  # User-wide skills folder
-  ./agents-remember-md/scripts/install-skills.sh \
+  # Development checkout before runtime installation
+  ./agents-remember-md/runtime/scripts/install-skills.sh \
     --install-root ~/.agents/skills
 
 Creates by default:
-  <install-root>/agents-remember-md -> <agents-remember-md-checkout>/skills
+  <install-root>/agents-remember-md -> <runtime-root>/skills
 
 With --layout flat:
-  <install-root>/<skill-name> -> <canonical-skill-directory>
+  <install-root>/<skill-name> -> <resolved-skill-directory>
 
 Options:
   --install-root PATH
       Destination skills directory where symlinks should be created.
 
   --layout tree|flat
-      tree: create one namespace symlink to the canonical skills tree.
+      tree: create one namespace symlink to the resolved skills tree.
       flat: create one direct symlink per skill using the SKILL.md name.
       Defaults to tree.
 
   --source PATH
-      Optional path to an agents-remember-md checkout or directly to its skills
-      directory. Defaults to the checkout that owns this script.
+      Optional path to an Agents Remember checkout, runtime root, or directly to
+      its skills directory. Defaults to the parent runtime root of this script.
 
   --archive-local-copies
       Move conflicting copied folders out of the install root into
@@ -111,7 +111,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-checkout_root="$(cd "$script_dir/.." && pwd -P)"
+runtime_root="$(cd "$script_dir/.." && pwd -P)"
 
 expand_home() {
   local path="$1"
@@ -139,13 +139,18 @@ resolve_source_root() {
   local source="$1"
 
   if [[ -z "$source" ]]; then
-    source="$checkout_root"
+    source="$runtime_root"
   else
     source="$(expand_home "$source")"
   fi
 
   if [[ -d "$source/skills" ]]; then
     resolve_existing_dir "$source/skills"
+    return
+  fi
+
+  if [[ -d "$source/runtime/skills" ]]; then
+    resolve_existing_dir "$source/runtime/skills"
     return
   fi
 
@@ -255,7 +260,7 @@ install_tree_layout() {
   fi
 
   skill_count="$(find -L "$link_path" -name SKILL.md | wc -l | tr -d ' ')"
-  echo "Visible canonical skills through namespace symlink: $skill_count"
+  echo "Visible skills through namespace symlink: $skill_count"
 }
 
 install_flat_layout() {
@@ -312,7 +317,7 @@ install_flat_layout() {
     create_or_update_symlink "$link_path" "$skill_dir"
   done
 
-  echo "Visible canonical skills through direct symlinks: ${#skill_names[@]}"
+  echo "Visible skills through direct symlinks: ${#skill_names[@]}"
 }
 
 if [[ -z "$install_root_arg" ]]; then
@@ -323,7 +328,7 @@ fi
 
 if ! source_root="$(resolve_source_root "$source_arg")"; then
   echo "Canonical skill tree not found." >&2
-  echo "Pass --source /path/to/agents-remember-md or --source /path/to/skills." >&2
+  echo "Pass --source /path/to/agents-remember-md, --source /path/to/runtime, or --source /path/to/skills." >&2
   exit 1
 fi
 

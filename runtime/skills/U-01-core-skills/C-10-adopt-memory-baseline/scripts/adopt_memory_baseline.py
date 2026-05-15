@@ -21,8 +21,7 @@ DRIFT_PATH = CORE_ROOT / "C-02-onboarding-drift-detection" / "scripts" / "check_
 WORKTREE_MANAGER_PATH = CORE_ROOT / "C-09-git-worktree-manager" / "scripts" / "git_worktree_manager.py"
 sys.path.insert(0, str(SHARED_ROOT))
 
-from agents_remember.memory_ledger import LedgerError, load_ledger  # noqa: E402
-from agents_remember.worktree_contract import default_contract  # noqa: E402
+from agents_remember.memory_ledger import LedgerError, create_initial_ledger, load_ledger, write_ledger  # noqa: E402
 
 
 def load_module(name: str, path: Path):
@@ -81,6 +80,55 @@ def current_branch(repo: Path) -> str:
 
 def head_commit(repo: Path, ref: str = "HEAD") -> str:
     return worktree_manager.head_commit(repo, ref)
+
+
+def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> dict[str, object]:
+    if not context.memory_root.exists():
+        raise RuntimeError(
+            f"memory root does not exist: {context.memory_root}. "
+            "Run C-00-initialize-memory-repo before adopting a memory baseline."
+        )
+    if not (context.memory_root / ".git").exists():
+        raise RuntimeError(
+            f"external memory root is not a Git repo: {context.memory_root}. "
+            "Run C-00-initialize-memory-repo before adopting a memory baseline."
+        )
+
+    worktree_manager.ensure_git_identity(context.memory_root)
+    if memory_branch and current_branch(context.memory_root) != memory_branch:
+        if worktree_manager.branch_exists(context.memory_root, memory_branch):
+            worktree_manager.require_git(context.memory_root, ["checkout", memory_branch])
+        else:
+            worktree_manager.require_git(context.memory_root, ["checkout", "-b", memory_branch])
+
+    existing_paths = [path.name for path in (context.memory_root / name for name in ("onboarding", "docs", "system")) if path.exists()]
+    if not existing_paths:
+        raise RuntimeError(
+            f"memory root has no onboarding, docs, or system content: {context.memory_root}. "
+            "Run C-00-initialize-memory-repo first, then add onboarding before adopting."
+        )
+
+    worktree_manager.require_git(context.memory_root, ["add", *existing_paths])
+    memory_content_commit = worktree_manager.commit_if_dirty(
+        context.memory_root,
+        f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
+    )
+    ledger = create_initial_ledger(
+        context.code_repository_name,
+        head_commit(context.code_repository_root, source_branch),
+        memory_content_commit,
+    )
+    write_ledger(context.ledger_path, ledger)
+    worktree_manager.require_git(context.memory_root, ["add", "memory.md"])
+    ledger_commit = worktree_manager.commit_if_dirty(
+        context.memory_root,
+        f"[adopt-{context.code_repository_name}-memory-baseline] Bootstrap memory ledger",
+    )
+    return {
+        "state": "adopted-baseline",
+        "memoryContentCommit": memory_content_commit,
+        "ledgerCommit": ledger_commit,
+    }
 
 
 def ledger_status(path: Path) -> dict[str, object]:
@@ -150,22 +198,7 @@ def command_adopt(args: argparse.Namespace) -> int:
         return 0
 
     source_branch = args.source_branch or current_branch(context.code_repository_root)
-    contract = default_contract(
-        task_name=f"adopt-{context.code_repository_name}-memory-baseline",
-        repo_name=context.code_repository_name,
-        workflow_kind="adopt-memory-baseline",
-        memory_mode="external",
-        coordination_root=context.coordination_root,
-        code_repo_path=context.code_repository_root,
-        code_source_branch=source_branch,
-        code_work_branch=args.work_branch or source_branch,
-        code_base_commit=head_commit(context.code_repository_root, source_branch),
-        worktree_name=f"adopt-{context.code_repository_name}-memory-baseline",
-        memory_repo_path=context.memory_root,
-        memory_source_branch=source_branch,
-        memory_work_branch=args.work_branch or source_branch,
-    )
-    result = worktree_manager.bootstrap_memory_repo(contract, dry_run=False)
+    result = adopt_initial_baseline(context, source_branch, args.work_branch or source_branch)
     payload["state"] = "adopted"
     payload["accepted_drift"] = bool(args.accept_drift)
     payload["bootstrap"] = result

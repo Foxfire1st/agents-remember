@@ -19,8 +19,8 @@ clarification: runtime bootstrap/install and repo onboarding bootstrap are
 separate workflows.
 
 - Runtime install should reconcile package-owned assets into `ar-coordination`.
-- C-00 should still scaffold repo memory and coordination folders only when
-  explicitly invoked for that repository.
+- C-00 should initialize or repair a repository memory root only when explicitly
+  invoked for that repository.
 - C-03 should still generate or maintain repo onboarding under the C-08 resolved
   `onboarding_root`; it should not install runtime assets.
 - C-05 should remain the public create/update onboarding entry point and route
@@ -37,7 +37,7 @@ separate workflows.
 
 The design should proceed as a clean alpha layout rather than a compatibility
 layer. The main correction below is to align package asset names with the
-existing `system/agents-md-files/` seed and to document C-03/C-05's newer
+existing `runtime/agents-md-files/` seed and to document C-03/C-05's newer
 route-local maintenance boundaries.
 
 ## Purpose
@@ -79,7 +79,7 @@ maintains durable onboarding for one target repository under the C-08 resolved
 Keep these boundaries explicit:
 
 - runtime install owns package runtime assets
-- C-00 owns missing repo memory/coordination scaffolding when invoked
+- C-00 owns missing repo memory-root scaffolding when invoked
 - C-03 owns repo onboarding generation and existing-memory slice maintenance
 - C-05 owns file-level onboarding semantics and routes structural slice work to
   C-03
@@ -161,8 +161,8 @@ Install order:
    `ar-coordination` folders.
 2. Copy package-owned skills into `ar-coordination/skills/`.
 3. Copy package-owned scripts into `ar-coordination/scripts/`.
-4. Copy package-owned default templates/examples into a reference location, not
-   over live user-owned settings.
+4. Leave package-owned default templates/examples in the checkout as source
+   material for initialization skills.
 5. Use symlinks from each code harness skill root into the coordinator copy.
 
 Harnesses should never symlink directly back to the checkout as the normal
@@ -199,7 +199,6 @@ Then expose the installed skills with the existing skill installer:
 
 ```bash
 /path/to/ar-coordination/scripts/install-skills.sh \
-  --source /path/to/ar-coordination/skills \
   --install-root /path/to/harness/skills \
   --layout tree
 ```
@@ -257,9 +256,7 @@ installer luxuries in this pass.
 
 `AGENTS.md` files should stop being tied only to their checkout locations.
 Instead, the checkout should catalog installable agent instruction files under
-an `agents-md-files/` package area. The current repo already collects these
-under `system/agents-md-files/`; future layout work should move that tree
-cleanly under `runtime/agents-md-files/`. Do not introduce a second
+the existing `runtime/agents-md-files/` package area. Do not introduce a second
 `agents-files` name for the same concept.
 
 Proposed checkout package layout:
@@ -290,10 +287,10 @@ The root installed `AGENTS.md` should do entry routing. Deeper `AGENTS.md` files
 should let agents progressively discover only the rules relevant to the area
 they are entering.
 
-Current package seeds are incomplete but useful:
+Current package seeds:
 
 ```text
-system/agents-md-files/
+runtime/agents-md-files/
   coordinator/AGENTS.md
   skills/AGENTS.md
   system/AGENTS.md
@@ -370,16 +367,15 @@ and local coordinator shape while drafting this spec.
 
 Current scaffold behavior:
 
-- `C-00-initialize-coordination-root` is the first-run or repair scaffold skill.
-- Default C-00 setup creates repo-local `ar-memory/` plus local
-  `ar-coordination/`.
+- `C-00-initialize-memory-repo` is the first-run or repair memory-root skill.
+- Default C-00 setup creates repo-local `ar-memory/`.
 - Explicit external-memory C-00 setup can create or repair a per-repo external
   memory root under `ar-coordination/memory-repos/ar-<repo-name>/`.
 - C-00 creates missing directories and starter files only; it must not overwrite
-  existing coordination or memory files without approval.
+  existing memory files without approval.
 - C-00 does not create onboarding content; `C-03` owns generated onboarding.
-- Current C-00 coordinator directories are `system/`, `memory-repos/`,
-  `tasks/`, `notes/`, and `worktrees/`.
+- C-00 verifies the installed coordinator runtime for external-memory setup but
+  does not install or repair runtime-owned coordinator folders.
 - C-00 starter memory-layer `settings.json` examples now include the standard
   path-rule exclusion baseline for generated, vendored, build, cache, IDE,
   environment, generated-marker, and Zone.Identifier paths.
@@ -405,11 +401,8 @@ Current memory behavior:
 
 - C-09 external-memory start blocks when no compatible memory state exists and
   asks for an explicit recovery choice.
-- C-09 can bootstrap an external memory repo only when explicitly requested, such
-  as `bootstrap-memory` or `start --memory-choice clean-start`.
-- C-09 memory bootstrap initializes the repo if needed, creates `onboarding/`,
-  `docs/`, and `system/`, writes missing starter system files, commits memory
-  content, then writes and commits `memory.md`.
+- C-09 no longer initializes memory repos; missing external memory should route
+  to `C-00-initialize-memory-repo`.
 - Existing `memory.md` is treated as authoritative; C-09 reports
   `already-ledgered` instead of overwriting it.
 
@@ -442,7 +435,7 @@ Current coordinator gap:
 - The local coordinator currently has the core folders and live memory/task
   state.
 - The checkout now gathers non-root `AGENTS.md` templates under
-  `system/agents-md-files/`, but the live coordinator does not yet have the
+  `runtime/agents-md-files/`, but the live coordinator does not yet have the
   installed coordinator-level `AGENTS.md` tree.
 - Skills and scripts still execute from the checkout today. Moving them into a
   coordinator-native runtime is the proposed alpha cleanup.
@@ -678,7 +671,7 @@ runtime install or update during this clean-structure pass.
 
 Runtime-owned assets include:
 
-- installed `skills/`
+- installed `runtime/skills/`
 - skill-local Python helpers and shared Python modules
 - coordinator-facing workflow scripts
 - installed coordinator `AGENTS.md` files
@@ -758,8 +751,6 @@ Repo-specific memory setup belongs to explicit workflows:
   existing-memory expansion, move handling, and deleted-slice cleanup
 - `C-05` handles direct file-level onboarding and routes structural route/slice
   maintenance to C-03
-- `C-09 bootstrap-memory` can create an external memory repo when explicitly
-  requested
 - `C-10` can adopt existing onboarding as the memory baseline after the memory
   repo exists
 
@@ -897,13 +888,12 @@ Source templates for those files should live in the package asset tree. The
 current seed is:
 
 ```text
-agents-remember-md/system/agents-md-files/
+agents-remember-md/runtime/agents-md-files/
   coordinator/AGENTS.md
   skills/AGENTS.md
   system/AGENTS.md
   tasks/AGENTS.md
 ```
 
-If the repo moves package assets under `runtime/`, preserve the
-`agents-md-files` name and move these templates there instead of creating a
-parallel naming scheme.
+If package assets are reorganized again, preserve the `agents-md-files` name for
+these templates instead of creating a parallel naming scheme.

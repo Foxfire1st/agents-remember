@@ -17,7 +17,6 @@ The bundled helper exposes these subcommands:
 <this-skill-dir>/scripts/git_worktree_manager.py start --code-repository-name <code-repository-name> --task-name <task> --worktree-name <name>
 <this-skill-dir>/scripts/git_worktree_manager.py attach --code-repository-name <code-repository-name> --task-name <task>
 <this-skill-dir>/scripts/git_worktree_manager.py status --code-repository-name <code-repository-name> --task-name <task>
-<this-skill-dir>/scripts/git_worktree_manager.py bootstrap-memory --code-repository-name <code-repository-name>
 <this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --dry-run ...
 <this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --approved --approval-note <note> ...
 <this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --code-repository-name <code-repository-name> --dry-run ...
@@ -48,12 +47,11 @@ For W-02 light tasks, the durable artifact shape is `<task-root>/<task-slug>/tas
 
 `start` resolves C-08 context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
 
-When external memory is enabled, C-09 validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. If no compatible memory state exists, it stops and reports the allowed human choices:
+When external memory is enabled, C-09 validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. Missing external memory is not a C-09 bootstrap path; run `C-00-initialize-memory-repo` first. If no compatible memory state exists, C-09 stops and reports the allowed human choices:
 
 1. `reconciliation`
-2. `clean-start`
-3. `disabled-memory`
-4. `custom`
+2. `disabled-memory`
+3. `custom`
 
 `attach` and `status` read the existing contract and report recoverable state without mutating Git. `status` includes a lifecycle phase, dirty worktree flags, a summary, and the next safe command.
 
@@ -120,7 +118,7 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 ## Boundaries
 
 1. C-09 may create or reuse worktrees and task contracts.
-2. C-09 may bootstrap a local external memory repo when explicitly requested or when `start --memory-choice clean-start` is used.
+2. C-09 does not initialize memory roots; use `C-00-initialize-memory-repo` before starting external-memory worktrees.
 3. C-09 may directly close out approved current-checkout edits when a worktree wrapper would add ceremony without isolation value.
 4. C-09 must not use divergent memory as semi-trusted reference context.
 5. C-09 must not commit without explicit commit approval after a closeout preview.

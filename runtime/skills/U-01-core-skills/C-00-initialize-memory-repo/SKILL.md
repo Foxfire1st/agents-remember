@@ -1,51 +1,65 @@
 ---
-name: c-00-initialize-coordination-root
-description: "Initialize the Agents Remember memory and coordination folders for a fresh clone or incomplete setup. Defaults to repo-local ar-memory durable memory plus local ar-coordination state; use external-memory scaffolding only when the developer explicitly asks for it."
+name: c-00-initialize-memory-repo
+description: "Initialize or repair the Agents Remember memory root for a target repository. Defaults to repo-local internal memory; creates an external memory repo only when the developer explicitly asks for external memory."
 ---
 
-# C-00 Initialize Coordination Root
+# C-00 Initialize Memory Repo
 
-Create the minimal `ar-memory/` durable-memory scaffold and `ar-coordination/` coordination scaffold expected by `agents-remember-md/AGENTS.md`.
+Create the minimal memory root required before onboarding or task workflows can use Agents Remember for a target repository.
 
-This skill is for first-run setup and repair of missing memory or coordination infrastructure. By default it creates the code repository's internal `ar-memory/` folder and a local coordination `ar-coordination/` folder. It does not create repo onboarding files under `onboarding/`; use `C-03-repo-bootstrap` after this scaffold exists.
+This skill initializes durable repo memory. It does not install the coordinator runtime, create harness skill symlinks, create task worktrees, or generate onboarding content. Use `installer/install-runtime.py` for coordinator runtime installation, `runtime/scripts/install-skills.sh` for harness exposure, and `C-03-repo-bootstrap` after this scaffold exists when the developer wants onboarding content generated.
 
-Use `C-08-ar-coordination-context-resolver` when an agent needs to inspect an existing repository's active coordination context. This skill creates or repairs scaffold files; it does not replace C-08 as the normal resolver.
+Use `C-08-ar-coordination-context-resolver` to inspect an existing repository's active context. This skill creates or repairs missing memory scaffolding; it does not replace C-08 as the normal resolver.
 
 ## Inputs
 
-- `code_repository_root`: root directory of the code repository being initialized. Default to the repository the developer asked to work on.
-- `topology`: `internal` by default. Use `external` only when the developer explicitly asks for external-memory scaffolding.
-- `agents_repo`: path to the `agents-remember-md` checkout. Needed only for explicit external-memory scaffolding that resolves `.env` or the built-in `../ar-coordination` default.
-- `coordination_root`: optional override for explicit external-memory scaffolding. Do not use it for default internal setup unless the developer explicitly provides a path.
-- `mode`: `create-missing` by default. Use `repair` only when the user explicitly asks to fix existing scaffold files.
+- `code_repository_root`: root directory of the code repository whose memory is being initialized. Default to the repository the developer asked to work on.
+- `topology`: `internal` by default. Use `external` only when the developer explicitly asks for an external memory repo.
+- `coordination_root`: required for external-memory initialization unless the installed runtime root is already obvious from the current skill location or the developer provided a path.
+- `mode`: `create-missing` by default. Use `repair` only when the developer explicitly asks to fix existing memory scaffold files.
 
 ## Safety Rules
 
-1. Never overwrite an existing coordination file without explicit user approval.
+1. Never overwrite an existing memory file without explicit user approval.
 2. Create missing directories and files only.
 3. Keep starter files generic; do not invent project-specific tools, docs, sources, or onboarding.
 4. If the resolved memory root or coordination root points outside the intended workspace, state the resolved absolute path before writing.
 5. Default internal scaffolding must not create or select an external memory repo.
-6. If `.env` is absent, do not create it unless the user explicitly asks for external-memory configuration.
+6. External-memory setup must not install coordinator runtime files; if the coordinator runtime is missing, tell the developer to run `installer/install-runtime.py` first.
+7. Do not create onboarding content. An empty `onboarding/` directory is enough for C-08 to resolve the memory root; C-03 owns onboarding generation.
 
 ## Procedure
 
-### 1. Resolve The Root
+### 1. Resolve The Memory Root
 
-Default internal scaffolding:
+Default internal memory:
 
 1. Resolve `code_repository_root`.
-2. Set the memory root to `<code_repository_root>/ar-memory`.
-3. Set the local coordination root to `<code_repository_root>/ar-coordination` unless the developer explicitly provided another coordination root.
-4. Do not resolve or create an external `AR_COORDINATION_ROOT`.
+2. Set `memory_root` to `<code_repository_root>/ar-memory`.
+3. Do not resolve or create an external memory repo.
 
-Explicit external-memory scaffolding:
+Explicit external memory:
 
-1. Use `coordination_root` when the developer provided one.
-2. Otherwise read `<agents_repo>/.env` if it exists; do not read `.env.example` at runtime.
-3. Parse `AR_COORDINATION_ROOT=<path>`.
-4. Resolve relative paths from the file that declared the value.
-5. If `.env` is absent or no value is declared, use `../ar-coordination` relative to `<agents_repo>` and state that default.
+1. Resolve `code_repository_root`.
+2. Resolve `coordination_root` from the developer-provided path or the installed runtime root.
+3. Verify the coordinator runtime exists by checking for:
+
+```text
+<coordination-root>/AGENTS.md
+<coordination-root>/skills/
+<coordination-root>/scripts/
+<coordination-root>/tasks/
+<coordination-root>/memory-repos/
+```
+
+4. If the runtime is missing, stop and ask the developer to run:
+
+```bash
+python3 agents-remember-md/installer/install-runtime.py <coordination-root>
+```
+
+5. Set `memory_root` to `<coordination-root>/memory-repos/ar-<code-repository-name>`.
+6. Initialize the external memory root as a Git repository when it is newly created or when it exists without `.git`.
 
 ### 2. Inspect Existing State
 
@@ -60,14 +74,10 @@ onboarding/
 docs/
 ```
 
-Check for these paths under the resolved coordination root:
+For external memory, also check:
 
 ```text
-system/
-memory-repos/
-tasks/
-notes/
-worktrees/
+.git/
 ```
 
 Report which are present and which are missing. If everything exists, stop with a clean summary.
@@ -81,16 +91,11 @@ Create only missing directories:
   system/
   onboarding/
   docs/
-
-<coordination-root>/
-  system/
-  memory-repos/
-  tasks/
-  notes/
-  worktrees/
 ```
 
-`notes/` is optional scratch space, but creating it keeps the common local layout consistent.
+For external memory, ensure `<coordination-root>/memory-repos/` exists before creating the per-repo memory root. Do not create or modify coordinator runtime directories such as `skills/`, `scripts/`, `tasks/`, `worktrees/`, `notes/`, or `temp/`.
+
+When creating an external memory Git repository, add `docs/.gitkeep` if `docs/` would otherwise be empty so the scaffold can be committed.
 
 ### 4. Create Missing Starter Files
 
@@ -120,6 +125,8 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
 ```
 
 #### `system/settings.json`
+
+For internal memory:
 
 ```json
 {
@@ -162,9 +169,7 @@ Do not duplicate active `pathRules` here as the authoritative machine source whe
 }
 ```
 
-`onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding.
-
-For explicit external-memory scaffolding, use the same file path under the per-repo memory repo:
+For external memory:
 
 ```json
 {
@@ -207,7 +212,7 @@ For explicit external-memory scaffolding, use the same file path under the per-r
 }
 ```
 
-Place this file in `ar-coordination/memory-repos/ar-<repo-name>/system/settings.json` for external memory repos. The coordinator may have its own local `system/settings.json` for path hints, but cross-repo policy belongs in the committed memory layer.
+`onboarding.storage` decides where eligible onboarding artifacts live. `onboarding.pathRules` decides which source paths and file types are eligible for onboarding. Cross-repo policy belongs in the memory layer, not in untracked coordinator runtime files.
 
 #### `system/sources.md`
 
@@ -257,22 +262,27 @@ Summarize:
 
 - resolved topology
 - resolved memory root
-- resolved coordination root
+- resolved coordination root when external memory is used
+- whether an external Git repository was initialized
 - directories created
 - files created
 - files left untouched
-- next suggested skill, usually `C-03-repo-bootstrap` to create or refresh onboarding under the resolved onboarding root
+- next suggested skill, usually `C-03-repo-bootstrap` when the developer wants onboarding content under the resolved onboarding root
 
 ## Common Outcomes
 
-### Fresh Clone
+### Fresh Internal Memory
 
-Expected result: create the full memory and coordination scaffold, then tell the user the repo is ready for repo bootstrap.
+Expected result: create `<code-repository-root>/ar-memory/` with `system/`, `onboarding/`, and `docs/`, then tell the developer the repo is ready for optional repo bootstrap.
 
-### Partial Scaffold
+### Fresh External Memory
 
-Expected result: create only missing files. Preserve existing `docs/`, `tasks/`, and onboarding content.
+Expected result: create `<coordination-root>/memory-repos/ar-<repo-name>/`, initialize Git if needed, add `system/`, `onboarding/`, and `docs/`, then tell the developer the repo is ready for optional repo bootstrap.
 
-### Existing Complete Scaffold
+### Partial Memory Scaffold
 
-Expected result: make no changes and report that the memory and coordination roots are already initialized.
+Expected result: create only missing files or directories. Preserve existing `docs/`, `system/`, and onboarding content.
+
+### Existing Complete Memory Scaffold
+
+Expected result: make no changes and report that the memory root is already initialized.

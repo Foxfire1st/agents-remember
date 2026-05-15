@@ -870,6 +870,26 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(context.coordination_root, agents_repo / "custom-coordination")
             self.assertEqual(context.memory_root, external_memory)
 
+    def test_resolver_uses_installed_runtime_root_as_coordination_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            repo.mkdir()
+            coordination_root = workspace / "runtime-home"
+            (coordination_root / "skills").mkdir(parents=True)
+            (coordination_root / "system").mkdir()
+            (coordination_root / "tasks").mkdir()
+            external_memory = coordination_root / "memory-repos" / "ar-repo-a"
+            external_memory.mkdir(parents=True)
+            context = resolver.resolve_coordination_context(
+                code_repository_name="repo-a",
+                workspace_root=workspace,
+                agents_repo=coordination_root,
+            )
+            self.assertEqual(context.topology, "external")
+            self.assertEqual(context.coordination_root, coordination_root)
+            self.assertEqual(context.memory_root, external_memory)
+
     def test_resolver_ignores_dot_env_example_at_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -935,7 +955,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 )
             self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
             self.assertEqual(raised.exception.external_memory, workspace / "ar-coordination" / "memory-repos" / "ar-repo-a")
-            self.assertIn("bootstrap memory with C-00", str(raised.exception))
+            self.assertIn("initialize memory with C-00-initialize-memory-repo", str(raised.exception))
 
     def test_drift_report_paths_use_temp_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1014,6 +1034,11 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             code_head = init_repo(workspace / "repo-a", "main")
             memory_root = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            init_repo(memory_root, "main")
+            (memory_root / "docs").mkdir()
+            (memory_root / "docs" / ".gitkeep").write_text("", encoding="utf-8")
+            (memory_root / "system").mkdir()
+            (memory_root / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
             write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
             args = Namespace(
                 code_repository_name="repo-a",
@@ -1063,6 +1088,11 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             code_head = init_repo(workspace / "repo-a", "main")
             memory_root = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            init_repo(memory_root, "main")
+            (memory_root / "docs").mkdir()
+            (memory_root / "docs" / ".gitkeep").write_text("", encoding="utf-8")
+            (memory_root / "system").mkdir()
+            (memory_root / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
             write_file_onboarding(memory_root / "onboarding", "repo-a", "README.md", code_head)
             args = Namespace(
                 code_repository_name="repo-a",

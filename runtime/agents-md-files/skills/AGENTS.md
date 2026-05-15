@@ -5,8 +5,8 @@
 1. Need to know where memory, tasks, docs, settings, worktrees, or cross-repo allowances live?
    → C-08
 
-2. Missing memory/coordination scaffold?
-   → C-00
+2. Missing repo memory scaffold?
+   → C-00-initialize-memory-repo
 
 3. Existing onboarding may be stale, unverifiable, missing, or orphaned?
    → C-02

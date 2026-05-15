@@ -24,7 +24,6 @@ sys.path.insert(0, str(SHARED_ROOT))
 
 from agents_remember.memory_ledger import (  # noqa: E402
     LedgerError,
-    create_initial_ledger,
     find_mapping,
     load_ledger,
     prepend_mapping,
@@ -296,9 +295,6 @@ def command_start(args: argparse.Namespace) -> int:
             ledger_path=None,
             memory_state="disabled",
         )
-    if contract.memory_mode == "external" and memory_state["state"] == "clean-start" and memory_state.get("ledgerCommit"):
-        contract = replace(contract, memory_base_commit=str(memory_state["ledgerCommit"]))
-
     if not args.dry_run:
         write_contract(contract.contract_path, contract)
     print(json.dumps({
@@ -321,25 +317,12 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
         return {"state": "disabled"}
     assert contract.memory_repo_path is not None
     if not contract.memory_repo_path.exists():
-        if args.memory_choice == "clean-start":
-            result = bootstrap_memory_repo(contract, args.dry_run)
-            if args.dry_run or result["state"] != "clean-start":
-                return result
-            assert contract.memory_worktree is not None
-            result["worktree"] = ensure_worktree(
-                contract.memory_repo_path,
-                contract.memory_worktree,
-                contract.memory_work_branch,
-                contract.memory_source_branch,
-                args.dry_run,
-            )
-            return result
         if args.memory_choice == "disabled-memory":
             return {"state": "disabled", "reason": "human selected disabled memory"}
         return {
             "state": "blocked",
-            "reason": "external memory repo is missing",
-            "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
+            "reason": "external memory repo is missing; run C-00-initialize-memory-repo before starting an external-memory worktree",
+            "choices": ["initialize-memory-repo", "disabled-memory", "custom"],
         }
     if (contract.memory_repo_path / ".git").exists() and has_changes(contract.memory_repo_path):
         if args.memory_choice == "disabled-memory":
@@ -358,7 +341,7 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
         return {
             "state": "blocked",
             "reason": str(error),
-            "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
+            "choices": ["initialize-memory-repo", "reconciliation", "disabled-memory", "custom"],
         }
     mapping = find_mapping(ledger, contract.code_base_commit)
     if mapping is None:
@@ -367,7 +350,7 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
             "reason": "no exact ledger mapping for selected code base commit",
             "codeBaseCommit": contract.code_base_commit,
             "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
-            "choices": ["reconciliation", "clean-start", "disabled-memory", "custom"],
+            "choices": ["reconciliation", "disabled-memory", "custom"],
         }
     assert contract.memory_worktree is not None
     memory_branch_state = ensure_worktree(
@@ -382,71 +365,6 @@ def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespac
         "worktree": memory_branch_state,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
-    }
-
-
-def bootstrap_memory_repo(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
-    assert contract.memory_repo_path is not None
-    assert contract.ledger_path is not None
-    ledger_path = contract.memory_repo_path / "memory.md"
-    if ledger_path.exists():
-        ledger = load_ledger(ledger_path)
-        return {
-            "state": "already-ledgered",
-            "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
-            "lastMemoryContentCommit": ledger.last_memory_content_commit,
-        }
-    if dry_run:
-        return {"state": "would-bootstrap", "path": contract.memory_repo_path.as_posix()}
-    contract.memory_repo_path.mkdir(parents=True, exist_ok=True)
-    if not (contract.memory_repo_path / ".git").exists():
-        require_git(contract.memory_repo_path, ["init"])
-    ensure_git_identity(contract.memory_repo_path)
-    if contract.memory_source_branch and current_branch(contract.memory_repo_path) != contract.memory_source_branch:
-        if branch_exists(contract.memory_repo_path, contract.memory_source_branch):
-            require_git(contract.memory_repo_path, ["checkout", contract.memory_source_branch])
-        else:
-            require_git(contract.memory_repo_path, ["checkout", "-b", contract.memory_source_branch])
-    for directory in ("onboarding", "docs", "system"):
-        (contract.memory_repo_path / directory).mkdir(parents=True, exist_ok=True)
-    docs_keep = contract.memory_repo_path / "docs" / ".gitkeep"
-    if not any((contract.memory_repo_path / "docs").iterdir()):
-        docs_keep.write_text("", encoding="utf-8")
-    overview = contract.memory_repo_path / "onboarding" / "overview.md"
-    if not overview.exists():
-        overview.write_text(f"# {contract.repo_name} Memory Overview\n\nExternal memory repo bootstrap placeholder.\n", encoding="utf-8")
-    settings = contract.memory_repo_path / "system" / "settings.json"
-    if not settings.exists():
-        settings.write_text(
-            json.dumps(
-                {
-                    "version": 2,
-                    "onboarding": {"storage": {"mode": "memory-repo"}, "pathRules": []},
-                    "crossRepo": {"allow": []},
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    for name in ("settings.md", "sources.md", "tools.md"):
-        path = contract.memory_repo_path / "system" / name
-        if not path.exists():
-            path.write_text(f"# {name.removesuffix('.md').title()}\n\nNo entries configured yet.\n", encoding="utf-8")
-    require_git(contract.memory_repo_path, ["add", "onboarding", "docs", "system"])
-    memory_content_commit = commit_if_dirty(contract.memory_repo_path, f"[{contract.task_id}] Bootstrap external memory content")
-    ledger = create_initial_ledger(
-        contract.repo_name,
-        contract.code_base_commit,
-        memory_content_commit,
-    )
-    write_ledger(ledger_path, ledger)
-    require_git(contract.memory_repo_path, ["add", "memory.md"])
-    ledger_commit = commit_if_dirty(contract.memory_repo_path, f"[{contract.task_id}] Bootstrap memory ledger")
-    return {
-        "state": "clean-start",
-        "memoryContentCommit": memory_content_commit,
-        "ledgerCommit": ledger_commit,
     }
 
 
@@ -585,28 +503,6 @@ def refresh_onboarding_metadata(
     verified_date: str,
 ) -> list[dict[str, str]]:
     return refresh_onboarding_metadata_for_context(contract_context(contract), changed_paths, verified_commit, verified_date)
-
-
-def command_bootstrap_memory(args: argparse.Namespace) -> int:
-    context = resolve_context(args)
-    source_branch = args.source_branch or current_branch(context.code_repository_root)
-    contract = default_contract(
-        task_name=args.task_name or f"bootstrap-{context.code_repository_name}-memory",
-        repo_name=context.code_repository_name,
-        workflow_kind="bootstrap-memory",
-        memory_mode="external",
-        coordination_root=context.coordination_root,
-        code_repo_path=context.code_repository_root,
-        code_source_branch=source_branch,
-        code_work_branch=args.work_branch or source_branch,
-        code_base_commit=head_commit(context.code_repository_root, source_branch),
-        worktree_name=args.worktree_name or f"bootstrap-{context.code_repository_name}-memory",
-        memory_repo_path=context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}",
-        memory_source_branch=source_branch,
-        memory_work_branch=args.work_branch or source_branch,
-    )
-    print(json.dumps(bootstrap_memory_repo(contract, args.dry_run), indent=2))
-    return 0
 
 
 def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
@@ -1168,7 +1064,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--source-branch")
     start.add_argument("--work-branch")
     start.add_argument("--memory-mode", choices=("internal", "external", "disabled"))
-    start.add_argument("--memory-choice", choices=("reconciliation", "clean-start", "disabled-memory", "custom"))
+    start.add_argument("--memory-choice", choices=("reconciliation", "disabled-memory", "custom"))
     start.add_argument("--custom-instruction")
     start.add_argument("--dry-run", action="store_true")
     start.set_defaults(func=command_start)
@@ -1180,14 +1076,6 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status")
     add_common(status)
     status.set_defaults(func=command_status)
-
-    bootstrap = subparsers.add_parser("bootstrap-memory")
-    add_common(bootstrap)
-    bootstrap.add_argument("--worktree-name")
-    bootstrap.add_argument("--source-branch")
-    bootstrap.add_argument("--work-branch")
-    bootstrap.add_argument("--dry-run", action="store_true")
-    bootstrap.set_defaults(func=command_bootstrap_memory)
 
     closeout = subparsers.add_parser("closeout")
     closeout.add_argument("--contract-path", type=Path, required=True)
