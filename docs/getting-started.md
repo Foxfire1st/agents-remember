@@ -38,6 +38,14 @@ To preview an install:
 python3 agents-remember-md/installer/install-runtime.py ./ar-coordination --dry-run
 ```
 
+Benchmark fixtures are optional and are not installed by default. Install or refresh them with:
+
+```bash
+python3 agents-remember-md/installer/install-runtime.py ./ar-coordination --include-benchmarks
+```
+
+The benchmark package is idempotent. Reinstalling refreshes package-owned benchmark cases, templates, prompts, and author results while preserving local outputs under `ar-coordination/benchmarks/user-runs/`. Benchmark preparation generates resettable case workspaces and clones pinned code and memory repositories into them.
+
 ## Expose Skills To Your Harness
 
 Some agent tools can read skills from a repository in the workspace. Others require skills to live in a specific folder. Use the installed adapter instead of copying skill folders by hand.

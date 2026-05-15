@@ -15,12 +15,14 @@ agents-remember-md/
       tasks/AGENTS.md
     scripts/
       install-skills.sh
+      run-benchmarks.py
     skills/
       U-01-core-skills/
       W-01-heavy-task-workflow/
       W-02-light-task-workflow/
       W-03-chat-task-workflow/
     system/defaults/examples/
+  benchmarks/
 ```
 
 ## Installed Runtime
@@ -35,6 +37,7 @@ ar-coordination/
   tasks/
     AGENTS.md
   memory-repos/
+  benchmarks/
   notes/
   worktrees/
   temp/
@@ -47,8 +50,13 @@ ar-coordination/
 - installed coordinator `AGENTS.md` templates
 - installed skills
 - installed scripts
+- optional benchmark fixtures when `--include-benchmarks` is passed
 
-It does not own live settings, notes, tasks, worktrees, memory repo content, temp files, or onboarding content.
+It does not own live settings, notes, tasks, worktrees, normal memory repo content, temp files, or onboarding content.
+
+When benchmark installation is enabled, the installer reconciles package-owned benchmark content under `ar-coordination/benchmarks/` and preserves only user-generated outputs under `ar-coordination/benchmarks/user-runs/`. Source benchmark content includes case manifests, prompts, author results, docs, and workspace templates, not pre-created workspaces. Generated benchmark workspaces are resettable state; normal user memory under `ar-coordination/memory-repos/` is not touched.
+
+Each generated benchmark case workspace has one shared code checkout area under `workspaces/<case-id>/repos/` and one benchmark-local coordination root under `workspaces/<case-id>/ar-coordination/`. `prepare` renders `workspaces/<case-id>/AGENTS.md` from the benchmark template, then clones both pinned code repositories and pinned memory repositories into those resettable workspace locations. Variants are execution modes and result groups, not duplicated workspace trees.
 
 ## Skill Adapter Contract
 

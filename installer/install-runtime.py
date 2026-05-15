@@ -18,6 +18,9 @@ AGENTS_MD_TARGETS = {
     "agents-md-files/tasks/AGENTS.md": "tasks/AGENTS.md",
 }
 
+IGNORED_COPY_NAMES = {"__pycache__"}
+IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
+
 
 @dataclass
 class InstallSummary:
@@ -86,6 +89,14 @@ def remove_path(path: Path, summary: InstallSummary, dry_run: bool) -> None:
     summary.removed_paths += 1
 
 
+def is_preserved_path(relative: Path, preserve: set[Path]) -> bool:
+    return any(relative == path or path in relative.parents for path in preserve)
+
+
+def is_ignored_package_path(relative: Path) -> bool:
+    return any(part in IGNORED_COPY_NAMES for part in relative.parts) or relative.suffix in IGNORED_COPY_SUFFIXES
+
+
 def prune_tree(
     source_root: Path,
     destination_root: Path,
@@ -100,9 +111,9 @@ def prune_tree(
     preserve = preserve or set()
     for destination in sorted(destination_root.rglob("*"), key=lambda path: len(path.parts), reverse=True):
         relative = destination.relative_to(destination_root)
-        if relative in preserve:
+        if is_preserved_path(relative, preserve):
             continue
-        if not (source_root / relative).exists():
+        if is_ignored_package_path(relative) or not (source_root / relative).exists():
             remove_path(destination, summary, dry_run)
 
 
@@ -110,6 +121,8 @@ def copy_tree(source_root: Path, destination_root: Path, summary: InstallSummary
     ensure_dir(destination_root, summary, dry_run)
     for source in sorted(source_root.rglob("*")):
         relative = source.relative_to(source_root)
+        if is_ignored_package_path(relative):
+            continue
         destination = destination_root / relative
         if source.is_dir():
             ensure_dir(destination, summary, dry_run)
@@ -129,7 +142,34 @@ def require_runtime_tree(runtime_root: Path) -> None:
         raise RuntimeError(f"runtime source is incomplete:\n{joined}")
 
 
-def install_runtime(source_root: Path, coordination_root: Path, dry_run: bool) -> InstallSummary:
+def require_benchmarks_tree(benchmarks_root: Path) -> None:
+    required = [
+        benchmarks_root / "README.md",
+        benchmarks_root / "cases",
+        benchmarks_root / "templates" / "workspace-AGENTS.md",
+    ]
+    missing = [path for path in required if not path.exists()]
+    if missing:
+        joined = "\n".join(f"  {path}" for path in missing)
+        raise RuntimeError(f"benchmark source is incomplete:\n{joined}")
+
+
+def install_benchmarks(source_root: Path, coordination_root: Path, summary: InstallSummary, dry_run: bool) -> None:
+    benchmarks_root = source_root / "benchmarks"
+    require_benchmarks_tree(benchmarks_root)
+
+    destination_root = coordination_root / "benchmarks"
+    prune_tree(benchmarks_root, destination_root, summary, dry_run, preserve={Path("user-runs")})
+    copy_tree(benchmarks_root, destination_root, summary, dry_run)
+
+
+def install_runtime(
+    source_root: Path,
+    coordination_root: Path,
+    dry_run: bool,
+    *,
+    include_benchmarks: bool = False,
+) -> InstallSummary:
     runtime_root = source_root / "runtime"
     require_runtime_tree(runtime_root)
 
@@ -147,6 +187,9 @@ def install_runtime(source_root: Path, coordination_root: Path, dry_run: bool) -
     for user_owned in ("memory-repos", "tasks", "worktrees", "notes", "temp"):
         ensure_dir(coordination_root / user_owned, summary, dry_run)
 
+    if include_benchmarks:
+        install_benchmarks(source_root, coordination_root, summary, dry_run)
+
     return summary
 
 
@@ -160,15 +203,27 @@ def main(argv: list[str] | None = None) -> int:
         help="Agents Remember checkout root. Defaults to the checkout that owns this installer.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview the install without writing files.")
+    parser.add_argument(
+        "--include-benchmarks",
+        action="store_true",
+        help="Also install the benchmark package into ar-coordination/benchmarks.",
+    )
     args = parser.parse_args(argv)
 
     try:
-        summary = install_runtime(args.source_root.resolve(), args.coordination_root.resolve(), args.dry_run)
+        summary = install_runtime(
+            args.source_root.resolve(),
+            args.coordination_root.resolve(),
+            args.dry_run,
+            include_benchmarks=args.include_benchmarks,
+        )
     except RuntimeError as error:
         parser.error(str(error))
 
     prefix = "Would install" if args.dry_run else "Installed"
     print(f"{prefix} Agents Remember runtime into {args.coordination_root.resolve()}")
+    if args.include_benchmarks:
+        print(f"{prefix} benchmark package into {(args.coordination_root / 'benchmarks').resolve()}")
     print(summary.report())
     return 0
 

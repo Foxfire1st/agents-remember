@@ -48,6 +48,12 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
    python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
    ```
 
+   Benchmark fixtures are optional. To install or refresh them too:
+
+   ```bash
+   python3 agents-remember-md/installer/install-runtime.py ./ar-coordination --include-benchmarks
+   ```
+
 3. Expose the installed skills to your agent harness.
 
    ```bash
@@ -93,6 +99,7 @@ Different tools discover instructions and skills differently. Use the install pa
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
 - [Workflows](docs/workflows.md) - chat, light task, heavy task, and when to use each.
+- [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
 - [Settings Reference](docs/reference/settings-json.md) - `system/settings.json` shape.
@@ -108,8 +115,10 @@ agents-remember-md/
   runtime/
     agents-md-files/                # installed AGENTS.md templates
     scripts/install-skills.sh       # harness skill symlink adapter
+    scripts/run-benchmarks.py       # optional benchmark runner
     skills/                         # installed skill source tree
     system/defaults/examples/       # scaffold examples used by initialization
+  benchmarks/                       # optional benchmark package source
   docs/                             # user-facing documentation
   roadmap/                          # design notes and historical planning
 ```
@@ -123,6 +132,7 @@ ar-coordination/
   skills/
   system/
   memory-repos/
+  benchmarks/                       # optional, installed with --include-benchmarks
   tasks/
   notes/
   worktrees/
