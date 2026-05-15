@@ -80,7 +80,7 @@ When routing to C-03, pass the affected source routes, known old/new paths, exis
 3. File-level onboarding links back to the nearest governing route-local overview so agents can reconstruct local area context from a file drop point. When updating onboarding, check whether the nearest governing overview has changed and update the link if needed.
 4. The canonical file-level onboarding content model is common to sidecar and inline storage.
 5. Repo-level entity catalogs document real entities and cross-layer projections, not generic glossary content.
-6. Repo-level entity catalogs use deterministic `git-blob-set-v1` fingerprints over curated load-bearing evidence paths; C-05 chooses and refreshes those paths, while C-02 only compares them.
+6. Repo-level entity catalogs use deterministic `git-blob-set-v1` fingerprints over curated load-bearing evidence paths; C-05 chooses and refreshes those paths, while C-02 compares them and verifies that every inventory entry has a matching fingerprint row.
 7. If both a file-level onboarding document and a repo entity catalog need updates, handle both in the same pass when the task materially affects both.
 8. This package may be invoked immediately from `C-01-findings-capture` when a verified factual current-state clarification qualifies for onboarding propagation.
 9. When updating `Docs References`, `Repo-Internal References`, or `Cross-Repo References`, do not optimize by deleting existing explanation. Investigate the existing prose, correct it if needed, and back it with citations.
@@ -133,4 +133,5 @@ Before writing or revising onboarding content, read the C-08 resolved `system/so
 1. for one-to-one file moves or deletes, delete or move the mirrored onboarding file to match the real source tree
 2. update overview indexes and cross-references that point at the old location
 3. check whether repo-level entity catalogs or related onboarding now need cleanup
-4. if a package, module, feature area, or source route moved or disappeared, route to C-03 `existing-memory-slice-maintenance` for coordinated route-local overview, child onboarding, and bootstrap artifact cleanup
+4. when an entity fingerprint goes stale because an evidence path disappeared or a fingerprint row has no matching inventory entry, verify whether the entity was removed, renamed, or moved before deleting catalog content or evidence paths
+5. if a package, module, feature area, or source route moved or disappeared, route to C-03 `existing-memory-slice-maintenance` for coordinated route-local overview, child onboarding, and bootstrap artifact cleanup

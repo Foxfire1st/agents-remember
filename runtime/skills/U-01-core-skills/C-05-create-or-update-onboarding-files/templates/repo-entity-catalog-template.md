@@ -13,7 +13,7 @@
 
 ## Entity Fingerprints
 
-Each row records the deterministic evidence basis for one entity. Use `git-blob-set-v1`: sort the evidence paths, resolve each current `HEAD:<path>` Git blob hash, hash the `path + blob_hash` list, and store the aggregate as `sha256:<digest>`. Evidence paths should be the smallest practical set of load-bearing source files that define the entity; false-positive review prompts are acceptable.
+Each row records the deterministic evidence basis for one entity. Every `## Entity Inventory` entry must have one matching fingerprint row. Use `git-blob-set-v1`: sort the evidence paths, resolve each current `HEAD:<path>` Git blob hash, hash the `path + blob_hash` list, and store the aggregate as `sha256:<digest>`. Evidence paths should be the smallest practical set of load-bearing source files that define the entity; false-positive review prompts are acceptable.
 
 | Entity | Algorithm | Fingerprint | Evidence Paths |
 | --- | --- | --- | --- |

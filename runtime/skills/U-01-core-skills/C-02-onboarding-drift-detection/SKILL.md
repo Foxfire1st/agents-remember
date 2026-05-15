@@ -63,7 +63,7 @@ Primary drift detection supports sidecar markdown onboarding under the resolved 
 
 Root and route-local overviews do not map one-to-one to a source file. They are verified against their recorded `sourceRoute`: C-02 compares that route from `lastVerifiedCommitHash` through `HEAD` and checks the same route for staged or unstaged local changes.
 
-Repo entity catalogs are verified through deterministic entity fingerprints. Each entity fingerprint row records `git-blob-set-v1`, an aggregate hash over a curated set of repo-relative evidence paths. The script sorts the paths, resolves each `HEAD:<path>` Git blob hash, hashes the `path + blob_hash` list, and compares the stored aggregate. Agent judgment belongs in choosing or refreshing the evidence path set; C-02 only checks the stored fingerprint deterministically.
+Repo entity catalogs are verified through deterministic entity fingerprints. Each `## Entity Inventory` entry must have a matching `## Entity Fingerprints` row. Each entity fingerprint row records `git-blob-set-v1`, an aggregate hash over a curated set of repo-relative evidence paths. The script sorts the paths, resolves each `HEAD:<path>` Git blob hash, hashes the `path + blob_hash` list, and compares the stored aggregate. Agent judgment belongs in choosing or refreshing the evidence path set; C-02 only checks the stored fingerprint deterministically.
 
 ### 2. Extract verification metadata
 
@@ -89,7 +89,8 @@ For repo entity catalogs, read:
 1. `repository`
 2. `doc_type`
 3. `lastUpdated`
-4. the `Entity Fingerprints` table with `Entity`, `Algorithm`, `Fingerprint`, and `Evidence Paths` columns
+4. the `Entity Inventory` section headings
+5. the `Entity Fingerprints` table with `Entity`, `Algorithm`, `Fingerprint`, and `Evidence Paths` columns
 
 For inline onboarding blocks, read the marker-delimited block and use its metadata such as `sourceDigest` and `verifiedAt`.
 
@@ -106,7 +107,7 @@ Use the recorded metadata plus the resolved storage mode to classify the current
 5. If the external or inline metadata needed for verification is empty, classify it as missing verification.
 6. For file-level sidecar onboarding, compare the source file against the recorded commit through `HEAD`, then check that same source path for staged or unstaged local changes.
 7. For repo and route-local overviews, compare the recorded `sourceRoute` against the recorded commit through `HEAD`, then check that same route for staged or unstaged local changes.
-8. For repo entity catalogs, recompute each entity's `git-blob-set-v1` fingerprint from the listed evidence paths. Missing evidence paths, unsupported algorithms, missing fingerprints, or fingerprint mismatches are actionable drift.
+8. For repo entity catalogs, reconcile inventory headings against fingerprint rows before trusting any entry. Missing fingerprint tables, inventory entries without matching fingerprint rows, unsupported algorithms, missing fingerprints, missing evidence paths, or fingerprint mismatches are actionable drift. Fingerprint rows without matching inventory entries are orphaned and must be reviewed as possible removed, renamed, or moved entities.
 9. For inline onboarding, recompute the source digest from the source body with the onboarding block removed.
 10. If verification matches, classify the onboarding unit as up to date.
 11. If verification does not match, classify it as drifted.
@@ -158,7 +159,7 @@ The handoff should identify:
 1. which onboarding files need refresh
 2. which files are orphaned and may need deletion
 3. which overview source routes changed
-4. which entity fingerprints changed and which evidence paths caused the stale signal
+4. which entity fingerprints changed, which inventory entries are missing fingerprint rows, which fingerprint rows are orphaned, and which evidence paths caused the stale signal
 5. whether related repo-level catalogs or overview files likely need follow-up
 6. which stale onboarding can still be used directionally until maintenance finishes
 

@@ -11,6 +11,7 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from typing import Optional
 
 
 CORE_ROOT = Path(__file__).resolve().parents[1]
@@ -132,9 +133,17 @@ def write_route_overview(onboarding_root: Path, repo_name: str, source_route: st
     return path
 
 
-def write_entity_catalog(onboarding_root: Path, repo_name: str, rows: list[tuple[str, str, str, list[str]]]) -> Path:
+def write_entity_catalog(
+    onboarding_root: Path,
+    repo_name: str,
+    rows: list[tuple[str, str, str, list[str]]],
+    inventory_entities: Optional[list[str]] = None,
+    include_fingerprints: bool = True,
+) -> Path:
     path = onboarding_root / "entities.md"
     path.parent.mkdir(parents=True, exist_ok=True)
+    if inventory_entities is None:
+        inventory_entities = [entity for entity, _algorithm, _fingerprint, _evidence_paths in rows]
     lines = [
         "# Entities",
         "",
@@ -145,14 +154,23 @@ def write_entity_catalog(onboarding_root: Path, repo_name: str, rows: list[tuple
         "| lastUpdated | 2026-05-09T00:00:00+00:00 |",
         "| status | active |",
         "",
-        "## Entity Fingerprints",
-        "",
-        "| Entity | Algorithm | Fingerprint | Evidence Paths |",
-        "| --- | --- | --- | --- |",
     ]
-    for entity, algorithm, fingerprint, evidence_paths in rows:
-        evidence = "; ".join(f"`{source_path}`" for source_path in evidence_paths)
-        lines.append(f"| {entity} | `{algorithm}` | `{fingerprint}` | {evidence} |")
+    if include_fingerprints:
+        lines.extend(
+            [
+                "## Entity Fingerprints",
+                "",
+                "| Entity | Algorithm | Fingerprint | Evidence Paths |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for entity, algorithm, fingerprint, evidence_paths in rows:
+            evidence = "; ".join(f"`{source_path}`" for source_path in evidence_paths)
+            lines.append(f"| {entity} | `{algorithm}` | `{fingerprint}` | {evidence} |")
+        lines.append("")
+    lines.extend(["## Entity Inventory", ""])
+    for entity in inventory_entities:
+        lines.extend([f"### {entity}", ""])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -1152,6 +1170,90 @@ class WorktreeSupportTests(unittest.TestCase):
 
             self.assertEqual(rows[0].classification, "drifted")
             self.assertIn("Entity evidence path missing", rows[0].note)
+            self.assertIn("removed, renamed, or moved", rows[0].note)
+
+    def test_drift_detects_entity_inventory_without_fingerprint_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            onboarding_root = workspace / "memory" / "onboarding"
+            catalog = write_entity_catalog(
+                onboarding_root,
+                "repo-a",
+                [],
+                inventory_entities=["Entity"],
+                include_fingerprints=False,
+            )
+
+            rows = drift.classify_sidecar_onboarding_units(
+                catalog,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].source_file, "entity:Entity")
+            self.assertEqual(rows[0].classification, "missing verification")
+            self.assertIn("no parseable Entity Fingerprints table", rows[0].note)
+
+    def test_drift_detects_entity_inventory_entry_missing_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            commit_file(repo, "src/entity.py", "class Entity:\n    pass\n", "Add entity")
+            fingerprint = drift.compute_git_blob_set_fingerprint(repo, ["src/entity.py"])
+            onboarding_root = workspace / "memory" / "onboarding"
+            catalog = write_entity_catalog(
+                onboarding_root,
+                "repo-a",
+                [("Entity", drift.GIT_BLOB_SET_ALGORITHM, fingerprint, ["src/entity.py"])],
+                inventory_entities=["Entity", "Other"],
+            )
+
+            rows = drift.classify_sidecar_onboarding_units(
+                catalog,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            by_source = {row.source_file: row for row in rows}
+            self.assertEqual(by_source["entity:Entity"].classification, "up to date")
+            self.assertEqual(by_source["entity:Other"].classification, "missing verification")
+            self.assertIn("no matching fingerprint row", by_source["entity:Other"].note)
+
+    def test_drift_detects_orphaned_entity_fingerprint_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            commit_file(repo, "src/entity.py", "class Entity:\n    pass\n", "Add entity")
+            fingerprint = drift.compute_git_blob_set_fingerprint(repo, ["src/entity.py"])
+            onboarding_root = workspace / "memory" / "onboarding"
+            catalog = write_entity_catalog(
+                onboarding_root,
+                "repo-a",
+                [
+                    ("Entity", drift.GIT_BLOB_SET_ALGORITHM, fingerprint, ["src/entity.py"]),
+                    ("Removed", drift.GIT_BLOB_SET_ALGORITHM, fingerprint, ["src/entity.py"]),
+                ],
+                inventory_entities=["Entity"],
+            )
+
+            rows = drift.classify_sidecar_onboarding_units(
+                catalog,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            by_source = {row.source_file: row for row in rows}
+            self.assertEqual(by_source["entity:Entity"].classification, "up to date")
+            self.assertEqual(by_source["entity:Removed"].classification, "orphaned")
+            self.assertIn("removed, renamed, or moved", by_source["entity:Removed"].note)
 
     def test_cross_repo_legacy_string_is_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

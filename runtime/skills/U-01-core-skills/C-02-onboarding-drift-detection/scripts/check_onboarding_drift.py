@@ -507,6 +507,25 @@ def parse_entity_fingerprint_rows(path: Path) -> list[EntityFingerprint]:
     return rows
 
 
+def parse_entity_inventory_names(path: Path) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    in_section = False
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("## "):
+            in_section = stripped == "## Entity Inventory"
+            continue
+        if not in_section or not stripped.startswith("### "):
+            continue
+        name = clean_scalar(stripped.removeprefix("###").strip()).strip("`")
+        if name and name not in seen:
+            names.append(name)
+            seen.add(name)
+    return names
+
+
 def git_stdout(repo_root: Path, args: list[str]) -> str:
     result = run_git(repo_root, args)
     if result.returncode != 0:
@@ -585,7 +604,10 @@ def classify_entity_fingerprint(
             classification="drifted",
             trust="low",
             affected_sections=f"entity catalog; {row.entity}; source evidence",
-            note=f"Entity evidence path missing: {', '.join(missing_paths)}.",
+            note=(
+                f"Entity evidence path missing: {', '.join(missing_paths)}. "
+                "Check whether the entity was removed, renamed, or moved before deleting or replacing the fingerprint evidence."
+            ),
         )
     try:
         current = compute_git_blob_set_fingerprint(repo_root, row.evidence_paths)
@@ -647,12 +669,71 @@ def classify_entity_fingerprint(
     )
 
 
+def missing_entity_fingerprint_row(
+    onboarding_file: Path,
+    onboarding_root: Path,
+    repository: str,
+    settings: StorageSettings,
+    last_updated: str,
+    entity: str,
+    note: str,
+) -> DriftRow:
+    return DriftRow(
+        onboarding_file=rel(onboarding_file, onboarding_root),
+        source_file=f"entity:{entity}",
+        repository=repository,
+        storage_mode=settings.mode,
+        last_verified_hash="",
+        last_verified_date=last_updated,
+        classification="missing verification",
+        trust="medium",
+        affected_sections=f"entity catalog; {entity}; verification",
+        note=note,
+    )
+
+
+def orphaned_entity_fingerprint_row(
+    onboarding_file: Path,
+    onboarding_root: Path,
+    repository: str,
+    settings: StorageSettings,
+    last_updated: str,
+    row: EntityFingerprint,
+) -> DriftRow:
+    return DriftRow(
+        onboarding_file=rel(onboarding_file, onboarding_root),
+        source_file=f"entity:{row.entity}",
+        repository=repository,
+        storage_mode=settings.mode,
+        last_verified_hash=row.fingerprint,
+        last_verified_date=last_updated,
+        classification="orphaned",
+        trust="low",
+        affected_sections=f"entity catalog; {row.entity}; verification",
+        note="Entity fingerprint row has no matching inventory entry. Check whether the entity was removed, renamed, or moved before deleting the row.",
+    )
+
+
 def classify_entity_catalog(onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings) -> list[DriftRow]:
     metadata = parse_table_metadata(onboarding_file)
     repository = metadata.get("repository", repo_root.name)
     last_updated = metadata.get("lastUpdated", "")
+    inventory_entities = parse_entity_inventory_names(onboarding_file)
     rows = parse_entity_fingerprint_rows(onboarding_file)
     if not rows:
+        if inventory_entities:
+            return [
+                missing_entity_fingerprint_row(
+                    onboarding_file,
+                    onboarding_root,
+                    repository,
+                    settings,
+                    last_updated,
+                    entity,
+                    "Repo entity catalog has no parseable Entity Fingerprints table for this inventory entry.",
+                )
+                for entity in inventory_entities
+            ]
         return [
             DriftRow(
                 onboarding_file=rel(onboarding_file, onboarding_root),
@@ -667,9 +748,44 @@ def classify_entity_catalog(onboarding_file: Path, repo_root: Path, onboarding_r
                 note="Repo entity catalog has no parseable Entity Fingerprints table.",
             )
         ]
-    return [
+    if not inventory_entities:
+        return [
+            DriftRow(
+                onboarding_file=rel(onboarding_file, onboarding_root),
+                source_file="entity-catalog",
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash="",
+                last_verified_date=last_updated,
+                classification="missing verification",
+                trust="medium",
+                affected_sections="entity catalog; inventory; verification",
+                note="Repo entity catalog has fingerprint rows but no parseable Entity Inventory section.",
+            )
+        ]
+    fingerprint_entities = {row.entity for row in rows}
+    rows_by_inventory = [
         classify_entity_fingerprint(onboarding_file, onboarding_root, repo_root, settings, repository, last_updated, row)
+        if row.entity in inventory_entities
+        else orphaned_entity_fingerprint_row(onboarding_file, onboarding_root, repository, settings, last_updated, row)
         for row in rows
+    ]
+    missing_inventory_rows = [
+        missing_entity_fingerprint_row(
+            onboarding_file,
+            onboarding_root,
+            repository,
+            settings,
+            last_updated,
+            entity,
+            "Entity inventory entry has no matching fingerprint row. Add a git-blob-set-v1 row with curated evidence paths before treating it as verified.",
+        )
+        for entity in inventory_entities
+        if entity not in fingerprint_entities
+    ]
+    return [
+        *rows_by_inventory,
+        *missing_inventory_rows,
     ]
 
 
