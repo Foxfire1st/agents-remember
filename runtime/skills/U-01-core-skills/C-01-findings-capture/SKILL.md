@@ -28,9 +28,12 @@ Route the finding to the owning durable surface:
 ## Rules
 
 1. Verify relevant code and onboarding before durable capture when possible.
-2. Ask targeted follow-up questions if the finding is still ambiguous.
-3. Do not rewrite approved `requirements.md` or `architecture.md` directly from one finding without developer approval.
-4. Do not send speculative, future-state, unresolved, or task-only notes into onboarding.
-5. If a finding affects both task-local artifacts and onboarding, update the task-local owner first, then propagate to onboarding only if the factual guardrail is satisfied.
-6. Use broader discovery only when direct code and onboarding checks are not enough.
-7. Never leave a confirmed finding only in chat when an appropriate durable destination exists.
+2. Do not copy developer clarifications into onboarding verbatim. Check them
+   against code reality first; when code contradicts or only partially supports
+   the clarification, surface the mismatch and resolve it before durable capture.
+3. Ask targeted follow-up questions if the finding is still ambiguous.
+4. Do not rewrite approved `requirements.md` or `architecture.md` directly from one finding without developer approval.
+5. Do not send speculative, future-state, unresolved, or task-only notes into onboarding.
+6. If a finding affects both task-local artifacts and onboarding, update the task-local owner first, then propagate to onboarding only if the factual guardrail is satisfied.
+7. Use broader discovery only when direct code and onboarding checks are not enough.
+8. Never leave a confirmed finding only in chat when an appropriate durable destination exists.

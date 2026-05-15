@@ -29,12 +29,36 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 This workspace uses a layered memory system. Make sure to read the below rules before performing actions.
 
+### Installed AGENTS.md Routing
+
+This coordinator file is the workspace entrypoint. Read the sibling installed
+`AGENTS.md` files when their scope becomes relevant:
+
+- Read `system/AGENTS.md` before relying on onboarding or reasoning over
+  repository source.
+- Read `tasks/AGENTS.md` before creating or updating task artifacts, or when
+  task framing, meta-questioning, or approval doctrine matters.
+- Read `skills/AGENTS.md` before choosing memory, onboarding, findings,
+  discovery, or worktree skills.
+
 ### Onboarding Documentation
 
 Onboarding files are companion context for source files. Their main purpose is to be read alongside the code they describe, at the moment that code is
 inspected. They can be found using the ar-coordination resolver.
 
 Before trusting the onboarding documentation, check the [Memory Layer Instructions](system/AGENTS.md)
+
+### Developer Clarifications
+
+When a developer clarifies an important concept, invariant, boundary, or
+current-state behavior, use `C-01-findings-capture`. Ask whether the verified
+clarification should be documented in onboarding.
+
+Do not copy the clarification into onboarding verbatim. Verify it against the
+relevant code, onboarding, and supporting context first. If code reality
+contradicts the clarification or only partially supports it, surface the
+mismatch and discuss it before propagating anything through
+`C-05-create-or-update-onboarding-files`.
 
 ---
 
