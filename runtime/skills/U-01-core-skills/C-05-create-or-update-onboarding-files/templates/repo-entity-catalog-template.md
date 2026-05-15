@@ -11,6 +11,14 @@
 
 <What this file is for and what it is not. Keep it focused on real entities and their cross-layer projections.>
 
+## Entity Fingerprints
+
+Each row records the deterministic evidence basis for one entity. Use `git-blob-set-v1`: sort the evidence paths, resolve each current `HEAD:<path>` Git blob hash, hash the `path + blob_hash` list, and store the aggregate as `sha256:<digest>`. Evidence paths should be the smallest practical set of load-bearing source files that define the entity; false-positive review prompts are acceptable.
+
+| Entity | Algorithm | Fingerprint | Evidence Paths |
+| --- | --- | --- | --- |
+| <Canonical Entity Name> | `git-blob-set-v1` | `sha256:<digest>` | `<repo-relative/source-a>`; `<repo-relative/source-b>` |
+
 ## Entity Inventory
 
 ### <Canonical Entity Name>

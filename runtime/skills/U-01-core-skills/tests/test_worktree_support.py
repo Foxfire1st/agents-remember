@@ -56,6 +56,8 @@ memory_carryover = importlib.util.module_from_spec(MEMORY_CARRYOVER_SPEC)
 sys.modules[MEMORY_CARRYOVER_SPEC.name] = memory_carryover
 MEMORY_CARRYOVER_SPEC.loader.exec_module(memory_carryover)
 
+drift = adopt_baseline.drift
+
 
 def git(repo: Path, *args: str) -> str:
     result = subprocess.run(
@@ -105,6 +107,54 @@ def write_file_onboarding(onboarding_root: Path, repo_name: str, source_path: st
         ),
         encoding="utf-8",
     )
+
+
+def write_route_overview(onboarding_root: Path, repo_name: str, source_route: str, commit_hash: str) -> Path:
+    path = onboarding_root / source_route / "overview.md" if source_route != "." else onboarding_root / "overview.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                f"# {source_route} Overview",
+                "",
+                "| Field | Value |",
+                "| --- | --- |",
+                f"| repository | {repo_name} |",
+                "| doc_type | `route-local-overview` |",
+                f"| sourceRoute | `{source_route}` |",
+                f"| lastVerifiedCommitHash | `{commit_hash}` |",
+                "| lastVerifiedCommitDate | 2026-05-09T00:00:00+00:00 |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_entity_catalog(onboarding_root: Path, repo_name: str, rows: list[tuple[str, str, str, list[str]]]) -> Path:
+    path = onboarding_root / "entities.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Entities",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| repository | {repo_name} |",
+        "| doc_type | `repo-entity-catalog` |",
+        "| lastUpdated | 2026-05-09T00:00:00+00:00 |",
+        "| status | active |",
+        "",
+        "## Entity Fingerprints",
+        "",
+        "| Entity | Algorithm | Fingerprint | Evidence Paths |",
+        "| --- | --- | --- | --- |",
+    ]
+    for entity, algorithm, fingerprint, evidence_paths in rows:
+        evidence = "; ".join(f"`{source_path}`" for source_path in evidence_paths)
+        lines.append(f"| {entity} | `{algorithm}` | `{fingerprint}` | {evidence} |")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def read_onboarding_field(path: Path, field: str) -> str:
@@ -990,6 +1040,118 @@ class WorktreeSupportTests(unittest.TestCase):
                 drift.resolve_report_path(workspace / "outside.md", coordination_root, temp_root, repo),
                 temp_root / "drift-reports" / "repo-a" / "outside.md",
             )
+
+    def test_drift_detects_clean_route_local_overview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            verified_commit = commit_file(repo, "src/service.py", "print('ok')\n", "Add service")
+            onboarding_root = workspace / "memory" / "onboarding"
+            overview = write_route_overview(onboarding_root, "repo-a", "src", verified_commit)
+
+            rows = drift.classify_sidecar_onboarding_units(
+                overview,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].classification, "up to date")
+            self.assertEqual(rows[0].source_file, "src")
+
+    def test_drift_detects_changed_route_local_overview_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            verified_commit = commit_file(repo, "src/service.py", "print('old')\n", "Add service")
+            onboarding_root = workspace / "memory" / "onboarding"
+            overview = write_route_overview(onboarding_root, "repo-a", "src", verified_commit)
+            commit_file(repo, "src/service.py", "print('new')\n", "Change service")
+
+            rows = drift.classify_sidecar_onboarding_units(
+                overview,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertEqual(rows[0].classification, "drifted")
+            self.assertIn("Source route changed", rows[0].note)
+
+    def test_drift_detects_clean_entity_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            commit_file(repo, "src/entity.py", "class Entity:\n    pass\n", "Add entity")
+            fingerprint = drift.compute_git_blob_set_fingerprint(repo, ["src/entity.py"])
+            onboarding_root = workspace / "memory" / "onboarding"
+            catalog = write_entity_catalog(
+                onboarding_root,
+                "repo-a",
+                [("Entity", drift.GIT_BLOB_SET_ALGORITHM, fingerprint, ["src/entity.py"])],
+            )
+
+            rows = drift.classify_sidecar_onboarding_units(
+                catalog,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].source_file, "entity:Entity")
+            self.assertEqual(rows[0].classification, "up to date")
+
+    def test_drift_detects_entity_fingerprint_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            commit_file(repo, "src/entity.py", "class Entity:\n    pass\n", "Add entity")
+            fingerprint = drift.compute_git_blob_set_fingerprint(repo, ["src/entity.py"])
+            onboarding_root = workspace / "memory" / "onboarding"
+            catalog = write_entity_catalog(
+                onboarding_root,
+                "repo-a",
+                [("Entity", drift.GIT_BLOB_SET_ALGORITHM, fingerprint, ["src/entity.py"])],
+            )
+            commit_file(repo, "src/entity.py", "class Entity:\n    name = 'changed'\n", "Change entity")
+
+            rows = drift.classify_sidecar_onboarding_units(
+                catalog,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertEqual(rows[0].classification, "drifted")
+            self.assertIn("fingerprint changed", rows[0].note)
+
+    def test_drift_detects_missing_entity_evidence_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            repo = workspace / "repo-a"
+            init_repo(repo, "main")
+            onboarding_root = workspace / "memory" / "onboarding"
+            catalog = write_entity_catalog(
+                onboarding_root,
+                "repo-a",
+                [("Entity", drift.GIT_BLOB_SET_ALGORITHM, "sha256:abc", ["src/missing.py"])],
+            )
+
+            rows = drift.classify_sidecar_onboarding_units(
+                catalog,
+                repo,
+                onboarding_root,
+                resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertEqual(rows[0].classification, "drifted")
+            self.assertIn("Entity evidence path missing", rows[0].note)
 
     def test_cross_repo_legacy_string_is_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

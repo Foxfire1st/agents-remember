@@ -7,6 +7,7 @@
 | sourceRoute | `<repo-root>` |
 | lastUpdated | <YYYY-MM-DDThh:mm> |
 | lastVerifiedCommitHash | `<full 40-char SHA or empty during bootstrap>` |
+| lastVerifiedCommitDate | <YYYY-MM-DDThh:mm:ss+00:00 or empty during bootstrap> |
 
 ## What This Repo Is
 

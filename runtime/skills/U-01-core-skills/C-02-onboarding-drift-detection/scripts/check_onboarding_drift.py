@@ -48,6 +48,13 @@ CLASSIFICATIONS = (
 ACTIONABLE_CLASSIFICATIONS = {"drifted", "missing verification", "missing", "orphaned", "unsupported"}
 INLINE_START_MARKER = "@ar-onboarding"
 INLINE_END_MARKER = "@ar-onboarding-end"
+GIT_BLOB_SET_ALGORITHM = "git-blob-set-v1"
+SIDECAR_DOC_TYPES = {
+    "file-level-onboarding",
+    "repo-overview",
+    "route-local-overview",
+    "repo-entity-catalog",
+}
 COMMON_BLOCK_DELIMITERS = {
     "/*": "*/",
     "<!--": "-->",
@@ -167,11 +174,19 @@ def is_file_level_onboarding(path: Path) -> bool:
     return metadata.get("doc_type") == "file-level-onboarding"
 
 
+def is_supported_sidecar_onboarding(path: Path) -> bool:
+    try:
+        metadata = parse_table_metadata(path)
+    except UnicodeDecodeError:
+        return False
+    return metadata.get("doc_type") in SIDECAR_DOC_TYPES
+
+
 def discover_onboarding_files(onboarding_root: Path) -> list[Path]:
     return sorted(
         path
         for path in onboarding_root.rglob("*.md")
-        if path.is_file() and is_file_level_onboarding(path)
+        if path.is_file() and is_supported_sidecar_onboarding(path)
     )
 
 
@@ -304,6 +319,360 @@ def classify_external_onboarding(onboarding_file: Path, repo_root: Path) -> Drif
     )
 
 
+def normalize_overview_route(source_route: str) -> str:
+    source_route = clean_scalar(source_route).strip()
+    if source_route in {"", ".", "`<repo-root>`", "<repo-root>", repo_root_placeholder()}:
+        return "."
+    return normalize_rel_path(source_route.strip("`"))
+
+
+def repo_root_placeholder() -> str:
+    return "<repo-root>"
+
+
+def local_route_change_note(repo_root: Path, source_route: str) -> str:
+    return local_change_note(repo_root, "." if source_route in {"", repo_root_placeholder()} else source_route)
+
+
+def classify_overview_onboarding(onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings) -> DriftRow:
+    metadata = parse_table_metadata(onboarding_file)
+    doc_type = metadata.get("doc_type", "")
+    repository = metadata.get("repository", repo_root.name)
+    source_route = normalize_overview_route(metadata.get("sourceRoute", "."))
+    last_hash = metadata.get("lastVerifiedCommitHash", "")
+    last_date = metadata.get("lastVerifiedCommitDate", "")
+    onboarding_ref = rel(onboarding_file, onboarding_root)
+
+    if not last_hash or not last_date:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_route,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=last_hash,
+            last_verified_date=last_date,
+            classification="missing verification",
+            trust="medium",
+            affected_sections="metadata; verification",
+            note=f"{doc_type or 'overview'} is missing lastVerifiedCommitHash or lastVerifiedCommitDate.",
+        )
+
+    if source_route != "." and not (repo_root / source_route).exists():
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_route,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=last_hash,
+            last_verified_date=last_date,
+            classification="orphaned",
+            trust="low",
+            affected_sections="all; source route missing",
+            note="Overview sourceRoute no longer exists.",
+        )
+
+    exists = run_git(repo_root, ["cat-file", "-e", f"{last_hash}^{{commit}}"])
+    if exists.returncode != 0:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_route,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=last_hash,
+            last_verified_date=last_date,
+            classification="drifted",
+            trust="medium",
+            affected_sections="overview; metadata",
+            note="Recorded overview verification commit is not available in git history.",
+        )
+
+    diff = run_git(repo_root, ["diff", "--quiet", last_hash, "HEAD", "--", source_route])
+    if diff.returncode == 0:
+        local_note = local_route_change_note(repo_root, source_route)
+        if local_note:
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_route,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=last_hash,
+                last_verified_date=last_date,
+                classification="drifted",
+                trust="medium",
+                affected_sections="overview; route summary; invariants",
+                note=local_note,
+            )
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_route,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=last_hash,
+            last_verified_date=last_date,
+            classification="up to date",
+            trust="high",
+            affected_sections="none",
+            note="No source-route diff since recorded overview verification commit.",
+        )
+    if diff.returncode == 1:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_route,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=last_hash,
+            last_verified_date=last_date,
+            classification="drifted",
+            trust="medium",
+            affected_sections="overview; route summary; invariants",
+            note="Source route changed since recorded overview verification commit.",
+        )
+    return DriftRow(
+        onboarding_file=onboarding_ref,
+        source_file=source_route,
+        repository=repository,
+        storage_mode=settings.mode,
+        last_verified_hash=last_hash,
+        last_verified_date=last_date,
+        classification="drifted",
+        trust="medium",
+        affected_sections="overview; metadata",
+        note=f"git diff failed: {diff.stderr.strip() or 'unknown git error'}",
+    )
+
+
+@dataclass
+class EntityFingerprint:
+    entity: str
+    algorithm: str
+    fingerprint: str
+    evidence_paths: list[str]
+
+
+def split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def split_evidence_paths(value: str) -> list[str]:
+    normalized = re.sub(r"<br\s*/?>", ";", value, flags=re.IGNORECASE)
+    paths: list[str] = []
+    for raw_path in normalized.split(";"):
+        source_path = clean_scalar(raw_path).strip().strip("`")
+        if not source_path or source_path.lower() in {"n/a", "none"}:
+            continue
+        paths.append(normalize_rel_path(source_path))
+    return paths
+
+
+def parse_entity_fingerprint_rows(path: Path) -> list[EntityFingerprint]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    in_section = False
+    headers: list[str] = []
+    rows: list[EntityFingerprint] = []
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("## "):
+            in_section = stripped == "## Entity Fingerprints"
+            headers = []
+            continue
+        if not in_section:
+            continue
+        if not stripped.startswith("|"):
+            if headers:
+                break
+            continue
+        cells = split_table_row(stripped)
+        if all(set(cell) <= {"-", ":"} for cell in cells):
+            continue
+        normalized_cells = [re.sub(r"\s+", "", cell).lower() for cell in cells]
+        if {"entity", "algorithm", "fingerprint", "evidencepaths"}.issubset(set(normalized_cells)):
+            headers = normalized_cells
+            continue
+        if not headers:
+            continue
+        row = {header: cells[index] if index < len(cells) else "" for index, header in enumerate(headers)}
+        entity = clean_scalar(row.get("entity", "")).strip()
+        algorithm = clean_scalar(row.get("algorithm", "")).strip("`")
+        fingerprint = clean_scalar(row.get("fingerprint", "")).strip("`")
+        evidence_paths = split_evidence_paths(row.get("evidencepaths", ""))
+        if entity:
+            rows.append(
+                EntityFingerprint(
+                    entity=entity,
+                    algorithm=algorithm,
+                    fingerprint=fingerprint,
+                    evidence_paths=evidence_paths,
+                )
+            )
+    return rows
+
+
+def git_stdout(repo_root: Path, args: list[str]) -> str:
+    result = run_git(repo_root, args)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return result.stdout.strip()
+
+
+def git_blob_hash(repo_root: Path, source_path: str) -> str:
+    return git_stdout(repo_root, ["rev-parse", f"HEAD:{source_path}"])
+
+
+def compute_git_blob_set_fingerprint(repo_root: Path, evidence_paths: list[str]) -> str:
+    lines: list[str] = []
+    for source_path in sorted(evidence_paths):
+        blob_hash = git_blob_hash(repo_root, source_path)
+        lines.append(f"{source_path}\0{blob_hash}\n")
+    digest = hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
+def entity_local_change_notes(repo_root: Path, evidence_paths: list[str]) -> list[str]:
+    notes: list[str] = []
+    for source_path in evidence_paths:
+        note = local_change_note(repo_root, source_path)
+        if note:
+            notes.append(f"{source_path}: {note}")
+    return notes
+
+
+def classify_entity_fingerprint(
+    onboarding_file: Path,
+    onboarding_root: Path,
+    repo_root: Path,
+    settings: StorageSettings,
+    repository: str,
+    last_updated: str,
+    row: EntityFingerprint,
+) -> DriftRow:
+    onboarding_ref = rel(onboarding_file, onboarding_root)
+    source_ref = f"entity:{row.entity}"
+    if row.algorithm != GIT_BLOB_SET_ALGORITHM:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_ref,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=row.fingerprint,
+            last_verified_date=last_updated,
+            classification="unsupported",
+            trust="low",
+            affected_sections=f"entity catalog; {row.entity}",
+            note=f"Unsupported entity fingerprint algorithm '{row.algorithm}'.",
+        )
+    if not row.fingerprint or not row.evidence_paths:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_ref,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=row.fingerprint,
+            last_verified_date=last_updated,
+            classification="missing verification",
+            trust="medium",
+            affected_sections=f"entity catalog; {row.entity}",
+            note="Entity fingerprint row is missing a fingerprint value or evidence paths.",
+        )
+    missing_paths = [source_path for source_path in row.evidence_paths if not (repo_root / source_path).exists()]
+    if missing_paths:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_ref,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=row.fingerprint,
+            last_verified_date=last_updated,
+            classification="drifted",
+            trust="low",
+            affected_sections=f"entity catalog; {row.entity}; source evidence",
+            note=f"Entity evidence path missing: {', '.join(missing_paths)}.",
+        )
+    try:
+        current = compute_git_blob_set_fingerprint(repo_root, row.evidence_paths)
+    except RuntimeError as error:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_ref,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=row.fingerprint,
+            last_verified_date=last_updated,
+            classification="drifted",
+            trust="low",
+            affected_sections=f"entity catalog; {row.entity}; source evidence",
+            note=f"Unable to compute entity fingerprint: {error}",
+        )
+
+    local_notes = entity_local_change_notes(repo_root, row.evidence_paths)
+    if current == row.fingerprint and not local_notes:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_ref,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=row.fingerprint,
+            last_verified_date=last_updated,
+            classification="up to date",
+            trust="high",
+            affected_sections="none",
+            note="Entity evidence fingerprint matches current HEAD.",
+        )
+    if current == row.fingerprint:
+        return DriftRow(
+            onboarding_file=onboarding_ref,
+            source_file=source_ref,
+            repository=repository,
+            storage_mode=settings.mode,
+            last_verified_hash=row.fingerprint,
+            last_verified_date=last_updated,
+            classification="drifted",
+            trust="medium",
+            affected_sections=f"entity catalog; {row.entity}; source evidence",
+            note="; ".join(local_notes),
+        )
+    note = "Entity evidence fingerprint changed since the catalog was refreshed."
+    if local_notes:
+        note = f"{note} Local changes also exist: {'; '.join(local_notes)}"
+    return DriftRow(
+        onboarding_file=onboarding_ref,
+        source_file=source_ref,
+        repository=repository,
+        storage_mode=settings.mode,
+        last_verified_hash=row.fingerprint,
+        last_verified_date=last_updated,
+        classification="drifted",
+        trust="medium",
+        affected_sections=f"entity catalog; {row.entity}; source evidence",
+        note=note,
+    )
+
+
+def classify_entity_catalog(onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings) -> list[DriftRow]:
+    metadata = parse_table_metadata(onboarding_file)
+    repository = metadata.get("repository", repo_root.name)
+    last_updated = metadata.get("lastUpdated", "")
+    rows = parse_entity_fingerprint_rows(onboarding_file)
+    if not rows:
+        return [
+            DriftRow(
+                onboarding_file=rel(onboarding_file, onboarding_root),
+                source_file="entity-catalog",
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash="",
+                last_verified_date=last_updated,
+                classification="missing verification",
+                trust="medium",
+                affected_sections="entity catalog; verification",
+                note="Repo entity catalog has no parseable Entity Fingerprints table.",
+            )
+        ]
+    return [
+        classify_entity_fingerprint(onboarding_file, onboarding_root, repo_root, settings, repository, last_updated, row)
+        for row in rows
+    ]
+
+
 def classify_external_source(source_file: str, repo_root: Path, onboarding_root: Path) -> DriftRow:
     onboarding_file = mirror_onboarding_path(onboarding_root, source_file)
     onboarding_ref = rel(onboarding_file, onboarding_root)
@@ -331,12 +700,43 @@ def classify_sidecar_onboarding(
     onboarding_root: Path,
     settings: StorageSettings,
 ) -> DriftRow:
+    rows = classify_sidecar_onboarding_units(onboarding_file, repo_root, onboarding_root, settings)
+    if len(rows) == 1:
+        return rows[0]
+    actionable = [row for row in rows if row.classification in ACTIONABLE_CLASSIFICATIONS]
     metadata = parse_table_metadata(onboarding_file)
+    return DriftRow(
+        onboarding_file=rel(onboarding_file, onboarding_root),
+        source_file="entity-catalog",
+        repository=metadata.get("repository", repo_root.name),
+        storage_mode=settings.mode,
+        last_verified_hash="",
+        last_verified_date=metadata.get("lastUpdated", ""),
+        classification="drifted" if actionable else "up to date",
+        trust="medium" if actionable else "high",
+        affected_sections="entity catalog",
+        note=f"{len(actionable)} actionable entity fingerprint rows." if actionable else "All entity fingerprint rows are up to date.",
+    )
+
+
+def classify_sidecar_onboarding_units(
+    onboarding_file: Path,
+    repo_root: Path,
+    onboarding_root: Path,
+    settings: StorageSettings,
+) -> list[DriftRow]:
+    metadata = parse_table_metadata(onboarding_file)
+    doc_type = metadata.get("doc_type", "")
+    if doc_type in {"repo-overview", "route-local-overview"}:
+        return [classify_overview_onboarding(onboarding_file, repo_root, onboarding_root, settings)]
+    if doc_type == "repo-entity-catalog":
+        return classify_entity_catalog(onboarding_file, repo_root, onboarding_root, settings)
+
     source_file = normalize_rel_path(metadata.get("path", ""))
     storage_mode = resolve_storage_for_source(source_file, settings, repo_root.name) if source_file else settings.mode
     onboarding_ref = rel(onboarding_file, onboarding_root)
     if storage_mode == "disabled":
-        return DriftRow(
+        return [DriftRow(
             onboarding_file=onboarding_ref,
             source_file=source_file,
             repository=metadata.get("repository", repo_root.name),
@@ -347,9 +747,9 @@ def classify_sidecar_onboarding(
             trust="high",
             affected_sections="none",
             note="Source path is excluded by pathRules.",
-        )
+        )]
     if not sidecar_storage_label(storage_mode):
-        return DriftRow(
+        return [DriftRow(
             onboarding_file=onboarding_ref,
             source_file=source_file,
             repository=metadata.get("repository", repo_root.name),
@@ -360,11 +760,11 @@ def classify_sidecar_onboarding(
             trust="low",
             affected_sections="resolver; storage configuration",
             note=f"Sidecar onboarding exists but the source path resolves to '{storage_mode}'.",
-        )
+        )]
     row = classify_external_onboarding(onboarding_file, repo_root)
     row.onboarding_file = onboarding_ref
     row.storage_mode = storage_mode
-    return row
+    return [row]
 
 
 @dataclass
@@ -768,8 +1168,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"code repository root is not a git repository: {code_repository_root}\n{git_check.stderr.strip()}")
     settings = context.storage
     rows = [
-        classify_sidecar_onboarding(path, code_repository_root, context.onboarding_root, settings)
+        row
         for path in discover_onboarding_files(context.onboarding_root)
+        for row in classify_sidecar_onboarding_units(path, code_repository_root, context.onboarding_root, settings)
     ]
     rows.extend(classify_inline_source(path, code_repository_root) for path in discover_inline_onboarding_sources(code_repository_root, settings))
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))

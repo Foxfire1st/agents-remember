@@ -59,9 +59,11 @@ Invoke `C-08-ar-coordination-context-resolver` for the target repository and use
 
 C-08 resolves `onboarding.storage` and `onboarding.pathRules` separately. Storage decides where eligible onboarding artifacts live. `pathRules` decide whether a source path or file type is eligible for onboarding, and they apply in both internal-memory and external-memory mode. In external-memory JSON settings, `pathRules` can be scoped per repository with `path: <repo-name>` or per repository subtree with `path: <repo-name>/<subtree>`.
 
-Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal memory or external memory. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
+Primary drift detection supports sidecar markdown onboarding under the resolved onboarding root, whether that root is repo-local internal memory or external memory. It classifies file-level onboarding, root repo overviews, route-local overviews, and repo entity catalogs when those artifacts carry supported `doc_type` metadata. It may also classify inline onboarding blocks when storage settings resolve a source path to `inline`.
 
-If repo-level entity catalogs or overview files are in scope, treat them as follow-up maintenance surfaces rather than trying to diff them directly against one source file.
+Root and route-local overviews do not map one-to-one to a source file. They are verified against their recorded `sourceRoute`: C-02 compares that route from `lastVerifiedCommitHash` through `HEAD` and checks the same route for staged or unstaged local changes.
+
+Repo entity catalogs are verified through deterministic entity fingerprints. Each entity fingerprint row records `git-blob-set-v1`, an aggregate hash over a curated set of repo-relative evidence paths. The script sorts the paths, resolves each `HEAD:<path>` Git blob hash, hashes the `path + blob_hash` list, and compares the stored aggregate. Agent judgment belongs in choosing or refreshing the evidence path set; C-02 only checks the stored fingerprint deterministically.
 
 ### 2. Extract verification metadata
 
@@ -74,11 +76,26 @@ For external mirrored onboarding files, read:
 3. `lastVerifiedCommitHash`
 4. `lastVerifiedCommitDate`
 
+For repo and route-local overviews, read:
+
+1. `repository`
+2. `doc_type`
+3. `sourceRoute`
+4. `lastVerifiedCommitHash`
+5. `lastVerifiedCommitDate`
+
+For repo entity catalogs, read:
+
+1. `repository`
+2. `doc_type`
+3. `lastUpdated`
+4. the `Entity Fingerprints` table with `Entity`, `Algorithm`, `Fingerprint`, and `Evidence Paths` columns
+
 For inline onboarding blocks, read the marker-delimited block and use its metadata such as `sourceDigest` and `verifiedAt`.
 
 If the onboarding unit is missing the metadata needed for verification, classify it as missing verification and flag it for maintenance.
 
-### 3. Compare the source file against the recorded verification point
+### 3. Compare the source evidence against the recorded verification point
 
 Use the recorded metadata plus the resolved storage mode to classify the current state:
 
@@ -87,11 +104,13 @@ Use the recorded metadata plus the resolved storage mode to classify the current
 3. If sidecar onboarding is expected but the mirrored markdown file is missing, classify it as missing.
 4. If inline onboarding is expected but the marker-delimited block is missing, classify it as missing.
 5. If the external or inline metadata needed for verification is empty, classify it as missing verification.
-6. For sidecar onboarding, compare the source file against the recorded commit through `HEAD`, then check that same source path for staged or unstaged local changes.
-7. For inline onboarding, recompute the source digest from the source body with the onboarding block removed.
-8. If verification matches, classify the onboarding unit as up to date.
-9. If verification does not match, classify it as drifted.
-10. If the storage mode or source encoding cannot be handled safely, classify it as unsupported.
+6. For file-level sidecar onboarding, compare the source file against the recorded commit through `HEAD`, then check that same source path for staged or unstaged local changes.
+7. For repo and route-local overviews, compare the recorded `sourceRoute` against the recorded commit through `HEAD`, then check that same route for staged or unstaged local changes.
+8. For repo entity catalogs, recompute each entity's `git-blob-set-v1` fingerprint from the listed evidence paths. Missing evidence paths, unsupported algorithms, missing fingerprints, or fingerprint mismatches are actionable drift.
+9. For inline onboarding, recompute the source digest from the source body with the onboarding block removed.
+10. If verification matches, classify the onboarding unit as up to date.
+11. If verification does not match, classify it as drifted.
+12. If the storage mode, algorithm, or source encoding cannot be handled safely, classify it as unsupported.
 
 ### 4. Qualify how trustworthy the onboarding still is
 
@@ -107,7 +126,8 @@ Also note which sections are likely affected:
 2. invariants and boundaries
 3. conventions
 4. cross-repo references
-5. repo-level entity catalog follow-up when entity shape or naming drift likely changed
+5. overview route summaries when a governed route changed
+6. repo-level entity catalog follow-up when an entity fingerprint drifted
 
 ### 5. Produce the maintenance artifact
 
@@ -137,8 +157,10 @@ The handoff should identify:
 
 1. which onboarding files need refresh
 2. which files are orphaned and may need deletion
-3. whether related repo-level catalogs or overview files likely need follow-up
-4. which stale onboarding can still be used directionally until maintenance finishes
+3. which overview source routes changed
+4. which entity fingerprints changed and which evidence paths caused the stale signal
+5. whether related repo-level catalogs or overview files likely need follow-up
+6. which stale onboarding can still be used directionally until maintenance finishes
 
 If no actionable files exist, return a clean summary and stop.
 If actionable files exist, consult this repo's [AGENTS.md](../../../AGENTS.md) "Onboarding Rules" section.

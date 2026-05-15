@@ -677,6 +677,8 @@ overview.md
 
 Use `templates/repo-overview-template.md`.
 
+Root overview verification is route-based. Record `sourceRoute` as `<repo-root>` and fill both `lastVerifiedCommitHash` and `lastVerifiedCommitDate` from the source commit that the overview was checked against. C-02 later compares that recorded commit to `HEAD` across the whole repository route and also checks for local staged or unstaged changes.
+
 The synthesis agent reads:
 
 - `bootstrap/STATE.md`
@@ -859,6 +861,8 @@ Overview workers write durable route-local overviews:
 ```
 
 Use `templates/route-local-overview-template.md`.
+
+Route-local overview verification is also route-based. Record the governed repo-relative source route, then fill `lastVerifiedCommitHash` and `lastVerifiedCommitDate` from the source commit that the overview was checked against. A later change anywhere under that route is allowed to trigger C-02 drift even if the prose still turns out to be correct after review.
 
 A route-local overview must include:
 

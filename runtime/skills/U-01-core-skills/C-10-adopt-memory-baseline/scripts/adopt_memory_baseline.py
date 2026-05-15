@@ -53,8 +53,9 @@ def run_drift(context, report_path: Path | None):
     if not context.onboarding_root.exists():
         raise RuntimeError(f"onboarding root does not exist: {context.onboarding_root}")
     rows = [
-        drift.classify_sidecar_onboarding(path, context.code_repository_root, context.onboarding_root, context.storage)
+        row
         for path in drift.discover_onboarding_files(context.onboarding_root)
+        for row in drift.classify_sidecar_onboarding_units(path, context.code_repository_root, context.onboarding_root, context.storage)
     ]
     rows.extend(
         drift.classify_inline_source(path, context.code_repository_root)
