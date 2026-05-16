@@ -12,7 +12,7 @@ cases/<case-id>/
 The mature memory repo for a case is not stored here. The case manifest pins its URL and commit, and `prepare` clones it into the matching generated workspace:
 
 ```text
-workspaces/<case-id>/ar-coordination/memory-repos/ar-<repo>/
+workspaces/<case-id>/with-memory/ar-coordination/memory-repos/ar-<repo>/
 ```
 
-The workspace itself is not committed. `prepare` creates it from the manifest plus templates, then clones the pinned code and memory repos into the paths C-08 uses during replay.
+The workspace itself is not committed. `prepare` creates it from the manifest plus templates, then creates one source-only environment and one memory-enabled environment. The source-only environment has only a pinned code checkout. The memory-enabled environment has the same pinned code checkout plus the memory repo path C-08 uses during replay.

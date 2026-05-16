@@ -19,6 +19,8 @@
   },
   "workspace": {
     "fixturePath": "workspaces/agents-remember-md-drift-workflow",
+    "sourceOnlyRoot": "source-only",
+    "withMemoryRoot": "with-memory",
     "repoRelativePath": "repos/agents-remember-md",
     "coordinationRoot": "ar-coordination"
   },
@@ -31,13 +33,13 @@
         {
           "id": "no-onboarding",
           "promptPath": "prompts/explain-drift-workflow.no-onboarding.md",
-          "cwd": "workspaces/agents-remember-md-drift-workflow/repos/agents-remember-md",
+          "cwd": "workspaces/agents-remember-md-drift-workflow/source-only",
           "allowMemory": false
         },
         {
           "id": "with-onboarding",
           "promptPath": "prompts/explain-drift-workflow.with-onboarding.md",
-          "cwd": "workspaces/agents-remember-md-drift-workflow",
+          "cwd": "workspaces/agents-remember-md-drift-workflow/with-memory",
           "allowMemory": true
         }
       ]

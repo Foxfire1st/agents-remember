@@ -23,6 +23,7 @@ AGENTS_MD_TARGETS = {
 IGNORED_COPY_NAMES = {"__pycache__"}
 IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
 BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
+BENCHMARK_SOURCE_IGNORE_PATHS = {Path("workspaces"), Path("user-runs")}
 
 
 @dataclass
@@ -122,8 +123,12 @@ def remove_path(path: Path, summary: InstallSummary, dry_run: bool) -> None:
     summary.removed_paths += 1
 
 
+def is_path_match(relative: Path, paths: set[Path]) -> bool:
+    return any(relative == path or path in relative.parents for path in paths)
+
+
 def is_preserved_path(relative: Path, preserve: set[Path]) -> bool:
-    return any(relative == path or path in relative.parents for path in preserve)
+    return is_path_match(relative, preserve)
 
 
 def is_ignored_package_path(relative: Path) -> bool:
@@ -137,24 +142,34 @@ def prune_tree(
     dry_run: bool,
     *,
     preserve: set[Path] | None = None,
+    ignore: set[Path] | None = None,
 ) -> None:
     if not destination_root.exists() or destination_root.is_symlink():
         return
 
     preserve = preserve or set()
+    ignore = ignore or set()
     for destination in sorted(destination_root.rglob("*"), key=lambda path: len(path.parts), reverse=True):
         relative = destination.relative_to(destination_root)
         if is_preserved_path(relative, preserve):
             continue
-        if is_ignored_package_path(relative) or not (source_root / relative).exists():
+        if is_path_match(relative, ignore) or is_ignored_package_path(relative) or not (source_root / relative).exists():
             remove_path(destination, summary, dry_run)
 
 
-def copy_tree(source_root: Path, destination_root: Path, summary: InstallSummary, dry_run: bool) -> None:
+def copy_tree(
+    source_root: Path,
+    destination_root: Path,
+    summary: InstallSummary,
+    dry_run: bool,
+    *,
+    ignore: set[Path] | None = None,
+) -> None:
     ensure_dir(destination_root, summary, dry_run)
+    ignore = ignore or set()
     for source in sorted(source_root.rglob("*")):
         relative = source.relative_to(source_root)
-        if is_ignored_package_path(relative):
+        if is_path_match(relative, ignore) or is_ignored_package_path(relative):
             continue
         destination = destination_root / relative
         if source.is_dir():
@@ -211,8 +226,15 @@ def install_benchmarks(source_root: Path, coordination_root: Path, summary: Inst
     ensure_gitignore_entry(coordination_root / ".gitignore", BENCHMARKS_GITIGNORE_ENTRY, summary, dry_run)
 
     destination_root = coordination_root / "benchmarks"
-    prune_tree(benchmarks_root, destination_root, summary, dry_run, preserve={Path("user-runs")})
-    copy_tree(benchmarks_root, destination_root, summary, dry_run)
+    prune_tree(
+        benchmarks_root,
+        destination_root,
+        summary,
+        dry_run,
+        preserve={Path("user-runs")},
+        ignore={Path("workspaces")},
+    )
+    copy_tree(benchmarks_root, destination_root, summary, dry_run, ignore=BENCHMARK_SOURCE_IGNORE_PATHS)
 
 
 def install_runtime(

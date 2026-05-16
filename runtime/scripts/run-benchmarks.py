@@ -210,6 +210,10 @@ def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> N
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def git_command(*args: str) -> list[str]:
+    return ["git", "-c", "core.longpaths=true", *args]
+
+
 def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool) -> None:
     url = str(repository["url"])
     commit = str(repository["commit"])
@@ -218,16 +222,39 @@ def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool) -> 
     else:
         repo_root.parent.mkdir(parents=True, exist_ok=True)
     if not (repo_root / ".git").exists():
-        run_command(["git", "clone", url, str(repo_root)], dry_run)
+        run_command(git_command("clone", url, str(repo_root)), dry_run)
     else:
-        run_command(["git", "-C", str(repo_root), "fetch", "--all", "--tags"], dry_run)
-    run_command(["git", "-C", str(repo_root), "checkout", "--detach", commit], dry_run)
-    run_command(["git", "-C", str(repo_root), "reset", "--hard", commit], dry_run)
-    run_command(["git", "-C", str(repo_root), "clean", "-fdx"], dry_run)
+        run_command(git_command("-C", str(repo_root), "fetch", "--all", "--tags"), dry_run)
+        run_command(git_command("-C", str(repo_root), "clean", "-fdx"), dry_run)
+    run_command(git_command("-C", str(repo_root), "checkout", "--detach", commit), dry_run)
+    run_command(git_command("-C", str(repo_root), "reset", "--hard", commit), dry_run)
+    run_command(git_command("-C", str(repo_root), "clean", "-fdx"), dry_run)
 
 
 def workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
     return benchmarks_root / str(case.workspace["fixturePath"])
+
+
+def source_only_workspace_path(case: BenchmarkCase) -> Path:
+    configured = case.workspace.get("sourceOnlyRoot")
+    if configured:
+        return Path(str(configured))
+    return Path("source-only")
+
+
+def with_memory_workspace_path(case: BenchmarkCase) -> Path:
+    configured = case.workspace.get("withMemoryRoot") or case.workspace.get("withOnboardingRoot")
+    if configured:
+        return Path(str(configured))
+    return Path("with-memory")
+
+
+def source_only_workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
+    return workspace_root(benchmarks_root, case) / source_only_workspace_path(case)
+
+
+def with_memory_workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
+    return workspace_root(benchmarks_root, case) / with_memory_workspace_path(case)
 
 
 def repository_path(case: BenchmarkCase) -> Path:
@@ -258,7 +285,7 @@ def render_workspace_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run:
 
     repo_relative_path = repository_path(case).as_posix()
     coordination_root = coordination_path(case).as_posix()
-    destination = workspace_root(benchmarks_root, case) / "AGENTS.md"
+    destination = with_memory_workspace_root(benchmarks_root, case) / "AGENTS.md"
     rendered = render_template(
         template_path.read_text(encoding="utf-8"),
         {
@@ -277,6 +304,20 @@ def render_workspace_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run:
     return destination
 
 
+def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
+    for relative in (Path("AGENTS.md"), Path("repos"), Path("ar-coordination")):
+        path = root / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        if dry_run:
+            print(f"Would remove legacy workspace path {path}")
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
 def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: bool) -> Path:
     memory_repo = coordination_root / "memory-repos" / memory_repo_name(case)
     memory_repository = case.memory_repository
@@ -290,13 +331,18 @@ def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: b
 def prepare_case(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> None:
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
-    repo_root = root / repository_path(case)
+    source_only_root = source_only_workspace_root(benchmarks_root, case)
+    with_memory_root = with_memory_workspace_root(benchmarks_root, case)
+    source_only_repo_root = source_only_root / repository_path(case)
+    with_memory_repo_root = with_memory_root / repository_path(case)
     print(f"Preparing {case.case_id}")
 
+    prune_legacy_workspace_paths(root, dry_run)
     render_workspace_agents(benchmarks_root, case, dry_run)
-    prepare_repo(repository, repo_root, dry_run)
+    prepare_repo(repository, source_only_repo_root, dry_run)
+    prepare_repo(repository, with_memory_repo_root, dry_run)
 
-    coordination_root = root / coordination_path(case)
+    coordination_root = with_memory_root / coordination_path(case)
     sync_runtime_assets(coordination_root, dry_run)
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run)
 
