@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import shutil
 import subprocess
@@ -469,6 +470,7 @@ def run_case(
     variant_id: str | None,
     repetitions: int | None,
     codex_bin: str,
+    jobs: int | None,
     dry_run: bool,
     skip_prepare: bool,
 ) -> Path:
@@ -482,23 +484,63 @@ def run_case(
     else:
         output_root.mkdir(parents=True, exist_ok=False)
 
+    tasks: list[tuple[dict[str, Any], dict[str, Any], int]] = []
+    default_jobs = 1
     for prompt in case_prompt(case, prompt_id):
         prompt_runs = int(repetitions or prompt.get("runs") or 3)
-        for variant in prompt_variant(prompt, variant_id):
-            for repetition in range(1, prompt_runs + 1):
-                run_one(
-                    benchmarks_root=benchmarks_root,
-                    case=case,
-                    prompt=prompt,
-                    variant=variant,
-                    repetition=repetition,
-                    output_root=output_root,
-                    codex_bin=codex_bin,
-                    dry_run=dry_run,
+        variants = prompt_variant(prompt, variant_id)
+        default_jobs = max(default_jobs, len(variants))
+        for repetition in range(1, prompt_runs + 1):
+            for variant in variants:
+                tasks.append((prompt, variant, repetition))
+
+    if dry_run:
+        for prompt, variant, repetition in tasks:
+            run_one(
+                benchmarks_root=benchmarks_root,
+                case=case,
+                prompt=prompt,
+                variant=variant,
+                repetition=repetition,
+                output_root=output_root,
+                codex_bin=codex_bin,
+                dry_run=True,
+            )
+        return output_root
+
+    max_workers = jobs or default_jobs
+    if max_workers < 1:
+        raise RuntimeError("--jobs must be greater than zero")
+
+    failures: list[str] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_task = {
+            executor.submit(
+                run_one,
+                benchmarks_root=benchmarks_root,
+                case=case,
+                prompt=prompt,
+                variant=variant,
+                repetition=repetition,
+                output_root=output_root,
+                codex_bin=codex_bin,
+                dry_run=False,
+            ): (prompt, variant, repetition)
+            for prompt, variant, repetition in tasks
+        }
+        for future in concurrent.futures.as_completed(future_to_task):
+            prompt, variant, repetition = future_to_task[future]
+            try:
+                future.result()
+            except Exception as error:
+                failures.append(
+                    f"{prompt.get('id')}/{variant.get('id')}/run-{repetition:03d}: {error}"
                 )
 
-    if not dry_run:
-        write_summary(output_root, analyze_run_root(output_root))
+    write_summary(output_root, analyze_run_root(output_root))
+    if failures:
+        joined = "\n".join(f"  - {failure}" for failure in failures)
+        raise RuntimeError(f"benchmark run completed with failed subprocesses:\n{joined}")
     return output_root
 
 
@@ -693,6 +735,7 @@ def command_run(args: argparse.Namespace) -> int:
             variant_id=args.variant,
             repetitions=args.repetitions,
             codex_bin=args.codex_bin,
+            jobs=args.jobs,
             dry_run=args.dry_run,
             skip_prepare=args.skip_prepare,
         )
@@ -738,6 +781,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--variant", help="Run only one variant id.")
     run_parser.add_argument("--repetitions", type=int, help="Override repetitions per prompt variant.")
     run_parser.add_argument("--codex-bin", default="codex", help="Codex executable to run.")
+    run_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        help="Maximum concurrent Codex runs. Defaults to the number of selected variants.",
+    )
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument("--skip-prepare", action="store_true", help="Use the existing workspace fixture state.")
     run_parser.set_defaults(func=command_run)

@@ -2,6 +2,11 @@ You are evaluating the Agents Remember drift-detection workflow.
 
 Use `repos/agents-remember-md` as the target source checkout. Use the benchmark-local `ar-coordination/` directory for Agents Remember context.
 
+Execution discipline:
+This is a non-interactive benchmark run. Do not ask the user questions, request
+approval, or pause for follow-up. Make reasonable assumptions from the available
+source and memory evidence and complete the primary task in one final answer.
+
 Run control:
 The required C-08/C-02 onboarding drift gate is startup work only. Passing the drift check is not task completion.
 
