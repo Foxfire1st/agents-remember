@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import os
 import shutil
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,7 @@ AGENTS_MD_TARGETS = {
 
 IGNORED_COPY_NAMES = {"__pycache__"}
 IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
+BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
 
 
 @dataclass
@@ -78,14 +81,44 @@ def copy_file(source: Path, destination: Path, summary: InstallSummary, dry_run:
     summary.copied_files += 1
 
 
+def removable_path(path: Path) -> Path:
+    if sys.platform != "win32":
+        return path
+
+    resolved = path.resolve()
+    text = str(resolved)
+    if text.startswith("\\\\?\\"):
+        return resolved
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text.lstrip("\\"))
+    return Path("\\\\?\\" + text)
+
+
+def remove_readonly(function, path: str, exc_info) -> None:
+    error = exc_info[1]
+    if not isinstance(error, PermissionError):
+        raise error
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def unlink_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
 def remove_path(path: Path, summary: InstallSummary, dry_run: bool) -> None:
     if not path.exists() and not path.is_symlink():
         return
     if not dry_run:
+        target = removable_path(path)
         if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
+            shutil.rmtree(target, onerror=remove_readonly)
         else:
-            path.unlink()
+            unlink_file(target)
     summary.removed_paths += 1
 
 
@@ -130,6 +163,23 @@ def copy_tree(source_root: Path, destination_root: Path, summary: InstallSummary
             copy_file(source, destination, summary, dry_run)
 
 
+def ensure_gitignore_entry(path: Path, entry: str, summary: InstallSummary, dry_run: bool) -> None:
+    if path.exists() and path.is_dir():
+        raise RuntimeError(f"cannot update .gitignore because a directory already exists: {path}")
+
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    entries = {line.strip() for line in existing.splitlines()}
+    if entry in entries:
+        summary.unchanged_files += 1
+        return
+
+    if not dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        separator = "" if not existing or existing.endswith(("\n", "\r\n")) else "\n"
+        path.write_text(f"{existing}{separator}{entry}\n", encoding="utf-8")
+    summary.copied_files += 1
+
+
 def require_runtime_tree(runtime_root: Path) -> None:
     required = [
         runtime_root / "agents-md-files",
@@ -157,6 +207,8 @@ def require_benchmarks_tree(benchmarks_root: Path) -> None:
 def install_benchmarks(source_root: Path, coordination_root: Path, summary: InstallSummary, dry_run: bool) -> None:
     benchmarks_root = source_root / "benchmarks"
     require_benchmarks_tree(benchmarks_root)
+
+    ensure_gitignore_entry(coordination_root / ".gitignore", BENCHMARKS_GITIGNORE_ENTRY, summary, dry_run)
 
     destination_root = coordination_root / "benchmarks"
     prune_tree(benchmarks_root, destination_root, summary, dry_run, preserve={Path("user-runs")})
