@@ -8,14 +8,14 @@
   "repository": {
     "name": "agents-remember-md",
     "url": "https://github.com/Foxfire1st/ai-infinite-context.git",
-    "commit": "962fc96005d7141aaeb905afa63c374f07cae966",
-    "fileCount": 103,
+    "commit": "403883337d2d0479dc2da02d1ce2a1a0f3983b93",
+    "fileCount": 104,
     "fileCountScope": "Tracked README.md, AGENTS.md, installer/**, and runtime/** files at the pinned commit."
   },
   "memoryRepository": {
     "name": "ar-agents-remember-md",
     "url": "https://github.com/Foxfire1st/ar-agents-remember-md.git",
-    "commit": "16e4143ab6fb30b06809db4baf5882825fa5cfb5"
+    "commit": "8ff8b843d57a67da0abfc7ce4af42b25ac9a8cfa"
   },
   "workspace": {
     "fixturePath": "workspaces/agents-remember-md-drift-workflow",

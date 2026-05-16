@@ -27,7 +27,7 @@ Then inspect or run them from the installed runtime:
 
 | Case                                | Size (files) | Repository                                                                                            | Status        |
 | ----------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------- | ------------- |
-| `agents-remember-md-drift-workflow` | ~270         | `https://github.com/Foxfire1st/ai-infinite-context.git` at `962fc96005d7141aaeb905afa63c374f07cae966` | draft fixture |
+| `agents-remember-md-drift-workflow` | 104          | `https://github.com/Foxfire1st/ai-infinite-context.git` at `403883337d2d0479dc2da02d1ce2a1a0f3983b93` | draft fixture |
 
 ## Layout
 
