@@ -7,6 +7,7 @@ Requires Python 3.10+ and git. Uses only the Python standard library.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -44,6 +45,7 @@ if RESOLVER_SPEC is None or RESOLVER_SPEC.loader is None:
 resolver = importlib.util.module_from_spec(RESOLVER_SPEC)
 sys.modules[RESOLVER_SPEC.name] = resolver
 RESOLVER_SPEC.loader.exec_module(resolver)
+ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
 
 
 def run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -437,8 +439,140 @@ def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> di
     }
 
 
+def markdown_table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def normalized_table_cell(cell: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", cell.lower())
+
+
+def parse_entity_fingerprint_rows(catalog_path: Path) -> list[dict[str, object]]:
+    if not catalog_path.exists():
+        return []
+    lines = catalog_path.read_text(encoding="utf-8").splitlines()
+    header: dict[str, int] | None = None
+    start_index = 0
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = markdown_table_cells(line)
+        normalized = {normalized_table_cell(cell): position for position, cell in enumerate(cells)}
+        required = {"entity", "algorithm", "fingerprint", "evidencepaths"}
+        if required.issubset(normalized):
+            header = {key: normalized[key] for key in required}
+            start_index = index + 2
+            break
+    if header is None:
+        return []
+
+    rows: list[dict[str, object]] = []
+    for index in range(start_index, len(lines)):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            break
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = markdown_table_cells(line)
+        if len(cells) <= max(header.values()):
+            continue
+        algorithm = cells[header["algorithm"]].strip("`")
+        evidence_cell = cells[header["evidencepaths"]]
+        rows.append({
+            "line_index": index,
+            "entity": cells[header["entity"]].strip("`"),
+            "algorithm": algorithm,
+            "fingerprint": cells[header["fingerprint"]].strip("`"),
+            "evidence_paths": re.findall(r"`([^`]+)`", evidence_cell),
+        })
+    return rows
+
+
+def entity_fingerprint_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
+    changed = set(changed_paths)
+    catalog_path = context.onboarding_root / "entities.md"
+    required: list[dict[str, object]] = []
+    unsupported: list[dict[str, str]] = []
+    for row in parse_entity_fingerprint_rows(catalog_path):
+        evidence_paths = list(row["evidence_paths"])
+        affected_paths = sorted(changed.intersection(evidence_paths))
+        if not affected_paths:
+            continue
+        entity = str(row["entity"])
+        if row["algorithm"] != ENTITY_FINGERPRINT_ALGORITHM:
+            unsupported.append({
+                "entity": entity,
+                "algorithm": str(row["algorithm"]),
+            })
+            continue
+        required.append({
+            "entity": entity,
+            "onboarding_file": catalog_path.as_posix(),
+            "evidence_paths": evidence_paths,
+            "affected_paths": affected_paths,
+        })
+    return {
+        "required": required,
+        "unsupported": unsupported,
+    }
+
+
+def compute_git_blob_set_fingerprint(repo_root: Path, evidence_paths: list[str]) -> str:
+    lines: list[str] = []
+    for source_path in sorted(evidence_paths):
+        blob_hash = require_git(repo_root, ["rev-parse", f"HEAD:{source_path}"])
+        lines.append(f"{source_path}\0{blob_hash}\n")
+    digest = hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
+def refresh_entity_fingerprints_for_context(context, changed_paths: list[str]) -> list[dict[str, object]]:
+    plan = entity_fingerprint_refresh_plan_for_context(context, changed_paths)
+    unsupported = plan["unsupported"]
+    if unsupported:
+        details = ", ".join(f"{item['entity']} ({item['algorithm']})" for item in unsupported)
+        raise RuntimeError(
+            "external-memory closeout requires supported entity fingerprint rows before memory commit; "
+            f"unsupported rows: {details}. Run C-05 create-or-update-onboarding-files, then rerun closeout."
+        )
+    required = list(plan["required"])
+    if not required:
+        return []
+
+    catalog_path = Path(required[0]["onboarding_file"])
+    lines = catalog_path.read_text(encoding="utf-8").splitlines()
+    refreshed: list[dict[str, object]] = []
+    rows_by_entity = {str(row["entity"]): row for row in parse_entity_fingerprint_rows(catalog_path)}
+    for item in required:
+        entity = str(item["entity"])
+        row = rows_by_entity[entity]
+        fingerprint = compute_git_blob_set_fingerprint(context.code_repository_root, list(item["evidence_paths"]))
+        line_index = int(row["line_index"])
+        old_fingerprint = str(row["fingerprint"])
+        if old_fingerprint:
+            lines[line_index] = lines[line_index].replace(old_fingerprint, fingerprint, 1)
+        else:
+            raise RuntimeError(
+                "external-memory closeout requires entity fingerprint values before memory commit; "
+                f"{catalog_path.as_posix()} row {entity!r} is missing a fingerprint. "
+                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            )
+        refreshed.append({
+            "entity": entity,
+            "onboarding_file": catalog_path.as_posix(),
+            "fingerprint": fingerprint,
+            "affected_paths": item["affected_paths"],
+        })
+    catalog_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return refreshed
+
+
 def onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
     return onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
+
+
+def entity_fingerprint_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+    return entity_fingerprint_refresh_plan_for_context(contract_context(contract), changed_paths)
 
 
 def validate_onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
@@ -515,18 +649,22 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
         "missing": [],
         "unsupported": [],
     }
+    entity_refresh = entity_fingerprint_refresh_plan(contract, changed_paths) if contract.memory_mode == "external" else {
+        "required": [],
+        "unsupported": [],
+    }
     payload = {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
+        "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata and affected entity fingerprints to that code commit, then commit memory and ledger.",
         "next_action": "request-commit-approval",
         "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved --approval-note <note>",
         "commit_approval_required": True,
         "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
         "closeout_order": [
             "commit-code",
-            "refresh-onboarding-metadata",
+            "refresh-onboarding-metadata-and-entity-fingerprints",
             "commit-memory-content",
             "update-ledger",
             "commit-ledger",
@@ -534,6 +672,7 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
         ],
         "changed_code_paths": changed_paths,
         "onboarding_metadata_refresh": metadata_refresh,
+        "entity_fingerprint_refresh": entity_refresh,
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -545,6 +684,7 @@ def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespac
                 "message": args.memory_commit_message,
                 "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
                 "metadata_refresh_after_code_commit": contract.memory_mode == "external",
+                "entity_fingerprint_refresh_after_code_commit": contract.memory_mode == "external",
             },
             "ledger": {
                 "would_update": contract.memory_mode == "external",
@@ -591,6 +731,7 @@ def command_closeout(args: argparse.Namespace) -> int:
         if contract.memory_worktree is None or contract.ledger_path is None:
             raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
         refreshed_onboarding = refresh_onboarding_metadata(contract, changed_paths, code_commit, code_commit_date)
+        refreshed_entities = refresh_entity_fingerprints_for_context(contract_context(contract), changed_paths)
         memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
         ledger = load_ledger(contract.ledger_path)
         write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
@@ -616,6 +757,7 @@ def command_closeout(args: argparse.Namespace) -> int:
         "memory_content_commit": memory_commit,
         "ledger_commit": ledger_commit,
         "refreshed_onboarding": refreshed_onboarding,
+        "refreshed_entities": refreshed_entities if contract.memory_mode == "external" else [],
     }, indent=2))
     return 0
 
@@ -640,6 +782,7 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
     memory_dirty = worktree_dirty(context.memory_root)
     changed_paths = changed_worktree_paths(context.code_repository_root)
     metadata_refresh = onboarding_refresh_plan_for_context(context, changed_paths)
+    entity_refresh = entity_fingerprint_refresh_plan_for_context(context, changed_paths)
     ledger_message = args.ledger_commit_message or f"[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
     return {
         "state": "would-direct-closeout",
@@ -648,20 +791,21 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
         "code_repository_root": context.code_repository_root.as_posix(),
         "memory_repo": context.memory_root.as_posix(),
         "source_branch": source_branch,
-        "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata to that code commit, then commit memory and ledger.",
+        "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata and affected entity fingerprints to that code commit, then commit memory and ledger.",
         "next_action": "request-commit-approval",
         "next_command": "direct-closeout --approved --approval-note <note> --code-commit-message <message>",
         "commit_approval_required": True,
         "approval_question": "Approve creating the direct code, memory, and ledger commits with these messages?",
         "closeout_order": [
             "commit-code",
-            "refresh-onboarding-metadata",
+            "refresh-onboarding-metadata-and-entity-fingerprints",
             "commit-memory-content",
             "update-ledger",
             "commit-ledger",
         ],
         "changed_code_paths": changed_paths,
         "onboarding_metadata_refresh": metadata_refresh,
+        "entity_fingerprint_refresh": entity_refresh,
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -669,13 +813,14 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
                 "worktree": context.code_repository_root.as_posix(),
             },
             "memory": {
-                "would_commit": memory_dirty or bool(metadata_refresh["required"]),
+                "would_commit": memory_dirty or bool(metadata_refresh["required"]) or bool(entity_refresh["required"]),
                 "message": args.memory_commit_message,
                 "worktree": context.memory_root.as_posix(),
                 "metadata_refresh_after_code_commit": True,
+                "entity_fingerprint_refresh_after_code_commit": True,
             },
             "ledger": {
-                "would_update": code_dirty or memory_dirty or bool(metadata_refresh["required"]),
+                "would_update": code_dirty or memory_dirty or bool(metadata_refresh["required"]) or bool(entity_refresh["required"]),
                 "message": ledger_message,
                 "path": (context.memory_root / "memory.md").as_posix(),
             },
@@ -705,6 +850,7 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
     code_commit = commit_if_dirty(context.code_repository_root, args.code_commit_message)
     code_commit_date = commit_date(context.code_repository_root, code_commit)
     refreshed_onboarding = refresh_onboarding_metadata_for_context(context, changed_paths, code_commit, code_commit_date)
+    refreshed_entities = refresh_entity_fingerprints_for_context(context, changed_paths)
     memory_commit = commit_if_dirty(context.memory_root, args.memory_commit_message)
     ledger_path = context.memory_root / "memory.md"
     ledger = load_ledger(ledger_path)
@@ -728,6 +874,7 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
         "memory_content_commit": memory_commit,
         "ledger_commit": ledger_commit,
         "refreshed_onboarding": refreshed_onboarding,
+        "refreshed_entities": refreshed_entities,
     }, indent=2))
     return 0
 
