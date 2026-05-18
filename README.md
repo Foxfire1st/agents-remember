@@ -61,7 +61,10 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
      --install-root ./.agents/skills
    ```
 
-   Use `--layout flat` for harnesses that require direct `<skill-name>/SKILL.md` folders.
+   Use `--layout flat` only for harnesses that require direct
+   `<skill-name>/SKILL.md` folders. Do not use flat layout for OpenClaw: keep
+   skills linked to `ar-coordination/skills` and configure
+   `skills.load.allowSymlinkTargets`. See [OpenClaw setup](docs/install/openclaw.md).
 
 4. Add workspace instructions that point agents at the installed runtime.
 
@@ -102,6 +105,7 @@ Different tools discover instructions and skills differently. Use the install pa
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
+- [Cost-aware Bootstrap](docs/guides/cost-aware-bootstrap.md) - model and wave-sizing choices for token-heavy repository bootstrap.
 - [Settings Reference](docs/reference/settings-json.md) - `system/settings.json` shape.
 - [Skills Reference](docs/reference/skills.md) - the installed skill families.
 

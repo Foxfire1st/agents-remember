@@ -41,6 +41,12 @@
           "promptPath": "prompts/explain-drift-workflow.with-onboarding.md",
           "cwd": "workspaces/agents-remember-md-drift-workflow/with-memory",
           "allowMemory": true
+        },
+        {
+          "id": "with-onboarding-warm",
+          "promptPath": "prompts/explain-drift-workflow.with-onboarding-warm.md",
+          "cwd": "workspaces/agents-remember-md-drift-workflow/with-memory",
+          "allowMemory": true
         }
       ]
     }

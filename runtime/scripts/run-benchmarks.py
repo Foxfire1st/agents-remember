@@ -6,13 +6,15 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 
@@ -39,11 +41,58 @@ TOKEN_KEYS = {
 }
 
 WORKSPACE_AGENTS_TEMPLATE = Path("templates/workspace-AGENTS.md")
+SOURCE_ONLY_AGENTS_TEMPLATE = Path("templates/source-only-AGENTS.md")
+BENCHMARK_ROOT_MARKER = ".benchmark-root"
+SKILLS_EXPOSURE_NAMESPACE = "agents-remember-md"
 COPYTREE_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+SKILL_EXPOSURE_MODES = ("auto", "link", "copy", "none")
 
 
 def is_ignored_package_path(relative: Path) -> bool:
     return "__pycache__" in relative.parts or relative.suffix in {".pyc", ".pyo"}
+
+
+def manifest_relative_path(value: object, label: str) -> Path:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string path")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{label} must not be empty")
+
+    normalized = text.replace("\\", "/")
+    posix_path = PurePosixPath(normalized)
+    windows_path = PureWindowsPath(text)
+    if posix_path.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+        raise ValueError(f"{label} must be a relative path: {text}")
+    if any(part == ".." for part in posix_path.parts):
+        raise ValueError(f"{label} must not contain '..': {text}")
+    if any(part in {"", "."} for part in posix_path.parts):
+        raise ValueError(f"{label} contains an unsupported path segment: {text}")
+    return Path(*posix_path.parts)
+
+
+def manifest_path_component(value: object, label: str) -> str:
+    path = manifest_relative_path(value, label)
+    if len(path.parts) != 1:
+        raise ValueError(f"{label} must be a single path component: {value}")
+    return path.parts[0]
+
+
+def validate_case_manifest(case: "BenchmarkCase") -> None:
+    workspace = case.workspace
+    manifest_relative_path(workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath")
+    for key in ("sourceOnlyRoot", "withMemoryRoot", "withOnboardingRoot", "repoRelativePath", "coordinationRoot", "withOnboardingCoordinationRoot"):
+        if key in workspace:
+            manifest_relative_path(workspace[key], f"{case.case_id}.workspace.{key}")
+    manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    if case.memory_repository.get("name"):
+        manifest_path_component(case.memory_repository["name"], f"{case.case_id}.memoryRepository.name")
+    for prompt in case.prompts:
+        prompt_id = prompt.get("id", "<unknown>")
+        for variant in prompt.get("variants", []):
+            variant_id = variant.get("id", "<unknown>")
+            manifest_relative_path(variant["promptPath"], f"{case.case_id}.{prompt_id}.{variant_id}.promptPath")
+            manifest_relative_path(variant["cwd"], f"{case.case_id}.{prompt_id}.{variant_id}.cwd")
 
 
 @dataclass(frozen=True)
@@ -105,6 +154,7 @@ def load_cases(benchmarks_root: Path) -> list[BenchmarkCase]:
         case = BenchmarkCase(manifest, load_json(manifest))
         if case.data.get("schemaVersion") != 1:
             raise RuntimeError(f"unsupported benchmark schema in {manifest}")
+        validate_case_manifest(case)
         cases.append(case)
     return cases
 
@@ -133,10 +183,7 @@ def replace_tree(source: Path, destination: Path, dry_run: bool) -> None:
         print(f"Would replace {destination} from {source}")
         return
     if destination.exists() or destination.is_symlink():
-        if destination.is_dir() and not destination.is_symlink():
-            shutil.rmtree(destination)
-        else:
-            destination.unlink()
+        remove_path(destination)
     shutil.copytree(source, destination, ignore=COPYTREE_IGNORE)
 
 
@@ -174,6 +221,67 @@ def find_runtime_source() -> tuple[str, Path]:
     raise RuntimeError("could not locate Agents Remember runtime source")
 
 
+def is_windows_directory_link(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", lambda: False)
+    return sys.platform == "win32" and path.is_dir() and (path.is_symlink() or is_junction())
+
+
+def absolute_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return Path.cwd() / path
+
+
+def removable_path(path: Path, *, resolve: bool = True) -> Path:
+    if sys.platform != "win32":
+        return path
+
+    resolved = path.resolve() if resolve else absolute_path(path)
+    text = str(resolved)
+    if text.startswith("\\\\?\\"):
+        return resolved
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text.lstrip("\\"))
+    return Path("\\\\?\\" + text)
+
+
+def remove_readonly(function, path: str, exc_info) -> None:
+    error = exc_info[1]
+    if not isinstance(error, PermissionError):
+        raise error
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def unlink_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
+def remove_directory_link(path: Path) -> None:
+    try:
+        path.rmdir()
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        path.rmdir()
+
+
+def remove_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    path_is_link = path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+    target = removable_path(path, resolve=not path_is_link)
+    if is_windows_directory_link(path):
+        remove_directory_link(target)
+    elif path.is_dir() and not path_is_link:
+        shutil.rmtree(target, onerror=remove_readonly)
+    else:
+        unlink_file(target)
+
+
 def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
     mode, root = find_runtime_source()
     if dry_run:
@@ -200,6 +308,166 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
             print(f"Would ensure directory {path}")
         else:
             path.mkdir(parents=True, exist_ok=True)
+
+
+def windows_shell_path(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
+def is_windows_wsl_bash(executable: str) -> bool:
+    normalized = str(Path(executable)).lower()
+    return "\\windows\\system32\\bash.exe" in normalized or "\\windowsapps\\bash.exe" in normalized
+
+
+def git_bash_from_git_executable() -> str | None:
+    git = shutil.which("git")
+    if not git:
+        return None
+    git_path = Path(git)
+    for parent in git_path.parents:
+        for relative in (Path("bin/bash.exe"), Path("usr/bin/bash.exe")):
+            candidate = parent / relative
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def windows_bash_executable(dry_run: bool) -> str:
+    configured = os.environ.get("AGENTS_REMEMBER_BASH")
+    if configured:
+        return configured
+
+    executable = shutil.which("bash")
+    if executable and not is_windows_wsl_bash(executable):
+        return executable
+
+    git_bash = git_bash_from_git_executable()
+    if git_bash:
+        return git_bash
+
+    if dry_run:
+        return "bash"
+    raise RuntimeError(
+        "Git for Windows bash is required to install benchmark skills with install-skills.sh. "
+        "Put Git Bash on PATH or set AGENTS_REMEMBER_BASH to the bash executable."
+    )
+
+
+def skill_install_command(
+    script: Path,
+    install_root: Path,
+    coordination_root: Path,
+    dry_run: bool,
+) -> tuple[list[str], dict[str, str]]:
+    if sys.platform == "win32":
+        command = [
+            windows_bash_executable(dry_run),
+            windows_shell_path(script),
+            "--install-root",
+            windows_shell_path(install_root),
+            "--source",
+            windows_shell_path(coordination_root),
+        ]
+        return command, {"MSYS": "winsymlinks:nativestrict"}
+
+    if script.exists() and os.access(script, os.X_OK):
+        command = [
+            str(script),
+            "--install-root",
+            str(install_root),
+            "--source",
+            str(coordination_root),
+        ]
+        return command, {}
+
+    bash = shutil.which("bash")
+    if bash:
+        command = [
+            bash,
+            str(script),
+            "--install-root",
+            str(install_root),
+            "--source",
+            str(coordination_root),
+        ]
+        return command, {}
+
+    if dry_run:
+        command = [
+            str(script),
+            "--install-root",
+            str(install_root),
+            "--source",
+            str(coordination_root),
+        ]
+        return command, {}
+    raise RuntimeError("install-skills.sh must be executable, or bash must be available")
+
+
+def copy_workspace_skill_exposure(workspace_root: Path, coordination_root: Path, dry_run: bool) -> None:
+    install_root = workspace_root / ".agents" / "skills"
+    link_path = install_root / SKILLS_EXPOSURE_NAMESPACE
+    skills_source = coordination_root / "skills"
+    if dry_run:
+        print(f"Would copy benchmark skills {skills_source} -> {link_path}")
+        return
+    if not skills_source.is_dir():
+        raise RuntimeError(f"benchmark runtime skills directory missing: {skills_source}")
+    if link_path.exists() or link_path.is_symlink():
+        remove_path(link_path)
+    link_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(skills_source, link_path, ignore=COPYTREE_IGNORE)
+
+
+def sync_workspace_skill_exposure(
+    workspace_root: Path,
+    coordination_root: Path,
+    dry_run: bool,
+    mode: str = "auto",
+) -> None:
+    if mode not in SKILL_EXPOSURE_MODES:
+        raise RuntimeError(f"unsupported skill exposure mode: {mode}")
+    if mode == "none":
+        print(f"Skipping benchmark skill exposure for {workspace_root}")
+        return
+    if mode == "copy":
+        copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
+        return
+
+    install_root = workspace_root / ".agents" / "skills"
+    link_path = install_root / SKILLS_EXPOSURE_NAMESPACE
+    script = coordination_root / "scripts" / "install-skills.sh"
+    try:
+        command, install_env = skill_install_command(script, install_root, coordination_root, dry_run)
+    except RuntimeError:
+        if mode == "auto":
+            copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
+            return
+        raise
+    env_prefix = " ".join(f"{key}={value}" for key, value in install_env.items())
+    env_prefix = f"{env_prefix} " if env_prefix else ""
+    if dry_run:
+        print(f"Would remove stale benchmark skill exposure {link_path}")
+        print(f"Would run in {workspace_root}: {env_prefix}{' '.join(command)}")
+        return
+    if not script.is_file():
+        if mode == "auto":
+            copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run=False)
+            return
+        raise RuntimeError(f"benchmark skill install script missing: {script}")
+    if not (coordination_root / "skills").is_dir():
+        raise RuntimeError(f"benchmark runtime skills directory missing: {coordination_root / 'skills'}")
+    if link_path.exists() or link_path.is_symlink():
+        remove_path(link_path)
+    env = os.environ.copy()
+    env.update(install_env)
+    try:
+        subprocess.run(command, cwd=workspace_root, env=env, check=True)
+    except subprocess.CalledProcessError:
+        if mode != "auto":
+            raise
+        print("Benchmark skill symlink exposure failed; falling back to copied skills.", file=sys.stderr)
+        copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run=False)
 
 
 def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> None:
@@ -233,20 +501,20 @@ def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool) -> 
 
 
 def workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
-    return benchmarks_root / str(case.workspace["fixturePath"])
+    return benchmarks_root / manifest_relative_path(case.workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath")
 
 
 def source_only_workspace_path(case: BenchmarkCase) -> Path:
     configured = case.workspace.get("sourceOnlyRoot")
     if configured:
-        return Path(str(configured))
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.sourceOnlyRoot")
     return Path("source-only")
 
 
 def with_memory_workspace_path(case: BenchmarkCase) -> Path:
     configured = case.workspace.get("withMemoryRoot") or case.workspace.get("withOnboardingRoot")
     if configured:
-        return Path(str(configured))
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.withMemoryRoot")
     return Path("with-memory")
 
 
@@ -261,14 +529,15 @@ def with_memory_workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Pa
 def repository_path(case: BenchmarkCase) -> Path:
     configured = case.workspace.get("repoRelativePath")
     if configured:
-        return Path(str(configured))
-    return Path("repos") / str(case.repository["name"])
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.repoRelativePath")
+    repo_name = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    return Path("repos") / repo_name
 
 
 def coordination_path(case: BenchmarkCase) -> Path:
     configured = case.workspace.get("coordinationRoot") or case.workspace.get("withOnboardingCoordinationRoot")
     if configured:
-        return Path(str(configured))
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.coordinationRoot")
     return Path("ar-coordination")
 
 
@@ -276,7 +545,7 @@ def memory_repo_name(case: BenchmarkCase) -> str:
     configured = case.memory_repository.get("name") or case.workspace.get("externalMemoryRepo")
     if not configured:
         raise RuntimeError(f"memory repository name is missing for case {case.case_id}")
-    return str(configured)
+    return manifest_path_component(configured, f"{case.case_id}.memoryRepository.name")
 
 
 def render_workspace_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> Path:
@@ -305,6 +574,39 @@ def render_workspace_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run:
     return destination
 
 
+def render_source_only_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> Path:
+    template_path = benchmarks_root / SOURCE_ONLY_AGENTS_TEMPLATE
+    if not template_path.is_file():
+        raise RuntimeError(f"benchmark source-only template not found: {template_path}")
+
+    repo_relative_path = repository_path(case).as_posix()
+    destination = source_only_workspace_root(benchmarks_root, case) / "AGENTS.md"
+    rendered = render_template(
+        template_path.read_text(encoding="utf-8"),
+        {
+            "case_id": case.case_id,
+            "repository_name": str(case.repository["name"]),
+            "repo_relative_path": repo_relative_path,
+        },
+    )
+    if dry_run:
+        print(f"Would render {template_path} -> {destination}")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(rendered, encoding="utf-8")
+    return destination
+
+
+def write_benchmark_root_marker(root: Path, dry_run: bool) -> Path:
+    marker = root / BENCHMARK_ROOT_MARKER
+    if dry_run:
+        print(f"Would write benchmark root marker {marker}")
+        return marker
+    root.mkdir(parents=True, exist_ok=True)
+    marker.write_text("Codex benchmark project root.\n", encoding="utf-8")
+    return marker
+
+
 def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
     for relative in (Path("AGENTS.md"), Path("repos"), Path("ar-coordination")):
         path = root / relative
@@ -313,10 +615,7 @@ def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
         if dry_run:
             print(f"Would remove legacy workspace path {path}")
             continue
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
+        remove_path(path)
 
 
 def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: bool) -> Path:
@@ -329,7 +628,7 @@ def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: b
     return memory_repo
 
 
-def prepare_case(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> None:
+def prepare_case(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool, skill_exposure_mode: str = "auto") -> None:
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
     source_only_root = source_only_workspace_root(benchmarks_root, case)
@@ -339,12 +638,16 @@ def prepare_case(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> N
     print(f"Preparing {case.case_id}")
 
     prune_legacy_workspace_paths(root, dry_run)
+    render_source_only_agents(benchmarks_root, case, dry_run)
     render_workspace_agents(benchmarks_root, case, dry_run)
+    write_benchmark_root_marker(source_only_root, dry_run)
+    write_benchmark_root_marker(with_memory_root, dry_run)
     prepare_repo(repository, source_only_repo_root, dry_run)
     prepare_repo(repository, with_memory_repo_root, dry_run)
 
     coordination_root = with_memory_root / coordination_path(case)
     sync_runtime_assets(coordination_root, dry_run)
+    sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run)
 
     if dry_run:
@@ -375,19 +678,51 @@ def run_id() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
 
-def codex_command(codex_bin: str, cwd: Path, prompt_text: str) -> list[str]:
+def resolve_windows_executable(command: str) -> str:
+    command_path = Path(command)
+    has_path = command_path.parent != Path(".") or command_path.is_absolute() or "/" in command or "\\" in command
+    if command_path.suffix:
+        return command
+
+    extensions = (".cmd", ".exe", ".bat", ".com")
+    if has_path:
+        for extension in extensions:
+            candidate = command_path.with_name(command_path.name + extension)
+            if candidate.is_file():
+                return str(candidate)
+        return command
+
+    for extension in extensions:
+        resolved = shutil.which(command + extension)
+        if resolved:
+            return resolved
+    resolved = shutil.which(command)
+    return resolved or command
+
+
+def resolve_codex_bin(codex_bin: str) -> str:
+    if sys.platform != "win32":
+        return codex_bin
+    return resolve_windows_executable(codex_bin)
+
+
+def codex_command(codex_bin: str, cwd: Path, final_message_path: Path) -> list[str]:
     return [
-        codex_bin,
+        resolve_codex_bin(codex_bin),
         "exec",
         "--json",
+        "--ephemeral",
         "--cd",
         str(cwd),
         "--skip-git-repo-check",
         "--sandbox",
         "danger-full-access",
+        "--output-last-message",
+        str(final_message_path),
         "-c",
         'approval_policy="never"',
-        prompt_text,
+        "-c",
+        f"project_root_markers=['{BENCHMARK_ROOT_MARKER}']",
     ]
 
 
@@ -410,21 +745,29 @@ def run_one(
     codex_bin: str,
     dry_run: bool,
 ) -> None:
-    prompt_path = case.path.parent / str(variant["promptPath"])
-    prompt_text = prompt_path.read_text(encoding="utf-8")
-    cwd = benchmarks_root / str(variant["cwd"])
     prompt_id = str(prompt["id"])
     variant_id = str(variant["id"])
+    prompt_path = case.path.parent / manifest_relative_path(
+        variant["promptPath"],
+        f"{case.case_id}.{prompt_id}.{variant_id}.promptPath",
+    )
+    prompt_text = prompt_path.read_text(encoding="utf-8")
+    cwd = benchmarks_root / manifest_relative_path(
+        variant["cwd"],
+        f"{case.case_id}.{prompt_id}.{variant_id}.cwd",
+    )
     run_prefix = output_root / prompt_id / variant_id / f"run-{repetition:03d}"
     jsonl_path = run_prefix.with_suffix(".jsonl")
     stderr_path = run_prefix.with_suffix(".stderr")
     metadata_path = run_prefix.with_suffix(".metadata.json")
-    command = codex_command(codex_bin, cwd, prompt_text)
+    final_message_path = run_prefix.with_suffix(".final.md")
+    command = codex_command(codex_bin, cwd, final_message_path)
 
     if dry_run:
         print(f"Would write JSONL to {jsonl_path}")
         print(f"Would write stderr to {stderr_path}")
-        print("Would run: " + " ".join(command[:10]) + " <prompt>")
+        print(f"Would write final message to {final_message_path}")
+        print("Would run: " + " ".join(command) + " <prompt via stdin>")
         write_metadata(
             metadata_path,
             {
@@ -433,6 +776,7 @@ def run_one(
                 "variant": variant_id,
                 "repetition": repetition,
                 "cwd": str(cwd),
+                "finalMessagePath": str(final_message_path),
                 "dryRun": True,
             },
             dry_run=True,
@@ -442,7 +786,14 @@ def run_one(
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with jsonl_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
-        completed = subprocess.run(command, stdout=stdout, stderr=stderr, text=True, check=False)
+        completed = subprocess.run(
+            command,
+            input=prompt_text,
+            stdout=stdout,
+            stderr=stderr,
+            text=True,
+            check=False,
+        )
     duration = time.monotonic() - started
     write_metadata(
         metadata_path,
@@ -452,9 +803,10 @@ def run_one(
             "variant": variant_id,
             "repetition": repetition,
             "cwd": str(cwd),
-            "command": command[:-1] + ["<prompt>"],
+            "command": command + ["<prompt via stdin>"],
             "durationSeconds": round(duration, 3),
             "exitCode": completed.returncode,
+            "finalMessagePath": str(final_message_path),
             "jsonlPath": str(jsonl_path),
             "stderrPath": str(stderr_path),
         },
@@ -473,9 +825,10 @@ def run_case(
     jobs: int | None,
     dry_run: bool,
     skip_prepare: bool,
+    skill_exposure_mode: str,
 ) -> Path:
     if not skip_prepare:
-        prepare_case(benchmarks_root, case, dry_run=dry_run)
+        prepare_case(benchmarks_root, case, dry_run=dry_run, skill_exposure_mode=skill_exposure_mode)
 
     current_run_id = run_id()
     output_root = benchmarks_root / "user-runs" / case.case_id / current_run_id
@@ -484,28 +837,28 @@ def run_case(
     else:
         output_root.mkdir(parents=True, exist_ok=False)
 
-    tasks: list[tuple[dict[str, Any], dict[str, Any], int]] = []
+    task_batches: list[list[tuple[dict[str, Any], dict[str, Any], int]]] = []
     default_jobs = 1
     for prompt in case_prompt(case, prompt_id):
         prompt_runs = int(repetitions or prompt.get("runs") or 3)
         variants = prompt_variant(prompt, variant_id)
         default_jobs = max(default_jobs, len(variants))
         for repetition in range(1, prompt_runs + 1):
-            for variant in variants:
-                tasks.append((prompt, variant, repetition))
+            task_batches.append([(prompt, variant, repetition) for variant in variants])
 
     if dry_run:
-        for prompt, variant, repetition in tasks:
-            run_one(
-                benchmarks_root=benchmarks_root,
-                case=case,
-                prompt=prompt,
-                variant=variant,
-                repetition=repetition,
-                output_root=output_root,
-                codex_bin=codex_bin,
-                dry_run=True,
-            )
+        for task_batch in task_batches:
+            for prompt, variant, repetition in task_batch:
+                run_one(
+                    benchmarks_root=benchmarks_root,
+                    case=case,
+                    prompt=prompt,
+                    variant=variant,
+                    repetition=repetition,
+                    output_root=output_root,
+                    codex_bin=codex_bin,
+                    dry_run=True,
+                )
         return output_root
 
     max_workers = jobs or default_jobs
@@ -514,28 +867,29 @@ def run_case(
 
     failures: list[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_task = {
-            executor.submit(
-                run_one,
-                benchmarks_root=benchmarks_root,
-                case=case,
-                prompt=prompt,
-                variant=variant,
-                repetition=repetition,
-                output_root=output_root,
-                codex_bin=codex_bin,
-                dry_run=False,
-            ): (prompt, variant, repetition)
-            for prompt, variant, repetition in tasks
-        }
-        for future in concurrent.futures.as_completed(future_to_task):
-            prompt, variant, repetition = future_to_task[future]
-            try:
-                future.result()
-            except Exception as error:
-                failures.append(
-                    f"{prompt.get('id')}/{variant.get('id')}/run-{repetition:03d}: {error}"
-                )
+        for task_batch in task_batches:
+            future_to_task = {
+                executor.submit(
+                    run_one,
+                    benchmarks_root=benchmarks_root,
+                    case=case,
+                    prompt=prompt,
+                    variant=variant,
+                    repetition=repetition,
+                    output_root=output_root,
+                    codex_bin=codex_bin,
+                    dry_run=False,
+                ): (prompt, variant, repetition)
+                for prompt, variant, repetition in task_batch
+            }
+            for future in concurrent.futures.as_completed(future_to_task):
+                prompt, variant, repetition = future_to_task[future]
+                try:
+                    future.result()
+                except Exception as error:
+                    failures.append(
+                        f"{prompt.get('id')}/{variant.get('id')}/run-{repetition:03d}: {error}"
+                    )
 
     write_summary(output_root, analyze_run_root(output_root))
     if failures:
@@ -720,7 +1074,7 @@ def command_prepare(args: argparse.Namespace) -> int:
     benchmarks_root = args.benchmarks_root.resolve()
     cases = select_cases(load_cases(benchmarks_root), args.target, args.case_id)
     for case in cases:
-        prepare_case(benchmarks_root, case, dry_run=args.dry_run)
+        prepare_case(benchmarks_root, case, dry_run=args.dry_run, skill_exposure_mode=args.skill_exposure_mode)
     return 0
 
 
@@ -738,6 +1092,7 @@ def command_run(args: argparse.Namespace) -> int:
             jobs=args.jobs,
             dry_run=args.dry_run,
             skip_prepare=args.skip_prepare,
+            skill_exposure_mode=args.skill_exposure_mode,
         )
         print(f"Run output: {output_root}")
     return 0
@@ -771,6 +1126,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser = subparsers.add_parser("prepare", help="Prepare resettable benchmark workspaces.")
     prepare_parser.add_argument("target", choices=("all", "case"))
     prepare_parser.add_argument("case_id", nargs="?")
+    prepare_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
     prepare_parser.add_argument("--dry-run", action="store_true")
     prepare_parser.set_defaults(func=command_prepare)
 
@@ -789,6 +1145,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument("--skip-prepare", action="store_true", help="Use the existing workspace fixture state.")
+    run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
     run_parser.set_defaults(func=command_run)
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze an existing user-runs directory.")

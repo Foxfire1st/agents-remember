@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -12,6 +14,7 @@ from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from typing import Optional
+from unittest import mock
 
 
 CORE_ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +59,13 @@ assert MEMORY_CARRYOVER_SPEC is not None and MEMORY_CARRYOVER_SPEC.loader is not
 memory_carryover = importlib.util.module_from_spec(MEMORY_CARRYOVER_SPEC)
 sys.modules[MEMORY_CARRYOVER_SPEC.name] = memory_carryover
 MEMORY_CARRYOVER_SPEC.loader.exec_module(memory_carryover)
+
+BENCHMARK_RUNNER_PATH = CORE_ROOT.parent.parent / "scripts" / "run-benchmarks.py"
+BENCHMARK_RUNNER_SPEC = importlib.util.spec_from_file_location("run_benchmarks", BENCHMARK_RUNNER_PATH)
+assert BENCHMARK_RUNNER_SPEC is not None and BENCHMARK_RUNNER_SPEC.loader is not None
+benchmark_runner = importlib.util.module_from_spec(BENCHMARK_RUNNER_SPEC)
+sys.modules[BENCHMARK_RUNNER_SPEC.name] = benchmark_runner
+BENCHMARK_RUNNER_SPEC.loader.exec_module(benchmark_runner)
 
 drift = adopt_baseline.drift
 
@@ -1562,6 +1572,114 @@ class WorktreeSupportTests(unittest.TestCase):
             plan = memory_carryover.build_plan(args)
             self.assertEqual(plan["candidates"][0]["decision"], "reject")
             self.assertEqual(plan["candidates"][0]["evidence"], "not-landed")
+
+
+class BenchmarkRunnerPortabilityTests(unittest.TestCase):
+    def test_manifest_relative_path_rejects_absolute_and_parent_escape(self) -> None:
+        self.assertEqual(
+            benchmark_runner.manifest_relative_path("workspaces/case-a", "fixturePath"),
+            Path("workspaces") / "case-a",
+        )
+        for value in ("../outside", "workspaces/../outside", "/tmp/outside", "C:/outside", "C:outside", r"..\outside"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    benchmark_runner.manifest_relative_path(value, "fixturePath")
+        with self.assertRaises(ValueError):
+            benchmark_runner.manifest_relative_path(None, "fixturePath")
+
+    def test_manifest_path_component_rejects_nested_names(self) -> None:
+        self.assertEqual(
+            benchmark_runner.manifest_path_component("ar-repo-a", "memoryRepository.name"),
+            "ar-repo-a",
+        )
+        with self.assertRaises(ValueError):
+            benchmark_runner.manifest_path_component("nested/repo", "memoryRepository.name")
+
+    def test_benchmark_safe_remove_deletes_readonly_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "workspace"
+            nested = root / "nested"
+            nested.mkdir(parents=True)
+            locked = nested / "pack-file"
+            locked.write_text("content\n", encoding="utf-8")
+            os.chmod(locked, stat.S_IREAD)
+            try:
+                benchmark_runner.remove_path(root)
+            finally:
+                if locked.exists():
+                    os.chmod(locked, stat.S_IWRITE)
+            self.assertFalse(root.exists())
+
+    def test_benchmark_safe_remove_deletes_directory_symlink_not_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "target"
+            target.mkdir()
+            (target / "SKILL.md").write_text("content\n", encoding="utf-8")
+            link = root / "link"
+            try:
+                os.symlink(target, link, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                raise unittest.SkipTest(f"directory symlinks unavailable: {error}") from error
+
+            benchmark_runner.remove_path(link)
+
+            self.assertFalse(link.exists() or link.is_symlink())
+            self.assertTrue((target / "SKILL.md").is_file())
+
+    def test_windows_codex_bin_prefers_cmd_shim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extensionless = root / "codex"
+            cmd = root / "codex.cmd"
+            extensionless.write_text("#!/bin/sh\n", encoding="utf-8")
+            cmd.write_text("@echo off\n", encoding="utf-8")
+
+            def fake_which(command: str) -> str | None:
+                candidate = root / command
+                if candidate.exists():
+                    return str(candidate)
+                return None
+
+            with mock.patch.object(benchmark_runner.sys, "platform", "win32"):
+                with mock.patch.object(benchmark_runner.shutil, "which", side_effect=fake_which):
+                    self.assertEqual(benchmark_runner.resolve_codex_bin("codex"), str(cmd))
+
+    def test_skill_exposure_copy_mode_copies_skill_tree_without_bash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            coordination_root = workspace / "ar-coordination"
+            skill_dir = coordination_root / "skills" / "U-01-core-skills" / "C-00-test-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: c-00-test-skill\n---\n", encoding="utf-8")
+
+            benchmark_runner.sync_workspace_skill_exposure(
+                workspace,
+                coordination_root,
+                dry_run=False,
+                mode="copy",
+            )
+
+            exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
+            self.assertTrue((exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file())
+
+    def test_skill_exposure_auto_falls_back_to_copy_without_script(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            coordination_root = workspace / "ar-coordination"
+            skill_dir = coordination_root / "skills" / "U-01-core-skills" / "C-00-test-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: c-00-test-skill\n---\n", encoding="utf-8")
+
+            benchmark_runner.sync_workspace_skill_exposure(
+                workspace,
+                coordination_root,
+                dry_run=False,
+                mode="auto",
+            )
+
+            exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
+            self.assertTrue((exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file())
 
 
 if __name__ == "__main__":
