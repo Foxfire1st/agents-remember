@@ -28,7 +28,7 @@ agents-remember-md/runtime/skills/
 | `C-01-findings-capture` | Route durable findings to the right artifact. |
 | `C-02-onboarding-drift-detection` | Classify onboarding freshness before planning. |
 | `C-03-repo-bootstrap` | Bootstrap repo overviews, route-local overviews, and onboarding coverage. |
-| `C-04-discovery` | Read top-down context before acting on unfamiliar code. |
+| `C-04-onboarding-read-mode` | Read existing onboarding with source via overview, route, and sidecar pairs. |
 | `C-05-create-or-update-onboarding-files` | Create and maintain file-level onboarding and entity catalogs. |
 | `C-08-ar-coordination-context-resolver` | Resolve memory, coordination, task, temp, and cross-repo facts. |
 | `C-09-git-worktree-manager` | Manage worktree lifecycle, direct closeout, integration, and cleanup gates. |

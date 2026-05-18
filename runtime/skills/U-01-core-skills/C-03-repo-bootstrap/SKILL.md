@@ -1209,7 +1209,7 @@ The orchestrator remains thin throughout.
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `C-08-ar-coordination-context-resolver`           | Required first step. Resolves memory root, settings, sources, path rules, storage, and cross-repo policy.     |
 | `C-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to C-03. C-03 creates cards/waves and delegates file output rules to C-05. |
-| `C-04-discovery`                                  | Supplies cross-repo discovery techniques used by scout, interface, and boundary passes.                       |
+| `C-04-onboarding-read-mode`                       | Consumes bootstrapped overviews and file maps as the source-reading protocol for existing onboarding.          |
 | `C-02-onboarding-drift-detection`                 | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `W-01-heavy-task-workflow`                        | May trigger targeted bootstrap when an active task enters an uncovered area.                                  |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |

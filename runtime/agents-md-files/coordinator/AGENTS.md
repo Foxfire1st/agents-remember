@@ -31,22 +31,21 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 
 ### Installed AGENTS.md Routing
 
-This coordinator file is the workspace entrypoint. Read the sibling installed
+This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- Read `system/AGENTS.md` before relying on onboarding or reasoning over
-  repository source.
 - Read `tasks/AGENTS.md` before creating or updating task artifacts, or when
   task framing, meta-questioning, or approval doctrine matters.
-- Read `skills/AGENTS.md` before choosing memory, onboarding, findings,
-  discovery, or worktree skills.
 
 ### Onboarding Documentation
 
-Onboarding files are companion context for source files. Their main purpose is to be read alongside the code they describe, at the moment that code is
-inspected. They can be found using the ar-coordination resolver.
+Onboarding files are companion context for source files. Their main purpose is
+to be read alongside the code they describe, at the moment that code is
+inspected.
 
-Before trusting the onboarding documentation, check the [Memory Layer Instructions](system/AGENTS.md)
+Use `C-04-onboarding-read-mode` before relying on onboarding or reasoning
+over repository source. C-04 owns the overview -> route overview ->
+candidate source/sidecar paired-read protocol.
 
 ### Developer Clarifications
 

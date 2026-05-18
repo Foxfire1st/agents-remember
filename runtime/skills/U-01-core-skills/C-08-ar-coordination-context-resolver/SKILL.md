@@ -84,7 +84,7 @@ The helper uses only the Python standard library, including the built-in JSON pa
 
 - `AGENTS.md` Gate 1 uses this skill to resolve coordination root, memory root, task root, temp root, onboarding root, settings, storage, `pathRules`, worktree facts, ledger path, and cross-repo allowances.
 - `C-02-onboarding-drift-detection` consumes the resolved context and remains responsible only for drift classification and trust reporting.
-- `C-03-repo-bootstrap`, `C-04-discovery`, `C-05-create-or-update-onboarding-files`, and task workflows use the resolved roots instead of rebuilding topology rules.
+- `C-03-repo-bootstrap`, `C-04-onboarding-read-mode`, `C-05-create-or-update-onboarding-files`, and task workflows use the resolved roots instead of rebuilding topology rules.
 - `C-09-git-worktree-manager` consumes the resolved context and owns Git worktree mutation, task contract updates, and closeout sequencing.
 
 ## Boundaries

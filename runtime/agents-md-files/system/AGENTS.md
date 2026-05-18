@@ -1,6 +1,6 @@
-## Hard Start-of-Task Memory Repo Onboarding Maintenance Gate
+## Start-of-Task Onboarding Trust Gate
 
-### Memory Repo Workflow
+### Single-Repository Workflow
 
 This gate applies ALWAYS at the start for every Task. Even for code explanations!
 No matter if that touches, explains, reviews, plans around,
@@ -22,16 +22,16 @@ the report says briefly and then ask if they want to update the onboarding befor
 
 Gate 4: If they say yes, then orchestrate the update process and split the work to up to 5 sub agents who each handle at max 15 files.
 All sub agents shall use this skill: `C-05-create-or-update-onboarding-files` and you pass it the instructions it needs to perform the job.
-If the developer says says no, tell them that reasoning over drifted onboardings may introduce risk of regressions.
+If the developer says no, tell them that reasoning over drifted onboardings may introduce risk of regressions.
 
 Gate 5: Run `C-02-onboarding-drift-detection` again to confirm that all onboarding is now verified and up to date.
 Do not for any reason skip execution of the drift detection skill.
 
 Gate 6: Only after steps 1 - 5 are completed, report to the developer. Then delete the drift report file.
 
-### Cross Memory Repo Workflow
+### Cross-Repository Workflow
 
-When working with Cross-Repo enabled and 1 or more repos are listed, the above Gate execution order changes.
+When working with cross-repo enabled and one or more repos are listed, the above gate execution order changes.
 
 For every repo in the Cross-Repo list, you run first Gate 1-3 to create individual drift reports.
 Then you report to the developer about all drift reports and ask if they want to update the onboarding before proceeding.
@@ -39,19 +39,14 @@ Depending on their answer, you delegate for each approved repo a sub agent to ex
 
 ---
 
-## Planning/Research Gate (Post: 'Hard Start-of-Task Onboarding Gate')
+## Post-Gate Planning and Research
 
-- Onboarding paths mirror their source code counterparts.
-  For example, `src/components/Button.js` has onboarding at `onboarding/src/components/Button.js.md`.
-  You can read them 1-to-1 or in small alternating batches with a size of up to 5 source files and 5 onboarding files at a time.
-- When opening relevant source files, open verified onboardings with them.
-
-Gate 1: Read the repos overview.md.
-Gate 2: Read onboardings alongside source files.
+For onboarding-backed source reading, use `C-04-onboarding-read-mode`. C-04 owns
+the overview -> route overview -> candidate source/sidecar paired-read protocol.
 
 ---
 
-## Implementation Gate (Post: 'Planning/Research Gate')
+## Post-Gate Implementation
 
 - When you make code changes, do also update or create onboardings using
   `C-05-create-or-update-onboarding-files`.
