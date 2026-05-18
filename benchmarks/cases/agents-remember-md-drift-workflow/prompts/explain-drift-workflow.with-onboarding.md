@@ -8,6 +8,7 @@ approval, or pause for follow-up. Make reasonable assumptions from the available
 source and memory evidence and complete the primary task in one final answer.
 
 Constraints:
+
 1. Do not final-answer with only the drift summary.
 2. Continue immediately to the primary task below.
 3. Mention the drift check only briefly as prerequisite status.
@@ -20,4 +21,4 @@ Completion criteria:
 The final answer must include the workflow explanation and file references. A clean drift check alone is not sufficient.
 
 Primary task:
-Inspect C-02, C-08, and the drift helper implementation. Explain the drift workflow, including resolver handoff, sidecar metadata checks, inline digest checks, report generation, and C-05 handoff.
+Explain the drift workflow, including resolver handoff, sidecar metadata checks, inline digest checks, report generation, onboarding handoff.

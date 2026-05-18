@@ -8,6 +8,7 @@ approval, or pause for follow-up. Make reasonable assumptions from the available
 source evidence and complete the primary task in one final answer.
 
 Constraints:
+
 - Do not edit source files.
 - Do not run C-02 drift detection.
 - Do not run the C-08 resolver CLI.
@@ -20,4 +21,4 @@ Completion criteria:
 The final answer must include the workflow explanation and file references.
 
 Primary task:
-Inspect C-02, C-08, and the drift helper implementation. Explain the drift workflow, including resolver handoff, sidecar metadata checks, inline digest checks, report generation, and C-05 handoff.
+Explain the drift workflow, including resolver handoff, sidecar metadata checks, inline digest checks, report generation, onboarding handoff.

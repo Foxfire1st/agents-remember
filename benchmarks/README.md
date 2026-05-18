@@ -33,6 +33,7 @@ installer path to work, and `none` skips benchmark-local skill exposure.
 | Case                                | Size (files) | Repository                                                                                            | Status        |
 | ----------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------- | ------------- |
 | `agents-remember-md-drift-workflow` | 104          | `https://github.com/Foxfire1st/ai-infinite-context.git` at `403883337d2d0479dc2da02d1ce2a1a0f3983b93` | draft fixture |
+| `tensorflow-check-numerics-xla`     | 36320        | `https://github.com/tensorflow/tensorflow.git` at `2020b5919c5b66b8672438bed85d0ca88d434438`          | draft fixture |
 
 ## Layout
 
