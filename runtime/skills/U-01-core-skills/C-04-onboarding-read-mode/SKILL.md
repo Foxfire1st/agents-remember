@@ -17,6 +17,44 @@ repo overview -> route overview -> candidate files -> source+sidecar paired read
 
 ## Onboarding Read Protocol
 
+Treat the read as a state machine, not as background advice. Move through these
+states in order and do not skip ahead because a search feels convenient.
+
+State 1: onboarding root known
+
+- Action: read `<onboarding_root>/overview.md`.
+- If `memory_root` is known and `onboarding_root` is not explicitly named, use
+  `<memory_root>/onboarding`.
+- Forbidden: locating, listing, or inventorying the memory or onboarding tree.
+
+State 2: route overview selected
+
+- Action: read the smallest relevant route overview(s).
+- Use repo overview evidence and the task domain to choose the route.
+- Forbidden: repository-root source search or multi-subsystem source search.
+
+State 3: candidate source set built
+
+- Action: read each candidate source file with its deterministic sidecar:
+  `<onboarding_root>/<repo-relative-source-path>.md`.
+- Before relying on a source file, carry this evidence format:
+  - source: `<repo-relative-source-path>`
+  - sidecar: `<onboarding_root>/<repo-relative-source-path>.md`
+  - sidecar status: `read` or `absent`
+  - reason: why this pair is relevant
+- Forbidden: source-only interpretation when the sidecar exists and has not
+  been read.
+
+State 4: named unresolved question remains
+
+- Action: run one targeted source `rg` or `find` for that named question,
+  scoped to the smallest selected route.
+- Read the resulting source/sidecar pairs before searching again.
+- Forbidden: a second or broader search until you can state what the first
+  scoped search failed to answer.
+
+Operational order:
+
 1. Read the repository `onboarding/overview.md`.
 2. Select the smallest relevant route overview(s) from the repo overview and the
    task domain.
@@ -34,10 +72,10 @@ repo overview -> route overview -> candidate files -> source+sidecar paired read
 5. Read candidate source files with their sidecar onboarding in paired batches.
 6. When a candidate sidecar is absent, read the nearest governing `overview.md`
    and carry the gap as context.
-7. Use source `rg` or `find` as targeted confirmation for a named unresolved
+7. Use source `rg` or `find` as targeted confirmation for one named unresolved
    question, scoped to the smallest selected route first.
-8. Expand search one route at a time when the selected route cannot answer the
-   stated question.
+8. Expand search one route at a time only after explaining what the previous
+   scoped search and paired reads failed to answer.
 
 ## Hard Boundaries
 
@@ -54,6 +92,12 @@ Do not start with:
 
 These are fallback actions only after the overview chain and candidate
 source/onboarding pairs fail to answer a stated question.
+
+If `onboarding_root` is known, onboarding-tree inventory is never a normal
+setup step. Start at `<onboarding_root>/overview.md`.
+
+Fallback source search has a budget: one named question, one smallest-route
+search, then read the resulting source/sidecar pairs before searching again.
 
 Do not perform cross-repo discovery unless the task evidence, repo overview, or
 route overview explicitly identifies a cross-repo boundary. Vendored or
