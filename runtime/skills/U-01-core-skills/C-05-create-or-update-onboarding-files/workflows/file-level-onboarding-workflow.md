@@ -20,11 +20,11 @@ Create or update the file-level onboarding content for one concrete source file.
 ## Source Discovery Rules
 
 1. Start by reading the C-08 resolved `system/sources.md` and use its `Domain Documentation` category for the file being documented.
-2. Use the `Domain Documentation` sources from the resolved `system/sources.md` when building `### Docs References` and any load-bearing explanatory prose that depends on technical or behavioral documentation.
+2. Use the `Domain Documentation` sources from the resolved `system/sources.md` when building `## Docs References` and any load-bearing explanatory prose that depends on technical or behavioral documentation.
 3. Treat adjacent onboarding as supporting input, not the whole discovery plan and not a substitute for the `Domain Documentation` pass.
 4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and line citations, but write the onboarding link to the canonical online reference rather than the local mirror path.
 5. If relevant material cannot be found in the `Domain Documentation` sources, record what was checked and that no relevant evidence was found.
-6. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `### Docs References`, `## Repo-Internal References`, or `## Cross-Repo References`.
+6. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `## Docs References`, `## Repo-Internal References`, or `## Cross-Repo References`.
 7. Cite the actual evidence source: the library documentation page, canonical local mirror, repository source file, generated artifact, onboarding file, or sibling-repo file that directly proves the statement.
 
 ## Placement Rules
@@ -57,9 +57,10 @@ Required top-level sections:
 2. `## Governing Overview`
 3. `## Purpose`
 4. `## Code Commentary`
-5. `## Repo-Internal References`
-6. `## Cross-Repo References`
-7. `## Update History`
+5. `## Docs References`
+6. `## Repo-Internal References`
+7. `## Cross-Repo References`
+8. `## Update History`
 
 `## Update History` is append-only and newest-first. Preserve earlier entries even when they are superseded; add a later entry that corrects, supersedes, or clarifies them.
 
@@ -69,14 +70,13 @@ Subsections under `## Code Commentary`:
 2. `### Conventions`
 3. `### Invariants And Boundaries`
 4. `### Todos`
-5. `### Docs References`
 
 Citation requirements for reference sections:
 
-1. `### Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
+1. `## Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
 2. `## Repo-Internal References` must include a concise prose summary when there is meaningful same-repository context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
 3. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
-4. In `### Docs References`, `Source Path` must link to the canonical online document URL. Read local mirrors if needed, but do not link to them.
+4. In `## Docs References`, `Source Path` must link to the canonical online document URL. Read local mirrors if needed, but do not link to them.
 5. In `## Repo-Internal References`, `Source Path` must use a workspace-relative markdown link to the cited same-repository code, onboarding, config, test, or generated artifact. Do not use absolute filesystem paths.
 6. In `## Cross-Repo References`, `Source Path` must use a workspace-relative markdown link when the cited boundary evidence exists in the workspace; otherwise link to the canonical external document or system reference.
 7. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.

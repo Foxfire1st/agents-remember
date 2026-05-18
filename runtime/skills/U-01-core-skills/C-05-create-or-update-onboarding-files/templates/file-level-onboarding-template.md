@@ -38,7 +38,7 @@ This is the canonical file-level onboarding content model. Sidecar onboarding mi
 
 <Known issues or technical debt that are not tied to one active task file.>
 
-### Docs References
+## Docs References
 
 <Start with a short prose summary if there is meaningful external or domain-documentation context to explain, then add the citation table. Use the C-08 resolved `system/sources.md` as a discovery aid, not as the citation target, and search beyond the registry until you find the actual proving document.
 Cite the actual online library or product documentation that directly proves the statement. Read local mirrors if needed, but link the table row to the canonical online document reference and health-check that canonical reference during create/update work. If the reference cannot be verified, record the blocker explicitly. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
