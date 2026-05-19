@@ -44,11 +44,20 @@ Preferred durable placement, with every path relative to the resolved `onboardin
 
 ```text
 overview.md
+overview.index.json
 <mirrored-source-folder>/overview.md
+<mirrored-source-folder>/overview.index.json
 <mirrored-source-file>.md
 ```
 
 Detached `bootstrap/areas/*` artifacts are allowed as temporary research and promotion artifacts. Durable agent-facing overviews exist to be discoverable through source-path traversal.
+
+`overview.index.json` files are generated route indexes. They do not replace
+overview prose or file-level onboarding. They let future C-04 reads infer child
+routes, covered file sidecars, sparse coverage, and governing-overview fallback
+without repeatedly probing for missing sidecars. They also carry a compact
+`hotPath` block derived from each overview's `## Hot Path Summary` plus
+generated candidate and source-anchor hints.
 
 ### Overview as construction pillar
 
@@ -69,8 +78,11 @@ When working on a source file, read onboarding from broadest to narrowest:
 
 ```text
 overview.md
+overview.index.json
 <ancestor-folder>/overview.md
+<ancestor-folder>/overview.index.json
 <nearest-folder>/overview.md
+<nearest-folder>/overview.index.json
 <source-file>.md
 ```
 
@@ -82,9 +94,13 @@ source:
 
 onboarding read path:
   overview.md
+  overview.index.json
   src/overview.md
+  src/overview.index.json
   src/helpdesk/overview.md
+  src/helpdesk/overview.index.json
   src/helpdesk/mappers/overview.md
+  src/helpdesk/mappers/overview.index.json
   src/helpdesk/mappers/PlatformMapper.php.md
 ```
 
@@ -695,6 +711,8 @@ Required root overview sections:
 ```markdown
 ## What This Repo Is
 
+## Hot Path Summary
+
 ## Architecture At A Glance
 
 ## Code Structure
@@ -867,6 +885,7 @@ Route-local overview verification is also route-based. Record the governed repo-
 A route-local overview must include:
 
 - parent overview backlink
+- hot path summary for fast route discovery
 - what belongs here / what does not
 - structures found here
 - operating model
@@ -884,6 +903,8 @@ A route-local overview must include:
 Done when:
 
 - all overview wave targets exist or have blockers
+- generated route indexes have been refreshed for created or changed route
+  overviews, including `hotPath` fields
 - the wave has a curator review
 - `STATE.md` is updated
 
@@ -991,6 +1012,10 @@ File onboarding workers must:
 6. keep planning notes out of durable onboarding
 7. preserve strict 1-to-1 source mapping
 
+After a file onboarding wave creates, updates, moves, or deletes sidecars,
+refresh generated route indexes so C-04 can use `coveredFiles` and route scope
+instead of probing for sidecar presence.
+
 ### 4I — Curator Review
 
 After each overview or onboarding wave, write:
@@ -1004,6 +1029,8 @@ Use `templates/curator-review-template.md`.
 The curator checks:
 
 - strict 1-to-1 mapping for file onboarding
+- generated route indexes exist next to changed route overviews
+- generated route indexes reflect changed file-level sidecar coverage
 - route-local overview placement is mirrored and local
 - file onboarding backlinks to nearest governing overview
 - overview downlinks list governed files

@@ -483,18 +483,36 @@ def git_command(*args: str) -> list[str]:
     return ["git", "-c", "core.longpaths=true", *args]
 
 
-def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool) -> None:
+def repo_has_commit(repo_root: Path, commit: str) -> bool:
+    result = subprocess.run(
+        git_command("-C", str(repo_root), "cat-file", "-e", f"{commit}^{{commit}}"),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool, force_clone: bool = False) -> None:
     url = str(repository["url"])
     commit = str(repository["commit"])
     if dry_run:
         print(f"Would ensure directory {repo_root.parent}")
     else:
         repo_root.parent.mkdir(parents=True, exist_ok=True)
-    if not (repo_root / ".git").exists():
+    if force_clone and (repo_root.exists() or repo_root.is_symlink()):
+        if dry_run:
+            print(f"Would remove existing repository {repo_root}")
+        else:
+            remove_path(repo_root)
+    existing_repo = not force_clone and (repo_root / ".git").exists()
+    if not existing_repo:
         run_command(git_command("clone", url, str(repo_root)), dry_run)
+    elif repo_has_commit(repo_root, commit):
+        if dry_run:
+            print(f"Would reuse cached repository {repo_root} at {commit}")
     else:
         run_command(git_command("-C", str(repo_root), "fetch", "--all", "--tags"), dry_run)
-        run_command(git_command("-C", str(repo_root), "clean", "-fdx"), dry_run)
     run_command(git_command("-C", str(repo_root), "checkout", "--detach", commit), dry_run)
     run_command(git_command("-C", str(repo_root), "reset", "--hard", commit), dry_run)
     run_command(git_command("-C", str(repo_root), "clean", "-fdx"), dry_run)
@@ -618,17 +636,23 @@ def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
         remove_path(path)
 
 
-def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: bool) -> Path:
+def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: bool, force_clone: bool = False) -> Path:
     memory_repo = coordination_root / "memory-repos" / memory_repo_name(case)
     memory_repository = case.memory_repository
     if memory_repository:
-        prepare_repo(memory_repository, memory_repo, dry_run)
+        prepare_repo(memory_repository, memory_repo, dry_run, force_clone=force_clone)
     elif not memory_repo.exists() and not dry_run:
         raise RuntimeError(f"workspace memory repo missing after preparation: {memory_repo}")
     return memory_repo
 
 
-def prepare_case(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool, skill_exposure_mode: str = "auto") -> None:
+def prepare_case(
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    dry_run: bool,
+    skill_exposure_mode: str = "auto",
+    force_clone: bool = False,
+) -> None:
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
     source_only_root = source_only_workspace_root(benchmarks_root, case)
@@ -642,13 +666,13 @@ def prepare_case(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool, skil
     render_workspace_agents(benchmarks_root, case, dry_run)
     write_benchmark_root_marker(source_only_root, dry_run)
     write_benchmark_root_marker(with_memory_root, dry_run)
-    prepare_repo(repository, source_only_repo_root, dry_run)
-    prepare_repo(repository, with_memory_repo_root, dry_run)
+    prepare_repo(repository, source_only_repo_root, dry_run, force_clone=force_clone)
+    prepare_repo(repository, with_memory_repo_root, dry_run, force_clone=force_clone)
 
     coordination_root = with_memory_root / coordination_path(case)
     sync_runtime_assets(coordination_root, dry_run)
     sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
-    memory_repo = prepare_memory_repo(case, coordination_root, dry_run)
+    memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
 
     if dry_run:
         print(f"Would verify benchmark memory repo exists: {memory_repo}")
@@ -826,9 +850,16 @@ def run_case(
     dry_run: bool,
     skip_prepare: bool,
     skill_exposure_mode: str,
+    force_clone: bool,
 ) -> Path:
     if not skip_prepare:
-        prepare_case(benchmarks_root, case, dry_run=dry_run, skill_exposure_mode=skill_exposure_mode)
+        prepare_case(
+            benchmarks_root,
+            case,
+            dry_run=dry_run,
+            skill_exposure_mode=skill_exposure_mode,
+            force_clone=force_clone,
+        )
 
     current_run_id = run_id()
     output_root = benchmarks_root / "user-runs" / case.case_id / current_run_id
@@ -1074,7 +1105,13 @@ def command_prepare(args: argparse.Namespace) -> int:
     benchmarks_root = args.benchmarks_root.resolve()
     cases = select_cases(load_cases(benchmarks_root), args.target, args.case_id)
     for case in cases:
-        prepare_case(benchmarks_root, case, dry_run=args.dry_run, skill_exposure_mode=args.skill_exposure_mode)
+        prepare_case(
+            benchmarks_root,
+            case,
+            dry_run=args.dry_run,
+            skill_exposure_mode=args.skill_exposure_mode,
+            force_clone=args.force_clone,
+        )
     return 0
 
 
@@ -1093,6 +1130,7 @@ def command_run(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             skip_prepare=args.skip_prepare,
             skill_exposure_mode=args.skill_exposure_mode,
+            force_clone=args.force_clone,
         )
         print(f"Run output: {output_root}")
     return 0
@@ -1127,6 +1165,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("target", choices=("all", "case"))
     prepare_parser.add_argument("case_id", nargs="?")
     prepare_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
+    prepare_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts before cloning.")
     prepare_parser.add_argument("--dry-run", action="store_true")
     prepare_parser.set_defaults(func=command_prepare)
 
@@ -1146,6 +1185,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument("--skip-prepare", action="store_true", help="Use the existing workspace fixture state.")
     run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
+    run_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts during preparation.")
     run_parser.set_defaults(func=command_run)
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze an existing user-runs directory.")

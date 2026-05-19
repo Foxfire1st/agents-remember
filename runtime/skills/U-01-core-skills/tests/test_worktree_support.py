@@ -1645,6 +1645,63 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 with mock.patch.object(benchmark_runner.shutil, "which", side_effect=fake_which):
                     self.assertEqual(benchmark_runner.resolve_codex_bin("codex"), str(cmd))
 
+    def test_prepare_repo_reuses_cached_commit_without_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream = root / "upstream"
+            commit = init_repo(upstream)
+            repo_root = root / "workspace" / "repo-a"
+            repository = {"url": str(upstream), "commit": commit}
+            benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
+
+            with mock.patch.object(benchmark_runner, "run_command", wraps=benchmark_runner.run_command) as run_command:
+                benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
+
+            commands = [call.args[0] for call in run_command.call_args_list]
+            command_text = [" ".join(command) for command in commands]
+            self.assertFalse(any(" clone " in f" {text} " for text in command_text))
+            self.assertFalse(any(" fetch " in f" {text} " for text in command_text))
+            self.assertTrue(any(" checkout " in f" {text} " for text in command_text))
+            self.assertTrue(any(" reset " in f" {text} " for text in command_text))
+            self.assertTrue(any(" clean " in f" {text} " for text in command_text))
+
+    def test_prepare_repo_fetches_when_cached_checkout_lacks_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream = root / "upstream"
+            first_commit = init_repo(upstream)
+            repo_root = root / "workspace" / "repo-a"
+            benchmark_runner.prepare_repo({"url": str(upstream), "commit": first_commit}, repo_root, dry_run=False)
+            second_commit = commit_file(upstream, "feature.txt", "feature\n", "Add feature")
+
+            with mock.patch.object(benchmark_runner, "run_command", wraps=benchmark_runner.run_command) as run_command:
+                benchmark_runner.prepare_repo({"url": str(upstream), "commit": second_commit}, repo_root, dry_run=False)
+
+            commands = [call.args[0] for call in run_command.call_args_list]
+            command_text = [" ".join(command) for command in commands]
+            self.assertFalse(any(" clone " in f" {text} " for text in command_text))
+            self.assertTrue(any(" fetch " in f" {text} " for text in command_text))
+            self.assertEqual(git(repo_root, "rev-parse", "HEAD"), second_commit)
+
+    def test_prepare_repo_force_clone_discards_cached_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream = root / "upstream"
+            commit = init_repo(upstream)
+            repo_root = root / "workspace" / "repo-a"
+            repository = {"url": str(upstream), "commit": commit}
+            benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
+
+            with mock.patch.object(benchmark_runner, "remove_path", wraps=benchmark_runner.remove_path) as remove_path:
+                with mock.patch.object(benchmark_runner, "run_command", wraps=benchmark_runner.run_command) as run_command:
+                    benchmark_runner.prepare_repo(repository, repo_root, dry_run=False, force_clone=True)
+
+            commands = [call.args[0] for call in run_command.call_args_list]
+            command_text = [" ".join(command) for command in commands]
+            self.assertTrue(remove_path.called)
+            self.assertTrue(any(" clone " in f" {text} " for text in command_text))
+            self.assertTrue((repo_root / ".git").exists())
+
     def test_skill_exposure_copy_mode_copies_skill_tree_without_bash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"

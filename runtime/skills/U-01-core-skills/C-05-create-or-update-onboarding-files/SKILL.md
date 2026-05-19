@@ -60,18 +60,21 @@ When routing to C-03, pass the affected source routes, known old/new paths, exis
 ```text
 <resolved-onboarding-root>/
   overview.md
+  overview.index.json
   entities.md
   <mirrored-source-folder>/
     overview.md
+    overview.index.json
     <mirrored-source-file>.md
 ```
 
 1. File-level onboarding keeps strict 1-to-1 mirroring with source files.
 2. Route-local `overview.md` files live in the mirrored onboarding hierarchy at the source folder they govern. They are governing context, not replacements for file-level onboarding.
 3. File-level onboarding should record the nearest `governingOverview` when one exists; otherwise point to the closest ancestor overview, falling back to the root `overview.md`.
-4. Repo-level entity catalogs exist once per repo as `entities.md` under the resolved onboarding root.
-5. Use `mcp_time_get_current_time` for onboarding timestamps; never guess.
-6. Keep durable onboarding commentary separate from task-local planning and output docs.
+4. Generated `overview.index.json` files live adjacent to route overviews and record route scope, child routes, existing file sidecars, coverage counts, routing terms, hot-path summary/hints, and governing-overview fallback.
+5. Repo-level entity catalogs exist once per repo as `entities.md` under the resolved onboarding root.
+6. Use `mcp_time_get_current_time` for onboarding timestamps; never guess.
+7. Keep durable onboarding commentary separate from task-local planning and output docs.
 
 ## Quick Rules
 
@@ -90,6 +93,36 @@ When routing to C-03, pass the affected source routes, known old/new paths, exis
 13. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References`, `Repo-Internal References`, or `Cross-Repo References` are still valid.
 14. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
 15. When changed paths imply route-level creation, refresh, move, or deletion, route to C-03 `existing-memory-slice-maintenance` before creating piecemeal file-level onboarding.
+16. After creating, updating, moving, or deleting route overviews or file-level sidecars, refresh generated route indexes with `scripts/build_route_indexes.py`.
+17. Keep each route overview's `## Hot Path Summary` short and current; it is copied into generated indexes for C-04 discovery.
+
+## Route Index Refresh
+
+Route indexes are generated availability metadata. Do not hand-maintain long
+missing-sidecar lists in overview prose.
+
+Use:
+
+```text
+python <C-05>/scripts/build_route_indexes.py --code-repository-root <repo> --onboarding-root <onboarding_root> --repository <repo-name>
+```
+
+The generator:
+
+1. discovers every `overview.md` under the resolved onboarding root
+2. writes adjacent `overview.index.json` files
+3. derives child routes from nested overviews
+4. derives `coveredFiles` from existing file-level sidecars whose source files
+   still exist
+5. derives route source scope from the overview route
+6. copies a bounded `## Hot Path Summary` into `hotPath.summary`
+7. derives `hotPath.candidateHints` and `hotPath.anchorHints` mechanically
+8. lets C-04 infer absent sidecars from source scope plus generated coverage
+
+If the generator reports stale or surprising coverage, fix the onboarding
+structure or source-sidecar mismatch before treating the index as current.
+If `hotPath.summary` is empty or stale, update the owning overview; do not hand
+edit the generated index.
 
 ## Source Discovery Rule
 

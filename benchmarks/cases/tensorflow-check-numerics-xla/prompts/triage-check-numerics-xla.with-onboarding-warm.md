@@ -13,18 +13,6 @@ Known benchmark-local paths:
 - memory_root: `ar-coordination/memory-repos/ar-tensorflow`
 - onboarding_root: `ar-coordination/memory-repos/ar-tensorflow/onboarding`
 
-Warm read mode:
-- Use `C-04-onboarding-read-mode`.
-- Do not locate, list, or inventory memory or onboarding. The roots above are
-  already known.
-- Start by reading `<onboarding_root>/overview.md`.
-- Before relying on a source file, read it with its deterministic sidecar:
-  `<onboarding_root>/<repo-relative-source-path>.md`.
-- If a candidate sidecar is absent, note that status and use the nearest
-  governing `overview.md`.
-- Use source search only for one named unresolved question at a time, scoped to
-  the smallest relevant route first.
-
 Execution discipline:
 This is a non-interactive benchmark run. Do not ask the user questions, request
 approval, browse the internet, use GitHub tools, or pause for follow-up. Make

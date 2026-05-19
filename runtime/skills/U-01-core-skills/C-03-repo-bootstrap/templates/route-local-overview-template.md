@@ -15,6 +15,10 @@
 
 <Explain this subtree as if it were a small repo of its own.>
 
+## Hot Path Summary
+
+<One or two short sentences for fast route discovery. Name the route's most useful files, identifiers, config keys, APIs, commands, tests, or error strings so agents can narrow source reads before opening the full overview.>
+
 ## What Belongs Here
 
 | Path | Role |

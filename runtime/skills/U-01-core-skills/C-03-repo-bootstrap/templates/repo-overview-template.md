@@ -13,6 +13,10 @@
 
 <Purpose, deployment model, core responsibilities, and the technologies that define the repo.>
 
+## Hot Path Summary
+
+<One or two short sentences for fast route discovery. Name the most likely entry areas, exact source anchors, config keys, command names, APIs, or files that help an agent narrow source reads without rereading the full overview.>
+
 ## Architecture At A Glance
 
 ```text
