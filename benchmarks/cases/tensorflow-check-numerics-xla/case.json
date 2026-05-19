@@ -15,7 +15,7 @@
   "memoryRepository": {
     "name": "ar-tensorflow",
     "url": "https://github.com/Foxfire1st/ar-tensorflow.git",
-    "commit": "ca6673bff6deeea295defcd1ef22020de8d0348a"
+    "commit": "f67d52f1f8d86d00b6fd8d0b547bb8d8816c4d3a"
   },
   "sourceTicket": {
     "system": "GitHub",
