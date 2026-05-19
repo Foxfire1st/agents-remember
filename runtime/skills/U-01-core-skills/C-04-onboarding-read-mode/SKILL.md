@@ -68,21 +68,40 @@ commands, errors, APIs, schema fields, test names, or distinctive comments. Do
 not search route labels or broad domain words after they selected the route.
 
 If no source anchor exists, narrow by filenames first with `rg -l`,
-`coveredFiles`, route-scoped globs, or one small filename search. Only print
-matching lines after a small file set is selected. If hits are noisy, stop and
-choose a narrower anchor in the same route or candidate file set.
+`coveredFiles`, route-scoped globs, or one small filename search. Do not print
+matching lines across a route until the file set is small. If hits are noisy,
+stop and choose a narrower anchor in the same route or candidate file set.
+
+Command output budget: confirmation commands must not print more than 80 lines.
+Prefer `rg -l`, exact files, or narrower globs. Route-scoped `rg -n` must have
+a shell output cap such as `| Select-Object -First 80`; `rg -m` is not enough
+across many files. If proof needs broader output, stop and name the unresolved
+question instead of dumping the route.
 
 Confirm only the packet contents:
 
 1. For `present-by-index`, read the source with its deterministic sidecar.
-2. For `absent-by-index`, do not probe the sidecar; read the governing overview
-   only if needed, then read the source.
+2. For `absent-by-index`, do not probe the sidecar; read source first.
 3. Without a route index, probe only the deterministic sidecar for the candidate
    source being confirmed.
 4. If one named source question remains, run one capped source-anchor search
-   over candidate files or the selected route: `rg -n -m 20 <source-anchor> ...`.
+   over candidate files; use the selected route only after filename narrowing.
 5. After search, read the resulting source/sidecar or source/governing-overview
    pair before any further search.
+
+Route overviews are fallback-only after discovery. Do not read a full route
+overview merely because a sidecar is absent. Read the governing overview only
+when the source role is unclear, `hotPath` did not cover route purpose, or the
+final answer needs a route boundary not proven by source.
+
+Stop confirmation as soon as source proves the subsystem boundary, immediate
+cause, user-facing consequence, and next fix direction. After that, do not read
+more overviews, sidecars, or broad searches unless the packet names an
+unresolved source question.
+
+For triage tasks, identify the likely cause and next investigation/fix
+direction. Do not search implementation mechanisms, alternative designs, or
+patch details unless the prompt asks for implementation planning.
 
 Confirmation must not expand into a second investigation. No repository-root,
 multi-route, or multi-subsystem search; no `rg --files`, broad `find`, or
