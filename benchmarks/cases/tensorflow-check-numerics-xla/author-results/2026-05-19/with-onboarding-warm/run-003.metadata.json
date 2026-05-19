@@ -1,0 +1,30 @@
+{
+  "case": "tensorflow-check-numerics-xla",
+  "command": [
+    "C:\\Users\\reado\\AppData\\Roaming\\npm\\codex.cmd",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--cd",
+    "C:\\ew\\ar-coordination\\benchmarks\\workspaces\\tensorflow-check-numerics-xla\\with-memory",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "danger-full-access",
+    "--output-last-message",
+    "C:\\ew\\ar-coordination\\benchmarks\\user-runs\\tensorflow-check-numerics-xla\\2026-05-19T05-18-07\\triage-check-numerics-xla\\with-onboarding-warm\\run-003.final.md",
+    "-c",
+    "approval_policy=\"never\"",
+    "-c",
+    "project_root_markers=['.benchmark-root']",
+    "<prompt via stdin>"
+  ],
+  "cwd": "C:\\ew\\ar-coordination\\benchmarks\\workspaces\\tensorflow-check-numerics-xla\\with-memory",
+  "durationSeconds": 262.84,
+  "exitCode": 0,
+  "finalMessagePath": "C:\\ew\\ar-coordination\\benchmarks\\user-runs\\tensorflow-check-numerics-xla\\2026-05-19T05-18-07\\triage-check-numerics-xla\\with-onboarding-warm\\run-003.final.md",
+  "jsonlPath": "C:\\ew\\ar-coordination\\benchmarks\\user-runs\\tensorflow-check-numerics-xla\\2026-05-19T05-18-07\\triage-check-numerics-xla\\with-onboarding-warm\\run-003.jsonl",
+  "prompt": "triage-check-numerics-xla",
+  "repetition": 3,
+  "stderrPath": "C:\\ew\\ar-coordination\\benchmarks\\user-runs\\tensorflow-check-numerics-xla\\2026-05-19T05-18-07\\triage-check-numerics-xla\\with-onboarding-warm\\run-003.stderr",
+  "variant": "with-onboarding-warm"
+}
