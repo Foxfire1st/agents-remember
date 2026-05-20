@@ -47,6 +47,35 @@ It owns installed skills, installed `AGENTS.md` templates, task files, notes, wo
 
 Agents Remember does not use embeddings, semantic search, or top-k retrieval for file-level onboarding. The path of the source file determines the path of the onboarding file. That keeps the read surface small and avoids pulling in related-looking but irrelevant material.
 
+## Retrieval Strategy Substrates
+
+File-level onboarding remains path-derived and verifiable, but agents often need
+different retrieval strategies before they know which file-level memory to read.
+C-04 is evolving into a retrieval strategy router for that job.
+
+The router starts from the model's current intent: what kind of missing context
+does the agent need next, and in what shape should that context arrive? It then
+chooses the memory substrate that best fits that intent.
+
+- `Semantics`: use when the concept is known, but the structure or location is
+  unknown. A semantic memory provider can search memory repos for candidate
+  routes or files.
+- `Relationship`: use when an anchor is known, but the surrounding
+  relationships, impact paths, callers, callees, or dependencies are unknown. A
+  relationship provider can search code structure for candidate connections.
+- `Intent`: use when an anchor or location is known, but the hidden contracts,
+  invariants, behavioral expectations, branch-valid truths, or code intent are
+  unknown. Onboarding plus bounded source confirmation is the default substrate
+  for this layer.
+
+These substrates are complementary. A triage task may start from anchors in a
+ticket, use the Relationship substrate to understand nearby structure, then move
+to the Intent substrate to learn the code truths that make a change safe.
+
+Provider output is candidate routing evidence, not proof. Source files,
+verified onboarding, drift checks, branch validity, and approved memory
+promotion remain the truth controls.
+
 ## Drift Detection
 
 Each file-level sidecar onboarding unit records verification metadata, including the source commit it was checked against. Before planning against onboarding, `C-02-onboarding-drift-detection` compares the source file with that verification point.
