@@ -9,5 +9,67 @@
   "memoryRepos": {
     "defaultTopology": "external",
     "repositories": []
+  },
+  "contextProviders": {
+    "enabled": false,
+    "providers": {
+      "grepai-memory": {
+        "type": "semantic",
+        "scope": "memory",
+        "enabled": false,
+        "roots": ["<coordination_root>/memory-repos"],
+        "runtimeRoot": "<coordination_root>/providers/grepai/memory-repos",
+        "watch": {
+          "mode": "background",
+          "cwd": "<coordination_root>/memory-repos",
+          "logDir": "<runtimeRoot>/logs"
+        },
+        "freshness": {
+          "refreshAfter": ["C-03", "C-05"]
+        }
+      },
+      "codegraphcontext-<repo-id>": {
+        "type": "relationship",
+        "scope": "code",
+        "enabled": false,
+        "roots": ["<code_repository_root>"],
+        "runtimeRoot": "<coordination_root>/providers/codegraphcontext/<repo-id>",
+        "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
+        "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
+        "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
+        "stateFile": "<runtimeRoot>/provider-state.json",
+        "env": {
+          "CGC_RUNTIME_DB_TYPE": "kuzudb",
+          "DEFAULT_DATABASE": "kuzudb",
+          "HOME": "<runtimeRoot>",
+          "KUZUDB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
+          "CGC_RUNTIME_DB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
+          "FALKORDB_PATH": "<runtimeRoot>/.codegraphcontext/db/falkordb.db",
+          "FALKORDB_SOCKET_PATH": "<runtimeRoot>/.codegraphcontext/run/falkordb.sock",
+          "LOG_FILE_PATH": "<runtimeRoot>/.codegraphcontext/logs/cgc.log",
+          "DEBUG_LOG_PATH": "<runtimeRoot>/.codegraphcontext/logs/debug.log",
+          "ENABLE_AUTO_WATCH": "false"
+        },
+        "watch": {
+          "mode": "managed-foreground",
+          "cwd": "<runtimeRoot>",
+          "logFile": "<runtimeRoot>/.codegraphcontext/logs/watch.log"
+        },
+        "freshness": {
+          "refreshAfter": ["C-09-closeout"]
+        }
+      }
+    },
+    "policy": {
+      "discoveryOnly": true,
+      "sourceProofRequired": true,
+      "maxSemanticQueriesPerPacket": 1,
+      "maxGraphQueriesPerPacket": 2,
+      "transportPolicy": {
+        "default": "cli",
+        "mcp": "optional",
+        "tokenEconomy": "budget-returned-evidence"
+      }
+    }
   }
 }

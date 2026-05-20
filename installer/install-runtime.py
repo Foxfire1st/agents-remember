@@ -198,6 +198,7 @@ def ensure_gitignore_entry(path: Path, entry: str, summary: InstallSummary, dry_
 def require_runtime_tree(runtime_root: Path) -> None:
     required = [
         runtime_root / "agents-md-files",
+        runtime_root / "providers",
         runtime_root / "skills",
         runtime_root / "scripts",
     ]
@@ -254,6 +255,7 @@ def install_runtime(
     copy_tree(runtime_root / "skills", coordination_root / "skills", summary, dry_run)
     prune_tree(runtime_root / "scripts", coordination_root / "scripts", summary, dry_run)
     copy_tree(runtime_root / "scripts", coordination_root / "scripts", summary, dry_run)
+    copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
 
     for source_rel, target_rel in AGENTS_MD_TARGETS.items():
         copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)

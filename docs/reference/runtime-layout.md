@@ -16,6 +16,9 @@ agents-remember-md/
     scripts/
       install-skills.sh
       run-benchmarks.py
+    providers/
+      requirements/
+      patches/
     skills/
       U-01-core-skills/
       W-01-heavy-task-workflow/
@@ -30,6 +33,11 @@ agents-remember-md/
 ```text
 ar-coordination/
   AGENTS.md
+  providers/
+    requirements/
+    patches/
+    _venvs/
+    <provider>/<instance-id>/
   scripts/
   skills/
   system/
@@ -50,9 +58,13 @@ ar-coordination/
 - installed coordinator `AGENTS.md` templates
 - installed skills
 - installed scripts
+- installed provider defaults, such as pinned requirement files and patch
+  assets
 - optional benchmark fixtures when `--include-benchmarks` is passed
 
-It does not own live settings, notes, tasks, worktrees, normal memory repo content, temp files, or onboarding content.
+It does not own live settings, notes, tasks, worktrees, normal memory repo content, temp files, onboarding content, provider virtual environments, provider databases, provider logs, or per-repository provider runtime state.
+
+Provider dependencies and artifacts are coordination-owned runtime state. Package defaults live under `runtime/providers/` and install into `ar-coordination/providers/`, while live provider installs use `providers/_venvs/<provider>/` and per-instance artifacts use `providers/<provider>/<instance-id>/`. For CodeGraphContext, the managed instance root is `providers/codegraphcontext/<repo-id>/.codegraphcontext/` so `.env`, `config.yaml`, `.cgcignore`, KuzuDB files, logs, and state remain outside indexed source repositories.
 
 When benchmark installation is enabled, the installer reconciles package-owned benchmark content under `ar-coordination/benchmarks/` and preserves only user-generated outputs under `ar-coordination/benchmarks/user-runs/`. Source benchmark content includes case manifests, prompts, author results, docs, and workspace templates, not pre-created workspaces. Generated benchmark workspaces are resettable state; normal user memory under `ar-coordination/memory-repos/` is not touched.
 
