@@ -74,6 +74,13 @@ Summary principle: define the retrieval contract and the context bundle the agen
 - C-03 and C-05 must notify or refresh provider indexes after onboarding updates.
 - GrepAI should be the default semantic provider for the memory layer when configured.
 - CodeGraphContext should be the default relationship provider for code repos when configured. Graphify remains deferred fallback/research until its artifact and hook behavior is less costly to contain.
+- Provider dependencies must be pinned and installed into coordination-owned provider environments, not user-global Python environments.
+- Provider virtual environments should be shared per provider type under `<coordination_root>/providers/_venvs/<provider>/`, not shared across unrelated providers. This keeps installs reusable across repo instances while avoiding dependency collisions between provider CLIs.
+- Provider dependency pins should live under `<coordination_root>/providers/requirements/<provider>.txt`; CGC should start pinned to the evaluated version before any monkey patch is applied.
+- Provider patches should live under `<coordination_root>/providers/patches/<provider>/` and be applied idempotently by lifecycle tooling. Patched provider state should record provider version, patch identity, and patch verification in the provider runtime state.
+- Provider runtime artifacts must live under `<coordination_root>/providers/<provider>/<instance-id>/`. For CGC, the preferred managed layout is `<coordination_root>/providers/codegraphcontext/<repo-id>/.codegraphcontext/` containing `.env`, `config.yaml`, `.cgcignore`, `db/kuzu/`, logs, and runtime state.
+- CGC is not acceptable as a managed provider until repo-local `.cgcignore` creation is patched or fixed upstream. The provider may read indexed source repositories, but it must not create `.cgcignore`, `.codegraphcontext`, reports, database files, logs, or other provider artifacts inside code repositories.
+- CGC upstream issue candidate: request an explicit `.cgcignore` path/config option that is honored before repo-local discovery/creation so externally managed indexes can keep ignore files under their runtime root.
 - The implementation must preserve C-08 context resolution, C-02 drift discipline, W-02 approval gates, and C-05 onboarding propagation.
 - Existing route indexes and `overview.index.json` remain first-class context inputs.
 
@@ -100,6 +107,9 @@ Completion gate: a user can express one GrepAI memory provider and multiple CGC 
 - Evaluate GrepAI against the current `ar-coordination/memory-repos` index.
 - Install/evaluate CodeGraphContext only after opt-in consent, then index at least two code repos if available: the active `agents-remember-md` repo and one additional sibling code repo.
 - Store all test artifacts under the active task folder, for example `provider-evaluation.md`, with no provider artifacts in code repos.
+- Treat artifact containment as part of provider quality. Record whether a provider mutates the indexed source repo, writes hidden files, writes reports, creates global config, or requires cleanup.
+- Pause full TensorFlow CGC indexing until the CGC runtime-root layout and `.cgcignore` mutation behavior are patched or explicitly accepted.
+- Record indexing wall time, shutdown warnings, query latency, concurrency behavior, and database lock behavior. CGC's first `agents-remember-md` spike showed that relationship quality cannot be judged separately from lifecycle cost.
 - Use CLI first for repeatability; use MCP only if already mounted and bounded.
 - For each query, record result volume and quality before treating the provider as useful.
 - Compare provider output against source/onboarding truth for a small sample, because provider output is candidate routing only.
@@ -114,15 +124,19 @@ Evaluation table format:
 | CGC      | `<code_repo_root>`                 | CLI       | Caller/callee query for a known function/class         | Lines/items/chars | Relationship candidates returned          | Source checked?            | Good/noisy/sparse, too much/too little | Keep command as supported probe or avoid   |
 | CGC      | `<code_repo_root>`                 | CLI       | Dependency/impact query across modules                 | Lines/items/chars | Candidate impact path(s) returned         | Source checked?            | Good/noisy/sparse, too much/too little | Keep, cap depth, or require source-first   |
 | CGC      | `<code_repo_root>`                 | CLI       | Negative or low-signal query                           | Lines/items/chars | Whether it fails quietly or floods output | Source checked?            | Good/noisy/sparse, too much/too little | Add guardrail or avoid command             |
+| CGC      | `<provider_runtime_root>`          | CLI       | Containment probe                                      | Files/paths       | Artifacts created by install/index/query  | Source repo dirtied?       | Clean/patchable/unacceptable           | Accept, patch, upstream issue, or defer    |
 | Chained  | memory + code                      | CLI       | Triage-shaped task: anchors -> relationships -> intent | Lines/items/chars | Bundle assembled across substrates        | Source/onboarding checked? | Coherent, excessive, missing contract? | Adjust router sequence or substrate names  |
 
-Completion gate: the task has a written judgement about whether GrepAI and CGC produce useful candidate routes at acceptable output volume, plus specific query limits for C-04.
+Completion gate: the task has a written judgement about whether GrepAI and CGC produce useful candidate routes at acceptable output volume and acceptable lifecycle cost, plus specific query limits for C-04. CGC cannot pass this gate until source-repo `.cgcignore` mutation is patched, accepted as a deliberate repo config choice, or fixed upstream.
 
 ### S3 — Implement provider lifecycle manager
 
 - Add a small shared provider manager surface rather than provider-specific adapters that normalize query outputs.
 - Provide `status`, `start`, `stop`, `refresh`, and `doctor` for each configured provider instance.
 - Track runtime state under `<coordination_root>/providers/<provider>/<id>/`, including logs, PID/process metadata, last status, and last refresh.
+- Install provider dependencies from `<coordination_root>/providers/requirements/<provider>.txt` into `<coordination_root>/providers/_venvs/<provider>/`.
+- Apply provider patches from `<coordination_root>/providers/patches/<provider>/` after installation and before provider use. Patches must be idempotent and version-checked.
+- Write `provider-state.json` under each provider instance runtime root with provider version, venv path, requirements file hash, applied patch ids, last doctor result, last refresh, and artifact-containment status.
 - GrepAI implementation:
   - status: run from configured root with `grepai status --no-ui` and `grepai watch --status`
   - start: `grepai watch --background --log-dir <runtimeRoot>/logs`
@@ -131,10 +145,12 @@ Completion gate: the task has a written judgement about whether GrepAI and CGC p
   - doctor: command availability, root `.grepai`, index stats, watcher state, log path
 - CGC implementation:
   - status: command availability, runtime paths, provider process state, `cgc doctor`, `cgc list`, and `cgc stats <code_repo_root>`
+  - install: create or reuse `<coordination_root>/providers/_venvs/codegraphcontext/`, install the pinned requirements file, apply the `.cgcignore` runtime-root patch, and verify the patched behavior before indexing
+  - runtime layout: use `<coordination_root>/providers/codegraphcontext/<repo-id>/.codegraphcontext/` for `.env`, `config.yaml`, `.cgcignore`, `db/kuzu/`, logs, and state
   - start: supervised foreground `cgc watch <code_repo_root>` or managed `cgc mcp start` with provider env and cwd `<runtimeRoot>`
   - stop: terminate the lifecycle-manager-owned process
   - refresh: `cgc index <code_repo_root> --force`, or delete-then-index fallback if needed
-  - doctor: path containment, env resolution, backend availability, query sanity check
+  - doctor: path containment, env resolution, backend availability, patch verification, no source-repo artifact creation, query sanity check
 - Likely target files:
   - new shared module under `runtime/skills/U-01-core-skills/_shared/agents_remember/`
   - optional script under `runtime/scripts/` for manual provider lifecycle commands
@@ -201,6 +217,9 @@ Completion gate: provider freshness becomes part of workflow closeout instead of
 ### S7 — Document operation and failure modes
 
 - Add concise provider docs covering installation consent, artifact layout, lifecycle commands, status interpretation, stale-index behavior, and fallback.
+- Document provider dependency layout: pinned requirements under `providers/requirements/`, per-provider venvs under `providers/_venvs/`, version-specific patches under `providers/patches/`, and per-instance runtime state under `providers/<provider>/<instance-id>/`.
+- Document the CGC `.cgcignore` caveat, the monkey patch, how to verify it, and the upstream issue/request that would let the patch be removed.
+- Document CGC performance observations separately from result quality: index wall time, executor shutdown warnings, KuzuDB lock/concurrency behavior, and refresh cost.
 - Explain CLI vs MCP as transport choice; token economy is controlled by returned evidence budgets.
 - Document multi-repo CGC setup with one provider instance per code repo.
 - Target docs:
@@ -213,6 +232,8 @@ Completion gate: a user can install/configure providers without reverse-engineer
 ### S8 — Test and review
 
 - Unit-test settings parsing and token/runtime-root expansion if a shared Python module is added.
+- Unit-test provider install layout expansion: requirements path, venv path, patch path, runtime root, and provider-state path.
+- Test the CGC `.cgcignore` patch against a temporary source repo and assert no `.cgcignore` or `.codegraphcontext` file is created in the indexed source repository.
 - Run lifecycle manager `doctor/status` in dry-run mode without requiring CGC installation.
 - When CGC is installed, run real smoke tests with runtime roots under `ar-coordination/providers/codegraphcontext/<repo-id>/`.
 - Verify C-04 remains usable with no providers configured.
@@ -279,20 +300,25 @@ What they offer is specialized discovery and lower retrieval friction, but they 
         "enabled": false,
         "roots": ["<code_repository_root>"],
         "runtimeRoot": "<coordination_root>/providers/codegraphcontext/<repo>",
+        "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
+        "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
+        "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
         "env": {
           "CGC_RUNTIME_DB_TYPE": "kuzudb",
           "DEFAULT_DATABASE": "kuzudb",
-          "KUZUDB_PATH": "<runtimeRoot>/db/kuzu",
-          "FALKORDB_PATH": "<runtimeRoot>/db/falkordb.db",
-          "FALKORDB_SOCKET_PATH": "<runtimeRoot>/run/falkordb.sock",
-          "LOG_FILE_PATH": "<runtimeRoot>/logs/cgc.log",
-          "DEBUG_LOG_PATH": "<runtimeRoot>/logs/debug.log",
+          "HOME": "<runtimeRoot>",
+          "KUZUDB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
+          "CGC_RUNTIME_DB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
+          "FALKORDB_PATH": "<runtimeRoot>/.codegraphcontext/db/falkordb.db",
+          "FALKORDB_SOCKET_PATH": "<runtimeRoot>/.codegraphcontext/run/falkordb.sock",
+          "LOG_FILE_PATH": "<runtimeRoot>/.codegraphcontext/logs/cgc.log",
+          "DEBUG_LOG_PATH": "<runtimeRoot>/.codegraphcontext/logs/debug.log",
           "ENABLE_AUTO_WATCH": "false"
         },
         "watch": {
           "mode": "managed-foreground",
           "cwd": "<runtimeRoot>",
-          "logFile": "<runtimeRoot>/logs/watch.log"
+          "logFile": "<runtimeRoot>/.codegraphcontext/logs/watch.log"
         },
         "freshness": {
           "refreshAfter": ["C-09-closeout"]
@@ -334,20 +360,27 @@ What they offer is specialized discovery and lower retrieval friction, but they 
 
 - Purpose: relationship and impact discovery over code repositories. CGC returns candidate relationships, not final architecture claims.
 - Scope: one provider instance per C-08 resolved code repo. Multi-repo support is achieved by registering multiple `codegraphcontext-code:<repo-id>` instances, each with its own runtime root and process supervision.
-- Artifacts: all Agents Remember-managed CGC artifacts for a repo live under `<coordination_root>/providers/codegraphcontext/<repo-id>/`. The planned layout is `db/` for KuzuDB or FalkorDB files, `run/` for sockets/PIDs, `logs/` for process logs, and optional `bundles/` for `.cgc` exports.
-- Configuration: prefer explicit runtime environment over user-global CGC config. Minimum env: `CGC_RUNTIME_DB_TYPE=kuzudb`, `DEFAULT_DATABASE=kuzudb`, `KUZUDB_PATH=<runtimeRoot>/db/kuzu`, `FALKORDB_PATH=<runtimeRoot>/db/falkordb.db`, `FALKORDB_SOCKET_PATH=<runtimeRoot>/run/falkordb.sock`, `LOG_FILE_PATH=<runtimeRoot>/logs/cgc.log`, `DEBUG_LOG_PATH=<runtimeRoot>/logs/debug.log`, and `ENABLE_AUTO_WATCH=false`.
+- Install: use `<coordination_root>/providers/_venvs/codegraphcontext/` as the shared CGC venv and install from `<coordination_root>/providers/requirements/codegraphcontext.txt`, initially pinned to the evaluated CGC version.
+- Patches: apply version-checked patches from `<coordination_root>/providers/patches/codegraphcontext/` after install and before any indexing. The first required patch redirects `.cgcignore` creation away from the indexed source repo and into the managed runtime root.
+- Artifacts: all Agents Remember-managed CGC artifacts for a repo live under `<coordination_root>/providers/codegraphcontext/<repo-id>/`. The preferred layout is `.codegraphcontext/.env`, `.codegraphcontext/config.yaml`, `.codegraphcontext/.cgcignore`, `.codegraphcontext/db/kuzu/`, `.codegraphcontext/logs/`, `.codegraphcontext/run/`, and `provider-state.json`.
+- Configuration: prefer explicit runtime environment over user-global CGC config. Minimum env: `HOME=<runtimeRoot>`, `CGC_RUNTIME_DB_TYPE=kuzudb`, `DEFAULT_DATABASE=kuzudb`, `KUZUDB_PATH=<runtimeRoot>/.codegraphcontext/db/kuzu`, `CGC_RUNTIME_DB_PATH=<runtimeRoot>/.codegraphcontext/db/kuzu`, `FALKORDB_PATH=<runtimeRoot>/.codegraphcontext/db/falkordb.db`, `FALKORDB_SOCKET_PATH=<runtimeRoot>/.codegraphcontext/run/falkordb.sock`, `LOG_FILE_PATH=<runtimeRoot>/.codegraphcontext/logs/cgc.log`, `DEBUG_LOG_PATH=<runtimeRoot>/.codegraphcontext/logs/debug.log`, and `ENABLE_AUTO_WATCH=false`.
+- Containment gate: CGC v0.4.10 creates `<indexed_repo>/.cgcignore` when no repo-local ignore file exists. This is not acceptable for managed provider mode. CGC can become the default relationship provider only after the lifecycle manager patches or upstream fixes that behavior, or after the developer explicitly accepts `.cgcignore` as a deliberate source-repo config file.
 - Managed start: foreground/blocking CGC watchers are acceptable when launched and supervised by Agents Remember. Start with the provider env, cwd `<runtimeRoot>`, and absolute code repo root, e.g. `cgc watch <code_repository_root>` or `codegraphcontext watch <code_repository_root>`.
-- Status gate: check that the provider command is installed, runtime paths are writable, `cgc doctor` succeeds under the provider env, the target repo appears in `cgc list`, `cgc stats <code_repository_root>` reports indexed content, and the lifecycle manager has a live watcher/MCP process when watch mode is enabled.
+- Status gate: check that the provider command is installed, runtime paths are writable, patch verification passes, `cgc doctor` succeeds under the provider env, the target repo appears in `cgc list`, `cgc stats <code_repository_root>` reports indexed content, no provider artifacts were written to the source repo, and the lifecycle manager has a live watcher/MCP process when watch mode is enabled.
 - Self-update: `cgc watch` uses a watchdog observer and updates the graph on create/modify/delete/move events. The CLI watcher blocks; the MCP server can also own watcher state through `watch_directory`, `list_watched_paths`, and `unwatch_directory`.
 - Hard refresh: run `cgc index <code_repository_root> --force` under the provider env, or the equivalent delete-then-index flow if the installed version lacks `--force`. If a watcher is running, stop or pause it during the rebuild and restart it afterward.
 - Query mode: agents may use CGC CLI/MCP relationship commands such as callers, callees, call chain, dependencies, inheritance tree, variable usage, complexity, dead-code, or read-only Cypher. Results must lead to source/onboarding verification before claims are promoted.
 - Transport choice: prefer CLI for scripted provider manager actions and bounded relationship probes. MCP is acceptable for interactive agent workflows, especially when mounted once per provider instance. Token economy must be enforced through result limits and source-follow-up discipline either way.
+- Performance caveat: the initial CGC v0.4.10 spike over `agents-remember-md` indexed 173 files/539 functions/22 classes but took 375.69 seconds and ended with an asyncio executor shutdown warning. Treat hard refresh cost and shutdown behavior as lifecycle risks until a patched, clean-layout rerun proves otherwise.
 
 ### Provider manager responsibilities
 
 - Install providers only after opt-in consent.
 - Keep provider roots out of code repos and memory repos unless the provider's own index format requires a repo-local config file already approved for that provider.
+- Install provider CLIs into per-provider venvs under `providers/_venvs/`, from pinned files under `providers/requirements/`.
+- Apply and verify version-specific provider patches before using patched providers.
 - Track configured roots, runtime roots, process ids, log paths, command versions, and last successful refresh timestamps.
+- Track provider versions, requirements hashes, applied patch ids, and artifact-containment checks in `provider-state.json`.
 - Support `status`, `start`, `stop`, `refresh`, and `doctor` for each provider instance.
 - Allow multiple GrepAI memory scopes if needed later, but default to one memory-repos root.
 - Allow multiple CGC code scopes from the start, one per code repo, keyed by stable repo id and C-08 resolved code root.
@@ -358,6 +391,8 @@ What they offer is specialized discovery and lower retrieval friction, but they 
 
 | Date-Time        | Decision                                                                                                                                        | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-05-20T18:20 | Implement the first contained provider lifecycle surface before rerunning CGC indexing.                                                         | The repo-local `.cgcignore` was removed, and source changes now ship pinned CGC requirements, a version-specific `.cgcignore` runtime-root patch asset, installer support for `runtime/providers`, a shared CGC layout/patch helper, unit tests, and a `provider-lifecycle.py` script for CGC/GrepAI status, layout, patch, start, stop, refresh, and doctor flows. The clean-layout evaluation can now proceed from a contained runtime root instead of repeating the messy split `db/` plus `home/.codegraphcontext` layout.                                                                                                                                   |
+| 2026-05-20T17:25 | Pin provider installs, use one venv per provider type, and require a CGC `.cgcignore` runtime-root patch before managed CGC adoption.           | The first CGC spike showed two lifecycle mismatches: using `HOME=<runtimeRoot>/home` plus `--path <runtimeRoot>/db/kuzu` produced a split layout, and CGC v0.4.10 generated an untracked `.cgcignore` inside the indexed `agents-remember-md` source repo. The task now prefers `<runtimeRoot>/.codegraphcontext/` for CGC config/db/logs, `<coordination_root>/providers/_venvs/<provider>/` for shared provider-specific venvs, pinned requirements under `providers/requirements/`, and version-checked patches under `providers/patches/`. TensorFlow CGC indexing is paused until the containment patch or an upstream fix is in place.                     |
 | 2026-05-20T14:22 | Add a bonus task to draft a source-repo philosophy document for Agents Remember.                                                                | Developer observed that the project is conceptually close to complete and that a dedicated document should explain the philosophy behind Agents Remember's decisions, including external developments and retroactive research. This is added as a bonus task so the idea is captured while keeping C-04 implementation focused.                                                                                                                                                                                                                                                                                                                                 |
 | 2026-05-20T14:15 | Capture the transcript's industry retrieval context as a task-local table.                                                                      | Developer wanted the current-industry-development framing written down but was not sure where it belongs yet. The task now has an `Industry Retrieval Context` table after the conceptual model, explicitly attributed to the developer-provided transcript and framed as support for the retrieval-substrate direction rather than verified product documentation.                                                                                                                                                                                                                                                                                              |
 | 2026-05-20T14:08 | Reframe open questions around the initial C-04 router test versus deferred provider lifecycle work.                                             | The previous open questions still reflected the broader provider-platform direction. The current task focus is testing whether models adapt to the Semantics / Relationship / Intent retrieval strategy router first. Physical skill rename, substrate naming, and model-adaptation examples now block the initial C-04 pass; provider refresh hooks, CGC artifact verification, and Graphify containment move to deferred lifecycle questions.                                                                                                                                                                                                                  |
