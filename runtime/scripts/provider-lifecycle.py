@@ -84,12 +84,29 @@ from agents_remember.context_providers import (  # noqa: E402
     grepai_runtime_layout_from_provider_settings,
     provider_requirements_file,
     read_provider_pin,
+    remove_grepai_root_provider_artifacts,
     source_provider_artifacts,
     stable_provider_id,
     sync_grepai_index_roots,
     write_grepai_workspace_config,
     write_provider_state,
 )
+
+
+def configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+def subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    merged_env["PYTHONUTF8"] = "1"
+    merged_env["PYTHONIOENCODING"] = "utf-8"
+    return merged_env
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -159,22 +176,41 @@ def run_command(
     cwd: Path,
     env: dict[str, str] | None = None,
     timeout: int = 60,
+    allow_timeout: bool = False,
 ) -> dict[str, Any]:
-    merged_env = os.environ.copy()
-    if env:
-        merged_env.update(env)
+    merged_env = subprocess_env(env)
     started = time.monotonic()
-    completed = subprocess.run(
-        command,
-        cwd=str(cwd),
-        env=merged_env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(cwd),
+            env=merged_env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        if not allow_timeout:
+            raise
+        stdout = error.stdout
+        stderr = error.stderr
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        return {
+            "command": command,
+            "cwd": cwd.as_posix(),
+            "returncode": None,
+            "durationSeconds": round(time.monotonic() - started, 3),
+            "stdout": stdout or "",
+            "stderr": stderr or "",
+            "timedOut": True,
+            "timeoutSeconds": timeout,
+        }
     return {
         "command": command,
         "cwd": cwd.as_posix(),
@@ -182,6 +218,7 @@ def run_command(
         "durationSeconds": round(time.monotonic() - started, 3),
         "stdout": completed.stdout,
         "stderr": completed.stderr,
+        "timedOut": False,
     }
 
 
@@ -191,9 +228,7 @@ def run_foreground_command(
     cwd: Path,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    merged_env = os.environ.copy()
-    if env:
-        merged_env.update(env)
+    merged_env = subprocess_env(env)
     started = time.monotonic()
     completed = subprocess.run(
         command,
@@ -395,7 +430,7 @@ def cgc_run_api_payload(data: dict[str, Any]) -> dict[str, Any]:
 
     payload: dict[str, Any] = {
         key: data[key]
-        for key in ("provider", "action", "ok", "repoId", "dryRun")
+        for key in ("provider", "action", "ok", "repoId", "workspace", "dryRun")
         if key in data
     }
     for key in ("returncode", "durationSeconds"):
@@ -418,6 +453,10 @@ def render_cgc_run_result(data: dict[str, Any], args: argparse.Namespace) -> boo
     if not getattr(args, "dry_run", False):
         return render_captured_command_output(data)
     return False
+
+
+def render_grepai_run_result(data: dict[str, Any], args: argparse.Namespace) -> bool:
+    return render_cgc_run_result(data, args)
 
 
 def cgc_uses_settings(args: argparse.Namespace) -> bool:
@@ -1836,6 +1875,98 @@ def grepai_watch_pid_from_output(output: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def grepai_watch_already_running_from_output(output: str) -> bool:
+    text = output.lower()
+    return "already" in text and "running" in text
+
+
+def grepai_watch_running_from_output(output: str) -> bool:
+    text = output.lower()
+    if "not running" in text:
+        return False
+    return "watcher: running" in text or "status: running" in text or grepai_watch_already_running_from_output(output)
+
+
+def grepai_state_matches_layout(state: dict[str, Any], layout: Any) -> bool:
+    return (
+        state.get("workspace") == layout.workspace_name
+        and state.get("runtimeRoot") == layout.runtime_root.as_posix()
+        and state.get("workspaceConfigFile") == layout.workspace_config_file.as_posix()
+    )
+
+
+def grepai_watch_state(
+    layout: Any,
+    *,
+    action: str,
+    pid: int | None,
+    backend_result: dict[str, Any] | None,
+    adopted: bool = False,
+    startup_timed_out: bool = False,
+) -> dict[str, Any]:
+    return {
+        "provider": "grepai",
+        "workspace": layout.workspace_name,
+        "roots": [
+            {
+                "projectId": root.project_id,
+                "path": root.path.as_posix(),
+                "sourcePath": root.source_path.as_posix() if root.source_path else None,
+            }
+            for root in layout.roots
+        ],
+        "runtimeRoot": layout.runtime_root.as_posix(),
+        "workspaceConfigFile": layout.workspace_config_file.as_posix(),
+        "process": {
+            "pid": pid,
+            "logDir": layout.logs_root.as_posix(),
+            "mode": "native-background-watch",
+            "adopted": adopted,
+            "startupTimedOut": startup_timed_out,
+        },
+        "lastAction": action,
+        "backend": backend_result,
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+def grepai_probe_watcher(command_name: str, layout: Any, state_file: Path, timeout: int) -> dict[str, Any]:
+    state = read_json(state_file)
+    state_pid = state.get("process", {}).get("pid")
+    managed_alive = bool(grepai_state_matches_layout(state, layout) and isinstance(state_pid, int) and process_alive(state_pid))
+    command = [command_name, "watch", "--status", "--workspace", layout.workspace_name]
+    status = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=timeout, allow_timeout=True)
+    output = f"{status.get('stdout', '')}\n{status.get('stderr', '')}"
+    native_running = grepai_watch_running_from_output(output)
+    native_pid = grepai_watch_pid_from_output(output)
+    pid = state_pid if managed_alive and isinstance(state_pid, int) else native_pid
+    return {
+        "running": managed_alive or native_running,
+        "pid": pid,
+        "managedAlive": managed_alive,
+        "nativeRunning": native_running,
+        "status": status,
+    }
+
+
+def prepare_grepai_workspace(
+    layout: Any,
+    provider_settings: dict[str, Any],
+    *,
+    dsn: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    removals = remove_grepai_root_provider_artifacts(layout.roots, dry_run=dry_run)
+    synced = [] if dry_run else sync_grepai_index_roots(layout)
+    if not dry_run:
+        write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
+    return {
+        "removedRootArtifacts": removals,
+        "syncedRoots": synced,
+        "workspaceConfigFile": layout.workspace_config_file.as_posix(),
+    }
+
+
 def grepai_backend_settings(provider_settings: dict[str, Any], layout: Any) -> dict[str, Any]:
     backend_settings = provider_settings.get("backend", {})
     if not isinstance(backend_settings, dict):
@@ -1906,7 +2037,7 @@ def docker_wait_for_postgres(
     deadline = time.monotonic() + timeout
     last_result: dict[str, Any] | None = None
     while time.monotonic() < deadline:
-        last_result = run_command(
+        ready = run_command(
             [
                 docker_command(),
                 "exec",
@@ -1922,15 +2053,25 @@ def docker_wait_for_postgres(
             cwd=cwd,
             timeout=15,
         )
-        if last_result["returncode"] == 0:
-            return last_result
+        last_result = ready
+        if ready["returncode"] == 0:
+            database = docker_psql(backend, cwd=cwd, timeout=15, sql="SELECT 1;")
+            last_result = database
+            if database["returncode"] == 0:
+                return {
+                    "returncode": 0,
+                    "stdout": database.get("stdout", ""),
+                    "stderr": database.get("stderr", ""),
+                    "pgReady": ready,
+                    "database": database,
+                }
         time.sleep(2)
     if last_result is None:
         raise ContextProviderError("timed out waiting for GrepAI PostgreSQL health check")
     raise ContextProviderError(f"GrepAI PostgreSQL health check failed: {last_result['stderr'] or last_result['stdout']}")
 
 
-def docker_ensure_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) -> dict[str, Any]:
+def docker_psql(backend: dict[str, Any], *, cwd: Path, timeout: int, sql: str) -> dict[str, Any]:
     return run_command(
         [
             docker_command(),
@@ -1946,10 +2087,35 @@ def docker_ensure_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) 
             "-v",
             "ON_ERROR_STOP=1",
             "-c",
-            "CREATE EXTENSION IF NOT EXISTS vector;",
+            sql,
         ],
         cwd=cwd,
         timeout=timeout,
+    )
+
+
+def docker_ensure_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) -> dict[str, Any]:
+    return docker_psql(
+        backend,
+        cwd=cwd,
+        timeout=timeout,
+        sql=(
+            "CREATE EXTENSION IF NOT EXISTS vector; "
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') "
+            "THEN RAISE EXCEPTION 'pgvector extension is not installed'; END IF; END $$;"
+        ),
+    )
+
+
+def docker_verify_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) -> dict[str, Any]:
+    return docker_psql(
+        backend,
+        cwd=cwd,
+        timeout=timeout,
+        sql=(
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') "
+            "THEN RAISE EXCEPTION 'pgvector extension is not installed'; END IF; END $$;"
+        ),
     )
 
 
@@ -1998,11 +2164,14 @@ def grepai_backend_status(args: argparse.Namespace) -> dict[str, Any]:
     inspect_data = None if args.dry_run else docker_inspect_container(backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout)
     running = docker_container_running(inspect_data)
     ping = None
+    extension = None
     if running and not args.dry_run:
         try:
             ping = docker_wait_for_postgres(backend, cwd=layout.coordination_root, timeout=args.timeout)
+            extension = docker_verify_pgvector(backend, cwd=layout.coordination_root, timeout=args.timeout)
         except (ContextProviderError, subprocess.TimeoutExpired, OSError) as error:
             ping = {"returncode": 1, "stderr": str(error), "stdout": ""}
+            extension = {"returncode": 1, "stderr": str(error), "stdout": ""}
 
     postgres_mapping = docker_container_port(inspect_data, backend["postgresContainerPort"]) if inspect_data else None
     actual_data_mount = docker_data_mount_source(inspect_data, backend["dataDestination"])
@@ -2014,7 +2183,10 @@ def grepai_backend_status(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "provider": "grepai",
         "action": "backend-status",
-        "ok": bool(running) and data_mount_matches and (ping is None or ping.get("returncode") == 0),
+        "ok": bool(running)
+        and data_mount_matches
+        and (ping is None or ping.get("returncode") == 0)
+        and (extension is None or extension.get("returncode") == 0),
         "dryRun": args.dry_run,
         "settingsFile": settings_path.as_posix(),
         "containerName": backend["containerName"],
@@ -2035,6 +2207,7 @@ def grepai_backend_status(args: argparse.Namespace) -> dict[str, Any]:
             },
         },
         "ping": ping,
+        "extension": extension,
     }
 
 
@@ -2230,9 +2403,7 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
             backend = grepai_backend_settings(provider_settings, layout)
             postgres_port = backend_result["ports"]["postgres"]["hostPort"]
             dsn = grepai_dsn(backend, host=backend_result["ports"]["postgres"]["bindHost"], port=postgres_port)
-            assert_no_grepai_root_provider_artifacts(layout.roots)
-            sync_grepai_index_roots(layout)
-            write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
+            workspace = prepare_grepai_workspace(layout, provider_settings, dsn=dsn)
         return {
             "provider": "grepai",
             "action": "install",
@@ -2241,6 +2412,7 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
             "version": version,
             "destination": destination.as_posix(),
             "backend": backend_result,
+            "workspace": workspace if backend_result is not None else None,
             "message": "pinned version already installed",
         }
 
@@ -2262,9 +2434,9 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
         backend = grepai_backend_settings(provider_settings, layout)
         postgres_port = backend_result["ports"]["postgres"]["hostPort"]
         dsn = grepai_dsn(backend, host=backend_result["ports"]["postgres"]["bindHost"], port=postgres_port)
-        assert_no_grepai_root_provider_artifacts(layout.roots)
-        sync_grepai_index_roots(layout)
-        write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
+        workspace = prepare_grepai_workspace(layout, provider_settings, dsn=dsn)
+    else:
+        workspace = None
     install_state = {
         "provider": "grepai",
         "requirementsFile": requirements_file.as_posix(),
@@ -2287,6 +2459,7 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
         "asset": asset_name,
         "destination": destination.as_posix(),
         "backend": backend_result,
+        "workspace": workspace,
     }
 
 
@@ -2363,6 +2536,41 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             "commands": results,
         }
 
+    if action == "run":
+        native_args = list(getattr(args, "native_args", []) or [])
+        if native_args and native_args[0] == "--":
+            native_args = native_args[1:]
+        if not native_args:
+            raise ContextProviderError("grepai run requires native GrepAI arguments after --")
+        if native_args[0] == "watch":
+            raise ContextProviderError("grepai run is for bounded native GrepAI commands; use grepai start/stop/refresh for watchers")
+
+        command = [command_name, *native_args]
+        if args.dry_run:
+            return {
+                "provider": "grepai",
+                "action": "run",
+                "ok": True,
+                "dryRun": True,
+                "workspace": layout.workspace_name,
+                "command": command,
+                "cwd": layout.runtime_root.as_posix(),
+                "env": layout.env(),
+            }
+
+        status = grepai_run(args, "status")
+        if not status["ok"]:
+            return {**status, "action": "run", "ok": False}
+
+        result = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout)
+        return {
+            "provider": "grepai",
+            "action": "run",
+            "ok": result["returncode"] == 0,
+            "workspace": layout.workspace_name,
+            "command": result,
+        }
+
     if action == "start":
         if not args.dry_run:
             require_durable_process_namespace("grepai start")
@@ -2388,48 +2596,73 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
                 "backend": backend_result,
                 "workspaceConfigPreview": {"path": layout.workspace_config_file.as_posix(), "dsn": dsn},
             }
+        workspace = None
         if dsn is not None:
-            assert_no_grepai_root_provider_artifacts(layout.roots)
-            sync_grepai_index_roots(layout)
-            write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
-        result = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout)
-        watch_pid = grepai_watch_pid_from_output(result.get("stdout", ""))
+            workspace = prepare_grepai_workspace(layout, provider_settings, dsn=dsn)
+        pre_probe = grepai_probe_watcher(command_name, layout, state_file, args.timeout)
+        if pre_probe["running"]:
+            write_json(
+                state_file,
+                grepai_watch_state(
+                    layout,
+                    action=action,
+                    pid=pre_probe.get("pid"),
+                    backend_result=backend_result,
+                    adopted=True,
+                ),
+            )
+            return {
+                "provider": "grepai",
+                "action": action,
+                "ok": True,
+                "alreadyRunning": True,
+                "pid": pre_probe.get("pid"),
+                "workspace": layout.workspace_name,
+                "runtimeRoot": layout.runtime_root.as_posix(),
+                "logDir": layout.logs_root.as_posix(),
+                "watcher": pre_probe,
+                "backend": backend_result,
+                "workspaceState": workspace,
+            }
+        result = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout, allow_timeout=True)
+        output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+        watch_pid = grepai_watch_pid_from_output(output)
+        post_probe = grepai_probe_watcher(command_name, layout, state_file, args.timeout)
+        if watch_pid is None:
+            watch_pid = post_probe.get("pid")
+        startup_timed_out = bool(result.get("timedOut"))
+        already_running = grepai_watch_already_running_from_output(output) or bool(post_probe["running"] and result.get("returncode") not in {0, None})
+        watcher_running = bool(post_probe["running"] or (isinstance(watch_pid, int) and process_alive(watch_pid)))
+        ok = bool(result["returncode"] == 0 or watcher_running)
         write_json(
             state_file,
-            {
-                "provider": "grepai",
-                "workspace": layout.workspace_name,
-                "roots": [
-                    {
-                        "projectId": root.project_id,
-                        "path": root.path.as_posix(),
-                        "sourcePath": root.source_path.as_posix() if root.source_path else None,
-                    }
-                    for root in layout.roots
-                ],
-                "runtimeRoot": layout.runtime_root.as_posix(),
-                "workspaceConfigFile": layout.workspace_config_file.as_posix(),
-                "process": {
-                    "pid": watch_pid,
-                    "logDir": layout.logs_root.as_posix(),
-                    "mode": "native-background-watch",
-                },
-                "lastAction": action,
-                "backend": backend_result,
-                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            },
+            grepai_watch_state(
+                layout,
+                action=action,
+                pid=watch_pid if isinstance(watch_pid, int) else None,
+                backend_result=backend_result,
+                adopted=already_running,
+                startup_timed_out=startup_timed_out,
+            ),
         )
-        return {
+        data = {
             "provider": "grepai",
             "action": action,
-            "ok": result["returncode"] == 0,
+            "ok": ok,
             "pid": watch_pid,
             "workspace": layout.workspace_name,
             "runtimeRoot": layout.runtime_root.as_posix(),
             "logDir": layout.logs_root.as_posix(),
             "command": result,
+            "watcher": post_probe,
+            "alreadyRunning": already_running,
+            "startupTimedOut": startup_timed_out,
             "backend": backend_result,
+            "workspaceState": workspace,
         }
+        if not ok:
+            data["recoveryAction"] = "Run grepai status, then grepai refresh if no matching watcher is running."
+        return data
 
     if action == "stop":
         if not args.dry_run:
@@ -2514,6 +2747,34 @@ def watcher_scoped_args(args: argparse.Namespace, provider: str, action: str) ->
     return argparse.Namespace(**values)
 
 
+def watcher_error_result(provider: str, action: str, error: BaseException) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "action": action,
+        "ok": False,
+        "error": str(error),
+        "recoveryAction": f"Run provider-specific {provider} status and retry {provider} {action} after resolving the reported error.",
+    }
+
+
+def watcher_recovery_actions(results: list[dict[str, Any]]) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    for result in results:
+        if result.get("ok"):
+            continue
+        recovery = result.get("recoveryAction")
+        if not recovery:
+            recovery = f"Inspect {result.get('provider', 'provider')} {result.get('action', 'status')} output and retry the failed provider action."
+        actions.append(
+            {
+                "provider": str(result.get("provider", "unknown")),
+                "action": str(result.get("action", "unknown")),
+                "recoveryAction": str(recovery),
+            }
+        )
+    return actions
+
+
 def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
     if action in {"start", "stop", "shutdown-all"} and not args.dry_run:
         require_durable_process_namespace(f"watchers {action}")
@@ -2532,7 +2793,10 @@ def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     if grepai_enabled:
         grepai_action = {"start": "start", "status": "status", "stop": "stop", "shutdown-all": "stop"}[action]
-        results.append(grepai_run(watcher_scoped_args(args, "grepai", grepai_action), grepai_action))
+        try:
+            results.append(grepai_run(watcher_scoped_args(args, "grepai", grepai_action), grepai_action))
+        except (ContextProviderError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+            results.append(watcher_error_result("grepai", grepai_action, error))
     if cgc_enabled:
         cgc_action = {"start": "start-all", "status": "status", "stop": "stop-all", "shutdown-all": "shutdown-all"}[action]
         scoped = watcher_scoped_args(args, "cgc", cgc_action)
@@ -2569,12 +2833,18 @@ def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
                 "stop-all": cgc_stop_all,
                 "shutdown-all": cgc_stop_all,
             }
-            results.append(cgc_handlers[cgc_action](scoped))
+            try:
+                results.append(cgc_handlers[cgc_action](scoped))
+            except (ContextProviderError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+                results.append(watcher_error_result("codegraphcontext", cgc_action, error))
 
+    ok = all(result.get("ok") for result in results)
+    recovery_actions = watcher_recovery_actions(results)
     return {
         "provider": "watchers",
         "action": action,
-        "ok": all(result.get("ok") for result in results),
+        "ok": ok,
+        "partial": any(result.get("ok") for result in results) and not ok,
         "dryRun": args.dry_run,
         "settingsFile": settings_path.as_posix(),
         "processNamespace": process_namespace_status(),
@@ -2583,6 +2853,7 @@ def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             "codegraphcontext-code": cgc_enabled,
         },
         "results": results,
+        "recoveryActions": recovery_actions,
     }
 
 
@@ -2624,6 +2895,44 @@ def normalize_cgc_args(args: argparse.Namespace) -> None:
         "repo_id": None,
         "code_repo_root": None,
         "python": sys.executable,
+    }.items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+    if not getattr(args, "coordination_root", None):
+        args.coordination_root = default_coordination_root()
+
+
+def add_grepai_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--coordination-root", type=Path, default=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--timeout", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("--from-settings", type=Path, default=argparse.SUPPRESS, help="Coordinator settings.json containing grepai-memory.")
+    parser.add_argument("--force", action="store_true", default=argparse.SUPPRESS, help="Reinstall even when the pinned version is already present.")
+    parser.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="Indexed memory root. Defaults to <coordination-root>/memory-repos.")
+    parser.add_argument(
+        "--runtime-root",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="Provider runtime root. Defaults to <coordination-root>/providers/grepai.",
+    )
+
+
+def add_grepai_action_parser(subparsers: Any, action: str, *, help_text: str) -> argparse.ArgumentParser:
+    action_parser = subparsers.add_parser(action, help=help_text)
+    add_grepai_common_args(action_parser)
+    return action_parser
+
+
+def normalize_grepai_args(args: argparse.Namespace) -> None:
+    for key, value in {
+        "dry_run": False,
+        "json": False,
+        "timeout": 60,
+        "from_settings": None,
+        "force": False,
+        "root": None,
+        "runtime_root": None,
     }.items():
         if not hasattr(args, key):
             setattr(args, key, value)
@@ -2689,15 +2998,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     grepai = providers.add_parser("grepai", help="Manage a GrepAI memory provider instance.")
-    grepai.add_argument("action", choices=["status", "install", "backend-start", "backend-status", "start", "stop", "refresh"])
-    add_common_provider_args(grepai)
-    grepai.add_argument("--from-settings", type=Path, help="Coordinator settings.json containing grepai-memory.")
-    grepai.add_argument("--force", action="store_true", help="Reinstall even when the pinned version is already present.")
-    grepai.add_argument("--root", type=Path, help="Indexed memory root. Defaults to <coordination-root>/memory-repos.")
-    grepai.add_argument(
-        "--runtime-root",
-        type=Path,
-        help="Provider runtime root. Defaults to <coordination-root>/providers/grepai.",
+    add_grepai_common_args(grepai)
+    grepai_actions = grepai.add_subparsers(dest="action", required=True)
+    for action, help_text in [
+        ("status", "Inspect the managed GrepAI workspace."),
+        ("install", "Install the managed GrepAI runtime."),
+        ("backend-start", "Start the shared GrepAI backend."),
+        ("backend-status", "Inspect the shared GrepAI backend."),
+        ("start", "Start the managed GrepAI watcher."),
+        ("stop", "Stop the managed GrepAI watcher."),
+        ("refresh", "Restart the managed GrepAI watcher."),
+    ]:
+        add_grepai_action_parser(grepai_actions, action, help_text=help_text)
+    grepai_run_parser = add_grepai_action_parser(
+        grepai_actions,
+        "run",
+        help_text="Run a bounded native GrepAI command in the managed environment.",
+    )
+    grepai_run_parser.add_argument(
+        "--lifecycle-json",
+        action="store_true",
+        help="Render lifecycle command metadata instead of the native provider output.",
+    )
+    grepai_run_parser.add_argument(
+        "native_args",
+        nargs=argparse.REMAINDER,
+        help="Native GrepAI arguments. Use -- before native args.",
     )
 
     watchers = providers.add_parser("watchers", help="Start, stop, or check every enabled provider watcher.")
@@ -2708,12 +3034,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
 
     try:
         if args.provider == "cgc":
             normalize_cgc_args(args)
+        elif args.provider == "grepai":
+            normalize_grepai_args(args)
         args.coordination_root = args.coordination_root.resolve()
         if getattr(args, "from_settings", None):
             args.from_settings = args.from_settings.resolve()
@@ -2758,6 +3087,8 @@ def main(argv: list[str] | None = None) -> int:
     rendered = False
     if args.provider == "cgc" and args.action == "run":
         rendered = render_cgc_run_result(data, args)
+    elif args.provider == "grepai" and args.action == "run":
+        rendered = render_grepai_run_result(data, args)
     if not rendered:
         render(data, as_json=args.json)
     return 0 if data.get("ok") else 1

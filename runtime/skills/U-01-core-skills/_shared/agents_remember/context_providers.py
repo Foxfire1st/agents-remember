@@ -1062,10 +1062,34 @@ def assert_no_grepai_root_provider_artifacts(roots: tuple[GrepaiMemoryRoot, ...]
         raise ContextProviderError(f"grepai provider artifacts found in indexed roots: {rendered}")
 
 
+def remove_grepai_root_provider_artifacts(
+    roots: tuple[GrepaiMemoryRoot, ...],
+    *,
+    dry_run: bool = False,
+) -> list[dict[str, str]]:
+    """Remove disposable GrepAI artifacts from indexed roots after direct-child validation."""
+
+    removals: list[dict[str, str]] = []
+    for root in roots:
+        root_path = (root.source_path or root.path).resolve()
+        for artifact in grepai_root_provider_artifacts(root_path):
+            resolved_artifact = artifact.resolve()
+            if artifact.name not in GREPAI_ROOT_ARTIFACT_NAMES or resolved_artifact.parent != root_path:
+                raise ContextProviderError(f"refusing to remove unexpected GrepAI artifact path: {artifact.as_posix()}")
+            removals.append(
+                {
+                    "projectId": root.project_id,
+                    "path": artifact.as_posix(),
+                }
+            )
+            _remove_runtime_path(artifact, dry_run=dry_run)
+    return removals
+
+
 def _remove_runtime_path(path: Path, dry_run: bool) -> None:
     if dry_run:
         return
-    if path.is_dir():
+    if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     else:
         path.unlink()

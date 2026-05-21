@@ -32,17 +32,14 @@ Semantics, then switch to Intent once candidate routes are known.
 Use Semantics when the request is vague or fuzzy. Semantics will retrieve from onboardings which
 allows to discover the symbols/routes/files hints to relevant source code.
 
-Use the runtime-owned binary with provider-owned GrepAI environment so searches
-read the managed workspace rather than a global user config. Tool callers on
-Windows should set the same environment variables programmatically.
+Run GrepAI through the lifecycle wrapper so searches use the provider-owned
+workspace environment rather than a global user config.
 
 ```bash
-cd <coordination_root>/providers/grepai
-env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
-  <coordination_root>/providers/_bin/grepai search \
+python <coordination_root>/scripts/provider-lifecycle.py grepai \
+  --coordination-root <coordination_root> \
+  --json \
+  run -- search \
   "<specific concept, behavior, error, or route question>" \
   --workspace <workspace> \
   --toon --compact --limit 5
@@ -54,7 +51,10 @@ copy private repository names, symbols, paths, snippets, or results into
 reusable skill examples.
 
 ```bash
-<coordination_root>/providers/_bin/grepai search \
+python <coordination_root>/scripts/provider-lifecycle.py grepai \
+  --coordination-root <coordination_root> \
+  --json \
+  run -- search \
   "where is retry backoff behavior documented" \
   --workspace <workspace> \
   --toon --compact --limit 5
@@ -73,7 +73,10 @@ Use this when the route is unknown and the next step is choosing which
 overview, sidecar, or source area to confirm.
 
 ```bash
-<coordination_root>/providers/_bin/grepai search \
+python <coordination_root>/scripts/provider-lifecycle.py grepai \
+  --coordination-root <coordination_root> \
+  --json \
+  run -- search \
   "validation rules for imported records" \
   --workspace <workspace> \
   --project <memoryProject> \

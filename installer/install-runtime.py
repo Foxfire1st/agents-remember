@@ -28,6 +28,12 @@ IGNORED_COPY_NAMES = {"__pycache__"}
 IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
 BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
 BENCHMARK_SOURCE_IGNORE_PATHS = {Path("workspaces"), Path("user-runs")}
+PROVIDER_DEPENDENCY_PATHS = {
+    Path("_bin"),
+    Path("_venvs"),
+    Path("codegraphcontext"),
+    Path("grepai"),
+}
 
 
 @dataclass
@@ -400,10 +406,21 @@ def install_runtime(
     prune_tree(runtime_root / "scripts", coordination_root / "scripts", summary, dry_run)
     copy_tree(runtime_root / "scripts", coordination_root / "scripts", summary, dry_run)
 
-    # Provider runtime scaffolding is disposable. Durable provider databases live
-    # outside this tree under provider-data/.
-    remove_path(coordination_root / "providers", summary, dry_run)
-    copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
+    # Provider runtime scaffolding is disposable during a full reinstall. A
+    # dependency-skipped copy must preserve installed binaries, venvs, and live
+    # provider instance roots so script/docs-only updates do not break watchers.
+    if install_provider_deps:
+        remove_path(coordination_root / "providers", summary, dry_run)
+        copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
+    else:
+        prune_tree(
+            runtime_root / "providers",
+            coordination_root / "providers",
+            summary,
+            dry_run,
+            preserve=PROVIDER_DEPENDENCY_PATHS,
+        )
+        copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
 
     for source_rel, target_rel in AGENTS_MD_TARGETS.items():
         copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)

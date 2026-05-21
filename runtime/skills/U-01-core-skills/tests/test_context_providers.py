@@ -78,6 +78,7 @@ from agents_remember.context_providers import (  # noqa: E402
     find_cgc_viz_server_module,
     find_cgc_writer_module,
     read_provider_pin,
+    remove_grepai_root_provider_artifacts,
     source_provider_artifacts,
     grepai_root_provider_artifacts,
     stable_provider_id,
@@ -403,6 +404,21 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual([path.name for path in grepai_root_provider_artifacts(root)], [".grepai"])
             with self.assertRaises(ContextProviderError):
                 assert_no_grepai_root_provider_artifacts((GrepaiMemoryRoot(project_id="memory", path=root),))
+
+    def test_grepai_removes_disposable_provider_artifacts_in_indexed_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "memory"
+            root.mkdir()
+            artifact = root / ".grepai"
+            artifact.mkdir()
+            (artifact / "symbols.gob").write_text("generated\n", encoding="utf-8")
+            (root / "overview.md").write_text("# Overview\n", encoding="utf-8")
+
+            removals = remove_grepai_root_provider_artifacts((GrepaiMemoryRoot(project_id="memory", path=root),))
+
+            self.assertEqual(removals, [{"projectId": "memory", "path": artifact.as_posix()}])
+            self.assertFalse(artifact.exists())
+            self.assertTrue((root / "overview.md").exists())
 
     def test_detects_forbidden_source_provider_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

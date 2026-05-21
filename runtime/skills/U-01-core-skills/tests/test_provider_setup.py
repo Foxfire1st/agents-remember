@@ -108,6 +108,30 @@ class ProviderSetupTests(unittest.TestCase):
             )
             self.assertTrue(cgc["backend"]["containerName"].startswith("ar-cgc-falkordb-agents-remember-md-"))
 
+    def test_run_command_forces_utf8_for_lifecycle_children(self) -> None:
+        captured = {}
+        original = provider_setup.subprocess.run
+
+        def fake_run(command, **kwargs):
+            captured.update(kwargs)
+            return provider_setup.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        provider_setup.subprocess.run = fake_run
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                result = provider_setup.run_command(
+                    ["python", "provider-lifecycle.py"],
+                    cwd=Path(tmp),
+                    timeout=1,
+                    dry_run=False,
+                )
+        finally:
+            provider_setup.subprocess.run = original
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(captured["env"]["PYTHONUTF8"], "1")
+        self.assertEqual(captured["env"]["PYTHONIOENCODING"], "utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()

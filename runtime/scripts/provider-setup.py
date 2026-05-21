@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -193,6 +194,13 @@ def command_display(command: list[str]) -> str:
     return " ".join(str(part) for part in command)
 
 
+def subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
 def run_command(
     command: list[str],
     *,
@@ -212,6 +220,7 @@ def run_command(
     completed = subprocess.run(
         command,
         cwd=cwd,
+        env=subprocess_env(),
         text=True,
         encoding="utf-8",
         errors="replace",
