@@ -48,6 +48,10 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
    python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
    ```
 
+   Reinstall recreates the package-owned runtime scaffold and installs
+   dependencies for providers enabled in `ar-coordination/system/settings.json`.
+   Use `--skip-provider-deps` only for a scaffolding-only repair.
+
    Benchmark fixtures are optional. To install or refresh them too:
 
    ```bash

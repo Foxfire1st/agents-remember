@@ -1,1 +1,4 @@
 codegraphcontext==0.4.10
+tree-sitter==0.25.2
+tree-sitter-language-pack==0.13.0
+tree-sitter-c-sharp==0.23.5

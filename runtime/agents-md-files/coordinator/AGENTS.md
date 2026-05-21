@@ -43,9 +43,10 @@ Onboarding files are companion context for source files. Their main purpose is
 to be read alongside the code they describe, at the moment that code is
 inspected.
 
-Use `C-04-onboarding-read-mode` before relying on onboarding or reasoning
-over repository source. C-04 owns the overview -> route overview ->
-candidate source/sidecar paired-read protocol.
+Use `C-04-retrieval-strategy-router` before relying on onboarding, providers,
+or repository source. C-04 owns Semantics, Relationship, and Intent routing
+across optional providers, route indexes, onboarding, and bounded source
+confirmation.
 
 ### Developer Clarifications
 
@@ -66,6 +67,20 @@ mismatch and discuss it before propagating anything through
 Infer which code repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is the code repository for resolver inputs.
 
 Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
+
+After C-08 resolves the target repository and coordination root, check the
+coordination settings at `<coordination_root>/system/settings.json` for provider
+configuration. `contextProviders` is coordinator-level configuration; do not
+decide provider availability from the resolved memory repo's
+`system/settings.json`.
+
+If enabled `contextProviders` are configured, run:
+
+```text
+python <coordination_root>/scripts/provider-lifecycle.py watchers status --coordination-root <coordination_root> --json
+```
+
+Skip this provider check when no context providers are configured.
 
 ### Routing
 

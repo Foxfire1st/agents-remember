@@ -8,6 +8,13 @@ The benchmark harness has already validated that the pinned external-memory repo
 matches the pinned source checkout for this run. Treat benchmark-local
 onboarding and memory files as trusted current-state context.
 
+Provider setup:
+The benchmark-local context providers are already installed, indexed, and
+running. Use `ar-coordination/system/settings.json` as the provider authority.
+GrepAI is available for semantic discovery over `ar-coordination/memory-repos`,
+and CodeGraphContext is available for relationship discovery over
+`repos/tensorflow`.
+
 Known benchmark-local paths:
 - code_root: `repos/tensorflow`
 - memory_root: `ar-coordination/memory-repos/ar-tensorflow`

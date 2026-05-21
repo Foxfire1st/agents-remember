@@ -24,6 +24,7 @@ AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/skills/AGENTS.md"): Path("skills/AGENTS.md"),
     Path("runtime/agents-md-files/tasks/AGENTS.md"): Path("tasks/AGENTS.md"),
 }
+PROVIDER_ASSET_DIRS = (Path("requirements"), Path("patches"))
 
 TOKEN_KEYS = {
     "input_tokens": "input_tokens",
@@ -142,6 +143,27 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"expected JSON object in {path}")
     return data
+
+
+def provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:
+    context = settings.get("contextProviders")
+    if not isinstance(context, dict) or context.get("enabled") is not True:
+        return False
+    providers = context.get("providers")
+    if not isinstance(providers, dict):
+        return False
+    provider = providers.get(provider_id)
+    return isinstance(provider, dict) and provider.get("enabled") is True
+
+
+def any_provider_enabled(settings: dict[str, Any]) -> bool:
+    context = settings.get("contextProviders")
+    if not isinstance(context, dict) or context.get("enabled") is not True:
+        return False
+    providers = context.get("providers")
+    if not isinstance(providers, dict):
+        return False
+    return any(isinstance(provider, dict) and provider.get("enabled") is True for provider in providers.values())
 
 
 def load_cases(benchmarks_root: Path) -> list[BenchmarkCase]:
@@ -294,6 +316,9 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
         replace_tree(runtime_root / "scripts", coordination_root / "scripts", dry_run)
         for source_rel, target_rel in AGENTS_MD_TARGETS.items():
             copy_file(root / source_rel, coordination_root / target_rel, dry_run)
+        default_settings = runtime_root / "system" / "defaults" / "examples" / "coordinator" / "settings.json"
+        if default_settings.exists():
+            copy_file(default_settings, coordination_root / "system" / "settings.json", dry_run)
     else:
         replace_tree(root / "skills", coordination_root / "skills", dry_run)
         replace_tree(root / "scripts", coordination_root / "scripts", dry_run)
@@ -301,13 +326,33 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
             source = root / relative
             if source.exists():
                 copy_file(source, coordination_root / relative, dry_run)
+        settings = root / "system" / "settings.json"
+        if settings.exists():
+            copy_file(settings, coordination_root / "system" / "settings.json", dry_run)
 
-    for folder in ("memory-repos", "tasks", "worktrees", "notes", "temp"):
+    sync_provider_assets(mode, root, coordination_root, dry_run)
+
+    for folder in ("memory-repos", "tasks", "worktrees", "notes", "temp", "provider-data"):
         path = coordination_root / folder
         if dry_run:
             print(f"Would ensure directory {path}")
         else:
             path.mkdir(parents=True, exist_ok=True)
+
+
+def sync_provider_assets(mode: str, root: Path, coordination_root: Path, dry_run: bool) -> None:
+    providers_source = root / "runtime" / "providers" if mode == "source" else root / "providers"
+    providers_target = coordination_root / "providers"
+    if dry_run:
+        print(f"Would replace benchmark provider assets in {providers_target}")
+    else:
+        remove_path(providers_target)
+        providers_target.mkdir(parents=True, exist_ok=True)
+
+    for relative in PROVIDER_ASSET_DIRS:
+        source = providers_source / relative
+        if source.exists():
+            copy_tree(source, providers_target / relative, dry_run)
 
 
 def windows_shell_path(path: Path) -> str:
@@ -479,8 +524,73 @@ def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> N
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def default_cgc_seed_source_coordination_root(benchmarks_root: Path, target_coordination_root: Path) -> Path | None:
+    candidates: list[Path] = [benchmarks_root.parent]
+    try:
+        mode, root = find_runtime_source()
+    except RuntimeError:
+        mode, root = "", Path()
+    if mode == "installed":
+        candidates.append(root)
+    elif mode == "source":
+        candidates.append(root.parent / "ar-coordination")
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen or resolved == target_coordination_root.resolve():
+            continue
+        seen.add(resolved)
+        if (resolved / "scripts" / "provider-lifecycle.py").is_file() and (resolved / "system" / "settings.json").is_file():
+            return resolved
+    return None
+
+
+def prepare_configured_providers(
+    coordination_root: Path,
+    dry_run: bool,
+    provider_timeout: int,
+    *,
+    cgc_seed_source_coordination_root: Path | None,
+    cgc_seed_repo_id: str,
+) -> None:
+    settings_path = coordination_root / "system" / "settings.json"
+    if not settings_path.exists():
+        if dry_run:
+            print(f"Would skip benchmark provider setup; settings file is missing: {settings_path}")
+        return
+    if not any_provider_enabled(load_json(settings_path)):
+        if dry_run:
+            print(f"Would skip benchmark provider setup; no providers enabled in {settings_path}")
+        return
+
+    script = coordination_root / "scripts" / "provider-setup.py"
+    if not dry_run and not script.is_file():
+        raise RuntimeError(f"benchmark provider setup script missing: {script}")
+    command = [
+        sys.executable,
+        script.as_posix(),
+        "prepare",
+        "--coordination-root",
+        coordination_root.as_posix(),
+        "--timeout",
+        str(provider_timeout),
+        "--json",
+    ]
+    if cgc_seed_source_coordination_root is not None:
+        command.extend(
+            [
+                "--cgc-seed-source-coordination-root",
+                cgc_seed_source_coordination_root.as_posix(),
+                "--cgc-seed-repo-id",
+                cgc_seed_repo_id,
+            ]
+        )
+    run_command(command, dry_run, cwd=coordination_root)
+
+
 def git_command(*args: str) -> list[str]:
-    return ["git", "-c", "core.longpaths=true", *args]
+    return ["git", "-c", "core.longpaths=true", "-c", "safe.directory=*", *args]
 
 
 def repo_has_commit(repo_root: Path, commit: str) -> bool:
@@ -625,6 +735,56 @@ def write_benchmark_root_marker(root: Path, dry_run: bool) -> Path:
     return marker
 
 
+def benchmark_stable_id(value: str) -> str:
+    lowered = value.strip().lower()
+    return "".join(character if character.isalnum() or character in "._-" else "-" for character in lowered).strip(".-_")
+
+
+def adapt_benchmark_settings(case: BenchmarkCase, coordination_root: Path, dry_run: bool) -> None:
+    settings_path = coordination_root / "system" / "settings.json"
+    if not settings_path.exists():
+        return
+    if dry_run:
+        print(f"Would adapt benchmark settings {settings_path}")
+        return
+
+    data = load_json(settings_path)
+    repository_name = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    memory_repo = memory_repo_name(case)
+
+    memory_repos = data.setdefault("memoryRepos", {})
+    if isinstance(memory_repos, dict):
+        memory_repos["repositories"] = [
+            {
+                "name": repository_name,
+                "path": f"memory-repos/{memory_repo}",
+            }
+        ]
+
+    cgc = None
+    if provider_enabled(data, "codegraphcontext-code"):
+        context = data.get("contextProviders")
+        providers = context.get("providers") if isinstance(context, dict) else None
+        cgc = providers.get("codegraphcontext-code") if isinstance(providers, dict) else None
+    if isinstance(cgc, dict):
+        roots = cgc.get("roots")
+        selected: dict[str, Any] = {}
+        target_id = benchmark_stable_id(repository_name)
+        if isinstance(roots, list):
+            for root in roots:
+                if isinstance(root, dict) and benchmark_stable_id(str(root.get("repoId", ""))) == target_id:
+                    selected = dict(root)
+                    break
+        selected["repoId"] = repository_name
+        selected["path"] = f"<workspace_root>/{repository_path(case).as_posix()}"
+        cgc["roots"] = [selected]
+        backend = cgc.get("backend")
+        if isinstance(backend, dict):
+            backend["containerName"] = f"ar-cgc-falkordb-bench-{benchmark_stable_id(case.case_id)}"
+
+    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
     for relative in (Path("AGENTS.md"), Path("repos"), Path("ar-coordination")):
         path = root / relative
@@ -652,6 +812,7 @@ def prepare_case(
     dry_run: bool,
     skill_exposure_mode: str = "auto",
     force_clone: bool = False,
+    provider_timeout: int = 1800,
 ) -> None:
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
@@ -671,8 +832,16 @@ def prepare_case(
 
     coordination_root = with_memory_root / coordination_path(case)
     sync_runtime_assets(coordination_root, dry_run)
+    adapt_benchmark_settings(case, coordination_root, dry_run)
     sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
+    prepare_configured_providers(
+        coordination_root,
+        dry_run,
+        provider_timeout,
+        cgc_seed_source_coordination_root=default_cgc_seed_source_coordination_root(benchmarks_root, coordination_root),
+        cgc_seed_repo_id=manifest_path_component(repository["name"], f"{case.case_id}.repository.name"),
+    )
 
     if dry_run:
         print(f"Would verify benchmark memory repo exists: {memory_repo}")
@@ -851,6 +1020,7 @@ def run_case(
     skip_prepare: bool,
     skill_exposure_mode: str,
     force_clone: bool,
+    provider_timeout: int,
 ) -> Path:
     if not skip_prepare:
         prepare_case(
@@ -859,6 +1029,7 @@ def run_case(
             dry_run=dry_run,
             skill_exposure_mode=skill_exposure_mode,
             force_clone=force_clone,
+            provider_timeout=provider_timeout,
         )
 
     current_run_id = run_id()
@@ -1111,6 +1282,7 @@ def command_prepare(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             skill_exposure_mode=args.skill_exposure_mode,
             force_clone=args.force_clone,
+            provider_timeout=args.provider_timeout,
         )
     return 0
 
@@ -1131,6 +1303,7 @@ def command_run(args: argparse.Namespace) -> int:
             skip_prepare=args.skip_prepare,
             skill_exposure_mode=args.skill_exposure_mode,
             force_clone=args.force_clone,
+            provider_timeout=args.provider_timeout,
         )
         print(f"Run output: {output_root}")
     return 0
@@ -1166,6 +1339,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("case_id", nargs="?")
     prepare_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
     prepare_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts before cloning.")
+    prepare_parser.add_argument("--provider-timeout", type=int, default=1800, help="Seconds allowed for each benchmark provider install/index command.")
     prepare_parser.add_argument("--dry-run", action="store_true")
     prepare_parser.set_defaults(func=command_prepare)
 
@@ -1186,6 +1360,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--skip-prepare", action="store_true", help="Use the existing workspace fixture state.")
     run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
     run_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts during preparation.")
+    run_parser.add_argument("--provider-timeout", type=int, default=1800, help="Seconds allowed for each benchmark provider install/index command during preparation.")
     run_parser.set_defaults(func=command_run)
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze an existing user-runs directory.")

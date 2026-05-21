@@ -51,7 +51,7 @@ Agents Remember does not use embeddings, semantic search, or top-k retrieval for
 
 File-level onboarding remains path-derived and verifiable, but agents often need
 different retrieval strategies before they know which file-level memory to read.
-C-04 is evolving into a retrieval strategy router for that job.
+C-04 is the retrieval strategy router for that job.
 
 The router starts from the model's current intent: what kind of missing context
 does the agent need next, and in what shape should that context arrive? It then

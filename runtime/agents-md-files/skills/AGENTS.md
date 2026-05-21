@@ -17,8 +17,8 @@
 5. Repo or area lacks enough onboarding to safely work there?
    → C-03
 
-6. Need to read existing onboarding with repository source before reasoning,
-   planning, answering, or editing?
+6. Need to choose between semantic search, relationship graph queries, and
+   onboarding/source proof before reasoning, planning, answering, or editing?
    → C-04
 
 7. Need to create/update file onboarding, inline onboarding, entity catalogs, references, metadata, or update history?

@@ -36,6 +36,20 @@ For this source checkout, the normal resolver input is:
 code_repository_name = agents-remember-md
 ```
 
+After C-08 resolves the target repository and coordination root, check the
+coordination settings at `<coordination_root>/system/settings.json` for provider
+configuration. `contextProviders` is coordinator-level configuration; do not
+decide provider availability from the resolved memory repo's
+`system/settings.json`.
+
+If enabled `contextProviders` are configured, run:
+
+```text
+python <coordination_root>/scripts/provider-lifecycle.py watchers status --coordination-root <coordination_root> --json
+```
+
+Skip this provider check when no context providers are configured.
+
 Then run `C-02-onboarding-drift-detection` for the resolved context before
 reasoning from onboarding or source files.
 

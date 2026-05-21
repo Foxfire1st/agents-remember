@@ -123,35 +123,78 @@ promotion.
           "refreshAfter": ["C-03", "C-05"]
         }
       },
-      "codegraphcontext-my-app": {
+      "codegraphcontext-code": {
         "type": "relationship",
         "scope": "code",
         "enabled": true,
-        "roots": ["/absolute/path/to/my-app"],
-        "runtimeRoot": "<coordination_root>/providers/codegraphcontext/my-app",
+        "roots": [
+          {
+            "repoId": "<repo-id>",
+            "path": "/absolute/path/to/<repo-directory>"
+          },
+          {
+            "repoId": "<second-repo-id>",
+            "path": "/absolute/path/to/<second-repo-directory>",
+            "cgcignorePatterns": [
+              "vendor/generated-sdk/"
+            ]
+          }
+        ],
+        "runtimeRoot": "<coordination_root>/providers/codegraphcontext",
+        "instanceRootTemplate": "<runtimeRoot>/<repoId>",
         "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
         "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
         "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
-        "stateFile": "<runtimeRoot>/provider-state.json",
-        "env": {
-          "CGC_RUNTIME_DB_TYPE": "kuzudb",
-          "DEFAULT_DATABASE": "kuzudb",
-          "HOME": "<runtimeRoot>",
-          "KUZUDB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
-          "CGC_RUNTIME_DB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
-          "FALKORDB_PATH": "<runtimeRoot>/.codegraphcontext/db/falkordb.db",
-          "FALKORDB_SOCKET_PATH": "<runtimeRoot>/.codegraphcontext/run/falkordb.sock",
-          "LOG_FILE_PATH": "<runtimeRoot>/.codegraphcontext/logs/cgc.log",
-          "DEBUG_LOG_PATH": "<runtimeRoot>/.codegraphcontext/logs/debug.log",
-          "ENABLE_AUTO_WATCH": "false"
+        "stateFileTemplate": "<instanceRoot>/provider-state.json",
+        "backend": {
+          "id": "codegraphcontext-falkordb",
+          "type": "falkordb-remote",
+          "mode": "docker",
+          "image": "falkordb/falkordb:v4.18.7",
+          "imageLockFile": "<coordination_root>/providers/requirements/codegraphcontext-falkordb-docker.lock",
+          "runtimeRoot": "<coordination_root>/provider-data/codegraphcontext/falkordb",
+          "dataRoot": "<backendRuntimeRoot>/data",
+          "containerName": "ar-cgc-falkordb",
+          "ports": {
+            "falkordb": {
+              "bindHost": "127.0.0.1",
+              "hostPort": "auto",
+              "containerPort": 6379
+            },
+            "browser": {
+              "bindHost": "127.0.0.1",
+              "hostPort": "auto",
+              "containerPort": 3000
+            }
+          }
+        },
+        "processEnvTemplate": {
+          "CGC_RUNTIME_DB_TYPE": "falkordb-remote",
+          "DEFAULT_DATABASE": "falkordb-remote",
+          "HOME": "<instanceRoot>/.codegraphcontext/run/home",
+          "USERPROFILE": "<instanceRoot>/.codegraphcontext/run/home",
+          "APPDATA": "<instanceRoot>/.codegraphcontext/run/appdata",
+          "LOCALAPPDATA": "<instanceRoot>/.codegraphcontext/run/localappdata",
+          "FALKORDB_HOST": "<backend.ports.falkordb.bindHost>",
+          "FALKORDB_PORT": "<backend.ports.falkordb.hostPort>",
+          "FALKORDB_GRAPH_NAME": "cgc_<repoGraphId>",
+          "LOG_FILE_PATH": "<instanceRoot>/.codegraphcontext/logs/cgc.log",
+          "DEBUG_LOG_PATH": "<instanceRoot>/.codegraphcontext/logs/debug.log",
+          "ENABLE_AUTO_WATCH": "false",
+          "PYTHONIOENCODING": "utf-8",
+          "PYTHONUTF8": "1"
         },
         "watch": {
           "mode": "managed-foreground",
-          "cwd": "<runtimeRoot>",
-          "logFile": "<runtimeRoot>/.codegraphcontext/logs/watch.log"
+          "cwdTemplate": "<instanceRoot>",
+          "logFileTemplate": "<instanceRoot>/.codegraphcontext/logs/watch.log",
+          "requiredBeforeSourceEdits": true,
+          "requiredBeforeBranchSwitch": true
         },
         "freshness": {
-          "refreshAfter": ["C-09-closeout"]
+          "refreshAfter": ["C-09-closeout"],
+          "branchSwitch": "watcher-first",
+          "hardRefresh": "explicit-only"
         }
       }
     },
@@ -183,21 +226,51 @@ promotion.
 `contextProviders.enabled` turns optional discovery providers on for the
 coordinator. If absent or false, agents should use onboarding-only routing.
 
-`contextProviders.providers` is a map of provider instances. A workspace can
-configure one GrepAI provider over the memory repos root and multiple
-CodeGraphContext providers, one per code repository.
+`contextProviders.providers` is a map of provider settings. A workspace can
+configure one GrepAI provider over the memory repos root and one
+CodeGraphContext code provider whose `roots` array expands into multiple
+repository instances.
 
 `contextProviders.providers.<id>.type` describes the retrieval substrate. Use
 `semantic` for concept-known/location-unknown memory discovery and
 `relationship` for anchor-known/relationship-unknown code discovery.
 
 `contextProviders.providers.<id>.roots` lists the absolute or template-expanded
-roots the provider indexes. Code providers should be scoped to one code repo per
-provider instance.
+roots the provider indexes. For CodeGraphContext, each root should be an object
+with a stable `repoId` and a `path`; the lifecycle manager expands those entries
+into per-repository runtime instances. A root may also define
+`cgcignorePatterns` for repo-specific generated or vendored paths that should be
+written to that instance's managed `.cgcignore`.
 
 `contextProviders.providers.<id>.runtimeRoot` is where Agents Remember-owned
-provider logs, process metadata, sockets, and local databases should live. Keep
-runtime roots under `ar-coordination/providers/`.
+provider-family state should live. Keep runtime roots under
+`ar-coordination/providers/`. CodeGraphContext uses
+`runtimeRoot` as the shared provider root and derives per-repository instance
+roots from `instanceRootTemplate`.
+The `providers/` tree is disposable install/runtime scaffolding and may be
+deleted and recreated during reinstall; durable provider databases belong under
+`provider-data/`, not under `providers/`.
+After recreating that scaffold, the runtime installer runs dependency install
+commands for enabled providers from this live settings file unless
+`--skip-provider-deps` is passed.
+Installer, benchmark preparation, and C-09 worktree preparation all use
+`scripts/provider-setup.py` as the shared orchestration entrypoint. Benchmark
+and worktree preparation should seed CGC with bundle export/import plus path
+rewrite when a source coordinator is available, instead of each caller
+implementing its own provider install, backend, and refresh sequence.
+Lifecycle commands default to `<coordination_root>/system/settings.json`; use
+`--from-settings` only as a debug override for an alternate settings file.
+Use `watchers start`, `watchers status`, and `watchers shutdown-all` for the
+normal coordinator-level watcher workflow across every enabled provider.
+CGC-specific commands can still fan out over all configured CGC roots:
+`cgc start` and `cgc start-all` start every configured repo watcher; add
+`--repo-id <repoId>` to `cgc start` only when starting one repo. `cgc stop`,
+`cgc stop-all`, and `cgc shutdown-all` stop every configured repo watcher; add
+`--repo-id <repoId>` to `cgc stop` only when stopping one repo.
+
+`contextProviders.providers.<id>.instanceRootTemplate` maps a CodeGraphContext
+root entry to its per-repository runtime root. The lifecycle manager expands it
+with values such as `repoId` and `runtimeRoot`.
 
 `contextProviders.providers.<id>.venvRoot` points to the provider-type virtual
 environment. Prefer one venv per provider type, such as
@@ -209,28 +282,49 @@ dependency file used to install or repair the provider environment.
 `contextProviders.providers.<id>.patchesRoot` points to version-checked patches
 that the lifecycle manager must apply and verify before using the provider.
 
-`contextProviders.providers.<id>.stateFile` points to provider lifecycle state,
-including provider version, requirements hash, applied patch identifiers, last
-doctor result, last refresh, process metadata, and containment status.
+`contextProviders.providers.<id>.stateFileTemplate` maps each expanded provider
+instance to its lifecycle state file. State should include provider version,
+requirements hash, applied patch identifiers, last doctor result, last refresh,
+process metadata, resolved backend ports, browser URL, and containment status.
 
-`contextProviders.providers.<id>.env` lists environment variables the lifecycle
-manager should apply when running provider commands. Prefer explicit per-provider
-paths over user-global provider configuration.
+`contextProviders.providers.<id>.backend` describes a shared managed backend.
+For CodeGraphContext, the managed backend is one lifecycle-owned FalkorDB Docker
+DBMS per coordination root. The backend configuration controls the pinned image,
+image lock file, persistent data root, container name, loopback-only port
+bindings, and browser UI binding. Resolved host ports and browser URLs are
+runtime state, not hand-maintained settings.
 
-For CodeGraphContext, set `HOME` to the provider runtime root and keep CGC
-configuration, ignore rules, KuzuDB data, logs, and run files under
-`<runtimeRoot>/.codegraphcontext/`. CGC versions that create `.cgcignore` in the
-indexed source repo must be patched, fixed upstream, or explicitly accepted as a
-repo-local config choice before managed use.
+`contextProviders.providers.<id>.processEnvTemplate` lists process environment
+variables the lifecycle manager applies when running provider commands. It is a
+template, not a persisted `.env` file. For CodeGraphContext, expand it per root
+with `instanceRoot`, resolved FalkorDB host/port, and a repo-scoped graph name.
+Use `repoGraphId` when a graph-name-safe id is needed instead of the path-facing
+`repoId`.
+On Windows, the lifecycle manager should also route `HOME`, `USERPROFILE`,
+`APPDATA`, and `LOCALAPPDATA` under the instance root so provider config and
+logs stay out of user-global locations. Do not set `HOME` or `USERPROFILE`
+directly to `<instanceRoot>` for CGC, because CGC would then treat
+`<instanceRoot>/.codegraphcontext` as its global config directory instead of the
+local repo context.
 
-Some CGC variables are process-only runtime controls. `CGC_RUNTIME_DB_TYPE`,
-`KUZUDB_PATH`, and `CGC_RUNTIME_DB_PATH` may be present in
-`contextProviders.providers.<id>.env`, but the lifecycle manager should not
-persist them into `<runtimeRoot>/.codegraphcontext/.env` for CGC v0.4.10 because
-`cgc doctor` treats those persisted keys as invalid config. Keep persisted
-`.env` content to CGC-recognized keys such as `DEFAULT_DATABASE`,
-`FALKORDB_PATH`, `FALKORDB_SOCKET_PATH`, `LOG_FILE_PATH`, `DEBUG_LOG_PATH`, and
-`ENABLE_AUTO_WATCH`.
+For CodeGraphContext, keep CGC configuration, ignore rules, logs, run files, and
+process state under `<instanceRoot>/.codegraphcontext/`. CGC versions that
+create `.cgcignore` in the indexed source repo must be patched, fixed upstream,
+or explicitly accepted as a repo-local config choice before managed use.
+The managed `.cgcignore` should also inherit the indexed repository's top-level
+`.gitignore` patterns so ignored folders such as `samples/`, `tools/`, or
+temporary working directories are not parsed by CGC.
+When CGC runs on Windows, a hard refresh must also delete existing repository
+children using both slash and backslash path prefixes before rebuilding. Without
+that version-checked patch, `cgc index --force` can leave stale File nodes for
+previously indexed ignored folders even though the new discovery pass excludes
+them.
+
+Some CGC variables are process-only runtime controls. The lifecycle manager may
+apply them from `processEnvTemplate`, but should not write them into
+`<instanceRoot>/.codegraphcontext/.env` when the installed CGC version rejects
+them as persisted config. Persist only keys that the installed CGC version
+accepts in its own config file.
 
 `contextProviders.providers.<id>.watch` describes how the provider should be
 kept fresh. `background` means the provider has its own background watcher.
@@ -239,6 +333,15 @@ process.
 
 `contextProviders.providers.<id>.freshness.refreshAfter` lists workflow events
 after which the provider may need a refresh or health check.
+
+`contextProviders.providers.<id>.freshness.branchSwitch` describes branch-switch
+handling. `watcher-first` means the watcher should be started or verified before
+branch changes when CodeGraphContext coverage matters.
+
+Provider reinstall/update is non-destructive by default. Reinstall may recreate
+scaffolding, virtual environments, copied requirements, patches, containers, and
+missing runtime directories, but deleting FalkorDB data, graph namespaces, or
+repository indexes requires an explicit destructive lifecycle command.
 
 `contextProviders.policy.discoveryOnly` means provider output is candidate
 routing evidence only.

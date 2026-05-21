@@ -28,35 +28,78 @@
           "refreshAfter": ["C-03", "C-05"]
         }
       },
-      "codegraphcontext-<repo-id>": {
+      "codegraphcontext-code": {
         "type": "relationship",
         "scope": "code",
         "enabled": false,
-        "roots": ["<code_repository_root>"],
-        "runtimeRoot": "<coordination_root>/providers/codegraphcontext/<repo-id>",
+        "roots": [
+          {
+            "repoId": "<repo-id>",
+            "path": "<workspace_root>/<repo-directory>"
+          },
+          {
+            "repoId": "<second-repo-id>",
+            "path": "<workspace_root>/<second-repo-directory>",
+            "cgcignorePatterns": [
+              "vendor/generated-sdk/"
+            ]
+          }
+        ],
+        "runtimeRoot": "<coordination_root>/providers/codegraphcontext",
+        "instanceRootTemplate": "<runtimeRoot>/<repoId>",
         "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
         "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
         "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
-        "stateFile": "<runtimeRoot>/provider-state.json",
-        "env": {
-          "CGC_RUNTIME_DB_TYPE": "kuzudb",
-          "DEFAULT_DATABASE": "kuzudb",
-          "HOME": "<runtimeRoot>",
-          "KUZUDB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
-          "CGC_RUNTIME_DB_PATH": "<runtimeRoot>/.codegraphcontext/db/kuzu",
-          "FALKORDB_PATH": "<runtimeRoot>/.codegraphcontext/db/falkordb.db",
-          "FALKORDB_SOCKET_PATH": "<runtimeRoot>/.codegraphcontext/run/falkordb.sock",
-          "LOG_FILE_PATH": "<runtimeRoot>/.codegraphcontext/logs/cgc.log",
-          "DEBUG_LOG_PATH": "<runtimeRoot>/.codegraphcontext/logs/debug.log",
-          "ENABLE_AUTO_WATCH": "false"
+        "stateFileTemplate": "<instanceRoot>/provider-state.json",
+        "backend": {
+          "id": "codegraphcontext-falkordb",
+          "type": "falkordb-remote",
+          "mode": "docker",
+          "image": "falkordb/falkordb:v4.18.7",
+          "imageLockFile": "<coordination_root>/providers/requirements/codegraphcontext-falkordb-docker.lock",
+          "runtimeRoot": "<coordination_root>/provider-data/codegraphcontext/falkordb",
+          "dataRoot": "<backendRuntimeRoot>/data",
+          "containerName": "ar-cgc-falkordb",
+          "ports": {
+            "falkordb": {
+              "bindHost": "127.0.0.1",
+              "hostPort": "auto",
+              "containerPort": 6379
+            },
+            "browser": {
+              "bindHost": "127.0.0.1",
+              "hostPort": "auto",
+              "containerPort": 3000
+            }
+          }
+        },
+        "processEnvTemplate": {
+          "CGC_RUNTIME_DB_TYPE": "falkordb-remote",
+          "DEFAULT_DATABASE": "falkordb-remote",
+          "HOME": "<instanceRoot>/.codegraphcontext/run/home",
+          "USERPROFILE": "<instanceRoot>/.codegraphcontext/run/home",
+          "APPDATA": "<instanceRoot>/.codegraphcontext/run/appdata",
+          "LOCALAPPDATA": "<instanceRoot>/.codegraphcontext/run/localappdata",
+          "FALKORDB_HOST": "<backend.ports.falkordb.bindHost>",
+          "FALKORDB_PORT": "<backend.ports.falkordb.hostPort>",
+          "FALKORDB_GRAPH_NAME": "cgc_<repoGraphId>",
+          "LOG_FILE_PATH": "<instanceRoot>/.codegraphcontext/logs/cgc.log",
+          "DEBUG_LOG_PATH": "<instanceRoot>/.codegraphcontext/logs/debug.log",
+          "ENABLE_AUTO_WATCH": "false",
+          "PYTHONIOENCODING": "utf-8",
+          "PYTHONUTF8": "1"
         },
         "watch": {
           "mode": "managed-foreground",
-          "cwd": "<runtimeRoot>",
-          "logFile": "<runtimeRoot>/.codegraphcontext/logs/watch.log"
+          "cwdTemplate": "<instanceRoot>",
+          "logFileTemplate": "<instanceRoot>/.codegraphcontext/logs/watch.log",
+          "requiredBeforeSourceEdits": true,
+          "requiredBeforeBranchSwitch": true
         },
         "freshness": {
-          "refreshAfter": ["C-09-closeout"]
+          "refreshAfter": ["C-09-closeout"],
+          "branchSwitch": "watcher-first",
+          "hardRefresh": "explicit-only"
         }
       }
     },

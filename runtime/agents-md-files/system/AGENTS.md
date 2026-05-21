@@ -9,25 +9,33 @@ exception. Code explanation is not an exception. Review is not an exception.
 Planning is not an exception.
 
 Before opening, reading, summarizing, or reasoning from source file contents in
-the relevant repository you must perform these six gates in order:
+the relevant repository you must perform these seven gates in order:
 
 Gate 1: Invoke `C-08-ar-coordination-context-resolver` for the target repository and use its resolved context for the authoritative `coordination_root`, `memory_root`,
 onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, task/worktree context, ledger path, and cross-repo allowances.
 
-Gate 2: Run `C-02-onboarding-drift-detection` for the relevant repository and then read its drift report.
+Gate 2: If `<coordination_root>/system/settings.json` has enabled `contextProviders`, run:
+
+```text
+python <coordination_root>/scripts/provider-lifecycle.py watchers status --coordination-root <coordination_root> --json
+```
+
+Skip this gate when no context providers are configured.
+
+Gate 3: Run `C-02-onboarding-drift-detection` for the relevant repository and then read its drift report.
 Do not for any reason skip execution of the drift detection skill.
 
-Gate 3: If the drift report indicates any drifted, missing-verification, or orphaned onboarding, tell the developer what
+Gate 4: If the drift report indicates any drifted, missing-verification, or orphaned onboarding, tell the developer what
 the report says briefly and then ask if they want to update the onboarding before proceeding.
 
-Gate 4: If they say yes, then orchestrate the update process and split the work to up to 5 sub agents who each handle at max 15 files.
+Gate 5: If they say yes, then orchestrate the update process and split the work to up to 5 sub agents who each handle at max 15 files.
 All sub agents shall use this skill: `C-05-create-or-update-onboarding-files` and you pass it the instructions it needs to perform the job.
 If the developer says no, tell them that reasoning over drifted onboardings may introduce risk of regressions.
 
-Gate 5: Run `C-02-onboarding-drift-detection` again to confirm that all onboarding is now verified and up to date.
+Gate 6: Run `C-02-onboarding-drift-detection` again to confirm that all onboarding is now verified and up to date.
 Do not for any reason skip execution of the drift detection skill.
 
-Gate 6: Only after steps 1 - 5 are completed, report to the developer. Then delete the drift report file.
+Gate 7: Only after steps 1 - 6 are completed, report to the developer. Then delete the drift report file.
 
 ### Cross-Repository Workflow
 
@@ -35,14 +43,15 @@ When working with cross-repo enabled and one or more repos are listed, the above
 
 For every repo in the Cross-Repo list, you run first Gate 1-3 to create individual drift reports.
 Then you report to the developer about all drift reports and ask if they want to update the onboarding before proceeding.
-Depending on their answer, you delegate for each approved repo a sub agent to execute Gate 4 - 6.
+Depending on their answer, you delegate for each approved repo a sub agent to execute Gate 5 - 7.
 
 ---
 
 ## Post-Gate Planning and Research
 
-For onboarding-backed source reading, use `C-04-onboarding-read-mode`. C-04 owns
-the overview -> route overview -> candidate source/sidecar paired-read protocol.
+For context-backed source reading, use `C-04-retrieval-strategy-router`. C-04
+owns Semantics, Relationship, and Intent routing across optional providers,
+route indexes, onboarding, and bounded source confirmation.
 
 ---
 

@@ -59,7 +59,7 @@ Use providers by retrieval substrate:
   unknown. GrepAI can serve this role over `memory-repos`.
 - `relationship`: use when an anchor is known but relationships, callers,
   callees, dependencies, or impact paths are unknown. CodeGraphContext can serve
-  this role per code repository.
+  this role across configured code repository roots.
 - `intent`: use onboarding and bounded source confirmation when the anchor or
   location is known but hidden contracts, invariants, and code truths are
   unknown.
@@ -68,6 +68,13 @@ Provider settings should stay declarative: roots, runtime locations, watch
 mode, freshness hooks, and transport policy. Start/stop/status/refresh behavior
 belongs to provider lifecycle tooling, not to this prose file.
 
+Installers, benchmark preparation, and worktree preparation should enter
+provider setup through `scripts/provider-setup.py`. That script centralizes
+dependency installation, watcher startup, and CGC seed import so benchmark and
+worktree flows do not reimplement the same provider logic. These flows should
+skip provider work entirely when the relevant `settings.json` does not enable
+providers.
+
 Provider installs should be coordination-owned. Use pinned requirements under
 `providers/requirements/`, one reusable virtual environment per provider type
 under `providers/_venvs/`, and version-checked patches under
@@ -75,15 +82,25 @@ under `providers/_venvs/`, and version-checked patches under
 
 Relationship providers must keep runtime artifacts out of code repositories
 unless a repository-local config file is explicitly approved. For
-CodeGraphContext, prefer one runtime root per code repo with config, ignore
-rules, KuzuDB data, logs, and process state under
-`providers/codegraphcontext/<repo-id>/.codegraphcontext/`.
+CodeGraphContext, configure one `codegraphcontext-code` provider with a `roots`
+array of `{ repoId, path }` entries. The lifecycle manager expands those entries
+into per-repo runtime roots under
+`providers/codegraphcontext/<repo-id>/.codegraphcontext/`, while all repos share
+one lifecycle-owned FalkorDB Docker DBMS with persistent data under
+`provider-data/codegraphcontext/falkordb/`.
 
 Treat CGC runtime environment and persisted CGC config as separate surfaces.
-`CGC_RUNTIME_DB_TYPE`, `KUZUDB_PATH`, and `CGC_RUNTIME_DB_PATH` are useful
-process env controls, but CGC v0.4.10 reports them as invalid if they are
-written into `<runtimeRoot>/.codegraphcontext/.env`. Persist only CGC-recognized
-keys in `.env`.
+`processEnvTemplate` is applied when launching CGC commands and should not be
+blindly written into `<instanceRoot>/.codegraphcontext/.env`. Persist only keys
+accepted by the installed CGC version.
+
+Provider reinstall/update is non-destructive to provider data by default.
+`providers/` is disposable scaffolding and may be deleted and recreated from
+source during install. Runtime reinstall then installs dependencies for
+providers enabled in the live coordinator settings, using the copied provider
+pins and patches. Durable provider databases live under `provider-data/`;
+deleting FalkorDB data, graph namespaces, or repository indexes still requires
+an explicit destructive lifecycle command.
 
 CGC versions that create `.cgcignore` inside the indexed source repo are not
 acceptable for managed provider mode until patched or fixed upstream. The
