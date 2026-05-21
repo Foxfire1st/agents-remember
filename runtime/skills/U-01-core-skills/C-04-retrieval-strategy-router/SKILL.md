@@ -32,19 +32,80 @@ Semantics, then switch to Intent once candidate routes are known.
 Use Semantics when the request is vague or fuzzy. Semantics will retrieve from onboardings which
 allows to discover the symbols/routes/files hints to relevant source code.
 
-Query shape:
+Use the runtime-owned binary with provider-owned GrepAI environment so searches
+read the managed workspace rather than a global user config. Tool callers on
+Windows should set the same environment variables programmatically.
 
 ```bash
-cd <coordination_root>/memory-repos
-<coordination_root>/providers/_bin/grepai search \
+cd <coordination_root>/providers/grepai
+env \
+  HOME=<coordination_root>/providers/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  <coordination_root>/providers/_bin/grepai search \
   "<specific concept, behavior, error, or route question>" \
+  --workspace <workspace> \
+  --toon --compact --limit 5
+```
+
+The two highest-value GrepAI patterns are broad semantic routing and scoped
+memory-project search. Examples here are synthetic response shapes only; do not
+copy private repository names, symbols, paths, snippets, or results into
+reusable skill examples.
+
+```bash
+<coordination_root>/providers/_bin/grepai search \
+  "where is retry backoff behavior documented" \
+  --workspace <workspace> \
+  --toon --compact --limit 5
+```
+
+Synthetic answer shape:
+
+```text
+results[3]{project,path,lines,score}:
+  1 | <memoryProject> | onboarding/src/jobs/retry-policy.ts.md | 18-34 | 0.84
+  2 | <memoryProject> | onboarding/src/http/client.ts.md | 41-59 | 0.78
+  3 | <memoryProject> | onboarding/overview.md | 72-81 | 0.73
+```
+
+Use this when the route is unknown and the next step is choosing which
+overview, sidecar, or source area to confirm.
+
+```bash
+<coordination_root>/providers/_bin/grepai search \
+  "validation rules for imported records" \
+  --workspace <workspace> \
+  --project <memoryProject> \
   --json --compact --limit 5
 ```
 
+Synthetic answer shape:
+
+```json
+{
+  "query": "validation rules for imported records",
+  "results": [
+    {
+      "project": "<memoryProject>",
+      "path": "onboarding/src/import/record-validator.ts.md",
+      "startLine": 22,
+      "endLine": 46,
+      "score": 0.86
+    }
+  ]
+}
+```
+
+Use `--project` after the relevant memory root is known. Use `--path` after
+route discovery narrows the search further. For the full GrepAI usage catalog
+with synthetic example outputs, read
+[grepai-high-leverage-usage.md](./grepai-high-leverage-usage.md) beside this skill.
+
 ## Relationship: CodeGraphContext
 
-Use CGC (CodeGraphContext) when an anchor/symbol is known to find relationsships and structure. One CGC query 
-can replace multiple direct rg reads. CGC is a powerful substrate for relationship questions: 
+Use CGC (CodeGraphContext) when an anchor/symbol is known to find relationships and structure. One CGC query
+can replace multiple direct `rg` reads. CGC is a powerful substrate for relationship questions:
 callers, callees, dependencies, ownership, inheritance, impact paths, or neighboring code.
 
 ```bash
@@ -61,6 +122,55 @@ python <coordination_root>/scripts/provider-lifecycle.py cgc \
   run -- analyze callers <function_or_method>
 ```
 
+The two highest-value CGC patterns are impact tracing and complexity triage.
+Examples here are synthetic response shapes only; do not copy private
+repository names, symbols, or paths into reusable skill examples.
+
+```bash
+python <coordination_root>/scripts/provider-lifecycle.py cgc \
+  --coordination-root <coordination_root> \
+  --repo-id <repoId> \
+  run -- analyze calls handleRequest \
+  --file <repo>/src/http/request-handler.ts
+```
+
+Synthetic answer shape:
+
+```text
+Function 'handleRequest' calls:
+validateRequest      <repo>/src/http/validation.ts:42
+loadSession          <repo>/src/auth/session.ts:18
+dispatchCommand      <repo>/src/app/command-router.ts:77
+
+Total: 3 function(s)
+```
+
+Use `analyze callers` for the reverse direction and `analyze chain` when two
+symbols are known and the missing question is whether one can reach the other.
+
+```bash
+python <coordination_root>/scripts/provider-lifecycle.py cgc \
+  --coordination-root <coordination_root> \
+  --repo-id <repoId> \
+  run -- analyze complexity --limit 5
+```
+
+Synthetic answer shape:
+
+```text
+Most Complex Functions (threshold: 10):
+Function             Complexity  Location
+renderDashboard              42  <repo>/src/ui/dashboard.tsx:88
+buildReport                  37  <repo>/src/reports/report-builder.ts:114
+syncExternalState            31  <repo>/src/sync/state-sync.ts:57
+```
+
+Use `analyze complexity` as an early risk map before touching large or tangled
+functions. Use `deps` with the module import string recorded in code, not
+necessarily the source file path. For the full CGC method catalog with
+synthetic example outputs, read
+[codegraphcontext-high-level-methods.md](./codegraphcontext-high-level-methods.md) beside this skill.
+
 ### Rules:
 Use CGC first for structure and relationships.
 Use direct source reads only to confirm specific anchors CGC surfaced.
@@ -68,7 +178,7 @@ Use direct source reads only to confirm specific anchors CGC surfaced.
 
 ## Intent: Onboarding And Source
 
-Use Intent when the route, file, or anchor is known and their relationsships (CGC) are
+Use Intent when the route, file, or anchor is known and their relationships (CGC) are
 understood. The missing context is the code's contract, invariant, behavioral 
 expectation, branch-valid truth, or fix direction.
 

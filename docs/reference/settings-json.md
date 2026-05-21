@@ -111,12 +111,54 @@ promotion.
       "grepai-memory": {
         "type": "semantic",
         "scope": "memory",
+        "mode": "workspace",
         "enabled": true,
-        "roots": ["<coordination_root>/memory-repos"],
-        "runtimeRoot": "<coordination_root>/providers/grepai/memory-repos",
+        "workspace": "agents-remember-memory",
+        "mirrorRoots": true,
+        "roots": [
+          {
+            "projectId": "<external-memory-id>",
+            "path": "<coordination_root>/memory-repos/<memory-repo>"
+          },
+          {
+            "projectId": "<internal-memory-id>",
+            "path": "/absolute/path/to/<repo-directory>/ar-memory"
+          }
+        ],
+        "runtimeRoot": "<coordination_root>/providers/grepai",
+        "requirementsFile": "<coordination_root>/providers/requirements/grepai.txt",
+        "stateFile": "<runtimeRoot>/state/provider-state.json",
+        "embedder": {
+          "provider": "ollama",
+          "model": "nomic-embed-text",
+          "endpoint": "http://localhost:11434",
+          "dimensions": 768
+        },
+        "backend": {
+          "id": "grepai-postgres",
+          "type": "postgres",
+          "mode": "docker",
+          "image": "pgvector/pgvector:pg16",
+          "imageLockFile": "<coordination_root>/providers/requirements/grepai-postgres-docker.lock",
+          "runtimeRoot": "<coordination_root>/provider-data/grepai/postgres",
+          "dataRoot": "<backendRuntimeRoot>/data",
+          "containerName": "ar-grepai-postgres",
+          "postgres": {
+            "user": "grepai",
+            "password": "grepai",
+            "database": "grepai"
+          },
+          "ports": {
+            "postgres": {
+              "bindHost": "127.0.0.1",
+              "hostPort": "auto",
+              "containerPort": 5432
+            }
+          }
+        },
         "watch": {
           "mode": "background",
-          "cwd": "<coordination_root>/memory-repos",
+          "workspace": "<workspace>",
           "logDir": "<runtimeRoot>/logs"
         },
         "freshness": {
@@ -227,29 +269,38 @@ promotion.
 coordinator. If absent or false, agents should use onboarding-only routing.
 
 `contextProviders.providers` is a map of provider settings. A workspace can
-configure one GrepAI provider over the memory repos root and one
-CodeGraphContext code provider whose `roots` array expands into multiple
-repository instances.
+configure one GrepAI workspace provider over multiple external or repo-internal
+memory roots and one CodeGraphContext code provider whose `roots` array expands
+into multiple repository instances.
 
 `contextProviders.providers.<id>.type` describes the retrieval substrate. Use
 `semantic` for concept-known/location-unknown memory discovery and
 `relationship` for anchor-known/relationship-unknown code discovery.
 
 `contextProviders.providers.<id>.roots` lists the absolute or template-expanded
-roots the provider indexes. For CodeGraphContext, each root should be an object
-with a stable `repoId` and a `path`; the lifecycle manager expands those entries
-into per-repository runtime instances. A root may also define
-`cgcignorePatterns` for repo-specific generated or vendored paths that should be
-written to that instance's managed `.cgcignore`.
+roots the provider indexes. For GrepAI, each root should be an object with a
+stable `projectId` and a `path`, allowing external memory repos and
+repo-internal `ar-memory/` roots to share one PostgreSQL-backed workspace.
+Managed GrepAI defaults `mirrorRoots` to true so lifecycle commands copy those
+memory roots into provider-owned `providers/grepai/index-roots/` before
+launching GrepAI; this keeps GrepAI's per-project `.grepai/` config and symbol
+files out of durable memory roots. For
+CodeGraphContext, each root should be an object with a stable `repoId` and a
+`path`; the lifecycle manager expands those entries into per-repository runtime
+instances. A root may also define `cgcignorePatterns` for repo-specific
+generated or vendored paths that should be written to that instance's managed
+`.cgcignore`.
 
 `contextProviders.providers.<id>.runtimeRoot` is where Agents Remember-owned
 provider-family state should live. Keep runtime roots under
-`ar-coordination/providers/`. CodeGraphContext uses
+`ar-coordination/providers/`. GrepAI writes workspace config, logs, state,
+cache, and mirrored index roots under `providers/grepai/`; CodeGraphContext uses
 `runtimeRoot` as the shared provider root and derives per-repository instance
 roots from `instanceRootTemplate`.
 The `providers/` tree is disposable install/runtime scaffolding and may be
-deleted and recreated during reinstall; durable provider databases belong under
-`provider-data/`, not under `providers/`.
+deleted and recreated during reinstall; durable provider databases such as
+GrepAI PostgreSQL and CGC FalkorDB belong under `provider-data/`, not under
+`providers/`.
 After recreating that scaffold, the runtime installer runs dependency install
 commands for enabled providers from this live settings file unless
 `--skip-provider-deps` is passed.

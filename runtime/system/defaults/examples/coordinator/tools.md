@@ -35,10 +35,11 @@ python <coordination_root>/scripts/provider-setup.py prepare \
   --cgc-seed-repo-id <repoId>
 
 # GrepAI memory provider
-cd <coordination_root>/memory-repos
-grepai status --no-ui
-grepai watch --status
-grepai search "<query>" --json --compact --limit 5
+python <coordination_root>/scripts/provider-lifecycle.py grepai backend-status
+python <coordination_root>/scripts/provider-lifecycle.py grepai status
+python <coordination_root>/scripts/provider-lifecycle.py grepai start
+<coordination_root>/providers/_bin/grepai search "<query>" \
+  --workspace agents-remember-memory --json --compact --limit 5
 
 # CodeGraphContext relationship provider
 python <coordination_root>/scripts/provider-lifecycle.py watchers status
@@ -58,16 +59,18 @@ python <coordination_root>/scripts/provider-lifecycle.py cgc stop \
 python <coordination_root>/scripts/provider-lifecycle.py cgc doctor \
   --repo-id <repoId>
 python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
   --repo-id <repoId> \
   --json \
   run -- analyze callers <symbol>
+python <coordination_root>/scripts/provider-lifecycle.py cgc \
+  --repo-id <repoId> \
+  visualize --port 8000
 ```
 
 The aggregate `watchers` command reads enabled providers from
 `<coordination_root>/system/settings.json`; `watchers start` starts the GrepAI
-memory watcher and all configured CGC code watchers, and `watchers shutdown-all`
-stops the managed watchers it owns.
+memory workspace watcher and all configured CGC code watchers, and
+`watchers shutdown-all` stops the managed watchers it owns.
 
 `provider-setup.py prepare` installs enabled provider dependencies, refreshes
 GrepAI memory when enabled, and for CGC first tries to export a `.cgc` bundle
@@ -77,25 +80,47 @@ load the rewritten bundle into the target backend. It falls back to
 Worktree starts should pass an isolated CGC runtime root so the worktree uses
 its own FalkorDB backend instead of mutating the main coordinator backend.
 
+The GrepAI lifecycle command reads `contextProviders.providers.grepai-memory`,
+expands its workspace roots into explicit projects, ensures the shared
+PostgreSQL/pgvector Docker backend is healthy, writes GrepAI workspace config
+under `providers/grepai/home/.grepai/workspace.yaml`, mirrors indexed memory
+roots under `providers/grepai/index-roots/` when `mirrorRoots` is enabled, and
+records runtime state under `providers/grepai/state/`. GrepAI must be launched through the
+runtime-owned binary at `providers/_bin/grepai`; managed mode should not fall
+back to a globally installed `grepai`.
+
 The CGC lifecycle command reads `contextProviders.providers.codegraphcontext-code`,
 expands its `roots` array into per-repo runtime instances, ensures the shared
 FalkorDB Docker backend is healthy, applies `processEnvTemplate` for the selected
 repo, and records resolved ports plus browser URL in provider state.
-The lifecycle script defaults to `<coordination_root>/system/settings.json`.
+The lifecycle script infers the coordinator root from its installed path and
+defaults to `<coordination_root>/system/settings.json`. `--coordination-root`
+is only needed for unusual runs against a different coordinator, and
 `--from-settings` is only a debug override for testing an alternate settings
 file. Running `cgc start` without `--repo-id` starts every configured CGC root;
 pass `--repo-id` only for a single repo. Running `cgc stop`, `cgc stop-all`, or
 `cgc shutdown-all` stops every configured CGC root; pass `--repo-id` to
 `cgc stop` only for a single repo.
-Running `cgc ... run -- <native cgc args>` executes a native CGC query with the
-managed provider environment for the selected repo. Put lifecycle options such
-as `--coordination-root`, `--repo-id`, and `--json` before `run`; arguments
-after `--` are passed to CGC.
+Running `cgc ... run -- <native cgc args>` executes a bounded native CGC query
+with the managed provider environment for the selected repo. Put lifecycle
+options such as `--repo-id`, `--json`, and any explicit `--coordination-root`
+override before `run`; arguments after `--` are passed to CGC. Use
+`cgc ... visualize --port <port>` for the long-running visualizer server; it is
+a separate lifecycle command, not a native-query pass-through.
+
+Long-running daemon actions such as `watchers start`, `watchers stop`,
+`watchers shutdown-all`, `cgc start`, `cgc stop`, `cgc visualize`, and GrepAI
+watcher start/stop/refresh must run from a durable host process namespace.
+Lifecycle status reports `processNamespace` diagnostics, and daemon actions
+refuse to run from sandboxes that advertise `--die-with-parent` because those
+processes can be killed when the sandbox exits and host PIDs may not be visible
+inside the sandbox.
 
 Patch and containment checks are part of provider health. A CGC provider should
 not be used in managed mode if indexing creates `.cgcignore`,
 `.codegraphcontext`, reports, databases, or logs inside the indexed source
-repository.
+repository. A GrepAI provider should not be used in managed mode if indexing
+creates `.grepai/` inside source repositories or durable memory roots.
 
 Provider output is discovery evidence only. Source files, verified onboarding,
 drift checks, branch validity, and approved memory promotion remain the proof

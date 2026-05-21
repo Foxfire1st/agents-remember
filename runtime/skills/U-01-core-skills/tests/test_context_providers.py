@@ -30,29 +30,59 @@ from agents_remember.context_providers import (  # noqa: E402
     CGC_PIN,
     CGC_REQUIREMENTS,
     CGC_ORIGINAL_SNIPPET,
+    CGC_VIZ_CLI_ROUTE_PATCH_ID,
+    CGC_VIZ_CLI_ROUTE_PATCH_MARKER,
+    CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET,
+    CGC_VIZ_CLI_URL_ORIGINAL_SNIPPET,
+    CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET,
+    CGC_VIZ_REPO_QUERY_PATCH_ID,
+    CGC_VIZ_REPO_QUERY_PATCH_MARKER,
+    CGC_VIZ_SERVER_FALLBACK_ORIGINAL_SNIPPET,
+    CGC_VIZ_SERVER_GLOBAL_ORIGINAL_SNIPPET,
+    CGC_VIZ_SERVER_RESPONSES_ORIGINAL_SNIPPET,
+    CGC_VIZ_SERVER_ROUTE_PATCH_ID,
+    CGC_VIZ_SERVER_ROUTE_PATCH_MARKER,
+    CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET,
     ContextProviderError,
+    GrepaiMemoryRoot,
     GREPAI_PIN,
     apply_cgc_cgcignore_patch,
     apply_cgc_delete_patch,
     apply_cgc_discovery_extensions_patch,
     apply_cgc_graph_builder_extensions_patch,
+    apply_cgc_viz_cli_route_patch,
+    apply_cgc_viz_repo_query_patch,
+    apply_cgc_viz_server_route_patch,
     assert_no_source_provider_artifacts,
+    assert_no_grepai_root_provider_artifacts,
     cgc_cgcignore_patch_applied,
     cgc_delete_patch_applied,
     cgc_discovery_extensions_patch_applied,
     cgc_graph_builder_extensions_patch_applied,
+    cgc_viz_cli_route_patch_applied,
+    cgc_viz_repo_query_patch_applied,
+    cgc_viz_server_route_patch_applied,
     cleanup_cgc_runtime_artifacts,
     cgc_runtime_layout,
     cgc_runtime_layout_from_provider_settings,
     ensure_cgc_runtime_layout,
+    ensure_grepai_runtime_layout,
     ensure_grepai_requirements_file,
+    grepai_runtime_layout,
+    grepai_runtime_layout_from_provider_settings,
+    grepai_workspace_config_text,
+    find_cgc_cli_helpers_module,
     find_cgc_cgcignore_module,
     find_cgc_discovery_module,
     find_cgc_graph_builder_module,
+    find_cgc_viz_server_module,
     find_cgc_writer_module,
     read_provider_pin,
     source_provider_artifacts,
+    grepai_root_provider_artifacts,
     stable_provider_id,
+    sync_grepai_index_roots,
+    write_grepai_workspace_config,
 )
 
 
@@ -238,6 +268,142 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), f"{GREPAI_PIN}\n")
             self.assertEqual(read_provider_pin(path, "grepai"), "0.35.0")
 
+    def test_grepai_layout_uses_workspace_runtime_and_postgres_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "ar-coordination" / "memory-repos" / "ar-my-app"
+            memory_root.mkdir(parents=True)
+            layout = grepai_runtime_layout(
+                coordination_root=root / "ar-coordination",
+                workspace_name="Agents Remember Memory",
+                roots=(GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),),
+            )
+
+            self.assertEqual(layout.workspace_name, "agents-remember-memory")
+            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "grepai")
+            self.assertEqual(layout.workspace_config_file, layout.home_root / ".grepai" / "workspace.yaml")
+            self.assertEqual(layout.state_file, layout.runtime_root / "state" / "provider-state.json")
+            self.assertEqual(layout.logs_root, layout.runtime_root / "logs")
+            self.assertEqual(layout.backend_root, root / "ar-coordination" / "provider-data" / "grepai" / "postgres")
+            self.assertEqual(layout.backend_data_root, layout.backend_root / "data")
+            self.assertEqual(layout.env()["HOME"], layout.home_root.as_posix())
+            self.assertEqual(layout.env()["XDG_STATE_HOME"], (layout.state_root / "xdg").as_posix())
+
+    def test_grepai_layout_expands_provider_settings_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            external_memory = root / "ar-coordination" / "memory-repos" / "ar-my-app"
+            internal_memory = root / "my-app" / "ar-memory"
+            external_memory.mkdir(parents=True)
+            internal_memory.mkdir(parents=True)
+            provider = {
+                "workspace": "agents-remember-memory",
+                "runtimeRoot": "<coordination_root>/providers/grepai",
+                "requirementsFile": "<coordination_root>/providers/requirements/grepai.txt",
+                "stateFile": "<runtimeRoot>/state/provider-state.json",
+                "backend": {
+                    "runtimeRoot": "<coordination_root>/provider-data/grepai/postgres",
+                    "dataRoot": "<backendRuntimeRoot>/data",
+                },
+                "roots": [
+                    {"projectId": "ar-my-app", "path": "<coordination_root>/memory-repos/ar-my-app"},
+                    {"projectId": "my-app-internal", "path": str(internal_memory)},
+                ],
+            }
+
+            layout = grepai_runtime_layout_from_provider_settings(
+                coordination_root=root / "ar-coordination",
+                provider_settings=provider,
+            )
+
+            self.assertEqual(layout.workspace_name, "agents-remember-memory")
+            self.assertEqual([item.project_id for item in layout.roots], ["ar-my-app", "my-app-internal"])
+            self.assertEqual(layout.roots[0].source_path, external_memory)
+            self.assertEqual(layout.roots[1].source_path, internal_memory)
+            self.assertEqual(
+                layout.roots[0].path,
+                root / "ar-coordination" / "providers" / "grepai" / "index-roots" / "ar-my-app",
+            )
+            self.assertEqual(
+                layout.roots[1].path,
+                root / "ar-coordination" / "providers" / "grepai" / "index-roots" / "my-app-internal",
+            )
+            self.assertEqual(layout.backend_data_root, root / "ar-coordination" / "provider-data" / "grepai" / "postgres" / "data")
+
+    def test_grepai_syncs_provider_owned_index_roots_from_memory_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "ar-coordination" / "memory-repos" / "ar-my-app"
+            source.mkdir(parents=True)
+            (source / "overview.md").write_text("# Overview\n", encoding="utf-8")
+            (source / ".grepai").mkdir()
+            (source / ".grepai" / "symbols.gob").write_text("generated", encoding="utf-8")
+            layout = grepai_runtime_layout(
+                coordination_root=root / "ar-coordination",
+                roots=(
+                    GrepaiMemoryRoot(
+                        project_id="ar-my-app",
+                        path=root / "ar-coordination" / "providers" / "grepai" / "index-roots" / "ar-my-app",
+                        source_path=source,
+                    ),
+                ),
+            )
+
+            ensure_grepai_runtime_layout(layout)
+            synced = sync_grepai_index_roots(layout)
+
+            self.assertEqual(synced[0]["projectId"], "ar-my-app")
+            self.assertEqual((layout.roots[0].path / "overview.md").read_text(encoding="utf-8"), "# Overview\n")
+            self.assertFalse((layout.roots[0].path / ".grepai").exists())
+            self.assertTrue((source / ".grepai").exists())
+
+    def test_grepai_workspace_config_is_provider_owned_and_names_projects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_root = root / "ar-coordination" / "memory-repos" / "ar-my-app"
+            memory_root.mkdir(parents=True)
+            layout = grepai_runtime_layout(
+                coordination_root=root / "ar-coordination",
+                roots=(GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),),
+            )
+
+            ensure_grepai_runtime_layout(layout)
+            write_grepai_workspace_config(
+                layout,
+                dsn="postgres://grepai:grepai@127.0.0.1:5432/grepai?sslmode=disable",
+                embedder_settings={"provider": "ollama", "model": "nomic-embed-text"},
+            )
+
+            text = layout.workspace_config_file.read_text(encoding="utf-8")
+            self.assertIn("workspaces:", text)
+            self.assertIn("store:", text)
+            self.assertIn("backend: postgres", text)
+            self.assertIn('endpoint: "http://localhost:11434"', text)
+            self.assertIn("dimensions: 768", text)
+            self.assertIn('name: "ar-my-app"', text)
+            self.assertIn(f'path: "{memory_root.as_posix()}"', text)
+            self.assertTrue(layout.workspace_config_file.is_relative_to(layout.runtime_root))
+            self.assertFalse((memory_root / ".grepai").exists())
+            self.assertEqual(
+                grepai_workspace_config_text(
+                    layout=layout,
+                    dsn="postgres://grepai:grepai@127.0.0.1:5432/grepai?sslmode=disable",
+                    embedder_settings={"provider": "ollama", "model": "nomic-embed-text"},
+                ),
+                text,
+            )
+
+    def test_grepai_rejects_provider_artifacts_in_indexed_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "memory"
+            root.mkdir()
+            self.assertEqual(grepai_root_provider_artifacts(root), [])
+
+            (root / ".grepai").mkdir()
+            self.assertEqual([path.name for path in grepai_root_provider_artifacts(root)], [".grepai"])
+            with self.assertRaises(ContextProviderError):
+                assert_no_grepai_root_provider_artifacts((GrepaiMemoryRoot(project_id="memory", path=root),))
+
     def test_detects_forbidden_source_provider_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             code_root = Path(tmp) / "repo"
@@ -326,6 +492,78 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertIn('".td",', text)
             self.assertFalse(apply_cgc_discovery_extensions_patch(target))
 
+    def test_cgc_viz_repo_query_patch_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "server.py"
+            target.write_text(f"def get_graph():\n{CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET}", encoding="utf-8")
+
+            self.assertTrue(apply_cgc_viz_repo_query_patch(target))
+            text = target.read_text(encoding="utf-8")
+            self.assertTrue(cgc_viz_repo_query_patch_applied(target))
+            self.assertIn(CGC_VIZ_REPO_QUERY_PATCH_MARKER, text)
+            self.assertIn("WITH repo_path, repo_prefix, node LIMIT 3000", text)
+            self.assertIn("LIMIT 5000", text)
+            self.assertFalse(apply_cgc_viz_repo_query_patch(target))
+
+    def test_cgc_viz_server_route_patch_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "server.py"
+            target.write_text(
+                CGC_VIZ_SERVER_RESPONSES_ORIGINAL_SNIPPET
+                + "from typing import Optional\n"
+                + CGC_VIZ_SERVER_GLOBAL_ORIGINAL_SNIPPET
+                + "async def spa_fallback(request, full_path: str):\n"
+                + CGC_VIZ_SERVER_FALLBACK_ORIGINAL_SNIPPET
+                + "\n"
+                + CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET,
+                encoding="utf-8",
+            )
+
+            self.assertTrue(apply_cgc_viz_server_route_patch(target))
+            text = target.read_text(encoding="utf-8")
+            self.assertTrue(cgc_viz_server_route_patch_applied(target))
+            self.assertIn(CGC_VIZ_SERVER_ROUTE_PATCH_MARKER, text)
+            self.assertIn("JSONResponse", text)
+            self.assertIn("RedirectResponse(_default_route)", text)
+            self.assertIn('full_path.startswith("api/")', text)
+            self.assertIn("default_route: Optional[str] = None", text)
+            self.assertFalse(apply_cgc_viz_server_route_patch(target))
+
+    def test_cgc_viz_cli_route_patch_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "cli_helpers.py"
+            target.write_text(
+                "def visualize_helper():\n"
+                + CGC_VIZ_CLI_URL_ORIGINAL_SNIPPET
+                + "    try:\n"
+                + CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET,
+                encoding="utf-8",
+            )
+
+            self.assertTrue(apply_cgc_viz_cli_route_patch(target))
+            text = target.read_text(encoding="utf-8")
+            self.assertTrue(cgc_viz_cli_route_patch_applied(target))
+            self.assertIn(CGC_VIZ_CLI_ROUTE_PATCH_MARKER, text)
+            self.assertIn('default_route = f"/explore?{query_string}"', text)
+            self.assertIn('visualization_url = f"{backend_url}{default_route}"', text)
+            self.assertIn("default_route=default_route", text)
+            self.assertFalse(apply_cgc_viz_cli_route_patch(target))
+
+    def test_find_cgc_cli_helpers_module_accepts_windows_venv_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = (
+                Path(tmp)
+                / "Lib"
+                / "site-packages"
+                / "codegraphcontext"
+                / "cli"
+                / "cli_helpers.py"
+            )
+            target.parent.mkdir(parents=True)
+            target.write_text("# module\n", encoding="utf-8")
+
+            self.assertEqual(find_cgc_cli_helpers_module(Path(tmp)), target.resolve())
+
     def test_find_cgc_cgcignore_module_accepts_windows_venv_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = (
@@ -389,6 +627,21 @@ class ContextProviderLayoutTests(unittest.TestCase):
 
             self.assertEqual(find_cgc_discovery_module(Path(tmp)), target.resolve())
 
+    def test_find_cgc_viz_server_module_accepts_windows_venv_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = (
+                Path(tmp)
+                / "Lib"
+                / "site-packages"
+                / "codegraphcontext"
+                / "viz"
+                / "server.py"
+            )
+            target.parent.mkdir(parents=True)
+            target.write_text("# module\n", encoding="utf-8")
+
+            self.assertEqual(find_cgc_viz_server_module(Path(tmp)), target.resolve())
+
     def test_patch_rejects_unexpected_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "cgcignore.py"
@@ -406,6 +659,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
         self.assertEqual(CGC_DELETE_PATCH_ID, "codegraphcontext-0.4.10-windows-delete-prefix-v1")
         self.assertEqual(CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID, "codegraphcontext-0.4.10-cpp-cc-td-extensions-v1")
         self.assertEqual(CGC_DISCOVERY_EXTENSIONS_PATCH_ID, "codegraphcontext-0.4.10-td-generic-discovery-v1")
+        self.assertEqual(CGC_VIZ_REPO_QUERY_PATCH_ID, "codegraphcontext-0.4.10-viz-repo-query-v1")
+        self.assertEqual(CGC_VIZ_SERVER_ROUTE_PATCH_ID, "codegraphcontext-0.4.10-viz-server-route-v1")
+        self.assertEqual(CGC_VIZ_CLI_ROUTE_PATCH_ID, "codegraphcontext-0.4.10-viz-cli-route-v1")
 
 
 if __name__ == "__main__":

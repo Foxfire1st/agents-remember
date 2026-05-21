@@ -77,7 +77,13 @@ decide provider availability from the resolved memory repo's
 If enabled `contextProviders` are configured, run:
 
 ```text
-python <coordination_root>/scripts/provider-lifecycle.py watchers status --coordination-root <coordination_root> --json
+python3 <coordination_root>/scripts/provider-lifecycle.py watchers status --json
+```
+
+If the watchers are down, turn them on:
+
+```text
+python3 <coordination_root>/scripts/provider-lifecycle.py cgc start
 ```
 
 Skip this provider check when no context providers are configured.

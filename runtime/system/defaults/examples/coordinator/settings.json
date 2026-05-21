@@ -16,12 +16,54 @@
       "grepai-memory": {
         "type": "semantic",
         "scope": "memory",
+        "mode": "workspace",
         "enabled": false,
-        "roots": ["<coordination_root>/memory-repos"],
-        "runtimeRoot": "<coordination_root>/providers/grepai/memory-repos",
+        "workspace": "agents-remember-memory",
+        "mirrorRoots": true,
+        "roots": [
+          {
+            "projectId": "<external-memory-id>",
+            "path": "<coordination_root>/memory-repos/<memory-repo>"
+          },
+          {
+            "projectId": "<internal-memory-id>",
+            "path": "<workspace_root>/<repo-directory>/ar-memory"
+          }
+        ],
+        "runtimeRoot": "<coordination_root>/providers/grepai",
+        "requirementsFile": "<coordination_root>/providers/requirements/grepai.txt",
+        "stateFile": "<runtimeRoot>/state/provider-state.json",
+        "embedder": {
+          "provider": "ollama",
+          "model": "nomic-embed-text",
+          "endpoint": "http://localhost:11434",
+          "dimensions": 768
+        },
+        "backend": {
+          "id": "grepai-postgres",
+          "type": "postgres",
+          "mode": "docker",
+          "image": "pgvector/pgvector:pg16",
+          "imageLockFile": "<coordination_root>/providers/requirements/grepai-postgres-docker.lock",
+          "runtimeRoot": "<coordination_root>/provider-data/grepai/postgres",
+          "dataRoot": "<backendRuntimeRoot>/data",
+          "containerName": "ar-grepai-postgres",
+          "postgres": {
+            "user": "grepai",
+            "password": "grepai",
+            "database": "grepai"
+          },
+          "ports": {
+            "postgres": {
+              "bindHost": "127.0.0.1",
+              "hostPort": "auto",
+              "containerPort": 5432
+            }
+          }
+        },
         "watch": {
           "mode": "background",
-          "cwd": "<coordination_root>/memory-repos",
+          "workspace": "<workspace>",
           "logDir": "<runtimeRoot>/logs"
         },
         "freshness": {

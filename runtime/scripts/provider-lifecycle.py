@@ -17,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -39,32 +40,54 @@ from agents_remember.context_providers import (  # noqa: E402
     CGC_DELETE_PATCH_ID,
     CGC_DISCOVERY_EXTENSIONS_PATCH_ID,
     CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID,
+    CGC_VIZ_CLI_ROUTE_PATCH_ID,
+    CGC_VIZ_REPO_QUERY_PATCH_ID,
+    CGC_VIZ_SERVER_ROUTE_PATCH_ID,
     GREPAI_PIN,
     GREPAI_PROVIDER,
+    GREPAI_POSTGRES_BACKEND_ID,
+    GREPAI_POSTGRES_CONTAINER_NAME,
+    GREPAI_POSTGRES_DEFAULT_HOST,
+    GREPAI_POSTGRES_DEFAULT_PORT,
+    GrepaiMemoryRoot,
     ContextProviderError,
     apply_cgc_cgcignore_patch,
     apply_cgc_delete_patch,
     apply_cgc_discovery_extensions_patch,
     apply_cgc_graph_builder_extensions_patch,
+    apply_cgc_viz_cli_route_patch,
+    apply_cgc_viz_repo_query_patch,
+    apply_cgc_viz_server_route_patch,
     cgc_cgcignore_patch_applied,
     cgc_delete_patch_applied,
     cgc_discovery_extensions_patch_applied,
     cgc_graph_builder_extensions_patch_applied,
+    cgc_viz_cli_route_patch_applied,
+    cgc_viz_repo_query_patch_applied,
+    cgc_viz_server_route_patch_applied,
+    assert_no_grepai_root_provider_artifacts,
     cleanup_cgc_runtime_artifacts,
     cgc_runtime_layout,
     cgc_runtime_layout_from_provider_settings,
     ensure_cgc_runtime_layout,
+    ensure_grepai_runtime_layout,
     ensure_grepai_requirements_file,
     expand_template,
     file_sha256,
+    find_cgc_cli_helpers_module,
     find_cgc_cgcignore_module,
     find_cgc_discovery_module,
     find_cgc_graph_builder_module,
+    find_cgc_viz_server_module,
     find_cgc_writer_module,
+    grepai_runtime_layout,
+    grepai_runtime_layout_from_provider_settings,
     provider_requirements_file,
     read_provider_pin,
     source_provider_artifacts,
     stable_provider_id,
+    sync_grepai_index_roots,
+    write_grepai_workspace_config,
     write_provider_state,
 )
 
@@ -78,6 +101,56 @@ def read_json(path: Path) -> dict[str, Any]:
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def default_coordination_root() -> Path:
+    """Infer the installed coordination root from this script's location."""
+
+    return Path(__file__).resolve().parents[1]
+
+
+def process_namespace_warning() -> str | None:
+    if os.name == "nt":
+        return None
+
+    try:
+        init_cmdline = (
+            Path("/proc/1/cmdline")
+            .read_bytes()
+            .replace(b"\x00", b" ")
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+    except OSError:
+        return None
+
+    if "--die-with-parent" not in init_cmdline:
+        return None
+
+    supervisor = init_cmdline.split(maxsplit=1)[0] if init_cmdline else "PID 1"
+    return (
+        f"current PID namespace is supervised by {supervisor} with --die-with-parent; "
+        "background provider processes started here may be killed when this command exits, "
+        "and host-side provider PIDs may not be visible from this namespace"
+    )
+
+
+def process_namespace_status() -> dict[str, Any]:
+    warning = process_namespace_warning()
+    return {
+        "durableForDaemons": warning is None,
+        "warning": warning,
+    }
+
+
+def require_durable_process_namespace(action: str) -> None:
+    warning = process_namespace_warning()
+    if warning is None:
+        return
+    raise ContextProviderError(
+        f"{action} manages long-running provider processes and must run outside this ephemeral process namespace: "
+        f"{warning}. Run the lifecycle command from a normal host terminal or another durable host execution context."
+    )
 
 
 def run_command(
@@ -109,6 +182,30 @@ def run_command(
         "durationSeconds": round(time.monotonic() - started, 3),
         "stdout": completed.stdout,
         "stderr": completed.stderr,
+    }
+
+
+def run_foreground_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    started = time.monotonic()
+    completed = subprocess.run(
+        command,
+        cwd=str(cwd),
+        env=merged_env,
+        check=False,
+    )
+    return {
+        "command": command,
+        "cwd": cwd.as_posix(),
+        "returncode": completed.returncode,
+        "durationSeconds": round(time.monotonic() - started, 3),
     }
 
 
@@ -164,19 +261,6 @@ def process_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
-
-
-def provider_executable(coordination_root: Path, name: str) -> str | None:
-    suffix = ".exe" if os.name == "nt" and not name.endswith(".exe") else ""
-    candidate = coordination_root / "providers" / "_bin" / f"{name}{suffix}"
-    if candidate.exists():
-        return str(candidate)
-    return shutil.which(f"{name}{suffix}") or shutil.which(name)
-
-
-def provider_bin_path(coordination_root: Path, name: str) -> Path:
-    suffix = ".exe" if os.name == "nt" and not name.endswith(".exe") else ""
-    return coordination_root / "providers" / "_bin" / f"{name}{suffix}"
 
 
 def docker_command() -> str:
@@ -276,7 +360,7 @@ def process_cmdline(pid: int) -> str:
 
 def render(data: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(data, indent=2, sort_keys=True))
+        print(json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False))
         return
 
     status = "ok" if data.get("ok") else "needs-attention"
@@ -290,13 +374,59 @@ def render(data: dict[str, Any], *, as_json: bool) -> None:
             print(f"{key}: {value}")
 
 
+def render_captured_command_output(data: dict[str, Any]) -> bool:
+    command = data.get("command")
+    if not isinstance(command, dict):
+        return False
+
+    stdout = command.get("stdout") or ""
+    stderr = command.get("stderr") or ""
+    if stdout:
+        print(stdout, end="" if stdout.endswith("\n") else "\n")
+    if stderr:
+        print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr)
+    return True
+
+
+def cgc_run_api_payload(data: dict[str, Any]) -> dict[str, Any]:
+    command = data.get("command")
+    if not isinstance(command, dict):
+        return data
+
+    payload: dict[str, Any] = {
+        key: data[key]
+        for key in ("provider", "action", "ok", "repoId", "dryRun")
+        if key in data
+    }
+    for key in ("returncode", "durationSeconds"):
+        if key in command:
+            payload[key] = command[key]
+
+    output_lines: list[str] = []
+    for stream_name in ("stdout", "stderr"):
+        stream_text = command.get(stream_name) or ""
+        if stream_text:
+            output_lines.extend(str(stream_text).splitlines())
+    payload["outputLines"] = output_lines
+    return payload
+
+
+def render_cgc_run_result(data: dict[str, Any], args: argparse.Namespace) -> bool:
+    if getattr(args, "lifecycle_json", False):
+        render(cgc_run_api_payload(data), as_json=True)
+        return True
+    if not getattr(args, "dry_run", False):
+        return render_captured_command_output(data)
+    return False
+
+
 def cgc_uses_settings(args: argparse.Namespace) -> bool:
     return getattr(args, "from_settings", None) is not None or getattr(args, "code_repo_root", None) is None
 
 
 def cgc_layout_from_args(args: argparse.Namespace):
     if cgc_uses_settings(args):
-        _, provider_settings = cgc_settings_from_file(args.coordination_root, args.from_settings)
+        _, provider_settings = cgc_settings_from_file(args.coordination_root, getattr(args, "from_settings", None))
         root_settings = cgc_root_from_settings(provider_settings, args.repo_id)
         return cgc_runtime_layout_from_provider_settings(
             coordination_root=args.coordination_root,
@@ -370,9 +500,10 @@ def cgc_root_from_settings(provider_settings: dict[str, Any], repo_id: str | Non
 
 
 def cgc_all_layouts_from_settings(args: argparse.Namespace) -> tuple[Path, dict[str, Any], list[Any]]:
-    settings_path, provider_settings = cgc_settings_from_file(args.coordination_root, args.from_settings)
-    if args.repo_id:
-        selected = [cgc_root_from_settings(provider_settings, args.repo_id)]
+    settings_path, provider_settings = cgc_settings_from_file(args.coordination_root, getattr(args, "from_settings", None))
+    repo_id = getattr(args, "repo_id", None)
+    if repo_id:
+        selected = [cgc_root_from_settings(provider_settings, repo_id)]
     else:
         roots = provider_settings.get("roots")
         if not isinstance(roots, list) or not roots:
@@ -493,14 +624,14 @@ def docker_container_port(inspect_data: dict[str, Any], container_port: int) -> 
     return str(host_ip), int(host_port)
 
 
-def docker_data_mount_source(inspect_data: dict[str, Any] | None) -> str | None:
+def docker_data_mount_source(inspect_data: dict[str, Any] | None, destination: str = "/data") -> str | None:
     if not inspect_data:
         return None
     mounts = inspect_data.get("Mounts", [])
     if not isinstance(mounts, list):
         return None
     for mount in mounts:
-        if isinstance(mount, dict) and mount.get("Destination") == "/data":
+        if isinstance(mount, dict) and mount.get("Destination") == destination:
             source = mount.get("Source")
             return str(source) if source else None
     return None
@@ -737,8 +868,14 @@ def cgc_backend_start(args: argparse.Namespace) -> dict[str, Any]:
             "ping": ping,
         }
 
-    falkordb_port = allocate_host_port(backend["falkordbHost"], backend["falkordbHostPort"], 6379)
-    browser_port = allocate_host_port(backend["browserHost"], backend["browserHostPort"], 3000)
+    if args.dry_run:
+        configured_falkordb_port = backend["falkordbHostPort"]
+        configured_browser_port = backend["browserHostPort"]
+        falkordb_port = 6379 if str(configured_falkordb_port) == "auto" else int(configured_falkordb_port)
+        browser_port = 3000 if str(configured_browser_port) == "auto" else int(configured_browser_port)
+    else:
+        falkordb_port = allocate_host_port(backend["falkordbHost"], backend["falkordbHostPort"], 6379)
+        browser_port = allocate_host_port(backend["browserHost"], backend["browserHostPort"], 3000)
     volume_arg = f"{str(layout.backend_data_root)}:/data"
     run_command_line = [
         docker_command(),
@@ -1025,13 +1162,26 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
             writer_module = find_cgc_writer_module(layout.venv_root)
             graph_builder_module = find_cgc_graph_builder_module(layout.venv_root)
             discovery_module = find_cgc_discovery_module(layout.venv_root)
+            viz_server_module = find_cgc_viz_server_module(layout.venv_root)
+            cli_helpers_module = find_cgc_cli_helpers_module(layout.venv_root)
             cgcignore_applied = cgc_cgcignore_patch_applied(cgcignore_module)
             delete_applied = cgc_delete_patch_applied(writer_module)
             graph_builder_applied = cgc_graph_builder_extensions_patch_applied(graph_builder_module)
             discovery_applied = cgc_discovery_extensions_patch_applied(discovery_module)
+            viz_repo_query_applied = cgc_viz_repo_query_patch_applied(viz_server_module)
+            viz_server_route_applied = cgc_viz_server_route_patch_applied(viz_server_module)
+            viz_cli_route_applied = cgc_viz_cli_route_patch_applied(cli_helpers_module)
             patch["module"] = cgcignore_module.as_posix()
             patch["applied"] = all(
-                [cgcignore_applied, delete_applied, graph_builder_applied, discovery_applied]
+                [
+                    cgcignore_applied,
+                    delete_applied,
+                    graph_builder_applied,
+                    discovery_applied,
+                    viz_repo_query_applied,
+                    viz_server_route_applied,
+                    viz_cli_route_applied,
+                ]
             )
             patch["patches"] = {
                 CGC_CGCIGNORE_PATCH_ID: {
@@ -1049,6 +1199,18 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
                 CGC_DISCOVERY_EXTENSIONS_PATCH_ID: {
                     "module": discovery_module.as_posix(),
                     "applied": discovery_applied,
+                },
+                CGC_VIZ_REPO_QUERY_PATCH_ID: {
+                    "module": viz_server_module.as_posix(),
+                    "applied": viz_repo_query_applied,
+                },
+                CGC_VIZ_SERVER_ROUTE_PATCH_ID: {
+                    "module": viz_server_module.as_posix(),
+                    "applied": viz_server_route_applied,
+                },
+                CGC_VIZ_CLI_ROUTE_PATCH_ID: {
+                    "module": cli_helpers_module.as_posix(),
+                    "applied": viz_cli_route_applied,
                 },
             }
         except ContextProviderError as error:
@@ -1074,6 +1236,7 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
         "sourceArtifacts": artifacts,
         "patch": patch,
         "process": {"pid": pid, "alive": process_alive(int(pid)) if isinstance(pid, int) else False},
+        "processNamespace": process_namespace_status(),
     }
 
 
@@ -1116,6 +1279,8 @@ def cgc_patch(args: argparse.Namespace) -> dict[str, Any]:
     writer_module = find_cgc_writer_module(layout.venv_root)
     graph_builder_module = find_cgc_graph_builder_module(layout.venv_root)
     discovery_module = find_cgc_discovery_module(layout.venv_root)
+    viz_server_module = find_cgc_viz_server_module(layout.venv_root)
+    cli_helpers_module = find_cgc_cli_helpers_module(layout.venv_root)
     patch_targets = [
         (CGC_CGCIGNORE_PATCH_ID, cgcignore_module, cgc_cgcignore_patch_applied, apply_cgc_cgcignore_patch),
         (CGC_DELETE_PATCH_ID, writer_module, cgc_delete_patch_applied, apply_cgc_delete_patch),
@@ -1130,6 +1295,24 @@ def cgc_patch(args: argparse.Namespace) -> dict[str, Any]:
             discovery_module,
             cgc_discovery_extensions_patch_applied,
             apply_cgc_discovery_extensions_patch,
+        ),
+        (
+            CGC_VIZ_REPO_QUERY_PATCH_ID,
+            viz_server_module,
+            cgc_viz_repo_query_patch_applied,
+            apply_cgc_viz_repo_query_patch,
+        ),
+        (
+            CGC_VIZ_SERVER_ROUTE_PATCH_ID,
+            viz_server_module,
+            cgc_viz_server_route_patch_applied,
+            apply_cgc_viz_server_route_patch,
+        ),
+        (
+            CGC_VIZ_CLI_ROUTE_PATCH_ID,
+            cli_helpers_module,
+            cgc_viz_cli_route_patch_applied,
+            apply_cgc_viz_cli_route_patch,
         ),
     ]
     patch_results: dict[str, dict[str, Any]] = {}
@@ -1234,6 +1417,7 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
             "cwd": layout.watch_cwd.as_posix(),
             "env": layout.env(),
         }
+    require_durable_process_namespace("cgc start")
     ensure_cgc_runtime_layout(layout)
     backend_result = None
     if cgc_uses_settings(args):
@@ -1304,6 +1488,8 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
 def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     if args.repo_id is not None:
         raise ContextProviderError("cgc start-all does not accept --repo-id; use cgc start for one root")
+    if not args.dry_run:
+        require_durable_process_namespace("cgc start-all")
 
     settings_path, _, layouts = cgc_all_layouts_from_settings(args)
     backend = cgc_backend_start(args)
@@ -1349,6 +1535,8 @@ def cgc_stop(args: argparse.Namespace) -> dict[str, Any]:
         return cgc_stop_all(args)
 
     layout = cgc_layout_from_args(args)
+    if not args.dry_run:
+        require_durable_process_namespace("cgc stop")
     state = read_json(layout.state_file)
     process_state = state.get("process", {})
     if not isinstance(process_state, dict):
@@ -1393,6 +1581,8 @@ def cgc_stop(args: argparse.Namespace) -> dict[str, Any]:
 def cgc_stop_all(args: argparse.Namespace) -> dict[str, Any]:
     if args.repo_id is not None:
         raise ContextProviderError(f"cgc {args.action} does not accept --repo-id; use cgc stop for one root")
+    if not args.dry_run:
+        require_durable_process_namespace(f"cgc {args.action}")
 
     settings_path, _, layouts = cgc_all_layouts_from_settings(args)
     results: list[dict[str, Any]] = []
@@ -1522,6 +1712,8 @@ def cgc_run(args: argparse.Namespace) -> dict[str, Any]:
         native_args = native_args[1:]
     if not native_args:
         raise ContextProviderError("cgc run requires native CGC arguments after --")
+    if native_args[0] == "visualize":
+        raise ContextProviderError("cgc run is for bounded native CGC commands; use cgc visualize for the visualizer server")
 
     command = [layout.cgc_executable().as_posix(), *native_args]
     if args.dry_run:
@@ -1551,88 +1743,453 @@ def cgc_run(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def grepai_paths(args: argparse.Namespace) -> tuple[Path, Path]:
-    root = args.root or args.coordination_root / "memory-repos"
-    runtime_root = args.runtime_root or args.coordination_root / "providers" / "grepai" / "memory-repos"
-    return root.resolve(), runtime_root.resolve()
+def cgc_visualize(args: argparse.Namespace) -> dict[str, Any]:
+    if cgc_uses_settings(args) and args.repo_id is None:
+        raise ContextProviderError("cgc visualize requires --repo-id when using settings-backed roots")
+    if args.port < 1 or args.port > 65535:
+        raise ContextProviderError("cgc visualize requires --port between 1 and 65535")
 
-
-def grepai_state_file(runtime_root: Path) -> Path:
-    return runtime_root / "provider-state.json"
-
-
-def grepai_init_command(command_name: str, provider_settings: dict[str, Any]) -> list[str]:
-    init_settings = provider_settings.get("init")
-    if not isinstance(init_settings, dict):
-        init_settings = {}
-    embedding_settings = provider_settings.get("embedding")
-    if not isinstance(embedding_settings, dict):
-        embedding_settings = {}
-    store_settings = provider_settings.get("store")
-    if not isinstance(store_settings, dict):
-        store_settings = {}
-
-    provider = init_settings.get("provider") or embedding_settings.get("provider") or "ollama"
-    model = init_settings.get("model") or embedding_settings.get("model") or "nomic-embed-text"
-    backend = init_settings.get("backend") or store_settings.get("backend") or "gob"
-    return [
-        command_name,
-        "init",
-        "--yes",
-        "--provider",
-        str(provider),
-        "--model",
-        str(model),
-        "--backend",
-        str(backend),
+    layout = cgc_layout_from_args(args)
+    command = [
+        layout.cgc_executable().as_posix(),
+        "visualize",
+        "--repo",
+        layout.code_repo_root.as_posix(),
+        "--port",
+        str(args.port),
     ]
+    if args.context:
+        command.extend(["--context", args.context])
 
-
-def ensure_grepai_project(args: argparse.Namespace, command_name: str, root: Path) -> dict[str, Any]:
-    config_file = root / ".grepai" / "config.yaml"
-    settings_path, provider_settings = grepai_settings_from_file(
-        args.coordination_root,
-        getattr(args, "from_settings", None),
-    )
-    command = grepai_init_command(command_name, provider_settings)
-    if config_file.exists():
-        return {
-            "ok": True,
-            "initialized": False,
-            "configFile": config_file.as_posix(),
-            "settingsFile": settings_path.as_posix(),
-        }
+    url = f"http://127.0.0.1:{args.port}"
     if args.dry_run:
         return {
+            "provider": "codegraphcontext",
+            "action": "visualize",
             "ok": True,
             "dryRun": True,
-            "initialized": True,
-            "configFile": config_file.as_posix(),
-            "settingsFile": settings_path.as_posix(),
+            "repoId": layout.repo_id,
+            "url": url,
+            "longRunning": True,
             "command": command,
+            "cwd": layout.runtime_root.as_posix(),
+            "env": layout.env(),
         }
 
-    root.mkdir(parents=True, exist_ok=True)
-    result = run_command(command, cwd=root, timeout=args.timeout)
+    require_durable_process_namespace("cgc visualize")
+    ensure_cgc_runtime_layout(layout)
+    status = cgc_status(args)
+    if not status["ok"]:
+        return {**status, "action": "visualize", "ok": False}
+
+    result = run_foreground_command(command, cwd=layout.runtime_root, env=layout.env())
     return {
+        "provider": "codegraphcontext",
+        "action": "visualize",
         "ok": result["returncode"] == 0,
-        "initialized": result["returncode"] == 0,
-        "configFile": config_file.as_posix(),
-        "settingsFile": settings_path.as_posix(),
+        "repoId": layout.repo_id,
+        "url": url,
+        "longRunning": True,
         "command": result,
     }
 
 
-def grepai_version(executable: str, cwd: Path, timeout: int) -> str | None:
-    result = run_command([executable, "version"], cwd=cwd, timeout=timeout)
+def grepai_layout_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any], Any]:
+    settings_path, provider_settings = grepai_settings_from_file(
+        args.coordination_root,
+        getattr(args, "from_settings", None),
+    )
+    if provider_settings and getattr(args, "root", None) is None and getattr(args, "runtime_root", None) is None:
+        return (
+            settings_path,
+            provider_settings,
+            grepai_runtime_layout_from_provider_settings(
+                coordination_root=args.coordination_root,
+                provider_settings=provider_settings,
+            ),
+        )
+
+    root = (args.root or args.coordination_root / "memory-repos").resolve()
+    runtime_root = (args.runtime_root or args.coordination_root / "providers" / "grepai").resolve()
+    return (
+        settings_path,
+        provider_settings,
+        grepai_runtime_layout(
+            coordination_root=args.coordination_root,
+            workspace_name=str(provider_settings.get("workspace", "agents-remember-memory")),
+            roots=(GrepaiMemoryRoot(project_id=stable_provider_id(root.name), path=root),),
+            runtime_root=runtime_root,
+        ),
+    )
+
+
+def grepai_version(executable: str, cwd: Path, timeout: int, env: dict[str, str] | None = None) -> str | None:
+    result = run_command([executable, "version"], cwd=cwd, env=env, timeout=timeout)
     if result["returncode"] != 0:
         return None
     match = re.search(r"\bversion\s+([0-9][^\s]*)", result["stdout"])
     return match.group(1) if match else None
 
 
+def grepai_watch_pid_from_output(output: str) -> int | None:
+    match = re.search(r"\bPID\s+([0-9]+)\b", output)
+    return int(match.group(1)) if match else None
+
+
+def grepai_backend_settings(provider_settings: dict[str, Any], layout: Any) -> dict[str, Any]:
+    backend_settings = provider_settings.get("backend", {})
+    if not isinstance(backend_settings, dict):
+        backend_settings = {}
+    ports = backend_settings.get("ports", {})
+    if not isinstance(ports, dict):
+        ports = {}
+    postgres_port = ports.get("postgres", {})
+    if not isinstance(postgres_port, dict):
+        postgres_port = {}
+    postgres_settings = backend_settings.get("postgres", {})
+    if not isinstance(postgres_settings, dict):
+        postgres_settings = {}
+
+    image = str(backend_settings.get("image", "pgvector/pgvector:pg16")).strip()
+    if not image or "<" in image or ">" in image:
+        raise ContextProviderError("grepai backend.image must be a concrete pgvector/postgres tag or digest")
+
+    base_variables = {
+        "coordination_root": layout.coordination_root.as_posix(),
+        "runtimeRoot": layout.runtime_root.as_posix(),
+        "backendRuntimeRoot": layout.backend_root.as_posix(),
+        "backendDataRoot": layout.backend_data_root.as_posix(),
+    }
+    image_lock_file = backend_settings.get("imageLockFile")
+    if image_lock_file:
+        image_lock_path = Path(expand_template(str(image_lock_file), base_variables)).resolve()
+    else:
+        image_lock_path = layout.coordination_root / "providers" / "requirements" / "grepai-postgres-docker.lock"
+
+    return {
+        "id": backend_settings.get("id", GREPAI_POSTGRES_BACKEND_ID),
+        "type": backend_settings.get("type", "postgres"),
+        "mode": backend_settings.get("mode", "docker"),
+        "image": image,
+        "imageLockFile": image_lock_path,
+        "containerName": str(backend_settings.get("containerName", GREPAI_POSTGRES_CONTAINER_NAME)),
+        "postgresHost": str(postgres_port.get("bindHost", GREPAI_POSTGRES_DEFAULT_HOST)),
+        "postgresHostPort": postgres_port.get("hostPort", "auto"),
+        "postgresContainerPort": int(postgres_port.get("containerPort", 5432)),
+        "postgresUser": str(postgres_settings.get("user", "grepai")),
+        "postgresPassword": str(postgres_settings.get("password", "grepai")),
+        "postgresDatabase": str(postgres_settings.get("database", "grepai")),
+        "dataDestination": str(backend_settings.get("dataDestination", "/var/lib/postgresql/data")),
+    }
+
+
+def grepai_dsn(backend: dict[str, Any], *, host: str, port: int | str) -> str:
+    user = urllib.parse.quote(str(backend["postgresUser"]), safe="")
+    password = urllib.parse.quote(str(backend["postgresPassword"]), safe="")
+    database = urllib.parse.quote(str(backend["postgresDatabase"]), safe="")
+    return f"postgres://{user}:{password}@{host}:{port}/{database}?sslmode=disable"
+
+
+def grepai_embedder_settings(provider_settings: dict[str, Any]) -> dict[str, Any]:
+    embedder = provider_settings.get("embedder")
+    if not isinstance(embedder, dict):
+        embedder = provider_settings.get("embedding")
+    return embedder if isinstance(embedder, dict) else {}
+
+
+def docker_wait_for_postgres(
+    backend: dict[str, Any],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_result: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        last_result = run_command(
+            [
+                docker_command(),
+                "exec",
+                "-e",
+                f"PGPASSWORD={backend['postgresPassword']}",
+                backend["containerName"],
+                "pg_isready",
+                "-U",
+                backend["postgresUser"],
+                "-d",
+                backend["postgresDatabase"],
+            ],
+            cwd=cwd,
+            timeout=15,
+        )
+        if last_result["returncode"] == 0:
+            return last_result
+        time.sleep(2)
+    if last_result is None:
+        raise ContextProviderError("timed out waiting for GrepAI PostgreSQL health check")
+    raise ContextProviderError(f"GrepAI PostgreSQL health check failed: {last_result['stderr'] or last_result['stdout']}")
+
+
+def docker_ensure_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) -> dict[str, Any]:
+    return run_command(
+        [
+            docker_command(),
+            "exec",
+            "-e",
+            f"PGPASSWORD={backend['postgresPassword']}",
+            backend["containerName"],
+            "psql",
+            "-U",
+            backend["postgresUser"],
+            "-d",
+            backend["postgresDatabase"],
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            "CREATE EXTENSION IF NOT EXISTS vector;",
+        ],
+        cwd=cwd,
+        timeout=timeout,
+    )
+
+
+def grepai_backend_state(
+    layout: Any,
+    backend: dict[str, Any],
+    *,
+    settings_path: Path,
+    status: str,
+    postgres_host: str,
+    postgres_port: int,
+    image_digest: str | None,
+    container_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "provider": "grepai",
+        "backend": {
+            "id": backend["id"],
+            "type": backend["type"],
+            "mode": backend["mode"],
+            "image": backend["image"],
+            "imageLock": {"image": backend["image"], "repoDigest": image_digest},
+            "imageLockFile": backend["imageLockFile"].as_posix(),
+            "containerName": backend["containerName"],
+            "containerId": container_id,
+            "runtimeRoot": layout.backend_root.as_posix(),
+            "dataRoot": layout.backend_data_root.as_posix(),
+            "status": status,
+            "ports": {
+                "postgres": {
+                    "bindHost": postgres_host,
+                    "hostPort": postgres_port,
+                    "containerPort": backend["postgresContainerPort"],
+                },
+            },
+        },
+        "settingsFile": settings_path.as_posix(),
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+def grepai_backend_status(args: argparse.Namespace) -> dict[str, Any]:
+    settings_path, provider_settings, layout = grepai_layout_from_args(args)
+    backend = grepai_backend_settings(provider_settings, layout)
+    state = read_json(layout.backend_state_file)
+    inspect_data = None if args.dry_run else docker_inspect_container(backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout)
+    running = docker_container_running(inspect_data)
+    ping = None
+    if running and not args.dry_run:
+        try:
+            ping = docker_wait_for_postgres(backend, cwd=layout.coordination_root, timeout=args.timeout)
+        except (ContextProviderError, subprocess.TimeoutExpired, OSError) as error:
+            ping = {"returncode": 1, "stderr": str(error), "stdout": ""}
+
+    postgres_mapping = docker_container_port(inspect_data, backend["postgresContainerPort"]) if inspect_data else None
+    actual_data_mount = docker_data_mount_source(inspect_data, backend["dataDestination"])
+    data_mount_matches = docker_host_path_matches(actual_data_mount, layout.backend_data_root) if inspect_data else False
+    postgres_host, postgres_port = postgres_mapping or (
+        state.get("backend", {}).get("ports", {}).get("postgres", {}).get("bindHost", backend["postgresHost"]),
+        state.get("backend", {}).get("ports", {}).get("postgres", {}).get("hostPort", backend["postgresHostPort"]),
+    )
+    return {
+        "provider": "grepai",
+        "action": "backend-status",
+        "ok": bool(running) and data_mount_matches and (ping is None or ping.get("returncode") == 0),
+        "dryRun": args.dry_run,
+        "settingsFile": settings_path.as_posix(),
+        "containerName": backend["containerName"],
+        "image": backend["image"],
+        "running": running,
+        "backendRuntimeRoot": layout.backend_root.as_posix(),
+        "backendDataRoot": layout.backend_data_root.as_posix(),
+        "dataMount": {
+            "expected": layout.backend_data_root.as_posix(),
+            "actual": actual_data_mount,
+            "matches": data_mount_matches,
+        },
+        "ports": {
+            "postgres": {
+                "bindHost": postgres_host,
+                "hostPort": postgres_port,
+                "containerPort": backend["postgresContainerPort"],
+            },
+        },
+        "ping": ping,
+    }
+
+
+def grepai_backend_start(args: argparse.Namespace) -> dict[str, Any]:
+    settings_path, provider_settings, layout = grepai_layout_from_args(args)
+    if not args.dry_run:
+        ensure_grepai_runtime_layout(layout)
+    backend = grepai_backend_settings(provider_settings, layout)
+    if backend["type"] != "postgres" or backend["mode"] != "docker":
+        raise ContextProviderError("managed GrepAI backend must be postgres docker")
+
+    inspect_data = None if args.dry_run else docker_inspect_container(backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout)
+    forced_remove_result = None
+    if inspect_data and not docker_host_path_matches(
+        docker_data_mount_source(inspect_data, backend["dataDestination"]),
+        layout.backend_data_root,
+    ):
+        if args.dry_run:
+            inspect_data = None
+        else:
+            forced_remove_result = run_command(
+                [docker_command(), "rm", "-f", backend["containerName"]],
+                cwd=layout.coordination_root,
+                timeout=args.timeout,
+            )
+            if forced_remove_result["returncode"] != 0:
+                return {"provider": "grepai", "action": "backend-start", "ok": False, "command": forced_remove_result}
+            inspect_data = None
+
+    if inspect_data and docker_container_running(inspect_data):
+        postgres_host, postgres_port = docker_container_port(inspect_data, backend["postgresContainerPort"]) or (
+            backend["postgresHost"],
+            backend["postgresHostPort"],
+        )
+        ping = docker_wait_for_postgres(backend, cwd=layout.coordination_root, timeout=args.timeout)
+        extension = docker_ensure_pgvector(backend, cwd=layout.coordination_root, timeout=args.timeout)
+        image_digest = docker_repo_digest(backend["image"], cwd=layout.coordination_root, timeout=args.timeout)
+        backend_state = grepai_backend_state(
+            layout,
+            backend,
+            settings_path=settings_path,
+            status="running",
+            postgres_host=str(postgres_host),
+            postgres_port=int(postgres_port),
+            image_digest=image_digest,
+            container_id=str(inspect_data.get("Id", "")),
+        )
+        write_json(layout.backend_state_file, backend_state)
+        write_json(backend["imageLockFile"], backend_state["backend"]["imageLock"])
+        return {
+            "provider": "grepai",
+            "action": "backend-start",
+            "ok": extension["returncode"] == 0,
+            "alreadyRunning": True,
+            "containerName": backend["containerName"],
+            "ports": backend_state["backend"]["ports"],
+            "dataMount": {
+                "expected": layout.backend_data_root.as_posix(),
+                "actual": docker_data_mount_source(inspect_data, backend["dataDestination"]),
+                "matches": True,
+            },
+            "ping": ping,
+            "extension": extension,
+        }
+
+    if args.dry_run:
+        configured_port = backend["postgresHostPort"]
+        postgres_port = 5432 if str(configured_port) == "auto" else int(configured_port)
+    else:
+        postgres_port = allocate_host_port(backend["postgresHost"], backend["postgresHostPort"], 5432)
+    volume_arg = f"{str(layout.backend_data_root)}:{backend['dataDestination']}"
+    run_command_line = [
+        docker_command(),
+        "run",
+        "-d",
+        "--name",
+        backend["containerName"],
+        "--restart",
+        "unless-stopped",
+        "-p",
+        f"{backend['postgresHost']}:{postgres_port}:{backend['postgresContainerPort']}",
+        "-v",
+        volume_arg,
+        "-e",
+        f"POSTGRES_USER={backend['postgresUser']}",
+        "-e",
+        f"POSTGRES_PASSWORD={backend['postgresPassword']}",
+        "-e",
+        f"POSTGRES_DB={backend['postgresDatabase']}",
+        backend["image"],
+    ]
+    commands = [[docker_command(), "pull", backend["image"]]]
+    if inspect_data:
+        commands.append([docker_command(), "rm", backend["containerName"]])
+    commands.append(run_command_line)
+    if args.dry_run:
+        return {
+            "provider": "grepai",
+            "action": "backend-start",
+            "ok": True,
+            "dryRun": True,
+            "settingsFile": settings_path.as_posix(),
+            "commands": commands,
+            "backendRuntimeRoot": layout.backend_root.as_posix(),
+            "backendDataRoot": layout.backend_data_root.as_posix(),
+            "ports": {
+                "postgres": {
+                    "bindHost": backend["postgresHost"],
+                    "hostPort": postgres_port,
+                    "containerPort": backend["postgresContainerPort"],
+                },
+            },
+        }
+
+    pull_result = run_command(commands[0], cwd=layout.coordination_root, timeout=args.timeout)
+    if pull_result["returncode"] != 0:
+        return {"provider": "grepai", "action": "backend-start", "ok": False, "command": pull_result}
+    rm_result = None
+    if inspect_data:
+        rm_result = run_command(commands[1], cwd=layout.coordination_root, timeout=args.timeout)
+        if rm_result["returncode"] != 0:
+            return {"provider": "grepai", "action": "backend-start", "ok": False, "command": rm_result}
+    run_result = run_command(run_command_line, cwd=layout.coordination_root, timeout=args.timeout)
+    if run_result["returncode"] != 0:
+        return {"provider": "grepai", "action": "backend-start", "ok": False, "command": run_result}
+    ping = docker_wait_for_postgres(backend, cwd=layout.coordination_root, timeout=args.timeout)
+    extension = docker_ensure_pgvector(backend, cwd=layout.coordination_root, timeout=args.timeout)
+    inspect_data = docker_inspect_container(backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout)
+    image_digest = docker_repo_digest(backend["image"], cwd=layout.coordination_root, timeout=args.timeout)
+    backend_state = grepai_backend_state(
+        layout,
+        backend,
+        settings_path=settings_path,
+        status="running",
+        postgres_host=backend["postgresHost"],
+        postgres_port=postgres_port,
+        image_digest=image_digest,
+        container_id=str(inspect_data.get("Id", "")) if inspect_data else None,
+    )
+    write_json(layout.backend_state_file, backend_state)
+    write_json(backend["imageLockFile"], backend_state["backend"]["imageLock"])
+    return {
+        "provider": "grepai",
+        "action": "backend-start",
+        "ok": extension["returncode"] == 0,
+        "containerName": backend["containerName"],
+        "ports": backend_state["backend"]["ports"],
+        "commands": {"pull": pull_result, "remove": rm_result, "forcedRemove": forced_remove_result, "run": run_result},
+        "ping": ping,
+        "extension": extension,
+    }
+
+
 def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
-    root, runtime_root = grepai_paths(args)
+    _, provider_settings, layout = grepai_layout_from_args(args)
     requirements_file = provider_requirements_file(args.coordination_root, GREPAI_PROVIDER)
     if args.dry_run and not requirements_file.exists():
         version = GREPAI_PIN.split("==", 1)[1]
@@ -1645,9 +2202,9 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
     release_base = f"https://github.com/yoanbernabeu/grepai/releases/download/v{version}"
     archive_url = f"{release_base}/{asset_name}"
     checksums_url = f"{release_base}/checksums.txt"
-    destination = provider_bin_path(args.coordination_root, "grepai")
-    installed = provider_executable(args.coordination_root, "grepai")
-    installed_version = grepai_version(installed, root, args.timeout) if installed else None
+    destination = layout.binary_path
+    installed = destination.as_posix() if destination.exists() else None
+    installed_version = grepai_version(installed, layout.runtime_root, args.timeout, layout.env()) if installed else None
 
     if args.dry_run:
         return {
@@ -1664,7 +2221,18 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
             "installedVersion": installed_version,
         }
 
+    ensure_grepai_runtime_layout(layout)
     if installed_version == version and destination.exists() and not args.force:
+        backend_result = grepai_backend_start(args) if provider_settings else None
+        if backend_result is not None and not backend_result.get("ok"):
+            return {**backend_result, "action": "install", "ok": False}
+        if backend_result is not None:
+            backend = grepai_backend_settings(provider_settings, layout)
+            postgres_port = backend_result["ports"]["postgres"]["hostPort"]
+            dsn = grepai_dsn(backend, host=backend_result["ports"]["postgres"]["bindHost"], port=postgres_port)
+            assert_no_grepai_root_provider_artifacts(layout.roots)
+            sync_grepai_index_roots(layout)
+            write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
         return {
             "provider": "grepai",
             "action": "install",
@@ -1672,10 +2240,10 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
             "requirementsFile": requirements_file.as_posix(),
             "version": version,
             "destination": destination.as_posix(),
+            "backend": backend_result,
             "message": "pinned version already installed",
         }
 
-    runtime_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="grepai-install-") as tmp_dir:
         archive_path = Path(tmp_dir) / asset_name
         download_file(archive_url, archive_path)
@@ -1685,8 +2253,18 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
             raise ContextProviderError(f"checksum mismatch for {asset_name}: expected {expected}, got {actual}")
         extract_binary_from_archive(archive_path, destination, {"grepai", "grepai.exe"})
 
-    installed_version = grepai_version(destination.as_posix(), root, args.timeout)
+    installed_version = grepai_version(destination.as_posix(), layout.runtime_root, args.timeout, layout.env())
     ok = installed_version == version
+    backend_result = grepai_backend_start(args) if provider_settings else None
+    if backend_result is not None and not backend_result.get("ok"):
+        ok = False
+    if backend_result is not None and backend_result.get("ok"):
+        backend = grepai_backend_settings(provider_settings, layout)
+        postgres_port = backend_result["ports"]["postgres"]["hostPort"]
+        dsn = grepai_dsn(backend, host=backend_result["ports"]["postgres"]["bindHost"], port=postgres_port)
+        assert_no_grepai_root_provider_artifacts(layout.roots)
+        sync_grepai_index_roots(layout)
+        write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
     install_state = {
         "provider": "grepai",
         "requirementsFile": requirements_file.as_posix(),
@@ -1708,33 +2286,42 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
         "installedVersion": installed_version,
         "asset": asset_name,
         "destination": destination.as_posix(),
+        "backend": backend_result,
     }
 
 
 def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
-    root, runtime_root = grepai_paths(args)
     if action == "install":
         return grepai_install(args)
+    if action == "backend-start":
+        return grepai_backend_start(args)
+    if action == "backend-status":
+        return grepai_backend_status(args)
 
-    executable = provider_executable(args.coordination_root, "grepai")
-    command_name = executable or "grepai"
-    if not executable:
+    settings_path, provider_settings, layout = grepai_layout_from_args(args)
+    executable = layout.binary_path
+    command_name = executable.as_posix()
+    if not executable.exists():
         return {
             "provider": "grepai",
             "action": action,
             "ok": False,
-            "root": root.as_posix(),
-            "message": "grepai command not found",
+            "runtimeRoot": layout.runtime_root.as_posix(),
+            "message": "runtime grepai command not found",
         }
-    runtime_root.mkdir(parents=True, exist_ok=True)
-    state_file = grepai_state_file(runtime_root)
+    ensure_grepai_runtime_layout(layout)
+    state_file = layout.state_file
 
     if action == "status":
-        commands = [[command_name, "status", "--no-ui"], [command_name, "watch", "--status"]]
+        backend_status = grepai_backend_status(args) if provider_settings else None
+        commands = [
+            [command_name, "workspace", "status", layout.workspace_name],
+            [command_name, "watch", "--status", "--workspace", layout.workspace_name],
+        ]
         if args.dry_run:
-            results = [{"command": command, "cwd": root.as_posix()} for command in commands]
+            results = [{"command": command, "cwd": layout.runtime_root.as_posix(), "env": layout.env()} for command in commands]
         else:
-            results = [run_command(command, cwd=root, timeout=args.timeout) for command in commands]
+            results = [run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout) for command in commands]
         state = read_json(state_file)
         pid = state.get("process", {}).get("pid")
         managed_alive = process_alive(int(pid)) if isinstance(pid, int) else False
@@ -1742,93 +2329,111 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             "Watcher: running" in result.get("stdout", "") or "Status: running" in result.get("stdout", "")
             for result in results
         )
+        root_artifacts = [
+            path.as_posix()
+            for root in layout.roots
+            for path in ((root.source_path or root.path) / ".grepai",)
+            if path.exists()
+        ]
         return {
             "provider": "grepai",
             "action": action,
             "ok": all(result.get("returncode", 0) == 0 for result in results)
-            and (managed_alive or native_watcher_running),
+            and (managed_alive or native_watcher_running)
+            and not root_artifacts
+            and (backend_status is None or bool(backend_status.get("ok"))),
             "dryRun": args.dry_run,
-            "root": root.as_posix(),
-            "runtimeRoot": runtime_root.as_posix(),
+            "settingsFile": settings_path.as_posix(),
+            "workspace": layout.workspace_name,
+            "roots": [
+                {
+                    "projectId": root.project_id,
+                    "path": root.path.as_posix(),
+                    "sourcePath": root.source_path.as_posix() if root.source_path else None,
+                }
+                for root in layout.roots
+            ],
+            "runtimeRoot": layout.runtime_root.as_posix(),
+            "workspaceConfigFile": layout.workspace_config_file.as_posix(),
+            "rootArtifacts": root_artifacts,
+            "backend": backend_status,
             "managedProcess": {"pid": pid, "alive": managed_alive},
             "watcherRunning": managed_alive or native_watcher_running,
+            "processNamespace": process_namespace_status(),
             "commands": results,
         }
 
     if action == "start":
-        command = [command_name, "watch", "--no-ui"]
+        if not args.dry_run:
+            require_durable_process_namespace("grepai start")
+        backend_result = grepai_backend_start(args) if provider_settings else None
+        if backend_result is not None and not backend_result.get("ok"):
+            return {**backend_result, "action": "start", "ok": False}
+        dsn = None
+        if backend_result is not None:
+            backend = grepai_backend_settings(provider_settings, layout)
+            postgres_port = backend_result["ports"]["postgres"]["hostPort"]
+            dsn = grepai_dsn(backend, host=backend_result["ports"]["postgres"]["bindHost"], port=postgres_port)
+        command = [command_name, "watch", "--workspace", layout.workspace_name, "--background", "--log-dir", layout.logs_root.as_posix()]
         if args.dry_run:
             return {
                 "provider": "grepai",
                 "action": action,
                 "ok": True,
                 "dryRun": True,
-                "root": root.as_posix(),
-                "runtimeRoot": runtime_root.as_posix(),
+                "workspace": layout.workspace_name,
+                "runtimeRoot": layout.runtime_root.as_posix(),
+                "env": layout.env(),
                 "command": command,
+                "backend": backend_result,
+                "workspaceConfigPreview": {"path": layout.workspace_config_file.as_posix(), "dsn": dsn},
             }
-        init_result = ensure_grepai_project(args, command_name, root)
-        if not init_result.get("ok"):
-            return {
-                "provider": "grepai",
-                "action": action,
-                "ok": False,
-                "root": root.as_posix(),
-                "runtimeRoot": runtime_root.as_posix(),
-                "init": init_result,
-            }
-        state = read_json(state_file)
-        existing_pid = state.get("process", {}).get("pid")
-        if isinstance(existing_pid, int) and process_alive(existing_pid):
-            return {
-                "provider": "grepai",
-                "action": action,
-                "ok": True,
-                "root": root.as_posix(),
-                "runtimeRoot": runtime_root.as_posix(),
-                "message": "managed process already running",
-                "pid": existing_pid,
-                "init": init_result,
-            }
-        watch_log = runtime_root / "logs" / "watch.log"
-        watch_log.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = watch_log.open("ab")
-        popen_kwargs: dict[str, Any] = {}
-        if os.name == "nt":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-        else:
-            popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(
-            command,
-            cwd=str(root),
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            **popen_kwargs,
-        )
+        if dsn is not None:
+            assert_no_grepai_root_provider_artifacts(layout.roots)
+            sync_grepai_index_roots(layout)
+            write_grepai_workspace_config(layout, dsn=dsn, embedder_settings=grepai_embedder_settings(provider_settings))
+        result = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout)
+        watch_pid = grepai_watch_pid_from_output(result.get("stdout", ""))
         write_json(
             state_file,
             {
                 "provider": "grepai",
-                "root": root.as_posix(),
-                "runtimeRoot": runtime_root.as_posix(),
-                "process": {"pid": process.pid, "logFile": watch_log.as_posix(), "mode": "watch"},
+                "workspace": layout.workspace_name,
+                "roots": [
+                    {
+                        "projectId": root.project_id,
+                        "path": root.path.as_posix(),
+                        "sourcePath": root.source_path.as_posix() if root.source_path else None,
+                    }
+                    for root in layout.roots
+                ],
+                "runtimeRoot": layout.runtime_root.as_posix(),
+                "workspaceConfigFile": layout.workspace_config_file.as_posix(),
+                "process": {
+                    "pid": watch_pid,
+                    "logDir": layout.logs_root.as_posix(),
+                    "mode": "native-background-watch",
+                },
                 "lastAction": action,
-                "init": init_result,
+                "backend": backend_result,
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             },
         )
         return {
             "provider": "grepai",
             "action": action,
-            "ok": True,
-            "root": root.as_posix(),
-            "runtimeRoot": runtime_root.as_posix(),
-            "pid": process.pid,
-            "logFile": watch_log.as_posix(),
-            "init": init_result,
+            "ok": result["returncode"] == 0,
+            "pid": watch_pid,
+            "workspace": layout.workspace_name,
+            "runtimeRoot": layout.runtime_root.as_posix(),
+            "logDir": layout.logs_root.as_posix(),
+            "command": result,
+            "backend": backend_result,
         }
 
     if action == "stop":
+        if not args.dry_run:
+            require_durable_process_namespace("grepai stop")
         state = read_json(state_file)
         pid = state.get("process", {}).get("pid")
         stopped_pid = None
@@ -1836,7 +2441,13 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             stopped_pid = pid
             if not args.dry_run:
                 os.kill(pid, signal.SIGTERM)
-        fallback = None if args.dry_run else run_command([command_name, "watch", "--stop"], cwd=root, timeout=args.timeout)
+        fallback_command = [command_name, "watch", "--stop", "--workspace", layout.workspace_name]
+        fallback = None if args.dry_run else run_command(
+            fallback_command,
+            cwd=layout.runtime_root,
+            env=layout.env(),
+            timeout=args.timeout,
+        )
         if not args.dry_run:
             state["process"] = {
                 "pid": pid,
@@ -1850,22 +2461,27 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             "action": action,
             "ok": True,
             "dryRun": args.dry_run,
-            "root": root.as_posix(),
-            "runtimeRoot": runtime_root.as_posix(),
+            "workspace": layout.workspace_name,
+            "runtimeRoot": layout.runtime_root.as_posix(),
             "stoppedPid": stopped_pid,
             "fallback": fallback,
         }
 
     if action == "refresh":
+        if not args.dry_run:
+            require_durable_process_namespace("grepai refresh")
         if args.dry_run:
             return {
                 "provider": "grepai",
                 "action": action,
                 "ok": True,
                 "dryRun": True,
-                "root": root.as_posix(),
-                "runtimeRoot": runtime_root.as_posix(),
-                "commands": [[command_name, "watch", "--stop"], [command_name, "watch", "--no-ui"]],
+                "workspace": layout.workspace_name,
+                "runtimeRoot": layout.runtime_root.as_posix(),
+                "commands": [
+                    [command_name, "watch", "--stop", "--workspace", layout.workspace_name],
+                    [command_name, "watch", "--workspace", layout.workspace_name, "--background", "--log-dir", layout.logs_root.as_posix()],
+                ],
             }
         stop_result = grepai_run(args, "stop")
         start_result = grepai_run(args, "start")
@@ -1873,8 +2489,8 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             "provider": "grepai",
             "action": action,
             "ok": bool(stop_result.get("ok")) and bool(start_result.get("ok")),
-            "root": root.as_posix(),
-            "runtimeRoot": runtime_root.as_posix(),
+            "workspace": layout.workspace_name,
+            "runtimeRoot": layout.runtime_root.as_posix(),
             "stop": stop_result,
             "start": start_result,
         }
@@ -1899,6 +2515,9 @@ def watcher_scoped_args(args: argparse.Namespace, provider: str, action: str) ->
 
 
 def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
+    if action in {"start", "stop", "shutdown-all"} and not args.dry_run:
+        require_durable_process_namespace(f"watchers {action}")
+
     settings_path, grepai_enabled = context_provider_enabled(
         args.coordination_root,
         getattr(args, "from_settings", None),
@@ -1958,6 +2577,7 @@ def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
         "ok": all(result.get("ok") for result in results),
         "dryRun": args.dry_run,
         "settingsFile": settings_path.as_posix(),
+        "processNamespace": process_namespace_status(),
         "enabled": {
             "grepai-memory": grepai_enabled,
             "codegraphcontext-code": cgc_enabled,
@@ -1967,10 +2587,48 @@ def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
 
 
 def add_common_provider_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--coordination-root", type=Path, required=True)
+    parser.add_argument(
+        "--coordination-root",
+        type=Path,
+        default=default_coordination_root(),
+        help="Coordination root. Defaults to the installed script's parent directory.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--timeout", type=int, default=60)
+
+
+def add_cgc_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--coordination-root", type=Path, default=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--timeout", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("--from-settings", type=Path, default=argparse.SUPPRESS, help="Coordinator settings.json containing codegraphcontext-code.")
+    parser.add_argument("--repo-id", default=argparse.SUPPRESS, help="Stable provider id for this code repository.")
+    parser.add_argument("--code-repo-root", type=Path, default=argparse.SUPPRESS)
+    parser.add_argument("--python", default=argparse.SUPPRESS, help="Python executable used to create the provider venv.")
+
+
+def add_cgc_action_parser(subparsers: Any, action: str, *, help_text: str) -> argparse.ArgumentParser:
+    action_parser = subparsers.add_parser(action, help=help_text)
+    add_cgc_common_args(action_parser)
+    return action_parser
+
+
+def normalize_cgc_args(args: argparse.Namespace) -> None:
+    for key, value in {
+        "dry_run": False,
+        "json": False,
+        "timeout": 60,
+        "from_settings": None,
+        "repo_id": None,
+        "code_repo_root": None,
+        "python": sys.executable,
+    }.items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+    if not getattr(args, "coordination_root", None):
+        args.coordination_root = default_coordination_root()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1978,48 +2636,68 @@ def build_parser() -> argparse.ArgumentParser:
     providers = parser.add_subparsers(dest="provider", required=True)
 
     cgc = providers.add_parser("cgc", help="Manage CodeGraphContext code provider settings and instances.")
-    cgc.add_argument(
-        "action",
-        choices=[
-            "apply-settings",
-            "backend-start",
-            "backend-status",
-            "status",
-            "install",
-            "install-all",
-            "init-layout",
-            "patch",
-            "doctor",
-            "start",
-            "start-all",
-            "stop",
-            "stop-all",
-            "shutdown-all",
-            "refresh",
-            "refresh-all",
-            "run",
-        ],
+    add_cgc_common_args(cgc)
+    cgc_actions = cgc.add_subparsers(dest="action", required=True)
+    for action, help_text in [
+        ("apply-settings", "Apply configured CGC provider settings."),
+        ("backend-start", "Start the shared FalkorDB backend."),
+        ("backend-status", "Inspect the shared FalkorDB backend."),
+        ("status", "Inspect one managed CGC repository runtime."),
+        ("install", "Install CGC for one managed repository runtime."),
+        ("install-all", "Install CGC for every configured repository runtime."),
+        ("init-layout", "Create the managed CGC runtime layout."),
+        ("patch", "Apply managed CGC containment patches."),
+        ("doctor", "Run CGC provider health checks."),
+        ("start", "Start managed CGC watchers."),
+        ("start-all", "Start every configured CGC watcher."),
+        ("stop", "Stop managed CGC watchers."),
+        ("stop-all", "Stop every configured CGC watcher."),
+        ("shutdown-all", "Stop every configured CGC watcher."),
+        ("refresh", "Reindex one managed CGC repository."),
+        ("refresh-all", "Reindex every configured CGC repository."),
+    ]:
+        add_cgc_action_parser(cgc_actions, action, help_text=help_text)
+    run_parser = add_cgc_action_parser(
+        cgc_actions,
+        "run",
+        help_text="Run a bounded native CGC command in the managed environment.",
     )
-    add_common_provider_args(cgc)
-    cgc.add_argument("--from-settings", type=Path, help="Coordinator settings.json containing codegraphcontext-code.")
-    cgc.add_argument("--repo-id", help="Stable provider id for this code repository.")
-    cgc.add_argument("--code-repo-root", type=Path)
-    cgc.add_argument("--python", default=sys.executable, help="Python executable used to create the provider venv.")
-    cgc.add_argument(
+    run_parser.add_argument(
+        "--lifecycle-json",
+        action="store_true",
+        help="Render lifecycle command metadata instead of the native provider output.",
+    )
+    run_parser.add_argument(
         "native_args",
         nargs=argparse.REMAINDER,
-        help="Native CGC arguments for cgc run. Put lifecycle options before run, then use -- before native args.",
+        help="Native CGC arguments. Use -- before native args.",
+    )
+    visualize_parser = add_cgc_action_parser(
+        cgc_actions,
+        "visualize",
+        help_text="Launch the long-running CGC visualizer server.",
+    )
+    visualize_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Visualizer server port.",
+    )
+    visualize_parser.add_argument(
+        "--context",
+        help="Specific CGC context to visualize.",
     )
 
     grepai = providers.add_parser("grepai", help="Manage a GrepAI memory provider instance.")
-    grepai.add_argument("action", choices=["status", "install", "start", "stop", "refresh"])
+    grepai.add_argument("action", choices=["status", "install", "backend-start", "backend-status", "start", "stop", "refresh"])
     add_common_provider_args(grepai)
+    grepai.add_argument("--from-settings", type=Path, help="Coordinator settings.json containing grepai-memory.")
     grepai.add_argument("--force", action="store_true", help="Reinstall even when the pinned version is already present.")
     grepai.add_argument("--root", type=Path, help="Indexed memory root. Defaults to <coordination-root>/memory-repos.")
     grepai.add_argument(
         "--runtime-root",
         type=Path,
-        help="Provider runtime root. Defaults to <coordination-root>/providers/grepai/memory-repos.",
+        help="Provider runtime root. Defaults to <coordination-root>/providers/grepai.",
     )
 
     watchers = providers.add_parser("watchers", help="Start, stop, or check every enabled provider watcher.")
@@ -2032,16 +2710,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.coordination_root = args.coordination_root.resolve()
-    if getattr(args, "from_settings", None):
-        args.from_settings = args.from_settings.resolve()
-    if hasattr(args, "code_repo_root"):
-        if args.code_repo_root is not None:
-            args.code_repo_root = args.code_repo_root.resolve()
-        if args.repo_id is not None:
-            args.repo_id = stable_provider_id(args.repo_id)
 
     try:
+        if args.provider == "cgc":
+            normalize_cgc_args(args)
+        args.coordination_root = args.coordination_root.resolve()
+        if getattr(args, "from_settings", None):
+            args.from_settings = args.from_settings.resolve()
+        if hasattr(args, "code_repo_root"):
+            if args.code_repo_root is not None:
+                args.code_repo_root = args.code_repo_root.resolve()
+            if args.repo_id is not None:
+                args.repo_id = stable_provider_id(args.repo_id)
+
         if args.provider == "cgc":
             handlers = {
                 "apply-settings": cgc_apply_settings,
@@ -2061,6 +2742,7 @@ def main(argv: list[str] | None = None) -> int:
                 "refresh": cgc_refresh,
                 "refresh-all": cgc_refresh_all,
                 "run": cgc_run,
+                "visualize": cgc_visualize,
             }
             data = handlers[args.action](args)
         elif args.provider == "grepai":
@@ -2073,7 +2755,11 @@ def main(argv: list[str] | None = None) -> int:
     except (ContextProviderError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
         data = {"provider": args.provider, "action": args.action, "ok": False, "error": str(error)}
 
-    render(data, as_json=args.json)
+    rendered = False
+    if args.provider == "cgc" and args.action == "run":
+        rendered = render_cgc_run_result(data, args)
+    if not rendered:
+        render(data, as_json=args.json)
     return 0 if data.get("ok") else 1
 
 

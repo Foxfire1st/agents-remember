@@ -56,7 +56,8 @@ verified onboarding, drift checks, branch validity, or memory promotion rules.
 Use providers by retrieval substrate:
 
 - `semantic`: use when a concept is known but the route or file location is
-  unknown. GrepAI can serve this role over `memory-repos`.
+  unknown. GrepAI can serve this role over external memory repos and
+  repo-internal `ar-memory/` roots.
 - `relationship`: use when an anchor is known but relationships, callers,
   callees, dependencies, or impact paths are unknown. CodeGraphContext can serve
   this role across configured code repository roots.
@@ -76,9 +77,26 @@ skip provider work entirely when the relevant `settings.json` does not enable
 providers.
 
 Provider installs should be coordination-owned. Use pinned requirements under
-`providers/requirements/`, one reusable virtual environment per provider type
-under `providers/_venvs/`, and version-checked patches under
-`providers/patches/`.
+`providers/requirements/`, runtime-owned binaries under `providers/_bin/`,
+one reusable virtual environment per Python provider type under
+`providers/_venvs/`, and version-checked patches under `providers/patches/`.
+Prefer Docker-wrapped backend services for providers that need a database or
+daemonized infrastructure. Do not require host-level PostgreSQL, FalkorDB, OS
+services, launch agents, package-manager services, or global user daemons for
+normal managed provider mode.
+
+Semantic providers must keep generated config, index, logs, and state out of
+source repositories and durable memory roots. For GrepAI, configure one
+`grepai-memory` provider in workspace mode with explicit `{ projectId, path }`
+roots for both external memory repos and repo-internal memory roots. The
+managed default mirrors those roots into provider-owned index roots before
+launching GrepAI, because GrepAI still keeps per-project symbol/config artifacts
+beside each configured project path. The lifecycle manager writes GrepAI
+workspace config, logs, provider state, and mirrored index roots under
+`providers/grepai/`, while all memory roots share one lifecycle-owned
+PostgreSQL/pgvector Docker DBMS with persistent data under
+`provider-data/grepai/postgres/`. A `.grepai/` directory inside any indexed
+memory root is a containment failure, not durable memory.
 
 Relationship providers must keep runtime artifacts out of code repositories
 unless a repository-local config file is explicitly approved. For

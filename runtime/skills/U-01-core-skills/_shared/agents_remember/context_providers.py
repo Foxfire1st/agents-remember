@@ -24,13 +24,21 @@ CGC_CGCIGNORE_PATCH_ID = "codegraphcontext-0.4.10-cgcignore-runtime-root-v2"
 CGC_DELETE_PATCH_ID = "codegraphcontext-0.4.10-windows-delete-prefix-v1"
 CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID = "codegraphcontext-0.4.10-cpp-cc-td-extensions-v1"
 CGC_DISCOVERY_EXTENSIONS_PATCH_ID = "codegraphcontext-0.4.10-td-generic-discovery-v1"
+CGC_VIZ_REPO_QUERY_PATCH_ID = "codegraphcontext-0.4.10-viz-repo-query-v1"
+CGC_VIZ_SERVER_ROUTE_PATCH_ID = "codegraphcontext-0.4.10-viz-server-route-v1"
+CGC_VIZ_CLI_ROUTE_PATCH_ID = "codegraphcontext-0.4.10-viz-cli-route-v1"
 CGC_FALKORDB_BACKEND_ID = "codegraphcontext-falkordb"
 CGC_FALKORDB_CONTAINER_NAME = "ar-cgc-falkordb"
 CGC_FALKORDB_DEFAULT_HOST = "127.0.0.1"
 CGC_FALKORDB_DEFAULT_PORT = "6379"
 GREPAI_PROVIDER = "grepai"
 GREPAI_PIN = "grepai==0.35.0"
+GREPAI_POSTGRES_BACKEND_ID = "grepai-postgres"
+GREPAI_POSTGRES_CONTAINER_NAME = "ar-grepai-postgres"
+GREPAI_POSTGRES_DEFAULT_HOST = "127.0.0.1"
+GREPAI_POSTGRES_DEFAULT_PORT = "5432"
 SOURCE_ARTIFACT_NAMES = (".cgcignore", ".codegraphcontext", "CGC_REPORT.md")
+GREPAI_ROOT_ARTIFACT_NAMES = (".grepai",)
 CGC_ENV_FILE_EXCLUDED_KEYS = {
     "HOME",
     # CGC uses these when passed as process env, but v0.4.10 reports them as
@@ -222,6 +230,94 @@ CGC_DISCOVERY_GENERIC_PATCHED_SNIPPET = f'''_GENERIC_EXTENSIONS: FrozenSet[str] 
     ".td",
 }})
 '''
+CGC_VIZ_REPO_QUERY_PATCH_MARKER = "Agents Remember patch: bound visualizer repo graph query by path prefix"
+CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET = '''                # Get all nodes within the repository scope
+                query = """
+                MATCH (r:Repository {path: $repo_path})
+                OPTIONAL MATCH (r)-[:CONTAINS*0..]->(n)
+                WITH DISTINCT r, COLLECT(DISTINCT n) as repo_nodes
+                UNWIND repo_nodes as node
+                OPTIONAL MATCH (node)-[rel]->(target)
+                WITH r, node, rel, target, repo_nodes
+                WHERE target IN repo_nodes OR target = r
+                RETURN node as n, rel, target as m
+                """
+                result = session.run(query, repo_path=repo_path)
+'''
+CGC_VIZ_REPO_QUERY_PATCHED_SNIPPET = f'''                # {CGC_VIZ_REPO_QUERY_PATCH_MARKER}.
+                query = """
+                WITH $repo_path AS repo_path, $repo_path + "/" AS repo_prefix
+                MATCH (node)
+                WHERE node.path = repo_path OR node.path STARTS WITH repo_prefix
+                WITH repo_path, repo_prefix, node LIMIT 3000
+                OPTIONAL MATCH (node)-[rel]->(target)
+                WHERE target.path = repo_path OR target.path STARTS WITH repo_prefix
+                RETURN node as n, rel, target as m
+                LIMIT 5000
+                """
+                result = session.run(query, repo_path=repo_path)
+'''
+CGC_VIZ_SERVER_ROUTE_PATCH_MARKER = "Agents Remember patch: route local visualizer root to explorer"
+CGC_VIZ_SERVER_RESPONSES_ORIGINAL_SNIPPET = "from fastapi.responses import HTMLResponse, FileResponse\n"
+CGC_VIZ_SERVER_RESPONSES_PATCHED_SNIPPET = (
+    "from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse\n"
+)
+CGC_VIZ_SERVER_GLOBAL_ORIGINAL_SNIPPET = '''# Path to static directory
+_static_dir: Optional[str] = None
+'''
+CGC_VIZ_SERVER_GLOBAL_PATCHED_SNIPPET = '''# Path to static directory
+_static_dir: Optional[str] = None
+# Default SPA route used when the local server is opened at /.
+_default_route: Optional[str] = None
+'''
+CGC_VIZ_SERVER_FALLBACK_ORIGINAL_SNIPPET = '''    global _static_dir
+    if not _static_dir:
+        return HTMLResponse("Static directory not configured", status_code=500)
+'''
+CGC_VIZ_SERVER_FALLBACK_PATCHED_SNIPPET = f'''    global _static_dir, _default_route
+    if full_path in ("", "/") and _default_route:
+        # {CGC_VIZ_SERVER_ROUTE_PATCH_MARKER}.
+        return RedirectResponse(_default_route)
+    if full_path.startswith("api/"):
+        return JSONResponse({{"detail": "Not found"}}, status_code=404)
+    if not _static_dir:
+        return HTMLResponse("Static directory not configured", status_code=500)
+'''
+CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET = '''def run_server(host: str = "127.0.0.1", port: int = 8000, static_dir: Optional[str] = None):
+    global _static_dir
+    _static_dir = static_dir
+    uvicorn.run(app, host=host, port=port)
+'''
+CGC_VIZ_SERVER_RUN_PATCHED_SNIPPET = '''def run_server(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    static_dir: Optional[str] = None,
+    default_route: Optional[str] = None,
+):
+    global _static_dir, _default_route
+    _static_dir = static_dir
+    _default_route = default_route
+    uvicorn.run(app, host=host, port=port)
+'''
+CGC_VIZ_CLI_ROUTE_PATCH_MARKER = "Agents Remember patch: make visualizer root open the explorer route"
+CGC_VIZ_CLI_URL_ORIGINAL_SNIPPET = (
+    '    query_string = urllib.parse.urlencode(params)\n'
+    '    visualization_url = f"{backend_url}/explore?{query_string}"\n'
+    '    \n'
+    '    console.print(f"[green]Starting visualizer server on {backend_url}...[/green]")\n'
+)
+CGC_VIZ_CLI_URL_PATCHED_SNIPPET = (
+    f'    query_string = urllib.parse.urlencode(params)\n'
+    f'    # {CGC_VIZ_CLI_ROUTE_PATCH_MARKER}.\n'
+    f'    default_route = f"/explore?{{query_string}}"\n'
+    f'    visualization_url = f"{{backend_url}}{{default_route}}"\n'
+    f'    \n'
+    f'    console.print(f"[green]Starting visualizer server on {{backend_url}}...[/green]")\n'
+)
+CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET = '''        run_server(host="127.0.0.1", port=port, static_dir=str(static_dir))
+'''
+CGC_VIZ_CLI_RUN_PATCHED_SNIPPET = '''        run_server(host="127.0.0.1", port=port, static_dir=str(static_dir), default_route=default_route)
+'''
 
 
 class ContextProviderError(ValueError):
@@ -300,6 +396,53 @@ class CgcRuntimeLayout:
         return self.venv_root / "bin" / "cgc"
 
 
+@dataclass(frozen=True)
+class GrepaiMemoryRoot:
+    project_id: str
+    path: Path
+    source_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class GrepaiRuntimeLayout:
+    coordination_root: Path
+    workspace_name: str
+    roots: tuple[GrepaiMemoryRoot, ...]
+    providers_root: Path
+    runtime_root: Path
+    requirements_file: Path
+    binary_path: Path
+    config_root: Path
+    workspace_config_file: Path
+    state_root: Path
+    state_file: Path
+    logs_root: Path
+    home_root: Path
+    run_root: Path
+    cache_root: Path
+    backend_root: Path
+    backend_data_root: Path
+    backend_state_file: Path
+
+    def env(self) -> dict[str, str]:
+        """Return process env that keeps GrepAI runtime state under providers/grepai."""
+
+        env = {
+            "HOME": self.home_root.as_posix(),
+            "XDG_STATE_HOME": (self.state_root / "xdg").as_posix(),
+            "XDG_CACHE_HOME": (self.cache_root / "xdg").as_posix(),
+        }
+        if os.name == "nt":
+            env.update(
+                {
+                    "USERPROFILE": str(self.home_root),
+                    "APPDATA": str(self.run_root / "appdata"),
+                    "LOCALAPPDATA": str(self.run_root / "localappdata"),
+                }
+            )
+        return env
+
+
 def stable_provider_id(value: str) -> str:
     """Return a stable provider id component."""
 
@@ -321,6 +464,13 @@ def provider_requirements_file(coordination_root: Path, provider: str) -> Path:
     """Return the copied runtime requirements file for a provider."""
 
     return coordination_root.resolve() / "providers" / "requirements" / f"{provider}.txt"
+
+
+def provider_binary_path(coordination_root: Path, name: str) -> Path:
+    """Return the runtime-owned provider binary path for this platform."""
+
+    suffix = ".exe" if os.name == "nt" and not name.endswith(".exe") else ""
+    return coordination_root.resolve() / "providers" / "_bin" / f"{name}{suffix}"
 
 
 def ensure_provider_requirements_file(coordination_root: Path, provider: str, pin: str) -> Path:
@@ -358,6 +508,282 @@ def read_provider_pin(requirements_file: Path, package_name: str) -> str:
 
 def ensure_grepai_requirements_file(coordination_root: Path) -> Path:
     return ensure_provider_requirements_file(coordination_root, GREPAI_PROVIDER, GREPAI_PIN)
+
+
+def grepai_runtime_layout(
+    *,
+    coordination_root: Path,
+    workspace_name: str = "agents-remember-memory",
+    roots: tuple[GrepaiMemoryRoot, ...] = (),
+    runtime_root: Path | None = None,
+    requirements_file: Path | None = None,
+    state_file: Path | None = None,
+    backend_root: Path | None = None,
+    backend_data_root: Path | None = None,
+    backend_state_file: Path | None = None,
+) -> GrepaiRuntimeLayout:
+    """Build the managed GrepAI runtime layout for memory-root indexing."""
+
+    coordination_root = coordination_root.resolve()
+    providers_root = coordination_root / "providers"
+    provider_data_root = coordination_root / "provider-data"
+    runtime_root = (runtime_root or providers_root / GREPAI_PROVIDER).resolve()
+    backend_root = (backend_root or provider_data_root / GREPAI_PROVIDER / "postgres").resolve()
+    backend_data_root = (backend_data_root or backend_root / "data").resolve()
+    workspace_name = stable_provider_id(workspace_name)
+    return GrepaiRuntimeLayout(
+        coordination_root=coordination_root,
+        workspace_name=workspace_name,
+        roots=tuple(roots),
+        providers_root=providers_root,
+        runtime_root=runtime_root,
+        requirements_file=(requirements_file or provider_requirements_file(coordination_root, GREPAI_PROVIDER)).resolve(),
+        binary_path=provider_binary_path(coordination_root, GREPAI_PROVIDER),
+        config_root=runtime_root / "config",
+        workspace_config_file=runtime_root / "home" / ".grepai" / "workspace.yaml",
+        state_root=runtime_root / "state",
+        state_file=(state_file or runtime_root / "state" / "provider-state.json").resolve(),
+        logs_root=runtime_root / "logs",
+        home_root=runtime_root / "home",
+        run_root=runtime_root / "run",
+        cache_root=runtime_root / "cache",
+        backend_root=backend_root,
+        backend_data_root=backend_data_root,
+        backend_state_file=(backend_state_file or backend_root / "backend-state.json").resolve(),
+    )
+
+
+def grepai_roots_from_provider_settings(
+    coordination_root: Path,
+    provider_settings: dict[str, Any],
+) -> tuple[GrepaiMemoryRoot, ...]:
+    roots = provider_settings.get("roots")
+    if not isinstance(roots, list) or not roots:
+        raise ContextProviderError("grepai-memory.roots must be a non-empty array")
+
+    base_variables = {
+        "coordination_root": coordination_root.as_posix(),
+        "workspace_root": coordination_root.parent.as_posix(),
+    }
+    normalized: list[GrepaiMemoryRoot] = []
+    seen: set[str] = set()
+    for root in roots:
+        if isinstance(root, str):
+            raw_path = root
+            project_id = stable_provider_id(Path(raw_path).name)
+        elif isinstance(root, dict):
+            if "path" not in root:
+                raise ContextProviderError("each grepai-memory root must define path")
+            raw_path = str(root["path"])
+            project_id = stable_provider_id(str(root.get("projectId") or root.get("repoId") or Path(raw_path).name))
+        else:
+            raise ContextProviderError("each grepai-memory root must be a path string or object")
+
+        expanded = Path(expand_template(raw_path, base_variables)).resolve()
+        if "<" in expanded.as_posix() or ">" in expanded.as_posix():
+            raise ContextProviderError(f"unresolved grepai root path placeholder: {expanded.as_posix()}")
+        if not expanded.exists() or not expanded.is_dir():
+            raise ContextProviderError(f"grepai root path does not exist or is not a directory: {expanded.as_posix()}")
+        if project_id in seen:
+            raise ContextProviderError(f"duplicate grepai project id: {project_id}")
+        seen.add(project_id)
+        normalized.append(GrepaiMemoryRoot(project_id=project_id, path=expanded))
+    return tuple(normalized)
+
+
+def grepai_runtime_layout_from_provider_settings(
+    *,
+    coordination_root: Path,
+    provider_settings: dict[str, Any],
+) -> GrepaiRuntimeLayout:
+    coordination_root = coordination_root.resolve()
+    base_variables = {
+        "coordination_root": coordination_root.as_posix(),
+        "workspace_root": coordination_root.parent.as_posix(),
+    }
+    provider_runtime_root = Path(
+        expand_template(
+            str(provider_settings.get("runtimeRoot", "<coordination_root>/providers/grepai")),
+            base_variables,
+        )
+    ).resolve()
+    backend_settings = provider_settings.get("backend", {})
+    if not isinstance(backend_settings, dict):
+        backend_settings = {}
+    backend_runtime_root = Path(
+        expand_template(
+            str(backend_settings.get("runtimeRoot", "<coordination_root>/provider-data/grepai/postgres")),
+            {"coordination_root": coordination_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix()},
+        )
+    ).resolve()
+    backend_data_root = Path(
+        expand_template(
+            str(backend_settings.get("dataRoot", "<backendRuntimeRoot>/data")),
+            {
+                "coordination_root": coordination_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+                "backendRuntimeRoot": backend_runtime_root.as_posix(),
+            },
+        )
+    ).resolve()
+    requirements_file = Path(
+        expand_template(
+            str(provider_settings.get("requirementsFile", "<coordination_root>/providers/requirements/grepai.txt")),
+            base_variables,
+        )
+    ).resolve()
+    state_file = Path(
+        expand_template(
+            str(provider_settings.get("stateFile", "<runtimeRoot>/state/provider-state.json")),
+            {"coordination_root": coordination_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix()},
+        )
+    ).resolve()
+    workspace_name = str(provider_settings.get("workspace", "agents-remember-memory"))
+    roots = grepai_roots_from_provider_settings(coordination_root, provider_settings)
+    mirror_roots = provider_settings.get("mirrorRoots", True) is not False
+    if mirror_roots:
+        roots = tuple(
+            GrepaiMemoryRoot(
+                project_id=root.project_id,
+                path=provider_runtime_root / "index-roots" / root.project_id,
+                source_path=root.path,
+            )
+            for root in roots
+        )
+    return grepai_runtime_layout(
+        coordination_root=coordination_root,
+        workspace_name=workspace_name,
+        roots=roots,
+        runtime_root=provider_runtime_root,
+        requirements_file=requirements_file,
+        state_file=state_file,
+        backend_root=backend_runtime_root,
+        backend_data_root=backend_data_root,
+        backend_state_file=backend_runtime_root / "backend-state.json",
+    )
+
+
+def ensure_grepai_runtime_layout(layout: GrepaiRuntimeLayout) -> None:
+    """Create provider-owned GrepAI runtime directories and requirement pin."""
+
+    for path in [
+        layout.runtime_root,
+        layout.requirements_file.parent,
+        layout.config_root,
+        layout.workspace_config_file.parent,
+        layout.state_root,
+        layout.logs_root,
+        layout.home_root,
+        layout.run_root,
+        layout.run_root / "appdata",
+        layout.run_root / "localappdata",
+        layout.cache_root,
+        layout.backend_data_root,
+        layout.backend_state_file.parent,
+        layout.runtime_root / "index-roots",
+    ]:
+        path.mkdir(parents=True, exist_ok=True)
+    if not layout.requirements_file.exists():
+        layout.requirements_file.write_text(f"{GREPAI_PIN}\n", encoding="utf-8")
+
+
+def sync_grepai_index_roots(layout: GrepaiRuntimeLayout) -> list[dict[str, str]]:
+    """Refresh provider-owned GrepAI mirror roots from durable memory roots."""
+
+    synced: list[dict[str, str]] = []
+    runtime_root = layout.runtime_root.resolve()
+    for root in layout.roots:
+        if root.source_path is None:
+            continue
+        source = root.source_path.resolve()
+        target = root.path.resolve()
+        if not source.exists() or not source.is_dir():
+            raise ContextProviderError(f"grepai source root does not exist or is not a directory: {source.as_posix()}")
+        if not target.is_relative_to(runtime_root):
+            raise ContextProviderError(f"refusing to sync GrepAI mirror outside provider runtime root: {target.as_posix()}")
+        if target.exists():
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            source,
+            target,
+            symlinks=True,
+            ignore=shutil.ignore_patterns(".git", ".grepai", "__pycache__"),
+        )
+        synced.append({"projectId": root.project_id, "source": source.as_posix(), "path": target.as_posix()})
+    return synced
+
+
+def _yaml_quote(value: str) -> str:
+    return json.dumps(value)
+
+
+def _yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return _yaml_quote(str(value))
+
+
+def grepai_workspace_config_text(
+    *,
+    layout: GrepaiRuntimeLayout,
+    dsn: str,
+    embedder_settings: dict[str, Any] | None = None,
+) -> str:
+    if embedder_settings is None:
+        embedder_settings = {}
+    provider = str(embedder_settings.get("provider", "ollama"))
+    model = str(embedder_settings.get("model", "nomic-embed-text"))
+    lines = [
+        "version: 1",
+        "workspaces:",
+        f"  {layout.workspace_name}:",
+        f"    name: {_yaml_quote(layout.workspace_name)}",
+        "    store:",
+        "      backend: postgres",
+        "      postgres:",
+        f"        dsn: {_yaml_quote(dsn)}",
+        "    embedder:",
+        f"      provider: {_yaml_quote(provider)}",
+        f"      model: {_yaml_quote(model)}",
+    ]
+    endpoint = embedder_settings.get("endpoint")
+    if not endpoint:
+        if provider == "ollama":
+            endpoint = "http://localhost:11434"
+        elif provider == "lmstudio":
+            endpoint = "http://127.0.0.1:1234"
+    if endpoint:
+        lines.append(f"      endpoint: {_yaml_quote(str(endpoint))}")
+    dimensions = embedder_settings.get("dimensions")
+    if dimensions is None and provider == "ollama" and model in {"nomic-embed-text", "nomic-embed-text-v2-moe"}:
+        dimensions = 768
+    if dimensions is not None:
+        lines.append(f"      dimensions: {_yaml_scalar(dimensions)}")
+    lines.extend(["    projects:"])
+    for root in layout.roots:
+        lines.extend(
+            [
+                f"      - name: {_yaml_quote(root.project_id)}",
+                f"        path: {_yaml_quote(root.path.as_posix())}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_grepai_workspace_config(
+    layout: GrepaiRuntimeLayout,
+    *,
+    dsn: str,
+    embedder_settings: dict[str, Any] | None = None,
+) -> None:
+    layout.workspace_config_file.parent.mkdir(parents=True, exist_ok=True)
+    layout.workspace_config_file.write_text(
+        grepai_workspace_config_text(layout=layout, dsn=dsn, embedder_settings=embedder_settings),
+        encoding="utf-8",
+    )
 
 
 def cgc_runtime_layout(
@@ -620,6 +1046,22 @@ def assert_no_source_provider_artifacts(code_repo_root: Path) -> None:
         raise ContextProviderError(f"provider artifacts found in source repo: {rendered}")
 
 
+def grepai_root_provider_artifacts(root: Path) -> list[Path]:
+    """Return GrepAI runtime artifacts that should not exist in indexed roots."""
+
+    resolved = root.resolve()
+    return [resolved / name for name in GREPAI_ROOT_ARTIFACT_NAMES if (resolved / name).exists()]
+
+
+def assert_no_grepai_root_provider_artifacts(roots: tuple[GrepaiMemoryRoot, ...]) -> None:
+    artifacts: list[Path] = []
+    for root in roots:
+        artifacts.extend(grepai_root_provider_artifacts(root.source_path or root.path))
+    if artifacts:
+        rendered = ", ".join(path.as_posix() for path in artifacts)
+        raise ContextProviderError(f"grepai provider artifacts found in indexed roots: {rendered}")
+
+
 def _remove_runtime_path(path: Path, dry_run: bool) -> None:
     if dry_run:
         return
@@ -728,6 +1170,36 @@ def find_cgc_discovery_module(venv_root: Path) -> Path:
     return matches[0]
 
 
+def find_cgc_viz_server_module(venv_root: Path) -> Path:
+    """Find CodeGraphContext's visualizer FastAPI server module in a provider venv."""
+
+    patterns = [
+        "lib/python*/site-packages/codegraphcontext/viz/server.py",
+        "Lib/site-packages/codegraphcontext/viz/server.py",
+    ]
+    matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
+    if not matches:
+        raise ContextProviderError(f"could not find CodeGraphContext viz/server.py under {venv_root}")
+    if len(matches) > 1:
+        raise ContextProviderError(f"multiple CodeGraphContext viz/server.py files found under {venv_root}")
+    return matches[0]
+
+
+def find_cgc_cli_helpers_module(venv_root: Path) -> Path:
+    """Find CodeGraphContext's CLI helper module in a provider venv."""
+
+    patterns = [
+        "lib/python*/site-packages/codegraphcontext/cli/cli_helpers.py",
+        "Lib/site-packages/codegraphcontext/cli/cli_helpers.py",
+    ]
+    matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
+    if not matches:
+        raise ContextProviderError(f"could not find CodeGraphContext cli/cli_helpers.py under {venv_root}")
+    if len(matches) > 1:
+        raise ContextProviderError(f"multiple CodeGraphContext cli/cli_helpers.py files found under {venv_root}")
+    return matches[0]
+
+
 def cgc_cgcignore_patch_applied(path: Path) -> bool:
     text = path.read_text(encoding="utf-8")
     return CGC_PATCH_MARKER in text and "if not local_cgcignore_path.exists():" in text
@@ -828,4 +1300,85 @@ def apply_cgc_discovery_extensions_patch(path: Path) -> bool:
         text.replace(CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET, CGC_DISCOVERY_GENERIC_PATCHED_SNIPPET, 1),
         encoding="utf-8",
     )
+    return True
+
+
+def cgc_viz_repo_query_patch_applied(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    return CGC_VIZ_REPO_QUERY_PATCH_MARKER in text and "WITH repo_path, repo_prefix, node LIMIT 3000" in text
+
+
+def apply_cgc_viz_repo_query_patch(path: Path) -> bool:
+    """Patch CGC visualizer repo graph query so large repos do not time out."""
+
+    text = path.read_text(encoding="utf-8")
+    if cgc_viz_repo_query_patch_applied(path):
+        return False
+    if CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET not in text:
+        raise ContextProviderError("CGC viz/server.py did not match the expected unpatched repo query snippet")
+    path.write_text(
+        text.replace(CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET, CGC_VIZ_REPO_QUERY_PATCHED_SNIPPET, 1),
+        encoding="utf-8",
+    )
+    return True
+
+
+def cgc_viz_server_route_patch_applied(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    return (
+        CGC_VIZ_SERVER_ROUTE_PATCH_MARKER in text
+        and "RedirectResponse(_default_route)" in text
+        and 'JSONResponse({"detail": "Not found"}, status_code=404)' in text
+        and "default_route: Optional[str] = None" in text
+    )
+
+
+def apply_cgc_viz_server_route_patch(path: Path) -> bool:
+    """Patch CGC visualizer server routing for local explorer launches."""
+
+    text = path.read_text(encoding="utf-8")
+    if cgc_viz_server_route_patch_applied(path):
+        return False
+
+    replacements = [
+        (CGC_VIZ_SERVER_RESPONSES_ORIGINAL_SNIPPET, CGC_VIZ_SERVER_RESPONSES_PATCHED_SNIPPET),
+        (CGC_VIZ_SERVER_GLOBAL_ORIGINAL_SNIPPET, CGC_VIZ_SERVER_GLOBAL_PATCHED_SNIPPET),
+        (CGC_VIZ_SERVER_FALLBACK_ORIGINAL_SNIPPET, CGC_VIZ_SERVER_FALLBACK_PATCHED_SNIPPET),
+        (CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET, CGC_VIZ_SERVER_RUN_PATCHED_SNIPPET),
+    ]
+    for original, patched in replacements:
+        if original not in text:
+            raise ContextProviderError("CGC viz/server.py did not match the expected unpatched route snippet")
+        text = text.replace(original, patched, 1)
+
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def cgc_viz_cli_route_patch_applied(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    return (
+        CGC_VIZ_CLI_ROUTE_PATCH_MARKER in text
+        and 'default_route = f"/explore?{query_string}"' in text
+        and "default_route=default_route" in text
+    )
+
+
+def apply_cgc_viz_cli_route_patch(path: Path) -> bool:
+    """Patch CGC visualize helper so opening / redirects to the explorer route."""
+
+    text = path.read_text(encoding="utf-8")
+    if cgc_viz_cli_route_patch_applied(path):
+        return False
+
+    replacements = [
+        (CGC_VIZ_CLI_URL_ORIGINAL_SNIPPET, CGC_VIZ_CLI_URL_PATCHED_SNIPPET),
+        (CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET, CGC_VIZ_CLI_RUN_PATCHED_SNIPPET),
+    ]
+    for original, patched in replacements:
+        if original not in text:
+            raise ContextProviderError("CGC cli/cli_helpers.py did not match the expected unpatched visualizer snippet")
+        text = text.replace(original, patched, 1)
+
+    path.write_text(text, encoding="utf-8")
     return True

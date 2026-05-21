@@ -17,7 +17,7 @@ onboarding root, settings path, task root, docs root, system files, storage sema
 Gate 2: If `<coordination_root>/system/settings.json` has enabled `contextProviders`, run:
 
 ```text
-python <coordination_root>/scripts/provider-lifecycle.py watchers status --coordination-root <coordination_root> --json
+python <coordination_root>/scripts/provider-lifecycle.py watchers status --json
 ```
 
 Skip this gate when no context providers are configured.

@@ -1,0 +1,51 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+  "SIM",
+  "ARG",
+  "PL",
+  "RUF",
+]
+ignore = [
+  "PLR0913", # too many arguments: useful warning, noisy during refactor
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.radon]
+# Show only functions/classes that are at least mildly complex.
+# A = 1-5, B = 6-10, C = 11-20, D = 21-30, E = 31-40, F = 41+
+cc_min = "B"
+cc_max = "F"
+
+# Make the output useful for refactor scouting.
+show_complexity = true
+average = true
+total_average = true
+order = "SCORE"
+
+# Maintainability Index:
+# A = high maintainability, B = medium, C = very low.
+# This hides healthy A files and shows B/C pressure points.
+mi_min = "B"
+mi_max = "C"
+show_mi = true
+
+# Keep generated/cache/vendor-ish paths out of the report.
+# Use comma-separated strings rather than TOML arrays; Radon has had
+# pyproject parsing rough edges with arrays.
+exclude = "tests/*,*/tests/*,.venv/*,venv/*,build/*,dist/*,.git/*,__pycache__/*"
+ignore = ".git,.hg,.mypy_cache,.pytest_cache,.ruff_cache,.venv,venv,node_modules,dist,build,__pycache__"
+
+# Usually better for real complexity pressure:
+# asserts should count as branches unless you intentionally use them as non-runtime checks.
+no_assert = false
