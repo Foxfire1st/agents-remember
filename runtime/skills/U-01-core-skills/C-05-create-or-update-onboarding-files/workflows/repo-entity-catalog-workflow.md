@@ -19,8 +19,9 @@ Create or update one repo-level entity catalog documenting load-bearing real ent
 1. Start by reading the C-08 resolved `system/sources.md` and use its `Domain Documentation` category for the repo entities under review.
 2. Use the `Domain Documentation` sources from the resolved `system/sources.md` when deciding canonical source of truth, naming drift, and cross-layer projections.
 3. Do not rely on adjacent onboarding alone when the `Domain Documentation` category contains more authoritative domain, protocol, or architecture context.
-4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and evidence gathering, but link onboarding output to the canonical online reference rather than the local mirror.
-5. The resolved `system/sources.md` is a discovery index only. Do not cite it as evidence; cite the actual documentation, code, generated artifact, or sibling-repo source that proves each entity claim.
+4. If `Domain Documentation` includes both local and live variants, treat the live source named by the registry as authoritative and the local material as an orientation cache. Use local material only for quick reading and evidence discovery, then verify domain claims against the live source and link onboarding output to the canonical online or intranet reference rather than the local mirror.
+5. If the local mirror/cache has no matching page, appears stale, or lacks enough evidence, immediately search or retrieve the live documentation source through the registry's named tool or MCP before recording that no relevant documentation exists.
+6. The resolved `system/sources.md` is a discovery index only. Do not cite it as evidence; cite the actual documentation, code, generated artifact, or sibling-repo source that proves each entity claim.
 
 ## Placement Rules
 

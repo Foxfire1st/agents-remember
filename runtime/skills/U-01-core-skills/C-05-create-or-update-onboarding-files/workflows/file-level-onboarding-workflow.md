@@ -22,10 +22,11 @@ Create or update the file-level onboarding content for one concrete source file.
 1. Start by reading the C-08 resolved `system/sources.md` and use its `Domain Documentation` category for the file being documented.
 2. Use the `Domain Documentation` sources from the resolved `system/sources.md` when building `## Docs References` and any load-bearing explanatory prose that depends on technical or behavioral documentation.
 3. Treat adjacent onboarding as supporting input, not the whole discovery plan and not a substitute for the `Domain Documentation` pass.
-4. If `Domain Documentation` includes both local and live variants, use the local material first for direct access and line citations, but write the onboarding link to the canonical online reference rather than the local mirror path.
-5. If relevant material cannot be found in the `Domain Documentation` sources, record what was checked and that no relevant evidence was found.
-6. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `## Docs References`, `## Repo-Internal References`, or `## Cross-Repo References`.
-7. Cite the actual evidence source: the library documentation page, canonical local mirror, repository source file, generated artifact, onboarding file, or sibling-repo file that directly proves the statement.
+4. If `Domain Documentation` includes both local and live variants, treat the live source named by the registry as authoritative and the local material as an orientation cache. Use local material only for quick reading and line discovery, then verify relevance against the live source when the domain fact matters. Write the onboarding link to the canonical online or intranet reference rather than the local mirror path.
+5. If the local mirror/cache has no matching page, appears stale, or lacks enough evidence, immediately search or retrieve the live documentation source through the registry's named tool or MCP before recording that no relevant evidence was found.
+6. If relevant material cannot be found after checking the live `Domain Documentation` source, or live retrieval is blocked, record what was checked and any blocker.
+7. The resolved `system/sources.md` is discovery-only. It must not appear as a cited source in `## Docs References`, `## Repo-Internal References`, or `## Cross-Repo References`.
+8. Cite the actual evidence source: the library documentation page, live documentation page, repository source file, generated artifact, onboarding file, or sibling-repo file that directly proves the statement.
 
 ## Placement Rules
 
@@ -81,7 +82,7 @@ Citation requirements for reference sections:
 6. In `## Cross-Repo References`, `Source Path` must use a workspace-relative markdown link when the cited boundary evidence exists in the workspace; otherwise link to the canonical external document or system reference.
 7. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
 8. `Finding` must be a concise summary of what those cited lines establish.
-9. Do not rely on uncited prose alone in any reference section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists, keep the table and note what was checked and that no relevant evidence was found.
+9. Do not rely on uncited prose alone in any reference section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists after checking the live documentation source, or live retrieval is blocked, keep the table and note what was checked and any blocker.
 10. Do not cite source registries, search pages, or “where to look” files as evidence. They are allowed only as discovery inputs before reading the actual source.
 
 ## Create Workflow

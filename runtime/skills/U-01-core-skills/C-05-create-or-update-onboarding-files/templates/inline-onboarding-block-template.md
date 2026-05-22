@@ -32,7 +32,7 @@ Todos:
 - <Durable follow-up that is not tied to one active task.>
 
 Docs References:
-- <Short prose summary or `No relevant documentation found.`>
+- <Short prose summary, or `No relevant documentation found after checking live sources.` with any retrieval blocker.>
 
 Repo-Internal References:
 - <Short prose summary or `No relevant internal references found.`>

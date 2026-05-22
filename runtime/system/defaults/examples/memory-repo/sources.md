@@ -10,8 +10,8 @@ Use this file as the starter template for the active sources inventory. The deri
 
 ## Domain Documentation
 
-- **<primary-domain-docs>** — the primary online/intranet source of technical domain knowledge, architecture docs, protocol definitions, and design decisions.
-- **<local-mirror-if-any>** — local exports or cached copies of the most useful domain docs when they exist. By default, local domain documentation lives under the resolved memory layer's `docs/`.
+- **<primary-domain-docs>** — the authoritative online/intranet source of technical domain knowledge, architecture docs, protocol definitions, and design decisions. Name the retrieval tool or MCP agents should use when the docs need to be searched live.
+- **<local-mirror-if-any>** — local exports or cached copies of useful domain docs when they exist. Treat local mirrors as orientation caches only: they are useful for quick reading and line discovery, but are not complete or authoritative. If the local mirror has no relevant page, appears stale, or lacks enough evidence, agents must use the live retrieval path named above before recording that no domain documentation exists. By default, local domain documentation lives under the resolved memory layer's `docs/`.
 
 ## Techstack Documentation
 
