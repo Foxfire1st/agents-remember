@@ -6,3 +6,4 @@ system/tools.md
 *.pyc
 __pycache__/
 .venv/
+.ruff_cache/
