@@ -40,8 +40,8 @@ Before starting file-level maintenance, classify the change shape.
 Handle directly in C-05 when:
 
 1. one concrete source file needs onboarding creation or update
-2. a small file move has a clear one-to-one mirrored onboarding move
-3. a deleted file only requires deleting or moving its mirrored file-level onboarding and nearby links
+2. a small behavior-preserving file move has a clear one-to-one mirrored onboarding move
+3. a deleted file is proven to have no behavior that moved elsewhere and only requires mirrored file-level onboarding cleanup plus nearby link repair
 4. a repo-level entity catalog needs a targeted entry update
 
 Route to C-03 `existing-memory-slice-maintenance` when:
@@ -51,9 +51,18 @@ Route to C-03 `existing-memory-slice-maintenance` when:
 3. a package or module route moves and the route-local overview plus child file onboarding need to move together
 4. many files appear or disappear together
 5. a route purpose changes enough that the governing route-local overview should be created, refreshed, moved, retired, or removed before file-level work continues
-6. file-by-file C-05 work would lose the structural meaning of the source change
+6. a file split, merge, or behavior relocation crosses multiple source files and file-by-file C-05 work would lose the structural meaning of the source change
 
 When routing to C-03, pass the affected source routes, known old/new paths, existing onboarding paths, and whether the desired outcome is expansion, refresh, move handling, or deleted-slice cleanup.
+
+## Onboarding Preservation Rule
+
+Existing onboarding is durable memory, not disposable generated output. Preserve and move useful onboarding before creating replacement artifacts.
+
+1. For behavior-preserving file renames or moves, move the mirrored onboarding file to the new source path and update path metadata, verification metadata, governing overview links, reference links, route indexes, and `Update History`.
+2. For splits, merges, or behavior relocation, inspect the old onboarding and the new source targets before deleting anything. Reuse accurate purpose, commentary, invariants, references, and history in the new target onboarding, updating only the parts that changed.
+3. For source deletion, first prove whether the documented behavior is truly gone or merely moved. Delete or retire onboarding only when no safe current target remains for the preserved knowledge.
+4. When preservation cannot be done safely, record why in the maintenance notes or task artifact before removing the old onboarding content.
 
 ## Sidecar Placement Rules
 
@@ -95,6 +104,7 @@ When routing to C-03, pass the affected source routes, known old/new paths, exis
 15. When changed paths imply route-level creation, refresh, move, or deletion, route to C-03 `existing-memory-slice-maintenance` before creating piecemeal file-level onboarding.
 16. After creating, updating, moving, or deleting route overviews or file-level sidecars, refresh generated route indexes with `scripts/build_route_indexes.py`.
 17. Keep each route overview's `## Hot Path Summary` short and current; it is copied into generated indexes for C-04 discovery.
+18. Do not delete onboarding for moved, split, merged, or deleted source until checking whether its documented behavior can be moved into a current onboarding target.
 
 ## Route Index Refresh
 
@@ -162,10 +172,13 @@ Before writing or revising onboarding content, read the C-08 resolved `system/so
 2. refresh verification metadata after the content update
 3. append a newest-first `Update History` entry instead of deleting or rewriting earlier history
 
-### When code is deleted or moved
+### When code is moved, split, merged, or deleted
 
-1. for one-to-one file moves or deletes, delete or move the mirrored onboarding file to match the real source tree
-2. update overview indexes and cross-references that point at the old location
-3. check whether repo-level entity catalogs or related onboarding now need cleanup
-4. when an entity fingerprint goes stale because an evidence path disappeared or a fingerprint row has no matching inventory entry, verify whether the entity was removed, renamed, or moved before deleting catalog content or evidence paths
-5. if a package, module, feature area, or source route moved or disappeared, route to C-03 `existing-memory-slice-maintenance` for coordinated route-local overview, child onboarding, and bootstrap artifact cleanup
+1. classify the source change as one-to-one move, split, merge, behavior relocation, true deletion, or route-level move/deletion
+2. for behavior-preserving one-to-one moves, move the mirrored onboarding file to match the real source tree and update metadata, governing overview links, references, route indexes, and `Update History`
+3. for splits, merges, or behavior relocation, reuse accurate old onboarding content in the new target sidecars or route overview before deleting the old mirrored file
+4. update overview indexes and cross-references that point at the old location
+5. check whether repo-level entity catalogs or related onboarding now need cleanup
+6. when an entity fingerprint goes stale because an evidence path disappeared or a fingerprint row has no matching inventory entry, verify whether the entity was removed, renamed, or moved before deleting catalog content or evidence paths
+7. delete or retire onboarding only after proving that the documented behavior is gone and no safe current target remains
+8. if a package, module, feature area, or source route moved or disappeared, route to C-03 `existing-memory-slice-maintenance` for coordinated route-local overview, child onboarding, and bootstrap artifact cleanup

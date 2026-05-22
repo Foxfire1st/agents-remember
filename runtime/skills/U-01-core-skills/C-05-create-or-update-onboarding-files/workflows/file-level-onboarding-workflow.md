@@ -110,9 +110,12 @@ When code changes:
 4. update metadata after the content has been verified
 5. append a newest-first `Update History` entry without deleting or rewriting earlier entries
 
-When code is deleted or moved:
+When code is moved, split, merged, or deleted:
 
-1. for a one-to-one file move or delete, delete or move the onboarding file to match the source tree
-2. update affected repo-level overview indexes and cross-links
-3. check whether repo-level entity catalogs or nearby onboarding need follow-up because of the move or deletion
-4. if the move or deletion affects a whole package, module, feature area, or source route, route to C-03 `existing-memory-slice-maintenance` for coordinated cleanup or move handling
+1. classify the source change as one-to-one move, split, merge, behavior relocation, true deletion, or route-level move/deletion
+2. for behavior-preserving one-to-one moves, move the onboarding file to the new mirrored path and update path metadata, governing overview links, reference links, verification metadata, and `Update History`
+3. for splits, merges, or behavior relocation, read the old onboarding before deleting it and reuse accurate purpose, commentary, invariants, references, and history in the new target onboarding
+4. for true deletion, delete or retire the onboarding only after proving the documented behavior did not move to another current source file
+5. update affected repo-level overview indexes and cross-links
+6. check whether repo-level entity catalogs or nearby onboarding need follow-up because of the move or deletion
+7. if the move or deletion affects a whole package, module, feature area, or source route, route to C-03 `existing-memory-slice-maintenance` for coordinated cleanup or move handling

@@ -504,6 +504,8 @@ Use it for:
 
 This mode does not pretend the repository is blank. It starts from the existing root `overview.md`, `entities.md` when present, route-local overviews, verified file-level onboarding, bootstrap artifacts, and the source delta that triggered the maintenance.
 
+For moved or deleted routes, preservation is the default question before removal. Inspect whether the old route's documented behavior moved into a new source route, split across multiple targets, merged into another route, or actually disappeared. Move or reuse accurate onboarding before retiring or removing stale artifacts; removal is only correct when no safe current target remains for the preserved knowledge.
+
 Expansion outputs may include:
 
 1. source inventory delta
@@ -518,7 +520,7 @@ Expansion outputs may include:
 Cleanup outputs may include:
 
 1. stale route assessment
-2. cleanup or removal plan
+2. cleanup, move, preservation, or removal plan
 3. affected route-local overview list
 4. affected child file-level onboarding list
 5. related bootstrap artifact list

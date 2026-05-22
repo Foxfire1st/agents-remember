@@ -5,3 +5,4 @@ system/tools.md
 .env
 *.pyc
 __pycache__/
+.venv/
