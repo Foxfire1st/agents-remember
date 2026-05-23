@@ -26,26 +26,22 @@ Use `HERMES.md` if you want Hermes-specific priority over shared context files.
 
 ## Skills
 
-Install the runtime:
+Install the runtime through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Hermes local skills commonly live under `~/.hermes/skills/`. Use a category folder and flat layout so each visible skill folder matches the skill name:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.hermes/skills/agents-remember-md \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.hermes/skills/agents-remember-md", layout="flat", dry_run=false)
 ```
 
 You can also install into a shared skills directory and add it to `~/.hermes/config.yaml`:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.agents/skills/agents-remember-md \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills/agents-remember-md", layout="flat", dry_run=false)
 ```
 
 ```yaml

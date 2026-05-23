@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -10,12 +10,16 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PROVIDER_SETUP_PATH = REPO_ROOT / "scripts" / "provider-setup.py"
-SPEC = importlib.util.spec_from_file_location("provider_setup", PROVIDER_SETUP_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise ImportError(f"Unable to load provider setup module from {PROVIDER_SETUP_PATH}")
-provider_setup = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(provider_setup)
+MCP_SRC = REPO_ROOT / "mcp" / "src"
+MCP_PACKAGE_ROOT = MCP_SRC / "agents_remember"
+sys.path.insert(0, str(MCP_SRC))
+
+import agents_remember  # noqa: E402
+
+if str(MCP_PACKAGE_ROOT) not in agents_remember.__path__:
+    agents_remember.__path__.append(str(MCP_PACKAGE_ROOT))
+
+from agents_remember.providers import provider_setup  # noqa: E402
 
 
 class ProviderSetupTests(unittest.TestCase):
@@ -120,7 +124,7 @@ class ProviderSetupTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 result = provider_setup.run_command(
-                    ["python", "provider-lifecycle.py"],
+                    ["python", "-m", "agents_remember.providers.provider_lifecycle"],
                     cwd=Path(tmp),
                     timeout=1,
                     dry_run=False,
@@ -131,6 +135,7 @@ class ProviderSetupTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(captured["env"]["PYTHONUTF8"], "1")
         self.assertEqual(captured["env"]["PYTHONIOENCODING"], "utf-8")
+        self.assertIs(captured["stdin"], provider_setup.subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

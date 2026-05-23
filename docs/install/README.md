@@ -2,10 +2,10 @@
 
 These pages explain how to expose the installed Agents Remember runtime to specific agent harnesses.
 
-Install the runtime first:
+Configure the Agents Remember MCP server first, then install the runtime:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Then choose the guide for your tool:

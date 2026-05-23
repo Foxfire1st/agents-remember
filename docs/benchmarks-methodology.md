@@ -24,7 +24,7 @@ Each case pins:
 - external memory repository URL and commit
 - author-provided result reports
 
-The source package does not commit case workspaces. It commits manifests, prompts, author results, and workspace templates. `prepare` generates the case workspace as resettable state with a source-only environment and a memory-enabled environment. Each environment gets a benchmark root marker and rendered harness `AGENTS.md` so Codex treats that environment as the project root. Beyond those harness files, the source-only environment contains only the pinned source checkout under `repos/` and no active memory context. The memory-enabled environment clones the same pinned source checkout under `repos/`, clones the pinned memory repository under the benchmark-local `ar-coordination/` root, and exposes benchmark-local runtime skills under `.agents/skills/agents-remember-md` for harness skill discovery. The default skill exposure mode tries the shell symlink installer and falls back to Python copying when Bash or symlinks are unavailable; `--skill-exposure-mode copy` forces the portable path. Reinstalling the benchmark package can prune and refresh generated workspaces when the pinned commit, prompt, memory, template, or author results change. User-generated outputs live separately under `benchmarks/user-runs/`.
+The source package does not commit case workspaces. It commits manifests, prompts, author results, and workspace templates. `prepare` generates the case workspace as resettable state with a source-only environment and a memory-enabled environment. Each environment gets a benchmark root marker and rendered harness `AGENTS.md` so Codex treats that environment as the project root. Beyond those harness files, the source-only environment contains only the pinned source checkout under `repos/` and no active memory context. The memory-enabled environment clones the same pinned source checkout under `repos/`, clones the pinned memory repository under the benchmark-local `ar-coordination/` root, and copies benchmark-local runtime skills under `.agents/skills/agents-remember-md` for harness skill discovery. Reinstalling the benchmark package can prune and refresh generated workspaces when the pinned commit, prompt, memory, template, or author results change. User-generated outputs live separately under `benchmarks/user-runs/`.
 
 Agents Remember path rules should exclude resettable benchmark workspaces from onboarding. In particular, workspace-local cloned repos, workspace-local `ar-coordination/` trees, cloned benchmark memory snapshots, and `benchmarks/user-runs/` are benchmark state, not source files that should receive onboarding companions. This prevents benchmark memory from recursively producing more onboarding for itself.
 
@@ -43,11 +43,10 @@ Avoid using feature-building tasks as primary benchmark evidence. A coding agent
 
 Each prompt should run the source-only and memory-enabled variants. The default repetition count is three runs per prompt and variant. For each repetition, the selected variants share one dated run root and are submitted together when the configured job count allows parallelism.
 
-The runner accepts `--skill-exposure-mode auto|link|copy|none` on `prepare` and
-`run`. Use `copy` when the host cannot create or follow symlinks. Use `link`
-when symlink installation must succeed and a copy fallback would hide a setup
-problem. `none` is only for preconfigured workspaces where skill discovery is
-handled outside the benchmark harness.
+The runner accepts `--skill-exposure-mode copy|none` on `prepare` and `run`.
+`copy` is the default and exposes benchmark-local skills under
+`.agents/skills/agents-remember-md`. `none` is only for preconfigured
+workspaces where skill discovery is handled outside the benchmark harness.
 
 The runner records:
 

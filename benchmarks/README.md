@@ -11,22 +11,23 @@ The benchmark suite is both evidence and a replay harness:
 
 Benchmarks are not installed by default. Install benchmark fixtures explicitly:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination --include-benchmarks
+```text
+runtime_install(dry_run=false, include_benchmarks=true)
 ```
 
-Then inspect or run them from the source checkout runner:
+Then inspect or run them through the MCP benchmark tools:
 
-```bash
-python3 agents-remember-md/scripts/run-benchmarks.py list
-python3 agents-remember-md/scripts/run-benchmarks.py prepare case agents-remember-md-drift-workflow
-python3 agents-remember-md/scripts/run-benchmarks.py run case agents-remember-md-drift-workflow --dry-run
+```text
+benchmark_prepare(target="case", case_id="agents-remember-md-drift-workflow")
+benchmark_run(target="case", case_id="agents-remember-md-drift-workflow", dry_run=true)
 ```
 
-Use `--skill-exposure-mode copy` with `prepare` or `run` when the host cannot
-create or follow symlinks. The default `auto` mode first tries the runtime skill
-installer and falls back to a copied skill tree when needed. `link` requires the
-installer path to work, and `none` skips benchmark-local skill exposure.
+For source-package debugging, run the package module from a checkout where
+`agents-remember-md/mcp/src` is on `PYTHONPATH`.
+
+Benchmark preparation copies the runtime skill tree into the memory-enabled
+workspace by default. Use `--skill-exposure-mode none` only when skill discovery
+is handled outside the benchmark harness.
 
 ## Current Cases
 
@@ -59,7 +60,7 @@ benchmarks/
         .benchmark-root
         .agents/
           skills/
-            agents-remember-md/ # symlink or copied tree from ar-coordination/skills
+            agents-remember-md/ # copied tree from ar-coordination/skills
         AGENTS.md              # rendered from templates/workspace-AGENTS.md
         ar-coordination/
           AGENTS.md
@@ -83,7 +84,7 @@ Each prompt has comparable variants:
 - `with-onboarding`: Codex works from `workspaces/<case-id>/with-memory/`, where `ar-coordination/` resolves to the cloned pinned external memory and `repos/<repo>/` contains the same pinned checkout.
 - `with-onboarding-warm`: when present, Codex starts from the same memory-enabled workspace but treats the benchmark-local memory as already validated, so it can test steady-state memory use without spending the run on startup resolver and drift gates.
 
-The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.agents/skills/agents-remember-md`, so the harness loads the same skills that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.agents/skills`. By default the runner tries the symlink installer and falls back to a copied skill tree when Bash or symlinks are unavailable; use `--skill-exposure-mode copy` to force the portable path.
+The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.agents/skills/agents-remember-md`, so the harness loads the same skills that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.agents/skills`. The runner copies that tree by default.
 
 Each prompt defaults to three repetitions per variant. For each repetition, the selected variants are placed under the same dated run root and submitted together when the job count allows parallelism. The runner writes raw JSONL, stderr, final messages, metadata, and generated summaries under `user-runs/`.
 

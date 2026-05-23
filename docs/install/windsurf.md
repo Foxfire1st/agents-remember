@@ -24,36 +24,30 @@ Add both the coordination runtime and target repository to the workspace when po
 
 ## Skills
 
-Install the runtime:
+Install the runtime through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Windsurf workspace skills live in `.windsurf/skills/<skill-name>/SKILL.md`. Global skills live in `~/.codeium/windsurf/skills/<skill-name>/SKILL.md`. Windsurf also discovers `.agents/skills` and `~/.agents/skills` for cross-agent compatibility.
 
-Use the flat symlink layout:
+Use the flat layout:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.windsurf/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.windsurf/skills", layout="flat", dry_run=false)
 ```
 
 For a shared project-level install:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.agents/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills", layout="flat", dry_run=false)
 ```
 
 For global Windsurf skills:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.codeium/windsurf/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.codeium/windsurf/skills", layout="flat", dry_run=false)
 ```
 
 Cascade can invoke skills automatically or manually with `@skill-name`.

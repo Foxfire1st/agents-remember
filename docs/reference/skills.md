@@ -49,10 +49,10 @@ Those skills handle research, synthesis, design, planning, implementation, and a
 
 Use:
 
-```bash
-ar-coordination/scripts/install-skills.sh --install-root <skills-folder>
+```text
+skills_install(install_root="/absolute/path/to/<skills-folder>", dry_run=false)
 ```
 
-Use `--layout flat` when the harness requires direct `<skill-name>/SKILL.md` folders.
+Use `layout="flat"` when the harness requires direct `<skill-name>/SKILL.md` folders.
 
-Do not copy individual skill folders by hand. Several skills rely on sibling files and shared helper modules from the installed runtime tree.
+Do not copy individual skill folders by hand. The MCP tool copies the packaged skill tree consistently, including sibling files and shared helper modules.

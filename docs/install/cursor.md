@@ -26,34 +26,28 @@ Use an absolute path when `ar-coordination` is outside the workspace.
 
 ## Skills
 
-Install the runtime:
+Install the runtime through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Cursor loads skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`, and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders.
 
 Use the flat layout so each visible folder matches the lowercase skill `name`:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.cursor/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.cursor/skills", layout="flat", dry_run=false)
 ```
 
 For a shared cross-agent project install:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.agents/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills", layout="flat", dry_run=false)
 ```
 
 For user-wide Cursor skills:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.cursor/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.cursor/skills", layout="flat", dry_run=false)
 ```

@@ -42,33 +42,31 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
      ar-coordination/
    ```
 
-2. Install the runtime into `ar-coordination`.
+2. Configure the MCP server with `coordinationRoot` pointing at `ar-coordination`, then request the MCP runtime install tool.
 
-   ```bash
-   python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+   ```text
+   runtime_install(dry_run=false)
    ```
 
-   Reinstall reconciles package-owned runtime scaffold files only. Provider
-   dependencies and provider runner reinstall are MCP-owned operations driven
-   from MCP settings outside the coordinator root.
+   Reinstall reconciles package-owned runtime scaffold files from the MCP
+   package. Provider dependencies and provider runner reinstall are MCP-owned
+   operations driven from MCP settings outside the coordinator root.
 
    Benchmark fixtures are optional. To install or refresh them too:
 
-   ```bash
-   python3 agents-remember-md/installer/install-runtime.py ./ar-coordination --include-benchmarks
+   ```text
+   runtime_install(dry_run=false, include_benchmarks=true)
    ```
 
-3. Expose the installed skills to your agent harness.
+3. Expose the packaged skills to your agent harness.
 
-   ```bash
-   ./ar-coordination/scripts/install-skills.sh \
-     --install-root ./.agents/skills
+   ```text
+   skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
    ```
 
-   Use `--layout flat` only for harnesses that require direct
-   `<skill-name>/SKILL.md` folders. Do not use flat layout for OpenClaw: keep
-   skills linked to `ar-coordination/skills` and configure
-   `skills.load.allowSymlinkTargets`. See [OpenClaw setup](docs/install/openclaw.md).
+   Use `layout="flat"` only for harnesses that require direct
+   `<skill-name>/SKILL.md` folders. The MCP tool copies skills; it does not
+   create symlinks.
 
 4. Add workspace instructions that point agents at the installed runtime.
 
@@ -119,14 +117,9 @@ Different tools discover instructions and skills differently. Use the install pa
 agents-remember-md/
   AGENTS.md                         # source checkout instructions
   README.md                         # public front door
-  installer/install-runtime.py      # runtime installer
-  scripts/
-    provider-lifecycle.py           # source/package-owned provider lifecycle helper
-    provider-setup.py               # source/package-owned provider setup helper
-    run-benchmarks.py               # optional benchmark runner
+  mcp/                              # package-local MCP server and services
   runtime/
     agents-md-files/                # installed AGENTS.md templates
-    scripts/install-skills.sh       # harness skill symlink adapter
     skills/                         # installed skill source tree
     system/defaults/examples/       # scaffold examples used by initialization
   benchmarks/                       # optional benchmark package source
@@ -139,8 +132,6 @@ The installed runtime lives in `ar-coordination/`, not in the source checkout:
 ```text
 ar-coordination/
   AGENTS.md
-  scripts/
-    install-skills.sh
   skills/
   system/
   memory-repos/

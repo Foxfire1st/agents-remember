@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from agents_remember.providers import provider_setup
+
 
 AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/coordinator/AGENTS.md"): Path("AGENTS.md"),
@@ -46,7 +48,7 @@ SOURCE_ONLY_AGENTS_TEMPLATE = Path("templates/source-only-AGENTS.md")
 BENCHMARK_ROOT_MARKER = ".benchmark-root"
 SKILLS_EXPOSURE_NAMESPACE = "agents-remember-md"
 COPYTREE_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-SKILL_EXPOSURE_MODES = ("auto", "link", "copy", "none")
+SKILL_EXPOSURE_MODES = ("copy", "none")
 
 
 def is_ignored_package_path(relative: Path) -> bool:
@@ -132,8 +134,6 @@ def default_benchmarks_root() -> Path:
         candidate = parent / "benchmarks"
         if (candidate / "cases").is_dir():
             return candidate
-        if (parent / "scripts").is_dir() and (parent / "benchmarks" / "cases").is_dir():
-            return parent / "benchmarks"
     return Path.cwd() / "benchmarks"
 
 
@@ -238,12 +238,6 @@ def find_runtime_source() -> tuple[str, Path]:
     for parent in script_path.parents:
         if (parent / "runtime" / "skills").is_dir() and (parent / "runtime" / "agents-md-files").is_dir():
             return "source", parent
-        if (
-            (parent / "skills").is_dir()
-            and (parent / "scripts" / "install-skills.sh").is_file()
-            and (parent / "AGENTS.md").is_file()
-        ):
-            return "installed", parent
     raise RuntimeError("could not locate Agents Remember runtime source")
 
 
@@ -309,26 +303,17 @@ def remove_path(path: Path) -> None:
 
 
 def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
-    mode, root = find_runtime_source()
+    _mode, root = find_runtime_source()
     if dry_run:
         print(f"Would ensure directory {coordination_root}")
     else:
         coordination_root.mkdir(parents=True, exist_ok=True)
-    if mode == "source":
-        runtime_root = root / "runtime"
-        replace_tree(runtime_root / "skills", coordination_root / "skills", dry_run)
-        replace_tree(runtime_root / "scripts", coordination_root / "scripts", dry_run)
-        for source_rel, target_rel in AGENTS_MD_TARGETS.items():
-            copy_file(root / source_rel, coordination_root / target_rel, dry_run)
-    else:
-        replace_tree(root / "skills", coordination_root / "skills", dry_run)
-        replace_tree(root / "scripts", coordination_root / "scripts", dry_run)
-        for relative in (Path("AGENTS.md"), Path("system/AGENTS.md"), Path("tasks/AGENTS.md")):
-            source = root / relative
-            if source.exists():
-                copy_file(source, coordination_root / relative, dry_run)
+    runtime_root = root / "runtime"
+    replace_tree(runtime_root / "skills", coordination_root / "skills", dry_run)
+    for source_rel, target_rel in AGENTS_MD_TARGETS.items():
+        copy_file(root / source_rel, coordination_root / target_rel, dry_run)
 
-    sync_provider_assets(mode, root, coordination_root, dry_run)
+    sync_provider_assets(root, coordination_root, dry_run)
 
     for folder in (
         "memory-repos",
@@ -347,8 +332,8 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
             path.mkdir(parents=True, exist_ok=True)
 
 
-def sync_provider_assets(mode: str, root: Path, coordination_root: Path, dry_run: bool) -> None:
-    providers_source = root / "runtime" / "providers" if mode == "source" else root / "providers"
+def sync_provider_assets(root: Path, coordination_root: Path, dry_run: bool) -> None:
+    providers_source = root / "runtime" / "providers"
     providers_target = coordination_root / "providers"
     if dry_run:
         print(f"Would replace benchmark provider assets in {providers_target}")
@@ -362,164 +347,33 @@ def sync_provider_assets(mode: str, root: Path, coordination_root: Path, dry_run
             copy_tree(source, providers_target / relative, dry_run)
 
 
-def windows_shell_path(path: Path) -> str:
-    return str(path).replace("\\", "/")
-
-
-def is_windows_wsl_bash(executable: str) -> bool:
-    normalized = str(Path(executable)).lower()
-    return "\\windows\\system32\\bash.exe" in normalized or "\\windowsapps\\bash.exe" in normalized
-
-
-def git_bash_from_git_executable() -> str | None:
-    git = shutil.which("git")
-    if not git:
-        return None
-    git_path = Path(git)
-    for parent in git_path.parents:
-        for relative in (Path("bin/bash.exe"), Path("usr/bin/bash.exe")):
-            candidate = parent / relative
-            if candidate.is_file():
-                return str(candidate)
-    return None
-
-
-def windows_bash_executable(dry_run: bool) -> str:
-    configured = os.environ.get("AGENTS_REMEMBER_BASH")
-    if configured:
-        return configured
-
-    executable = shutil.which("bash")
-    if executable and not is_windows_wsl_bash(executable):
-        return executable
-
-    git_bash = git_bash_from_git_executable()
-    if git_bash:
-        return git_bash
-
-    if dry_run:
-        return "bash"
-    raise RuntimeError(
-        "Git for Windows bash is required to install benchmark skills with install-skills.sh. "
-        "Put Git Bash on PATH or set AGENTS_REMEMBER_BASH to the bash executable."
-    )
-
-
-def skill_install_command(
-    script: Path,
-    install_root: Path,
-    coordination_root: Path,
-    dry_run: bool,
-) -> tuple[list[str], dict[str, str]]:
-    if sys.platform == "win32":
-        command = [
-            windows_bash_executable(dry_run),
-            windows_shell_path(script),
-            "--install-root",
-            windows_shell_path(install_root),
-            "--source",
-            windows_shell_path(coordination_root),
-        ]
-        return command, {"MSYS": "winsymlinks:nativestrict"}
-
-    if script.exists() and os.access(script, os.X_OK):
-        command = [
-            str(script),
-            "--install-root",
-            str(install_root),
-            "--source",
-            str(coordination_root),
-        ]
-        return command, {}
-
-    bash = shutil.which("bash")
-    if bash:
-        command = [
-            bash,
-            str(script),
-            "--install-root",
-            str(install_root),
-            "--source",
-            str(coordination_root),
-        ]
-        return command, {}
-
-    if dry_run:
-        command = [
-            str(script),
-            "--install-root",
-            str(install_root),
-            "--source",
-            str(coordination_root),
-        ]
-        return command, {}
-    raise RuntimeError("install-skills.sh must be executable, or bash must be available")
-
-
 def copy_workspace_skill_exposure(workspace_root: Path, coordination_root: Path, dry_run: bool) -> None:
     install_root = workspace_root / ".agents" / "skills"
-    link_path = install_root / SKILLS_EXPOSURE_NAMESPACE
+    exposure_path = install_root / SKILLS_EXPOSURE_NAMESPACE
     skills_source = coordination_root / "skills"
     if dry_run:
-        print(f"Would copy benchmark skills {skills_source} -> {link_path}")
+        print(f"Would copy benchmark skills {skills_source} -> {exposure_path}")
         return
     if not skills_source.is_dir():
         raise RuntimeError(f"benchmark runtime skills directory missing: {skills_source}")
-    if link_path.exists() or link_path.is_symlink():
-        remove_path(link_path)
-    link_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skills_source, link_path, ignore=COPYTREE_IGNORE)
+    if exposure_path.exists() or exposure_path.is_symlink():
+        remove_path(exposure_path)
+    exposure_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(skills_source, exposure_path, ignore=COPYTREE_IGNORE)
 
 
 def sync_workspace_skill_exposure(
     workspace_root: Path,
     coordination_root: Path,
     dry_run: bool,
-    mode: str = "auto",
+    mode: str = "copy",
 ) -> None:
     if mode not in SKILL_EXPOSURE_MODES:
         raise RuntimeError(f"unsupported skill exposure mode: {mode}")
     if mode == "none":
         print(f"Skipping benchmark skill exposure for {workspace_root}")
         return
-    if mode == "copy":
-        copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
-        return
-
-    install_root = workspace_root / ".agents" / "skills"
-    link_path = install_root / SKILLS_EXPOSURE_NAMESPACE
-    script = coordination_root / "scripts" / "install-skills.sh"
-    try:
-        command, install_env = skill_install_command(script, install_root, coordination_root, dry_run)
-    except RuntimeError:
-        if mode == "auto":
-            copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
-            return
-        raise
-    env_prefix = " ".join(f"{key}={value}" for key, value in install_env.items())
-    env_prefix = f"{env_prefix} " if env_prefix else ""
-    if dry_run:
-        print(f"Would remove stale benchmark skill exposure {link_path}")
-        print(f"Would run in {workspace_root}: {env_prefix}{' '.join(command)}")
-        return
-    if not script.is_file():
-        if mode == "auto":
-            copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run=False)
-            return
-        raise RuntimeError(f"benchmark skill install script missing: {script}")
-    if not (coordination_root / "skills").is_dir():
-        raise RuntimeError(f"benchmark runtime skills directory missing: {coordination_root / 'skills'}")
-    if link_path.exists() or link_path.is_symlink():
-        remove_path(link_path)
-    env = os.environ.copy()
-    env.update(install_env)
-    try:
-        subprocess.run(command, cwd=workspace_root, env=env, check=True)
-    except subprocess.CalledProcessError:
-        if mode != "auto":
-            raise
-        print("Benchmark skill symlink exposure failed; falling back to copied skills.", file=sys.stderr)
-        copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run=False)
+    copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
 
 
 def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> None:
@@ -534,12 +388,10 @@ def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> N
 def default_cgc_seed_source_coordination_root(benchmarks_root: Path, target_coordination_root: Path) -> Path | None:
     candidates: list[Path] = [benchmarks_root.parent]
     try:
-        mode, root = find_runtime_source()
+        _mode, root = find_runtime_source()
     except RuntimeError:
-        mode, root = "", Path()
-    if mode == "installed":
-        candidates.append(root)
-    elif mode == "source":
+        root = Path()
+    if root:
         candidates.append(root.parent / "ar-coordination")
 
     seen: set[Path] = set()
@@ -571,15 +423,12 @@ def prepare_configured_providers(
             print(f"Would skip benchmark provider setup; no providers enabled in {settings_path}")
         return
 
-    script = Path(__file__).resolve().parent / "provider-setup.py"
-    if not dry_run and not script.is_file():
-        raise RuntimeError(f"benchmark provider setup source script missing: {script}")
-    command = [
-        sys.executable,
-        script.as_posix(),
+    argv = [
         "prepare",
         "--coordination-root",
         coordination_root.as_posix(),
+        "--from-settings",
+        settings_path.as_posix(),
         "--timeout",
         str(provider_timeout),
         "--json",
@@ -593,7 +442,16 @@ def prepare_configured_providers(
                 cgc_seed_repo_id,
             ]
         )
-    run_command(command, dry_run, cwd=coordination_root)
+    if dry_run:
+        argv.append("--dry-run")
+    if dry_run:
+        print(
+            "Would run in "
+            f"{coordination_root}: python -m agents_remember.providers.provider_setup {' '.join(argv)}"
+        )
+    payload = provider_setup.action_payload(provider_setup.build_parser().parse_args(argv))
+    if not payload.get("ok"):
+        raise RuntimeError(json.dumps(payload, indent=2))
 
 
 def git_command(*args: str) -> list[str]:
@@ -817,7 +675,7 @@ def prepare_case(
     benchmarks_root: Path,
     case: BenchmarkCase,
     dry_run: bool,
-    skill_exposure_mode: str = "auto",
+    skill_exposure_mode: str = "copy",
     force_clone: bool = False,
     provider_timeout: int = 1800,
 ) -> None:
@@ -1344,7 +1202,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser = subparsers.add_parser("prepare", help="Prepare resettable benchmark workspaces.")
     prepare_parser.add_argument("target", choices=("all", "case"))
     prepare_parser.add_argument("case_id", nargs="?")
-    prepare_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
+    prepare_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy")
     prepare_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts before cloning.")
     prepare_parser.add_argument("--provider-timeout", type=int, default=1800, help="Seconds allowed for each benchmark provider install/index command.")
     prepare_parser.add_argument("--dry-run", action="store_true")
@@ -1365,7 +1223,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument("--skip-prepare", action="store_true", help="Use the existing workspace fixture state.")
-    run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="auto")
+    run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy")
     run_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts during preparation.")
     run_parser.add_argument("--provider-timeout", type=int, default=1800, help="Seconds allowed for each benchmark provider install/index command during preparation.")
     run_parser.set_defaults(func=command_run)

@@ -269,7 +269,6 @@ def require_runtime_tree(runtime_root: Path) -> None:
         runtime_root / "providers" / "requirements" / "codegraphcontext.txt",
         runtime_root / "providers" / "requirements" / "grepai.txt",
         runtime_root / "skills",
-        runtime_root / "scripts" / "install-skills.sh",
     ]
     missing = [path for path in required if not path.exists()]
     if missing:
@@ -452,8 +451,7 @@ def install_runtime(
         preserve={Path("AGENTS.md")},
     )
     copy_tree(runtime_root / "skills", coordination_root / "skills", summary, dry_run)
-    prune_tree(runtime_root / "scripts", coordination_root / "scripts", summary, dry_run)
-    copy_tree(runtime_root / "scripts", coordination_root / "scripts", summary, dry_run)
+    remove_path(coordination_root / "scripts", summary, dry_run)
 
     # Provider runtime scaffolding is disposable during a full reinstall. A
     # dependency-skipped copy must preserve installed binaries, venvs, and live

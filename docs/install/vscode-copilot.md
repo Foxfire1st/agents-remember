@@ -9,8 +9,8 @@ Official references:
 
 ## Install Runtime
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 ## Expose Skills
@@ -19,9 +19,8 @@ VS Code discovers project skills from `.github/skills`, `.claude/skills`, and `.
 
 For a workspace-local cross-agent install:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.agents/skills
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
 ```
 
 If you prefer to point VS Code directly at the installed runtime, add the installed skill roots in the workspace settings:

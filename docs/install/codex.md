@@ -22,30 +22,28 @@ Use an absolute path in the `@...` include when the coordination runtime is outs
 
 ## Skills
 
-Install the runtime first:
+Install the runtime first through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
-Then expose the installed skill tree:
+Then expose the packaged skill tree:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.agents/skills
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
 ```
 
 For user-wide skills:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.agents/skills
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
 ```
 
-The default tree layout creates:
+The default tree layout copies:
 
 ```text
-<install-root>/agents-remember-md -> <ar-coordination>/skills
+<install-root>/agents-remember-md/
 ```
 
-That keeps skill helper paths resolved from the installed runtime instead of copied source folders.
+That keeps the harness pointed at an MCP-installed skill package instead of ad hoc copied source folders.

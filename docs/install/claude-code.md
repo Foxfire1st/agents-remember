@@ -24,28 +24,26 @@ If `ar-coordination` is outside the workspace, point at the actual readable path
 
 ## Skills
 
-Install the runtime:
+Install the runtime through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
-Expose installed skills to the project:
+Expose packaged skills to the project:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.claude/skills
+```text
+skills_install(install_root="/absolute/path/to/.claude/skills", dry_run=false)
 ```
 
 For user-wide Claude Code skills:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.claude/skills
+```text
+skills_install(install_root="/absolute/path/to/.claude/skills", dry_run=false)
 ```
 
-Claude Code supports project and personal skill folders and discovers nested `.claude/skills` directories. The default namespace symlink layout is usually enough:
+Claude Code supports project and personal skill folders and discovers nested `.claude/skills` directories. The default namespace layout is usually enough:
 
 ```text
-.claude/skills/agents-remember-md -> ar-coordination/skills
+.claude/skills/agents-remember-md/
 ```

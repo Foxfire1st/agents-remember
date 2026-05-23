@@ -15,10 +15,15 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.mcp.config import load_config  # noqa: E402
 from agents_remember.mcp.server import create_server  # noqa: E402
 from agents_remember.mcp.tools import (  # noqa: E402
+    PUBLIC_TOOLS,
+    cgc_query_payload,
     context_packet_payload,
+    memory_init_payload,
     ping_payload,
+    route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
+    skills_install_payload,
 )
 from test_config import settings_payload  # noqa: E402
 
@@ -60,9 +65,9 @@ class McpToolTests(unittest.TestCase):
             )
             self.assertEqual(
                 payload["tools"],
-                ["ping", "server_info", "context_packet", "runtime_install"],
+                list(PUBLIC_TOOLS),
             )
-            self.assertEqual(payload["reservedTools"], ["provider_status"])
+            self.assertEqual(payload["reservedTools"], [])
 
     def test_server_constructs_with_context_packet_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -115,6 +120,89 @@ class McpToolTests(unittest.TestCase):
             )
             self.assertFalse(payload["includeBenchmarks"])
             self.assertFalse(payload["installProviderDeps"])
+
+    def test_phase_04_tools_are_reported(self) -> None:
+        expected = {
+            "resolve_context",
+            "drift_check",
+            "route_index_refresh",
+            "memory_init",
+            "skills_install",
+            "provider_status",
+            "grepai_search",
+            "grepai_trace",
+            "cgc_query",
+            "provider_watchers",
+            "cgc_visualize",
+            "worktree_start",
+            "worktree_attach",
+            "worktree_status",
+            "worktree_closeout_preview",
+            "worktree_closeout_apply",
+            "direct_closeout_preview",
+            "direct_closeout_apply",
+            "worktree_integrate",
+            "worktree_cleanup",
+            "memory_baseline_status",
+            "memory_baseline_adopt",
+            "memory_carryover_plan",
+            "memory_carryover_apply",
+            "benchmark_prepare",
+            "benchmark_run",
+        }
+        self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
+
+    def test_skills_install_payload_is_copy_only_and_dry_run_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = skills_install_payload(str(Path(tmp_dir) / "skills"))
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["operation"], "skills_install")
+            self.assertTrue(payload["dryRun"])
+            self.assertEqual(payload["layout"], "tree")
+            self.assertTrue(payload["planned"])
+
+    def test_memory_init_payload_uses_configured_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            payload = memory_init_payload(config, "agents-remember-md")
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["operation"], "memory_init")
+            self.assertTrue(payload["dryRun"])
+            self.assertEqual(
+                payload["memoryRoot"],
+                (root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md").as_posix(),
+            )
+
+    def test_route_index_refresh_payload_runs_in_dry_run_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            payload = route_index_refresh_payload(config, "agents-remember-md")
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["operation"], "route_index_refresh")
+            self.assertTrue(payload["dryRun"])
+            self.assertEqual(payload["routes"], 0)
+
+    def test_cgc_query_payload_rejects_unknown_repo_before_provider_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with self.assertRaisesRegex(ValueError, "not allowed"):
+                cgc_query_payload(config, "other-repo", "deps")
 
 
 def initialize_context_fixture(root: Path) -> None:

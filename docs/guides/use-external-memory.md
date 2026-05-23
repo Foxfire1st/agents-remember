@@ -18,7 +18,6 @@ projects/
   agents-remember-md/
   ar-coordination/
     AGENTS.md
-    scripts/
     skills/
     memory-repos/
       ar-my-app/
@@ -37,10 +36,10 @@ ar-coordination/memory-repos/ar-<repo-name>/
 
 ## Initialize
 
-Install the runtime first:
+Install the runtime first through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Then ask the agent to run `C-00-initialize-memory-repo` in external-memory mode for the target repository. External mode should be explicit; C-00 defaults to internal memory.

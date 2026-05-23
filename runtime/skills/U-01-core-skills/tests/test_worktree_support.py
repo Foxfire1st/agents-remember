@@ -18,8 +18,16 @@ from unittest import mock
 
 
 CORE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = CORE_ROOT.parent.parent.parent
 SHARED_ROOT = CORE_ROOT / "_shared"
+SHARED_PACKAGE_ROOT = SHARED_ROOT / "agents_remember"
+MCP_PACKAGE_ROOT = REPO_ROOT / "mcp" / "src" / "agents_remember"
 sys.path.insert(0, str(SHARED_ROOT))
+
+import agents_remember  # noqa: E402
+
+if str(SHARED_PACKAGE_ROOT) not in agents_remember.__path__:
+    agents_remember.__path__.insert(0, str(SHARED_PACKAGE_ROOT))
 
 from agents_remember.memory_ledger import (  # noqa: E402
     LedgerError,
@@ -30,6 +38,9 @@ from agents_remember.memory_ledger import (  # noqa: E402
     write_ledger,
 )
 from agents_remember.worktree_contract import default_contract, load_contract, task_root_candidates, write_contract  # noqa: E402
+
+agents_remember.__path__.append(str(MCP_PACKAGE_ROOT))
+from agents_remember.benchmarks import runner as benchmark_runner  # noqa: E402
 
 
 RESOLVER_PATH = CORE_ROOT / "C-08-ar-coordination-context-resolver" / "scripts" / "ar_coordination_context_resolver.py"
@@ -59,13 +70,6 @@ assert MEMORY_CARRYOVER_SPEC is not None and MEMORY_CARRYOVER_SPEC.loader is not
 memory_carryover = importlib.util.module_from_spec(MEMORY_CARRYOVER_SPEC)
 sys.modules[MEMORY_CARRYOVER_SPEC.name] = memory_carryover
 MEMORY_CARRYOVER_SPEC.loader.exec_module(memory_carryover)
-
-BENCHMARK_RUNNER_PATH = CORE_ROOT.parent.parent.parent / "scripts" / "run-benchmarks.py"
-BENCHMARK_RUNNER_SPEC = importlib.util.spec_from_file_location("run_benchmarks", BENCHMARK_RUNNER_PATH)
-assert BENCHMARK_RUNNER_SPEC is not None and BENCHMARK_RUNNER_SPEC.loader is not None
-benchmark_runner = importlib.util.module_from_spec(BENCHMARK_RUNNER_SPEC)
-sys.modules[BENCHMARK_RUNNER_SPEC.name] = benchmark_runner
-BENCHMARK_RUNNER_SPEC.loader.exec_module(benchmark_runner)
 
 drift = adopt_baseline.drift
 
@@ -1720,7 +1724,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
             self.assertTrue((exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file())
 
-    def test_skill_exposure_auto_falls_back_to_copy_without_script(self) -> None:
+    def test_skill_exposure_default_copies_skill_tree_without_script(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             coordination_root = workspace / "ar-coordination"
@@ -1732,7 +1736,6 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 workspace,
                 coordination_root,
                 dry_run=False,
-                mode="auto",
             )
 
             exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE

@@ -7,7 +7,7 @@ description: "Initialize or repair the Agents Remember memory root for a target 
 
 Create the minimal memory root required before onboarding or task workflows can use Agents Remember for a target repository.
 
-This skill initializes durable repo memory. It does not install the coordinator runtime, create harness skill symlinks, create task worktrees, or generate onboarding content. Use `installer/install-runtime.py` for coordinator runtime installation, `runtime/scripts/install-skills.sh` for harness exposure, and `C-03-repo-bootstrap` after this scaffold exists when the developer wants onboarding content generated.
+This skill initializes durable repo memory. It does not install the coordinator runtime, expose harness skills, create task worktrees, or generate onboarding content. Request MCP `runtime_install` for coordinator runtime installation, MCP `skills_install` for harness skill exposure, and `C-03-repo-bootstrap` after this scaffold exists when the developer wants onboarding content generated.
 
 Use `C-08-ar-coordination-context-resolver` to inspect an existing repository's active context. This skill creates or repairs missing memory scaffolding; it does not replace C-08 as the normal resolver.
 
@@ -25,7 +25,7 @@ Use `C-08-ar-coordination-context-resolver` to inspect an existing repository's 
 3. Keep starter files generic; do not invent project-specific tools, docs, sources, or onboarding.
 4. If the resolved memory root or coordination root points outside the intended workspace, state the resolved absolute path before writing.
 5. Default internal scaffolding must not create or select an external memory repo.
-6. External-memory setup must not install coordinator runtime files; if the coordinator runtime is missing, tell the developer to run `installer/install-runtime.py` first.
+6. External-memory setup must not install coordinator runtime files; if the coordinator runtime is missing, tell the developer to request MCP `runtime_install` first.
 7. Do not create onboarding content. An empty `onboarding/` directory is enough for C-08 to resolve the memory root; C-03 owns onboarding generation.
 
 ## Procedure
@@ -47,15 +47,14 @@ Explicit external memory:
 ```text
 <coordination-root>/AGENTS.md
 <coordination-root>/skills/
-<coordination-root>/scripts/
 <coordination-root>/tasks/
 <coordination-root>/memory-repos/
 ```
 
-4. If the runtime is missing, stop and ask the developer to run:
+4. If the runtime is missing, stop and ask the developer to request:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py <coordination-root>
+```text
+runtime_install(dry_run=false)
 ```
 
 5. Set `memory_root` to `<coordination-root>/memory-repos/ar-<code-repository-name>`.
@@ -93,7 +92,7 @@ Create only missing directories:
   docs/
 ```
 
-For external memory, ensure `<coordination-root>/memory-repos/` exists before creating the per-repo memory root. Do not create or modify coordinator runtime directories such as `skills/`, `scripts/`, `tasks/`, `worktrees/`, `notes/`, or `temp/`.
+For external memory, ensure `<coordination-root>/memory-repos/` exists before creating the per-repo memory root. Do not create or modify coordinator runtime directories such as `skills/`, `tasks/`, `worktrees/`, `notes/`, or `temp/`.
 
 When creating an external memory Git repository, add `docs/.gitkeep` if `docs/` would otherwise be empty so the scaffold can be committed.
 

@@ -24,67 +24,29 @@ OpenClaw workspaces may contain other standing instruction files. Keep Agents Re
 
 ## Skills
 
-Install the runtime:
+Install the runtime through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py /path/to/ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 OpenClaw commonly uses global skills under `~/.openclaw/skills/` and workspace skills under `<workspace>/skills/`, with workspace skills taking precedence.
 
-Agents Remember skills should stay linked to the installed runtime under
-`ar-coordination/skills`. Use the default nested/tree install layout. Do not
-work around OpenClaw skill discovery by copying the skills into the OpenClaw root
-or by using flat layout: several bundled scripts use their runtime layout to find
-shared modules and default coordination paths. A copied or flattened tree can
-make the skills visible while making commands such as
-`C-08-ar-coordination-context-resolver` resolve the wrong coordination root.
+Agents Remember skills should be installed through the MCP `skills_install`
+tool. Use the default nested/tree install layout. Do not use flat layout unless
+OpenClaw requires direct `<skill-name>/SKILL.md` folders.
 
 Install workspace skills with the default nested layout:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root /path/to/openclaw-workspace/skills
+```text
+skills_install(install_root="/absolute/path/to/openclaw-workspace/skills", dry_run=false)
 ```
 
 For shared global skills:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.openclaw/skills
+```text
+skills_install(install_root="/absolute/path/to/.openclaw/skills", dry_run=false)
 ```
-
-OpenClaw resolves symlink and junction targets before loading skills. Without an
-explicit trust entry, it may report a `symlink-escape` or skip the linked runtime
-because the real path points outside the configured skill root. Keep the links
-and add a narrow `allowSymlinkTargets` entry to the OpenClaw config:
-
-```json5
-{
-  skills: {
-    load: {
-      extraDirs: ["/path/to/openclaw-workspace/skills"],
-      allowSymlinkTargets: ["/path/to/ar-coordination/skills"],
-    },
-  },
-}
-```
-
-For a Windows workspace using `.agents/skills`, that looks like:
-
-```json5
-{
-  skills: {
-    load: {
-      extraDirs: ["C:/ew/.agents/skills"],
-      allowSymlinkTargets: ["C:/ew/ar-coordination/skills"],
-    },
-  },
-}
-```
-
-Keep `allowSymlinkTargets` scoped to the real `ar-coordination/skills` directory.
-Do not allow a broad parent such as the whole workspace or home directory.
 
 ## Long-running Turns
 

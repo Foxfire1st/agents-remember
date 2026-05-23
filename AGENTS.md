@@ -36,19 +36,20 @@ For this source checkout, the normal resolver input is:
 code_repository_name = agents-remember-md
 ```
 
-After C-08 resolves the target repository and coordination root, check the
-coordination settings at `<coordination_root>/system/settings.json` for provider
-configuration. `contextProviders` is coordinator-level configuration; do not
-decide provider availability from the resolved memory repo's
+After C-08 resolves the target repository and coordination root, prefer the
+Agents Remember MCP `context_packet` tool when that server is configured.
+Provider authority comes from the MCP settings file, not from coordinator
+`system/settings.json`, and not from the resolved memory repo's
 `system/settings.json`.
 
-If enabled `contextProviders` are configured, run:
+If the MCP settings configure providers, request:
 
 ```text
-python <coordination_root>/scripts/provider-lifecycle.py watchers status --coordination-root <coordination_root> --json
+context_packet(repo_id="agents-remember-md", include_providers=true)
 ```
 
-Skip this provider check when no context providers are configured.
+Skip this provider check when no MCP server is configured or the MCP settings
+report no providers.
 
 Then run `C-02-onboarding-drift-detection` for the resolved context before
 reasoning from onboarding or source files.
@@ -68,11 +69,11 @@ runtime settings live under the selected `ar-coordination/` or memory root.
 
 ## Source Layout
 
-- `installer/` contains the runtime installer.
+- `mcp/` contains the MCP server, tool surface, and package-owned runtime
+  services.
 - `runtime/agents-md-files/` contains package-owned `AGENTS.md` templates for
   the installed coordinator runtime.
 - `runtime/skills/` contains the package-owned skill source tree.
-- `runtime/scripts/` contains scripts installed into the runtime.
 - `runtime/system/defaults/` contains starter examples that initialization
   skills may use when creating user-owned settings.
 - `README.md` documents the current user-facing install and usage model.

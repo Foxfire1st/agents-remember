@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
-import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,12 +10,16 @@ from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PROVIDER_LIFECYCLE_PATH = REPO_ROOT / "scripts" / "provider-lifecycle.py"
-SPEC = importlib.util.spec_from_file_location("provider_lifecycle", PROVIDER_LIFECYCLE_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise ImportError(f"Unable to load provider lifecycle module from {PROVIDER_LIFECYCLE_PATH}")
-provider_lifecycle = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(provider_lifecycle)
+MCP_SRC = REPO_ROOT / "mcp" / "src"
+MCP_PACKAGE_ROOT = MCP_SRC / "agents_remember"
+sys.path.insert(0, str(MCP_SRC))
+
+import agents_remember  # noqa: E402
+
+if str(MCP_PACKAGE_ROOT) not in agents_remember.__path__:
+    agents_remember.__path__.append(str(MCP_PACKAGE_ROOT))
+
+from agents_remember.providers import provider_lifecycle  # noqa: E402
 
 
 class ProviderLifecycleRenderTests(unittest.TestCase):

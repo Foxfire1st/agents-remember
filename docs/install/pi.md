@@ -21,36 +21,30 @@ Pi also supports global context under `~/.pi/agent/AGENTS.md`.
 
 ## Skills
 
-Install the runtime:
+Install the runtime through the MCP server:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Pi loads skills from project `.pi/skills`, project `.agents/skills`, global `~/.pi/agent/skills`, global `~/.agents/skills`, settings entries, package entries, and repeated `--skill <path>` flags.
 
 Use flat layout for Pi-native skill roots:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.pi/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.pi/skills", layout="flat", dry_run=false)
 ```
 
 For a shared project install:
 
-```bash
-./ar-coordination/scripts/install-skills.sh \
-  --install-root ./.agents/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.agents/skills", layout="flat", dry_run=false)
 ```
 
 For global Pi skills:
 
-```bash
-/path/to/ar-coordination/scripts/install-skills.sh \
-  --install-root ~/.pi/agent/skills \
-  --layout flat
+```text
+skills_install(install_root="/absolute/path/to/.pi/agent/skills", layout="flat", dry_run=false)
 ```
 
 Pi can discover `SKILL.md` directories recursively, but skill names should still match their parent folder for clean validation.

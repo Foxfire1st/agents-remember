@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-import importlib.util
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-INSTALLER_PATH = REPO_ROOT / "installer" / "install-runtime.py"
-SPEC = importlib.util.spec_from_file_location("install_runtime", INSTALLER_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise ImportError(f"Unable to load runtime installer from {INSTALLER_PATH}")
-install_runtime = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = install_runtime
-SPEC.loader.exec_module(install_runtime)
+MCP_SRC = REPO_ROOT / "mcp" / "src"
+MCP_PACKAGE_ROOT = MCP_SRC / "agents_remember"
+sys.path.insert(0, str(MCP_SRC))
+
+import agents_remember  # noqa: E402
+
+if str(MCP_PACKAGE_ROOT) not in agents_remember.__path__:
+    agents_remember.__path__.append(str(MCP_PACKAGE_ROOT))
+
+from agents_remember.install import runtime as install_runtime  # noqa: E402
 
 
 def write_file(path: Path, content: str = "x\n") -> None:
@@ -29,7 +31,6 @@ def create_runtime_source(root: Path) -> Path:
     for source_rel in install_runtime.AGENTS_MD_TARGETS:
         write_file(runtime_root / source_rel)
     write_file(runtime_root / "skills" / "U-01-core-skills" / "C-04" / "SKILL.md")
-    write_file(runtime_root / "scripts" / "install-skills.sh")
     write_file(runtime_root / "providers" / "requirements" / "codegraphcontext.txt")
     write_file(runtime_root / "providers" / "requirements" / "grepai.txt")
     write_file(runtime_root / "providers" / "patches" / "codegraphcontext" / "patch.diff")
@@ -53,6 +54,7 @@ class InstallRuntimeTests(unittest.TestCase):
             )
             cgc_data = providers_root / "data" / "codegraphcontext" / "graph.db"
             cgc_log = providers_root / "logs" / "codegraphcontext" / "watch.log"
+            old_script = coordination_root / "scripts" / "install-skills.sh"
 
             write_file(grepai_exe, "live grepai\n")
             write_file(cgc_exe, "live cgc\n")
@@ -61,11 +63,14 @@ class InstallRuntimeTests(unittest.TestCase):
             write_file(cgc_data, "live graph\n")
             write_file(cgc_log, "live log\n")
             write_file(providers_root / "old.txt")
+            write_file(old_script)
 
             summary = install_runtime.install_runtime(
                 source_root,
                 coordination_root,
                 dry_run=False,
+                install_provider_deps=False,
+                provider_settings={},
             )
 
             self.assertEqual(summary.dependency_runs, 0)
@@ -77,6 +82,7 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertTrue(cgc_log.exists())
             self.assertFalse((providers_root / "old.txt").exists())
             self.assertTrue((providers_root / "requirements" / "grepai.txt").exists())
+            self.assertFalse((coordination_root / "scripts").exists())
 
     def test_runtime_install_preserves_provider_state_and_ignores_mcp_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -99,6 +105,8 @@ class InstallRuntimeTests(unittest.TestCase):
                 source_root,
                 coordination_root,
                 dry_run=False,
+                install_provider_deps=False,
+                provider_settings={},
             )
 
             self.assertEqual(summary.dependency_runs, 0)

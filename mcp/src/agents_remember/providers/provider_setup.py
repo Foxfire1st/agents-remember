@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare Agents Remember context providers for a coordination root.
-
-This source-checkout script is the shared manual/debug orchestration layer for
-benchmark workspace preparation and provider seed work. MCP runtime install uses
-package-local provider lifecycle code instead of coordinator-local scripts.
-"""
+"""Prepare Agents Remember context providers from package-local MCP code."""
 
 from __future__ import annotations
 
@@ -19,6 +14,9 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any
+
+from agents_remember.mcp.command_capture import run_package_main
+from agents_remember.providers import provider_lifecycle
 
 
 def stable_provider_id(value: str) -> str:
@@ -37,12 +35,12 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def settings_path(coordination_root: Path) -> Path:
-    return coordination_root / "system" / "settings.json"
+def settings_path(coordination_root: Path, from_settings: Path | None = None) -> Path:
+    return from_settings or coordination_root / "system" / "settings.json"
 
 
-def load_settings(coordination_root: Path) -> dict[str, Any] | None:
-    path = settings_path(coordination_root)
+def load_settings(coordination_root: Path, from_settings: Path | None = None) -> dict[str, Any] | None:
+    path = settings_path(coordination_root, from_settings)
     if not path.exists():
         return None
     return load_json(path)
@@ -114,6 +112,28 @@ def configured_cgc_repo_root(
 
 def cgc_extra_args(args: argparse.Namespace) -> list[str]:
     path = getattr(args, "cgc_from_settings", None)
+    return ["--from-settings", path.as_posix()] if path is not None else []
+
+
+def cgc_seed_source_settings_path(
+    args: argparse.Namespace,
+    source_coordination_root: Path,
+    target_coordination_root: Path,
+) -> Path | None:
+    explicit = getattr(args, "cgc_seed_source_from_settings", None)
+    if explicit is not None:
+        return explicit
+    if source_coordination_root.resolve() == target_coordination_root.resolve():
+        return getattr(args, "from_settings", None)
+    return None
+
+
+def cgc_seed_source_extra_args(
+    args: argparse.Namespace,
+    source_coordination_root: Path,
+    target_coordination_root: Path,
+) -> list[str]:
+    path = cgc_seed_source_settings_path(args, source_coordination_root, target_coordination_root)
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
@@ -226,6 +246,7 @@ def run_command(
         errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
         timeout=timeout,
         check=False,
     )
@@ -251,10 +272,6 @@ def parse_json_stdout(stdout: str) -> Any:
         return None
 
 
-def lifecycle_script(coordination_root: Path) -> Path:
-    return Path(__file__).resolve().with_name("provider-lifecycle.py")
-
-
 def run_lifecycle(
     coordination_root: Path,
     provider: str,
@@ -265,18 +282,7 @@ def run_lifecycle(
     extra_args: list[str] | None = None,
     native_args: list[str] | None = None,
 ) -> dict[str, Any]:
-    script = lifecycle_script(coordination_root)
-    if not dry_run and not script.is_file():
-        return {
-            "ok": False,
-            "provider": provider,
-            "action": action,
-            "error": f"provider lifecycle script missing: {script}",
-        }
-
-    command = [
-        sys.executable,
-        script.as_posix(),
+    argv = [
         provider,
         "--coordination-root",
         coordination_root.as_posix(),
@@ -287,7 +293,28 @@ def run_lifecycle(
         action,
         *(native_args or []),
     ]
-    result = run_command(command, cwd=coordination_root, timeout=timeout, dry_run=dry_run)
+    command = [sys.executable, "-m", "agents_remember.providers.provider_lifecycle", *argv]
+    if dry_run:
+        result = {
+            "ok": True,
+            "dryRun": True,
+            "command": command,
+            "cwd": coordination_root.as_posix(),
+            "json": None,
+        }
+    else:
+        result = run_package_main(
+            operation=f"provider_setup.{provider}.{action}",
+            main=provider_lifecycle.main,
+            argv=argv,
+        )
+        result.update(
+            {
+                "command": command,
+                "cwd": coordination_root.as_posix(),
+                "json": result.get("payload"),
+            }
+        )
     result.update({"provider": provider, "action": action})
     return result
 
@@ -444,9 +471,14 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
 
     target_repo_id = args.cgc_seed_repo_id
     source_repo_id = args.cgc_seed_source_repo_id or target_repo_id
-    source_settings = load_settings(source_coordination_root)
+    source_settings_file = cgc_seed_source_settings_path(args, source_coordination_root, target_coordination_root)
+    source_settings = load_settings(source_coordination_root, source_settings_file)
     if source_settings is None:
-        return {"ok": False, "skipped": True, "reason": f"source settings missing: {settings_path(source_coordination_root)}"}
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": f"source settings missing: {settings_path(source_coordination_root, source_settings_file)}",
+        }
 
     target_root_info = configured_cgc_repo_root(target_coordination_root, settings, target_repo_id)
     source_root_info = configured_cgc_repo_root(source_coordination_root, source_settings, source_repo_id)
@@ -508,6 +540,7 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
         "backend-start",
         timeout=args.timeout,
         dry_run=args.dry_run,
+        extra_args=cgc_seed_source_extra_args(args, source_coordination_root, target_coordination_root),
     )
     if not source_backend.get("ok"):
         return {"ok": False, "stage": "source-backend-start", "command": source_backend}
@@ -518,7 +551,11 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
         "run",
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=["--repo-id", str(source_repo_id)],
+        extra_args=[
+            *cgc_seed_source_extra_args(args, source_coordination_root, target_coordination_root),
+            "--repo-id",
+            str(source_repo_id),
+        ],
         native_args=[
             "--",
             "export",
@@ -666,13 +703,13 @@ def prepare_enabled_providers(args: argparse.Namespace, settings: dict[str, Any]
 
 
 def action_payload(args: argparse.Namespace) -> dict[str, Any]:
-    settings = load_settings(args.coordination_root)
+    settings = load_settings(args.coordination_root, args.from_settings)
     if settings is None:
         return {
             "ok": True,
             "action": args.action,
             "coordinationRoot": args.coordination_root.as_posix(),
-            "settingsFile": settings_path(args.coordination_root).as_posix(),
+            "settingsFile": settings_path(args.coordination_root, args.from_settings).as_posix(),
             "enabled": {},
             "results": [],
             "note": "settings.json is missing; no providers configured",
@@ -695,7 +732,7 @@ def action_payload(args: argparse.Namespace) -> dict[str, Any]:
         "action": args.action,
         "dryRun": args.dry_run,
         "coordinationRoot": args.coordination_root.as_posix(),
-        "settingsFile": settings_path(args.coordination_root).as_posix(),
+        "settingsFile": settings_path(args.coordination_root, args.from_settings).as_posix(),
         "isolatedCgcSettings": isolated,
         "enabled": enabled,
         "results": results,
@@ -706,6 +743,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "prepare"))
     parser.add_argument("--coordination-root", type=Path, required=True)
+    parser.add_argument("--from-settings", type=Path)
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -714,6 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-cgc-refresh-fallback", dest="cgc_refresh_fallback", action="store_false")
     parser.set_defaults(cgc_refresh_fallback=True)
     parser.add_argument("--cgc-seed-source-coordination-root", type=Path)
+    parser.add_argument("--cgc-seed-source-from-settings", type=Path)
     parser.add_argument("--cgc-seed-repo-id")
     parser.add_argument("--cgc-seed-source-repo-id")
     parser.add_argument("--cgc-seed-source-repo-root", type=Path)
@@ -750,11 +789,13 @@ def main(argv: list[str] | None = None) -> int:
     args.coordination_root = args.coordination_root.resolve()
     for name in (
         "cgc_seed_source_coordination_root",
+        "cgc_seed_source_from_settings",
         "cgc_seed_source_repo_root",
         "cgc_seed_target_repo_root",
         "cgc_seed_bundle_dir",
         "cgc_isolated_runtime_root",
         "cgc_isolated_settings_path",
+        "from_settings",
     ):
         value = getattr(args, name)
         if value is not None:

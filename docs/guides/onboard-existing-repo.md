@@ -4,10 +4,10 @@ You do not need full coverage before Agents Remember becomes useful. Start small
 
 ## 1. Install The Runtime
 
-From the workspace root:
+Configure the Agents Remember MCP server, then request:
 
-```bash
-python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
+```text
+runtime_install(dry_run=false)
 ```
 
 Expose skills for your harness using the relevant [install guide](../README.md#install-guides).

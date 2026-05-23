@@ -5,18 +5,14 @@ use after the `Relationship` substrate is selected. Examples are synthetic and
 show response shapes only. Do not copy private repository names, symbols, or
 paths into training-style examples.
 
-Run CGC through the managed provider wrapper:
+Request CGC through the Agents Remember MCP provider tools:
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- <cgc command>
+```text
+cgc_query(repo_id="<repoId>", query_type="<cgc command>", arguments=[...], dry_run=false)
 ```
 
-When running this lower-level script directly, pass the same generated provider
-settings file the MCP would use with `--from-settings`. Provider authority does
-not come from coordinator `system/settings.json`.
+Provider authority comes from MCP settings. It does not come from coordinator
+`system/settings.json`.
 
 CGC is not just a locator. `find name <anchor>` is a useful smoke test, but the
 high-level methods below expose call edges, reverse call edges, import
@@ -43,12 +39,13 @@ implementations, and variable occurrences.
 Use `calls` when the anchor function is known and the missing packet is what it
 invokes next.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze calls handleRequest \
-  --file <repo>/src/http/request-handler.ts
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["calls", "handleRequest", "--file", "<repo>/src/http/request-handler.ts"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -72,12 +69,13 @@ Confirm any selected target with source before editing.
 Use `callers` when the anchor function is known and the missing packet is who
 can reach it.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze callers dispatchCommand \
-  --file <repo>/src/app/command-router.ts
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["callers", "dispatchCommand", "--file", "<repo>/src/app/command-router.ts"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -100,14 +98,23 @@ triage.
 Use `chain` to prove whether one known function can reach another through call
 edges.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze chain handleRequest saveAuditEvent \
-  --from-file <repo>/src/http/request-handler.ts \
-  --to-file <repo>/src/audit/audit-store.ts \
-  --depth 3
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=[
+    "chain",
+    "handleRequest",
+    "saveAuditEvent",
+    "--from-file",
+    "<repo>/src/http/request-handler.ts",
+    "--to-file",
+    "<repo>/src/audit/audit-store.ts",
+    "--depth",
+    "3",
+  ],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -131,11 +138,13 @@ recorded by CGC, not necessarily a file path. If a file-path query returns no
 data, inspect a few `IMPORTS` edges or source imports and retry with the module
 string.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze deps ../shared/validation --no-external
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["deps", "../shared/validation", "--no-external"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -154,12 +163,13 @@ Use this for module impact checks and import-neighborhood discovery.
 
 Use `tree` for class inheritance and attached methods.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze tree CachedRepository \
-  --file <repo>/src/storage/cached-repository.ts
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["tree", "CachedRepository", "--file", "<repo>/src/storage/cached-repository.ts"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -187,11 +197,13 @@ call sites.
 
 Use `complexity` to identify large or risky functions before changing a route.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze complexity --limit 5
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["complexity", "--limit", "5"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -216,11 +228,8 @@ Use `dead-code` for candidates that have no incoming CGC call edges. Treat the
 result as a prompt for source confirmation, because dynamic callbacks,
 framework entry points, event handlers, and reflection can look unused.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze dead-code
+```text
+cgc_query(repo_id="<repoId>", query_type="analyze", arguments=["dead-code"], dry_run=false)
 ```
 
 Synthetic output shape:
@@ -242,11 +251,8 @@ Use this for cleanup investigation, not as deletion proof.
 
 Use `overrides` to find all class implementations of a method name.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze overrides serialize
+```text
+cgc_query(repo_id="<repoId>", query_type="analyze", arguments=["overrides", "serialize"], dry_run=false)
 ```
 
 Synthetic output shape:
@@ -267,12 +273,13 @@ Use this before changing method contracts or shared serialization behavior.
 Use `variable` to find occurrences of a variable name, optionally limited to a
 file.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze variable requestId \
-  --file <repo>/src/http/request-handler.ts
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["variable", "requestId", "--file", "<repo>/src/http/request-handler.ts"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape:
@@ -297,11 +304,13 @@ selected occurrence.
 Use `kotlin-call-audit` only for repositories with Kotlin code. It reports
 multi-target callsite ambiguity in Kotlin call edges.
 
-```bash
-python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze kotlin-call-audit --limit 10
+```text
+cgc_query(
+  repo_id="<repoId>",
+  query_type="analyze",
+  arguments=["kotlin-call-audit", "--limit", "10"],
+  dry_run=false,
+)
 ```
 
 Synthetic output shape for a non-Kotlin repo:
