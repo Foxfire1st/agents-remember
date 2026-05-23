@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.drift import onboarding_drift as drift
@@ -21,14 +22,39 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 
 
-def resolve_context(args: argparse.Namespace):
-    return resolver.resolve_coordination_context(
+@dataclass(frozen=True)
+class BaselineRequest:
+    code_repository_name: str
+    workspace_root: Path
+    code_repository_root: Path | None = None
+    coordination_root: Path | None = None
+    topology: str | None = "external"
+    report: Path | None = None
+
+
+def request_from_args(args: argparse.Namespace) -> BaselineRequest:
+    return BaselineRequest(
         code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,
-        requested_topology=args.topology,
-        coordination_root=args.coordination_root,
         code_repository_root=args.code_repository_root,
+        coordination_root=args.coordination_root,
+        topology=args.topology,
+        report=args.report,
     )
+
+
+def resolve_request_context(request: BaselineRequest):
+    return resolver.resolve_coordination_context(
+        code_repository_name=request.code_repository_name,
+        workspace_root=request.workspace_root,
+        requested_topology=request.topology,
+        coordination_root=request.coordination_root,
+        code_repository_root=request.code_repository_root,
+    )
+
+
+def resolve_context(args: argparse.Namespace):
+    return resolve_request_context(request_from_args(args))
 
 
 def run_drift(context, report_path: Path | None):
@@ -168,42 +194,63 @@ def base_payload(context, rows: list[object], report: Path) -> dict[str, object]
     }
 
 
+def baseline_status(request: BaselineRequest) -> dict[str, object]:
+    context = resolve_request_context(request)
+    rows, report = run_drift(context, request.report)
+    return base_payload(context, rows, report)
+
+
+def baseline_adopt(
+    request: BaselineRequest,
+    *,
+    accept_drift: bool = False,
+    source_branch: str | None = None,
+    work_branch: str | None = None,
+    dry_run: bool = True,
+) -> tuple[int, dict[str, object]]:
+    context = resolve_request_context(request)
+    if context.topology != "external":
+        raise RuntimeError("adoption requires external topology")
+    rows, report = run_drift(context, request.report)
+    payload = base_payload(context, rows, report)
+    if payload["ledger"]["exists"]:
+        return 0, payload
+    if payload["drift"]["actionable"] and not accept_drift:
+        payload["message"] = (
+            "actionable drift blocks adoption; refresh onboarding with C-05 or rerun with --accept-drift"
+        )
+        return 2, payload
+    if dry_run:
+        payload["state"] = "would-adopt"
+        payload["accepted_drift"] = bool(accept_drift)
+        return 0, payload
+
+    resolved_source_branch = source_branch or current_branch(context.code_repository_root)
+    result = adopt_initial_baseline(
+        context, resolved_source_branch, work_branch or resolved_source_branch
+    )
+    payload["state"] = "adopted"
+    payload["accepted_drift"] = bool(accept_drift)
+    payload["bootstrap"] = result
+    payload["ledger"] = ledger_status(context.ledger_path)
+    return 0, payload
+
+
 def command_status(args: argparse.Namespace) -> int:
-    context = resolve_context(args)
-    rows, report = run_drift(context, args.report)
-    print(json.dumps(base_payload(context, rows, report), indent=2))
+    print(json.dumps(baseline_status(request_from_args(args)), indent=2))
     return 0
 
 
 def command_adopt(args: argparse.Namespace) -> int:
-    context = resolve_context(args)
-    if context.topology != "external":
-        raise RuntimeError("adoption requires external topology")
-    rows, report = run_drift(context, args.report)
-    payload = base_payload(context, rows, report)
-    if payload["ledger"]["exists"]:
-        print(json.dumps(payload, indent=2))
-        return 0
-    if payload["drift"]["actionable"] and not args.accept_drift:
-        payload["message"] = (
-            "actionable drift blocks adoption; refresh onboarding with C-05 or rerun with --accept-drift"
-        )
-        print(json.dumps(payload, indent=2))
-        return 2
-    if args.dry_run:
-        payload["state"] = "would-adopt"
-        payload["accepted_drift"] = bool(args.accept_drift)
-        print(json.dumps(payload, indent=2))
-        return 0
-
-    source_branch = args.source_branch or current_branch(context.code_repository_root)
-    result = adopt_initial_baseline(context, source_branch, args.work_branch or source_branch)
-    payload["state"] = "adopted"
-    payload["accepted_drift"] = bool(args.accept_drift)
-    payload["bootstrap"] = result
-    payload["ledger"] = ledger_status(context.ledger_path)
+    returncode, payload = baseline_adopt(
+        request_from_args(args),
+        accept_drift=args.accept_drift,
+        source_branch=args.source_branch,
+        work_branch=args.work_branch,
+        dry_run=args.dry_run,
+    )
     print(json.dumps(payload, indent=2))
-    return 0
+    return returncode
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:

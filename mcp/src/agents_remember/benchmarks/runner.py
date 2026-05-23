@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -136,6 +138,33 @@ class BenchmarkCase:
     @property
     def prompts(self) -> list[dict[str, Any]]:
         return list(self.data.get("prompts", []))
+
+
+@dataclass(frozen=True)
+class BenchmarkPrepareRequest:
+    benchmarks_root: Path
+    target: str = "all"
+    case_id: str | None = None
+    dry_run: bool = True
+    skill_exposure_mode: str = "copy"
+    force_clone: bool = False
+    provider_timeout: int = 1800
+
+
+@dataclass(frozen=True)
+class BenchmarkRunRequest:
+    benchmarks_root: Path
+    target: str = "all"
+    case_id: str | None = None
+    prompt: str | None = None
+    variant: str | None = None
+    repetitions: int | None = None
+    jobs: int | None = None
+    dry_run: bool = True
+    skip_prepare: bool = False
+    skill_exposure_mode: str = "copy"
+    force_clone: bool = False
+    provider_timeout: int = 1800
 
 
 def default_benchmarks_root() -> Path:
@@ -1141,6 +1170,82 @@ def write_summary(run_root: Path, rows: list[dict[str, Any]]) -> Path:
     return summary_path
 
 
+def _capture_messages(run: Any) -> tuple[Any, list[str]]:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        value = run()
+    messages = [line for line in stdout.getvalue().splitlines() if line]
+    return value, messages
+
+
+def prepare_benchmarks(request: BenchmarkPrepareRequest) -> dict[str, Any]:
+    benchmarks_root = request.benchmarks_root.resolve()
+    cases = select_cases(load_cases(benchmarks_root), request.target, request.case_id)
+
+    def run_prepare() -> None:
+        for case in cases:
+            prepare_case(
+                benchmarks_root,
+                case,
+                dry_run=request.dry_run,
+                skill_exposure_mode=request.skill_exposure_mode,
+                force_clone=request.force_clone,
+                provider_timeout=request.provider_timeout,
+            )
+
+    _, messages = _capture_messages(run_prepare)
+    return {
+        "ok": True,
+        "operation": "codex_benchmark_prepare",
+        "benchmarksRoot": benchmarks_root.as_posix(),
+        "target": request.target,
+        "caseId": request.case_id or "",
+        "dryRun": request.dry_run,
+        "cases": [case.case_id for case in cases],
+        "messages": messages,
+    }
+
+
+def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
+    benchmarks_root = request.benchmarks_root.resolve()
+    cases = select_cases(load_cases(benchmarks_root), request.target, request.case_id)
+
+    def run_selected_cases() -> list[Path]:
+        output_roots: list[Path] = []
+        for case in cases:
+            output_roots.append(
+                run_case(
+                    benchmarks_root,
+                    case,
+                    prompt_id=request.prompt,
+                    variant_id=request.variant,
+                    repetitions=request.repetitions,
+                    jobs=request.jobs,
+                    dry_run=request.dry_run,
+                    skip_prepare=request.skip_prepare,
+                    skill_exposure_mode=request.skill_exposure_mode,
+                    force_clone=request.force_clone,
+                    provider_timeout=request.provider_timeout,
+                )
+            )
+        return output_roots
+
+    output_roots, messages = _capture_messages(run_selected_cases)
+    return {
+        "ok": True,
+        "operation": "codex_benchmark_run",
+        "benchmarksRoot": benchmarks_root.as_posix(),
+        "target": request.target,
+        "caseId": request.case_id or "",
+        "prompt": request.prompt or "",
+        "variant": request.variant or "",
+        "dryRun": request.dry_run,
+        "cases": [case.case_id for case in cases],
+        "runOutputRoots": [path.as_posix() for path in output_roots],
+        "messages": messages,
+    }
+
+
 def command_list(args: argparse.Namespace) -> int:
     benchmarks_root = args.benchmarks_root.resolve()
     for case in load_cases(benchmarks_root):
@@ -1153,29 +1258,30 @@ def command_list(args: argparse.Namespace) -> int:
 
 
 def command_prepare(args: argparse.Namespace) -> int:
-    benchmarks_root = args.benchmarks_root.resolve()
-    cases = select_cases(load_cases(benchmarks_root), args.target, args.case_id)
-    for case in cases:
-        prepare_case(
-            benchmarks_root,
-            case,
+    payload = prepare_benchmarks(
+        BenchmarkPrepareRequest(
+            benchmarks_root=args.benchmarks_root,
+            target=args.target,
+            case_id=args.case_id,
             dry_run=args.dry_run,
             skill_exposure_mode=args.skill_exposure_mode,
             force_clone=args.force_clone,
             provider_timeout=args.provider_timeout,
         )
+    )
+    for message in payload["messages"]:
+        print(message)
     return 0
 
 
 def command_run(args: argparse.Namespace) -> int:
-    benchmarks_root = args.benchmarks_root.resolve()
-    cases = select_cases(load_cases(benchmarks_root), args.target, args.case_id)
-    for case in cases:
-        output_root = run_case(
-            benchmarks_root,
-            case,
-            prompt_id=args.prompt,
-            variant_id=args.variant,
+    payload = run_codex_benchmark(
+        BenchmarkRunRequest(
+            benchmarks_root=args.benchmarks_root,
+            target=args.target,
+            case_id=args.case_id,
+            prompt=args.prompt,
+            variant=args.variant,
             repetitions=args.repetitions,
             jobs=args.jobs,
             dry_run=args.dry_run,
@@ -1184,6 +1290,10 @@ def command_run(args: argparse.Namespace) -> int:
             force_clone=args.force_clone,
             provider_timeout=args.provider_timeout,
         )
+    )
+    for message in payload["messages"]:
+        print(message)
+    for output_root in payload["runOutputRoots"]:
         print(f"Run output: {output_root}")
     return 0
 

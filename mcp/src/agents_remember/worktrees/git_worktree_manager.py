@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 import subprocess
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from agents_remember.kernel import coordination_context_resolver as resolver
@@ -32,6 +32,12 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
+
+
+@dataclass(frozen=True)
+class WorktreeCommandResult:
+    returncode: int
+    payload: dict[str, object]
 
 
 def run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -221,19 +227,31 @@ def load_contract_from_args(args: argparse.Namespace) -> WorktreeContract:
     return load_contract(contract_path)
 
 
-def command_status(args: argparse.Namespace) -> int:
+def status_result(args: argparse.Namespace) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
-    print(json.dumps(status_payload(contract), indent=2))
-    return 0
+    return WorktreeCommandResult(0, status_payload(contract))
+
+
+def command_status(args: argparse.Namespace) -> int:
+    result = status_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
+
+
+def attach_result(args: argparse.Namespace) -> WorktreeCommandResult:
+    contract = load_contract_from_args(args)
+    return WorktreeCommandResult(
+        0, {"state": "attached", "attached": True, **status_payload(contract)}
+    )
 
 
 def command_attach(args: argparse.Namespace) -> int:
-    contract = load_contract_from_args(args)
-    print(json.dumps({"state": "attached", "attached": True, **status_payload(contract)}, indent=2))
-    return 0
+    result = attach_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
-def command_start(args: argparse.Namespace) -> int:
+def start_result(args: argparse.Namespace) -> WorktreeCommandResult:
     context = resolve_context(args)
     repo = context.code_repository_root
     source_branch = args.source_branch or current_branch(repo)
@@ -269,12 +287,9 @@ def command_start(args: argparse.Namespace) -> int:
 
     if contract.contract_path.exists():
         contract = load_contract(contract.contract_path)
-        print(
-            json.dumps(
-                {"state": "attached-existing-contract", **status_payload(contract)}, indent=2
-            )
+        return WorktreeCommandResult(
+            0, {"state": "attached-existing-contract", **status_payload(contract)}
         )
-        return 0
 
     code_state = ensure_worktree(
         repo,
@@ -285,19 +300,16 @@ def command_start(args: argparse.Namespace) -> int:
     )
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":
-        print(
-            json.dumps(
-                {
-                    "state": "blocked",
-                    "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-                    "next_action": "choose-memory-recovery",
-                    "code_worktree": code_state,
-                    "memory": memory_state,
-                },
-                indent=2,
-            )
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
+                "next_action": "choose-memory-recovery",
+                "code_worktree": code_state,
+                "memory": memory_state,
+            },
         )
-        return 2
     if contract.memory_mode == "external" and memory_state["state"] == "disabled":
         contract = replace(
             contract,
@@ -312,39 +324,39 @@ def command_start(args: argparse.Namespace) -> int:
         )
     provider_state = prepare_providers_for_start(context, contract, args)
     if provider_state["state"] == "blocked":
-        print(
-            json.dumps(
-                {
-                    "state": "blocked",
-                    "summary": "Worktree provider setup could not be prepared safely.",
-                    "next_action": "choose-provider-setup-recovery",
-                    "code_worktree": code_state,
-                    "memory": memory_state,
-                    "providers": provider_state,
-                },
-                indent=2,
-            )
-        )
-        return 2
-    if not args.dry_run:
-        write_contract(contract.contract_path, contract)
-    print(
-        json.dumps(
+        return WorktreeCommandResult(
+            2,
             {
-                "state": "started",
-                "summary": "Worktree task started; continue the wrapped workflow before closeout.",
-                "next_action": "work",
+                "state": "blocked",
+                "summary": "Worktree provider setup could not be prepared safely.",
+                "next_action": "choose-provider-setup-recovery",
                 "code_worktree": code_state,
                 "memory": memory_state,
                 "providers": provider_state,
-                "contract_path": contract.contract_path.as_posix(),
-                "task_artifact": contract.task_artifact.as_posix(),
-                "contract": contract_payload(contract),
             },
-            indent=2,
         )
+    if not args.dry_run:
+        write_contract(contract.contract_path, contract)
+    return WorktreeCommandResult(
+        0,
+        {
+            "state": "started",
+            "summary": "Worktree task started; continue the wrapped workflow before closeout.",
+            "next_action": "work",
+            "code_worktree": code_state,
+            "memory": memory_state,
+            "providers": provider_state,
+            "contract_path": contract.contract_path.as_posix(),
+            "task_artifact": contract.task_artifact.as_posix(),
+            "contract": contract_payload(contract),
+        },
     )
-    return 0
+
+
+def command_start(args: argparse.Namespace) -> int:
+    result = start_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
 def parse_json_stdout(stdout: str) -> object:
@@ -861,7 +873,7 @@ def closeout_preview_payload(
     return payload
 
 
-def command_closeout(args: argparse.Namespace) -> int:
+def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
     contract = load_contract(args.contract_path)
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
     if current_code_source != contract.code_base_commit:
@@ -883,8 +895,7 @@ def command_closeout(args: argparse.Namespace) -> int:
                 f"{contract.memory_source_branch} is {current_memory_source}, expected {contract.memory_base_commit}"
             )
     if args.dry_run:
-        print(json.dumps(closeout_preview_payload(contract, args), indent=2))
-        return 0
+        return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     if not args.approved:
         raise RuntimeError("closeout requires --approved after explicit commit approval")
     approval_note = args.approval_note.replace("\n", " ").strip()
@@ -929,25 +940,26 @@ def command_closeout(args: argparse.Namespace) -> int:
         ledger_commit=ledger_commit,
     )
     write_contract(contract.contract_path, updated)
-    print(
-        json.dumps(
-            {
-                "state": "closed",
-                **status_payload(updated),
-                "summary": "Closeout completed; integrate the task branches back into their source branches.",
-                "next_action": "integrate",
-                "code_commit": code_commit,
-                "memory_content_commit": memory_commit,
-                "ledger_commit": ledger_commit,
-                "refreshed_onboarding": refreshed_onboarding,
-                "refreshed_entities": refreshed_entities
-                if contract.memory_mode == "external"
-                else [],
-            },
-            indent=2,
-        )
+    return WorktreeCommandResult(
+        0,
+        {
+            "state": "closed",
+            **status_payload(updated),
+            "summary": "Closeout completed; integrate the task branches back into their source branches.",
+            "next_action": "integrate",
+            "code_commit": code_commit,
+            "memory_content_commit": memory_commit,
+            "ledger_commit": ledger_commit,
+            "refreshed_onboarding": refreshed_onboarding,
+            "refreshed_entities": refreshed_entities if contract.memory_mode == "external" else [],
+        },
     )
-    return 0
+
+
+def command_closeout(args: argparse.Namespace) -> int:
+    result = closeout_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
 def validate_direct_external_context(context, source_branch: str) -> object:
@@ -1030,13 +1042,14 @@ def direct_closeout_preview_payload(
     }
 
 
-def command_direct_closeout(args: argparse.Namespace) -> int:
+def direct_closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
     context = resolve_context(args)
     source_branch = args.source_branch or current_branch(context.code_repository_root)
     validate_direct_external_context(context, source_branch)
     if args.dry_run:
-        print(json.dumps(direct_closeout_preview_payload(context, args, source_branch), indent=2))
-        return 0
+        return WorktreeCommandResult(
+            0, direct_closeout_preview_payload(context, args, source_branch)
+        )
     if not args.approved:
         raise RuntimeError("direct closeout requires --approved after explicit commit approval")
     approval_note = args.approval_note.replace("\n", " ").strip()
@@ -1067,28 +1080,31 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
         args.ledger_commit_message
         or f"[direct-closeout] Ledger sync: {code_commit} -> {memory_commit}",
     )
-    print(
-        json.dumps(
-            {
-                "state": "direct-closed",
-                "phase": "done",
-                "code_repository_name": context.code_repository_name,
-                "code_repository_root": context.code_repository_root.as_posix(),
-                "memory_repo": context.memory_root.as_posix(),
-                "source_branch": source_branch,
-                "summary": "Direct closeout completed; code, memory content, and ledger commits were created on the current branches.",
-                "approval_note": approval_note,
-                "changed_code_paths": changed_paths,
-                "code_commit": code_commit,
-                "memory_content_commit": memory_commit,
-                "ledger_commit": ledger_commit,
-                "refreshed_onboarding": refreshed_onboarding,
-                "refreshed_entities": refreshed_entities,
-            },
-            indent=2,
-        )
+    return WorktreeCommandResult(
+        0,
+        {
+            "state": "direct-closed",
+            "phase": "done",
+            "code_repository_name": context.code_repository_name,
+            "code_repository_root": context.code_repository_root.as_posix(),
+            "memory_repo": context.memory_root.as_posix(),
+            "source_branch": source_branch,
+            "summary": "Direct closeout completed; code, memory content, and ledger commits were created on the current branches.",
+            "approval_note": approval_note,
+            "changed_code_paths": changed_paths,
+            "code_commit": code_commit,
+            "memory_content_commit": memory_commit,
+            "ledger_commit": ledger_commit,
+            "refreshed_onboarding": refreshed_onboarding,
+            "refreshed_entities": refreshed_entities,
+        },
     )
-    return 0
+
+
+def command_direct_closeout(args: argparse.Namespace) -> int:
+    result = direct_closeout_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
 def integration_branch(contract: WorktreeContract) -> str:
@@ -1241,13 +1257,12 @@ def replay_memory_content(
     return integrated_memory_content_commit, integrated_ledger_commit, None
 
 
-def command_integrate(args: argparse.Namespace) -> int:
-    if not args.approved:
+def integrate_result(args: argparse.Namespace) -> WorktreeCommandResult:
+    if not args.approved and not args.dry_run:
         raise RuntimeError("integration requires --approved after human review")
     contract = load_contract(args.contract_path)
     if contract.integration_status == "completed":
-        print(json.dumps({"state": "already-integrated", **status_payload(contract)}, indent=2))
-        return 0
+        return WorktreeCommandResult(0, {"state": "already-integrated", **status_payload(contract)})
     validate_integrate_contract(contract)
 
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
@@ -1265,45 +1280,38 @@ def command_integrate(args: argparse.Namespace) -> int:
             contract.memory_repo_path, current_memory_source, contract.ledger_commit
         )
     if args.strategy == "ff-only" and (code_replay_required or memory_replay_required):
-        print(
-            json.dumps(
-                blocked_integration_payload(
-                    contract,
-                    "blocked-non-ff",
-                    "source branch moved; rerun with --strategy replay after reviewing parallel changes",
-                    persist=not args.dry_run,
-                    code_replay_required=code_replay_required,
-                    memory_replay_required=memory_replay_required,
-                ),
-                indent=2,
-            )
+        return WorktreeCommandResult(
+            2,
+            blocked_integration_payload(
+                contract,
+                "blocked-non-ff",
+                "source branch moved; rerun with --strategy replay after reviewing parallel changes",
+                persist=not args.dry_run,
+                code_replay_required=code_replay_required,
+                memory_replay_required=memory_replay_required,
+            ),
         )
-        return 2
 
     if args.dry_run:
-        print(
-            json.dumps(
-                {
-                    "state": "would-integrate",
-                    **status_payload(contract),
-                    "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
-                    "next_action": "integrate",
-                    "strategy": args.strategy,
-                    "code_replay_required": code_replay_required,
-                    "memory_replay_required": memory_replay_required,
-                    "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
-                },
-                indent=2,
-            )
+        return WorktreeCommandResult(
+            0,
+            {
+                "state": "would-integrate",
+                **status_payload(contract),
+                "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
+                "next_action": "integrate",
+                "strategy": args.strategy,
+                "code_replay_required": code_replay_required,
+                "memory_replay_required": memory_replay_required,
+                "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
+            },
         )
-        return 0
 
     integrated_code_commit = contract.code_commit
     if args.strategy == "replay":
         integrated_code_commit, blocked = replay_code_if_needed(contract, current_code_source)
         if blocked is not None:
-            print(json.dumps(blocked, indent=2))
-            return 2
+            return WorktreeCommandResult(2, blocked)
     if not is_ancestor(contract.code_repo_path, current_code_source, integrated_code_commit):
         raise RuntimeError(
             "integrated code commit is not a fast-forward from the current code source branch"
@@ -1330,8 +1338,7 @@ def command_integrate(args: argparse.Namespace) -> int:
                 )
             )
             if blocked is not None:
-                print(json.dumps(blocked, indent=2))
-                return 2
+                return WorktreeCommandResult(2, blocked)
         if not is_ancestor(
             contract.memory_repo_path, current_memory_source, integrated_ledger_commit
         ):
@@ -1360,23 +1367,26 @@ def command_integrate(args: argparse.Namespace) -> int:
         cleanup="pending",
     )
     write_contract(contract.contract_path, updated)
-    print(
-        json.dumps(
-            {
-                "state": "integrated",
-                **status_payload(updated),
-                "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
-                "next_action": "cleanup",
-                "strategy": args.strategy,
-                "integrated_code_commit": integrated_code_commit,
-                "integrated_memory_content_commit": integrated_memory_content_commit,
-                "integrated_ledger_commit": integrated_ledger_commit,
-                "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
-            },
-            indent=2,
-        )
+    return WorktreeCommandResult(
+        0,
+        {
+            "state": "integrated",
+            **status_payload(updated),
+            "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
+            "next_action": "cleanup",
+            "strategy": args.strategy,
+            "integrated_code_commit": integrated_code_commit,
+            "integrated_memory_content_commit": integrated_memory_content_commit,
+            "integrated_ledger_commit": integrated_ledger_commit,
+            "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
+        },
     )
-    return 0
+
+
+def command_integrate(args: argparse.Namespace) -> int:
+    result = integrate_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
 def remove_registered_worktree(repo: Path, worktree: Path, dry_run: bool) -> dict[str, object]:
@@ -1420,8 +1430,8 @@ def remove_empty_dir(path: Path, dry_run: bool) -> dict[str, object]:
     return {"path": path.as_posix(), "removed": True}
 
 
-def command_cleanup(args: argparse.Namespace) -> int:
-    if not args.approved:
+def cleanup_result(args: argparse.Namespace) -> WorktreeCommandResult:
+    if not args.approved and not args.dry_run:
         raise RuntimeError("cleanup requires --approved after successful integration")
     contract = load_contract(args.contract_path)
     if contract.integration_status != "completed":
@@ -1493,22 +1503,25 @@ def command_cleanup(args: argparse.Namespace) -> int:
         for key, value in branches.items()
         if not value.get("deleted") and value.get("reason") not in {"already-absent", None}
     }
-    print(
-        json.dumps(
-            {
-                "state": state,
-                **status_payload(updated),
-                "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
-                "next_action": "done",
-                "removed_worktrees": removed_worktrees,
-                "branches": branches,
-                "directories": directories,
-                "kept_branches": kept_branches,
-            },
-            indent=2,
-        )
+    return WorktreeCommandResult(
+        0,
+        {
+            "state": state,
+            **status_payload(updated),
+            "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
+            "next_action": "done",
+            "removed_worktrees": removed_worktrees,
+            "branches": branches,
+            "directories": directories,
+            "kept_branches": kept_branches,
+        },
     )
-    return 0
+
+
+def command_cleanup(args: argparse.Namespace) -> int:
+    result = cleanup_result(args)
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:

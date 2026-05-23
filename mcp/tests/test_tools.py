@@ -24,8 +24,11 @@ from agents_remember.mcp.tools import (
     cgc_complexity_payload,
     cgc_dependencies_payload,
     cgc_symbol_search_payload,
+    codex_benchmark_prepare_payload,
     codex_benchmark_run_payload,
     context_packet_payload,
+    memory_baseline_status_payload,
+    memory_carryover_plan_payload,
     memory_init_payload,
     ping_payload,
     route_index_refresh_payload,
@@ -190,6 +193,52 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["operation"], "codex_benchmark_run")
             self.assertEqual(payload["executable"], "codex")
             self.assertEqual(payload["resolution"], "PATH")
+
+    def test_command_style_artifacts_are_not_exposed_for_service_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with (
+                patch(
+                    "agents_remember.controllers.skill_tools.baseline.baseline_status",
+                    return_value={"state": "ready"},
+                ),
+                patch(
+                    "agents_remember.controllers.skill_tools.carryover.build_plan_for_request",
+                    return_value={"state": "would-carryover"},
+                ),
+                patch(
+                    "agents_remember.controllers.skill_tools.benchmark_runner.prepare_benchmarks",
+                    return_value={
+                        "ok": True,
+                        "operation": "codex_benchmark_prepare",
+                        "messages": [],
+                    },
+                ),
+            ):
+                payloads = [
+                    memory_baseline_status_payload(config, "agents-remember-md"),
+                    memory_carryover_plan_payload(
+                        config,
+                        "agents-remember-md",
+                        source_memory=(
+                            root / "ar-coordination" / "memory-repos" / "branch-memory"
+                        ).as_posix(),
+                        official_code_ref="main",
+                        source_code_ref="feature",
+                        old_base="base",
+                    ),
+                    codex_benchmark_prepare_payload(config),
+                ]
+
+            for payload in payloads:
+                self.assertNotIn("argv", payload)
+                self.assertNotIn("stdout", payload)
+                self.assertNotIn("stderr", payload)
+                self.assertNotIn("payload", payload)
 
     def test_skills_install_payload_is_copy_only_and_dry_run_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

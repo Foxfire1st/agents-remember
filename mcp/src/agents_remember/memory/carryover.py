@@ -34,6 +34,31 @@ class CarryoverCandidate:
     official_exists: bool
 
 
+@dataclass(frozen=True)
+class CarryoverRequest:
+    code_repository_root: Path
+    official_code_ref: str
+    source_code_ref: str
+    old_base: str
+    official_memory: Path
+    source_memory: Path
+    code_repository_name: str
+    replace_existing: bool = False
+
+
+def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
+    return CarryoverRequest(
+        code_repository_root=args.code_repository_root,
+        official_code_ref=args.official_code_ref,
+        source_code_ref=args.source_code_ref,
+        old_base=args.old_base,
+        official_memory=args.official_memory,
+        source_memory=args.source_memory,
+        code_repository_name=args.code_repository_name,
+        replace_existing=args.replace_existing,
+    )
+
+
 def run_git(
     repo: Path, args: list[str], *, input_text: str | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -204,25 +229,25 @@ def candidate_for_path(
     )
 
 
-def build_plan(args: argparse.Namespace) -> dict[str, object]:
-    code_repository_root = args.code_repository_root.resolve()
-    official_memory = args.official_memory.resolve()
-    source_memory = args.source_memory.resolve()
-    official_head = head_commit(code_repository_root, args.official_code_ref)
-    source_head = head_commit(code_repository_root, args.source_code_ref)
-    old_base = head_commit(code_repository_root, args.old_base)
-    official_changed = changed_paths(code_repository_root, old_base, args.official_code_ref)
-    source_changed = changed_paths(code_repository_root, old_base, args.source_code_ref)
+def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
+    code_repository_root = request.code_repository_root.resolve()
+    official_memory = request.official_memory.resolve()
+    source_memory = request.source_memory.resolve()
+    official_head = head_commit(code_repository_root, request.official_code_ref)
+    source_head = head_commit(code_repository_root, request.source_code_ref)
+    old_base = head_commit(code_repository_root, request.old_base)
+    official_changed = changed_paths(code_repository_root, old_base, request.official_code_ref)
+    source_changed = changed_paths(code_repository_root, old_base, request.source_code_ref)
     candidates = [
         candidate_for_path(
             code_repository_root=code_repository_root,
             old_base=old_base,
-            official_ref=args.official_code_ref,
-            source_ref=args.source_code_ref,
+            official_ref=request.official_code_ref,
+            source_ref=request.source_code_ref,
             official_memory=official_memory,
             source_memory=source_memory,
             source_path=source_path,
-            replace_existing=args.replace_existing,
+            replace_existing=request.replace_existing,
         )
         for source_path in sorted(source_changed)
         if source_path in official_changed
@@ -249,19 +274,23 @@ def build_plan(args: argparse.Namespace) -> dict[str, object]:
         counts[candidate.decision] = counts.get(candidate.decision, 0) + 1
     return {
         "state": "would-carryover",
-        "code_repository_name": args.code_repository_name,
+        "code_repository_name": request.code_repository_name,
         "code_repository_root": code_repository_root.as_posix(),
-        "official_code_ref": args.official_code_ref,
+        "official_code_ref": request.official_code_ref,
         "official_code_head": official_head,
-        "source_code_ref": args.source_code_ref,
+        "source_code_ref": request.source_code_ref,
         "source_code_head": source_head,
         "old_base": old_base,
         "official_memory": official_memory.as_posix(),
         "source_memory": source_memory.as_posix(),
-        "replace_existing": bool(args.replace_existing),
+        "replace_existing": bool(request.replace_existing),
         "counts": counts,
         "candidates": [asdict(candidate) for candidate in candidates],
     }
+
+
+def build_plan(args: argparse.Namespace) -> dict[str, object]:
+    return build_plan_for_request(request_from_args(args))
 
 
 def metadata_row(text: str, field: str, value: str, *, code: bool = False) -> tuple[str, bool]:
@@ -294,19 +323,27 @@ def selected_candidates(
     return selected
 
 
-def apply_carryover(args: argparse.Namespace) -> dict[str, object]:
-    if not args.approved or not args.approval_note:
-        raise RuntimeError("apply requires --approved and --approval-note")
-    plan = build_plan(args)
-    official_memory = args.official_memory.resolve()
+def apply_carryover_for_request(
+    request: CarryoverRequest,
+    *,
+    intent_note: str,
+    include_review_required: list[str] | None = None,
+    memory_commit_message: str = "Carry over landed branch memory",
+    ledger_commit_message: str = "Record branch memory carryover",
+) -> dict[str, object]:
+    cleaned_note = intent_note.replace("\n", " ").strip()
+    if not cleaned_note:
+        raise RuntimeError("apply requires an intent_note describing the requested carryover")
+    plan = build_plan_for_request(request)
+    official_memory = request.official_memory.resolve()
     ensure_clean(official_memory, "official memory")
     ledger_path = official_memory / "memory.md"
     ledger = load_ledger(ledger_path)
     official_head = str(plan["official_code_head"])
-    official_date = commit_date(args.code_repository_root.resolve(), official_head)
-    include_review_required = set(args.include_review_required or [])
+    official_date = commit_date(request.code_repository_root.resolve(), official_head)
+    included_review_required = set(include_review_required or [])
     carried = []
-    for candidate in selected_candidates(plan, include_review_required):
+    for candidate in selected_candidates(plan, included_review_required):
         source = Path(str(candidate["branch_onboarding"]))
         target = Path(str(candidate["official_onboarding"]))
         if not source.exists():
@@ -320,18 +357,30 @@ def apply_carryover(args: argparse.Namespace) -> dict[str, object]:
     if not carried or not has_changes(official_memory):
         payload = {**plan, "state": "nothing-to-carryover", "carried": carried}
         return payload
-    memory_content_commit = commit_if_dirty(official_memory, args.memory_commit_message)
+    memory_content_commit = commit_if_dirty(official_memory, memory_commit_message)
     write_ledger(ledger_path, prepend_mapping(ledger, official_head, memory_content_commit))
     require_git(official_memory, ["add", "memory.md"])
-    ledger_commit = commit_if_dirty(official_memory, args.ledger_commit_message)
+    ledger_commit = commit_if_dirty(official_memory, ledger_commit_message)
     return {
         **plan,
         "state": "carried-over",
-        "approval_note": args.approval_note,
+        "intent_note": cleaned_note,
         "carried": carried,
         "memory_content_commit": memory_content_commit,
         "ledger_commit": ledger_commit,
     }
+
+
+def apply_carryover(args: argparse.Namespace) -> dict[str, object]:
+    if not args.approved or not args.approval_note:
+        raise RuntimeError("apply requires --approved and --approval-note")
+    return apply_carryover_for_request(
+        request_from_args(args),
+        intent_note=args.approval_note,
+        include_review_required=args.include_review_required,
+        memory_commit_message=args.memory_commit_message,
+        ledger_commit_message=args.ledger_commit_message,
+    )
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:

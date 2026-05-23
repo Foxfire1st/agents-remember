@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,6 @@ from agents_remember.kernel.coordination_context_resolver import (
 )
 from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.route_index import build_route_indexes
-from agents_remember.mcp.command_capture import run_package_main
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope, path_is_relative_to
 from agents_remember.memory import baseline, carryover
 from agents_remember.providers import lifecycle_service
@@ -382,37 +382,28 @@ def worktree_start_tool(
     dry_run: bool = True,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
-    argv = [
-        "start",
-        *_repo_common_argv(config, repo),
-        "--task-name",
-        task_name,
-        "--worktree-name",
-        worktree_name,
-        "--workflow-kind",
-        workflow_kind,
-    ]
-    _append_option(argv, "--source-branch", source_branch)
-    _append_option(argv, "--work-branch", work_branch)
-    _append_option(argv, "--memory-mode", memory_mode)
-    _append_option(argv, "--memory-choice", memory_choice)
-    settings_path = None
-    if skip_provider_setup:
-        argv.append("--skip-provider-setup")
-    else:
-        settings_path = write_lifecycle_settings(config)
-        argv.extend(
-            [
-                "--provider-from-settings",
-                settings_path.as_posix(),
-                "--provider-timeout",
-                str(config.timeout_caps.get("providerSeconds", 120)),
-            ]
-        )
-    if dry_run:
-        argv.append("--dry-run")
+    settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
+    args = _worktree_namespace(
+        config,
+        repo,
+        task_name=task_name,
+        worktree_name=worktree_name,
+        workflow_kind=workflow_kind,
+        source_branch=source_branch,
+        work_branch=work_branch,
+        memory_mode=memory_mode,
+        memory_choice=memory_choice,
+        custom_instruction=None,
+        skip_provider_setup=skip_provider_setup,
+        provider_coordination_root=None,
+        provider_seed_source_coordination_root=None,
+        provider_runtime_root=None,
+        provider_from_settings=settings_path,
+        provider_timeout=config.timeout_caps.get("providerSeconds", 120),
+        dry_run=dry_run,
+    )
     try:
-        return _worktree_main("worktree_start", argv)
+        return _worktree_result("worktree_start", git_worktree_manager.start_result(args))
     finally:
         if settings_path is not None:
             settings_path.unlink(missing_ok=True)
@@ -426,12 +417,15 @@ def worktree_attach_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
-    argv = ["attach", *_repo_common_argv(config, repo)]
-    _append_option(argv, "--task-name", task_name)
-    _append_option(
-        argv, "--contract-path", _coord_path_text(config, contract_path, "contract_path")
+    args = _worktree_namespace(
+        config,
+        repo,
+        task_name=task_name,
+        contract_path=_coord_path(config, contract_path, "contract_path")
+        if contract_path
+        else None,
     )
-    return _worktree_main("worktree_attach", argv)
+    return _worktree_result("worktree_attach", git_worktree_manager.attach_result(args))
 
 
 def worktree_status_tool(
@@ -442,12 +436,15 @@ def worktree_status_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
-    argv = ["status", *_repo_common_argv(config, repo)]
-    _append_option(argv, "--task-name", task_name)
-    _append_option(
-        argv, "--contract-path", _coord_path_text(config, contract_path, "contract_path")
+    args = _worktree_namespace(
+        config,
+        repo,
+        task_name=task_name,
+        contract_path=_coord_path(config, contract_path, "contract_path")
+        if contract_path
+        else None,
     )
-    return _worktree_main("worktree_status", argv)
+    return _worktree_result("worktree_status", git_worktree_manager.status_result(args))
 
 
 def worktree_closeout_preview_tool(
@@ -550,19 +547,14 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    argv = [
-        "integrate",
-        "--contract-path",
-        _coord_path(config, contract_path, "contract_path").as_posix(),
-        "--strategy",
-        strategy,
-    ]
-    if not dry_run:
-        argv.append("--approved")
-    _append_option(argv, "--ledger-commit-message", ledger_commit_message)
-    if dry_run:
-        argv.append("--dry-run")
-    return _worktree_main("worktree_integrate", argv)
+    args = argparse.Namespace(
+        contract_path=_coord_path(config, contract_path, "contract_path"),
+        strategy=strategy,
+        approved=not dry_run,
+        ledger_commit_message=ledger_commit_message,
+        dry_run=dry_run,
+    )
+    return _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
 
 
 def worktree_cleanup_tool(
@@ -571,22 +563,18 @@ def worktree_cleanup_tool(
     contract_path: str,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    argv = [
-        "cleanup",
-        "--contract-path",
-        _coord_path(config, contract_path, "contract_path").as_posix(),
-    ]
-    if not dry_run:
-        argv.append("--approved")
-    if dry_run:
-        argv.append("--dry-run")
-    return _worktree_main("worktree_cleanup", argv)
+    args = argparse.Namespace(
+        contract_path=_coord_path(config, contract_path, "contract_path"),
+        approved=not dry_run,
+        dry_run=dry_run,
+    )
+    return _worktree_result("worktree_cleanup", git_worktree_manager.cleanup_result(args))
 
 
 def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> dict[str, Any]:
     repo = _repo(config, repo_id)
-    argv = ["status", *_baseline_common_argv(config, repo)]
-    return run_package_main(operation="memory_baseline_status", main=baseline.main, argv=argv)
+    payload = baseline.baseline_status(_baseline_request(config, repo))
+    return {"ok": True, "operation": "memory_baseline_status", **payload}
 
 
 def memory_baseline_adopt_tool(
@@ -599,14 +587,14 @@ def memory_baseline_adopt_tool(
     dry_run: bool = True,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
-    argv = ["adopt", *_baseline_common_argv(config, repo)]
-    if accept_drift:
-        argv.append("--accept-drift")
-    _append_option(argv, "--source-branch", source_branch)
-    _append_option(argv, "--work-branch", work_branch)
-    if dry_run:
-        argv.append("--dry-run")
-    return run_package_main(operation="memory_baseline_adopt", main=baseline.main, argv=argv)
+    returncode, payload = baseline.baseline_adopt(
+        _baseline_request(config, repo),
+        accept_drift=accept_drift,
+        source_branch=source_branch,
+        work_branch=work_branch,
+        dry_run=dry_run,
+    )
+    return {"ok": returncode == 0, "operation": "memory_baseline_adopt", **payload}
 
 
 def memory_carryover_plan_tool(
@@ -619,7 +607,7 @@ def memory_carryover_plan_tool(
     old_base: str,
     replace_existing: bool = False,
 ) -> dict[str, Any]:
-    argv = _carryover_argv(
+    request = _carryover_request(
         config,
         repo_id=repo_id,
         source_memory=source_memory,
@@ -628,9 +616,8 @@ def memory_carryover_plan_tool(
         old_base=old_base,
         replace_existing=replace_existing,
     )
-    return run_package_main(
-        operation="memory_carryover_plan", main=carryover.main, argv=["plan", *argv]
-    )
+    payload = carryover.build_plan_for_request(request)
+    return {"ok": True, "operation": "memory_carryover_plan", **payload}
 
 
 def memory_carryover_apply_tool(
@@ -647,9 +634,8 @@ def memory_carryover_apply_tool(
     memory_commit_message: str = "Carry over landed branch memory",
     ledger_commit_message: str = "Record branch memory carryover",
 ) -> dict[str, Any]:
-    argv = [
-        "apply",
-        *_carryover_argv(
+    payload = carryover.apply_carryover_for_request(
+        _carryover_request(
             config,
             repo_id=repo_id,
             source_memory=source_memory,
@@ -658,17 +644,12 @@ def memory_carryover_apply_tool(
             old_base=old_base,
             replace_existing=replace_existing,
         ),
-        "--approved",
-        "--approval-note",
-        intent_note,
-        "--memory-commit-message",
-        memory_commit_message,
-        "--ledger-commit-message",
-        ledger_commit_message,
-    ]
-    for source_path in include_review_required or []:
-        argv.extend(["--include-review-required", source_path])
-    return run_package_main(operation="memory_carryover_apply", main=carryover.main, argv=argv)
+        intent_note=intent_note,
+        include_review_required=include_review_required,
+        memory_commit_message=memory_commit_message,
+        ledger_commit_message=ledger_commit_message,
+    )
+    return {"ok": True, "operation": "memory_carryover_apply", **payload}
 
 
 def codex_benchmark_prepare_tool(
@@ -682,29 +663,16 @@ def codex_benchmark_prepare_tool(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
-    argv = [
-        "--benchmarks-root",
-        _benchmark_root(config, benchmarks_root).as_posix(),
-        "prepare",
-        target,
-    ]
-    _append_positional(argv, case_id)
-    argv.extend(
-        [
-            "--skill-exposure-mode",
-            skill_exposure_mode,
-            "--provider-timeout",
-            str(provider_timeout),
-        ]
-    )
-    if force_clone:
-        argv.append("--force-clone")
-    if dry_run:
-        argv.append("--dry-run")
-    return run_package_main(
-        operation="codex_benchmark_prepare",
-        main=benchmark_runner.main,
-        argv=argv,
+    return benchmark_runner.prepare_benchmarks(
+        benchmark_runner.BenchmarkPrepareRequest(
+            benchmarks_root=_benchmark_root(config, benchmarks_root),
+            target=target,
+            case_id=case_id,
+            dry_run=dry_run,
+            skill_exposure_mode=skill_exposure_mode,
+            force_clone=force_clone,
+            provider_timeout=provider_timeout,
+        )
     )
 
 
@@ -738,37 +706,21 @@ def codex_benchmark_run_tool(
             ),
         }
 
-    argv = [
-        "--benchmarks-root",
-        _benchmark_root(config, benchmarks_root).as_posix(),
-        "run",
-        target,
-    ]
-    _append_positional(argv, case_id)
-    _append_option(argv, "--prompt", prompt)
-    _append_option(argv, "--variant", variant)
-    if repetitions is not None:
-        argv.extend(["--repetitions", str(repetitions)])
-    argv.extend(
-        [
-            "--skill-exposure-mode",
-            skill_exposure_mode,
-            "--provider-timeout",
-            str(provider_timeout),
-        ]
-    )
-    if jobs is not None:
-        argv.extend(["--jobs", str(jobs)])
-    if dry_run:
-        argv.append("--dry-run")
-    if skip_prepare:
-        argv.append("--skip-prepare")
-    if force_clone:
-        argv.append("--force-clone")
-    result = run_package_main(
-        operation="codex_benchmark_run",
-        main=benchmark_runner.main,
-        argv=argv,
+    result = benchmark_runner.run_codex_benchmark(
+        benchmark_runner.BenchmarkRunRequest(
+            benchmarks_root=_benchmark_root(config, benchmarks_root),
+            target=target,
+            case_id=case_id,
+            prompt=prompt,
+            variant=variant,
+            repetitions=repetitions,
+            jobs=jobs,
+            dry_run=dry_run,
+            skip_prepare=skip_prepare,
+            skill_exposure_mode=skill_exposure_mode,
+            force_clone=force_clone,
+            provider_timeout=provider_timeout,
+        )
     )
     result["codexExecutable"] = codex_executable
     result["codexResolution"] = "PATH"
@@ -795,38 +747,38 @@ def _coord_path(config: McpRuntimeConfig, value: str, label: str) -> Path:
     return path
 
 
-def _coord_path_text(config: McpRuntimeConfig, value: str | None, label: str) -> str | None:
-    if not value:
-        return None
-    return _coord_path(config, value, label).as_posix()
+def _worktree_namespace(
+    config: McpRuntimeConfig,
+    repo: RepositoryScope,
+    **kwargs: Any,
+) -> argparse.Namespace:
+    values: dict[str, Any] = {
+        "code_repository_name": repo.repo_id,
+        "workspace_root": config.workspace_root,
+        "coordination_root": config.coordination_root,
+        "code_repository_root": repo.path,
+        "topology": None,
+        "contract_path": None,
+        "task_name": None,
+    }
+    values.update(kwargs)
+    return argparse.Namespace(**values)
 
 
-def _repo_common_argv(config: McpRuntimeConfig, repo: RepositoryScope) -> list[str]:
-    return [
-        "--code-repository-name",
-        repo.repo_id,
-        "--workspace-root",
-        config.workspace_root.as_posix(),
-        "--coordination-root",
-        config.coordination_root.as_posix(),
-        "--code-repository-root",
-        repo.path.as_posix(),
-    ]
+def _worktree_result(
+    operation: str, result: git_worktree_manager.WorktreeCommandResult
+) -> dict[str, Any]:
+    return {"ok": result.returncode == 0, "operation": operation, **result.payload}
 
 
-def _baseline_common_argv(config: McpRuntimeConfig, repo: RepositoryScope) -> list[str]:
-    return [
-        "--code-repository-name",
-        repo.repo_id,
-        "--workspace-root",
-        config.workspace_root.as_posix(),
-        "--coordination-root",
-        config.coordination_root.as_posix(),
-        "--code-repository-root",
-        repo.path.as_posix(),
-        "--topology",
-        "external",
-    ]
+def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseline.BaselineRequest:
+    return baseline.BaselineRequest(
+        code_repository_name=repo.repo_id,
+        workspace_root=config.workspace_root,
+        code_repository_root=repo.path,
+        coordination_root=config.coordination_root,
+        topology="external",
+    )
 
 
 def _provider_watchers_once(
@@ -902,10 +854,6 @@ def _provider_lifecycle_result(
         settings_path.unlink(missing_ok=True)
 
 
-def _worktree_main(operation: str, argv: list[str]) -> dict[str, Any]:
-    return run_package_main(operation=operation, main=git_worktree_manager.main, argv=argv)
-
-
 def _worktree_closeout(
     config: McpRuntimeConfig,
     *,
@@ -917,22 +865,16 @@ def _worktree_closeout(
     dry_run: bool,
     intent_note: str,
 ) -> dict[str, Any]:
-    argv = [
-        "closeout",
-        "--contract-path",
-        _coord_path(config, contract_path, "contract_path").as_posix(),
-        "--code-commit-message",
-        code_commit_message,
-    ]
-    _append_option(argv, "--memory-commit-message", memory_commit_message)
-    _append_option(argv, "--ledger-commit-message", ledger_commit_message)
-    if intent_note:
-        argv.extend(["--approval-note", intent_note])
-    if not dry_run:
-        argv.append("--approved")
-    if dry_run:
-        argv.append("--dry-run")
-    return _worktree_main(operation, argv)
+    args = argparse.Namespace(
+        contract_path=_coord_path(config, contract_path, "contract_path"),
+        code_commit_message=code_commit_message,
+        memory_commit_message=memory_commit_message,
+        ledger_commit_message=ledger_commit_message,
+        approval_note=intent_note,
+        approved=not dry_run,
+        dry_run=dry_run,
+    )
+    return _worktree_result(operation, git_worktree_manager.closeout_result(args))
 
 
 def _direct_closeout(
@@ -949,27 +891,22 @@ def _direct_closeout(
     dry_run: bool,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
-    argv = [
-        "direct-closeout",
-        *_repo_common_argv(config, repo),
-        "--task-name",
-        task_name,
-        "--code-commit-message",
-        code_commit_message,
-    ]
-    _append_option(argv, "--source-branch", source_branch)
-    _append_option(argv, "--memory-commit-message", memory_commit_message)
-    _append_option(argv, "--ledger-commit-message", ledger_commit_message)
-    if intent_note:
-        argv.extend(["--approval-note", intent_note])
-    if not dry_run:
-        argv.append("--approved")
-    if dry_run:
-        argv.append("--dry-run")
-    return _worktree_main(operation, argv)
+    args = _worktree_namespace(
+        config,
+        repo,
+        task_name=task_name,
+        source_branch=source_branch,
+        code_commit_message=code_commit_message,
+        memory_commit_message=memory_commit_message,
+        ledger_commit_message=ledger_commit_message,
+        approval_note=intent_note,
+        approved=not dry_run,
+        dry_run=dry_run,
+    )
+    return _worktree_result(operation, git_worktree_manager.direct_closeout_result(args))
 
 
-def _carryover_argv(
+def _carryover_request(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
@@ -983,25 +920,16 @@ def _carryover_argv(
     if repo.memory_root is None:
         raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
     source_memory_path = _coord_path(config, source_memory, "source_memory")
-    argv = [
-        "--code-repository-root",
-        repo.path.as_posix(),
-        "--official-code-ref",
-        official_code_ref,
-        "--source-code-ref",
-        source_code_ref,
-        "--old-base",
-        old_base,
-        "--official-memory",
-        repo.memory_root.as_posix(),
-        "--source-memory",
-        source_memory_path.as_posix(),
-        "--code-repository-name",
-        repo.repo_id,
-    ]
-    if replace_existing:
-        argv.append("--replace-existing")
-    return argv
+    return carryover.CarryoverRequest(
+        code_repository_root=repo.path,
+        official_code_ref=official_code_ref,
+        source_code_ref=source_code_ref,
+        old_base=old_base,
+        official_memory=repo.memory_root,
+        source_memory=source_memory_path,
+        code_repository_name=repo.repo_id,
+        replace_existing=replace_existing,
+    )
 
 
 def _benchmark_root(config: McpRuntimeConfig, value: str | None) -> Path:
@@ -1011,13 +939,3 @@ def _benchmark_root(config: McpRuntimeConfig, value: str | None) -> Path:
     if (coordinator_benchmarks / "cases").is_dir():
         return coordinator_benchmarks
     return source_root_from_package() / "benchmarks"
-
-
-def _append_option(argv: list[str], flag: str, value: str | None) -> None:
-    if value:
-        argv.extend([flag, value])
-
-
-def _append_positional(argv: list[str], value: str | None) -> None:
-    if value:
-        argv.append(value)
