@@ -6,11 +6,10 @@ import unittest
 from pathlib import Path
 
 
-CORE_ROOT = Path(__file__).resolve().parents[1]
-SHARED_ROOT = CORE_ROOT / "_shared"
-sys.path.insert(0, str(SHARED_ROOT))
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.context_providers import (  # noqa: E402
+from agents_remember.providers.context_providers import (  # noqa: E402
     CGC_CGCIGNORE_PATCH_ID,
     CGC_DELETE_PATCH_ID,
     CGC_DISCOVERY_EXTENSIONS_PATCH_ID,

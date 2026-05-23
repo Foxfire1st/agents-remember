@@ -32,22 +32,10 @@ Install the runtime through the MCP server:
 runtime_install(dry_run=false)
 ```
 
-Cursor loads skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`, and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders.
+Cursor loads skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`, and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders. Place the MCP settings under the matching registration folder, such as `.cursor/mcp/` or `.agents/mcp/`, and the skill target is inferred as the sibling `skills/` folder.
 
 Use the flat layout so each visible folder matches the lowercase skill `name`:
 
 ```text
-skills_install(install_root="/absolute/path/to/.cursor/skills", layout="flat", dry_run=false)
-```
-
-For a shared cross-agent project install:
-
-```text
-skills_install(install_root="/absolute/path/to/.agents/skills", layout="flat", dry_run=false)
-```
-
-For user-wide Cursor skills:
-
-```text
-skills_install(install_root="/absolute/path/to/.cursor/skills", layout="flat", dry_run=false)
+skills_install(layout="flat", dry_run=false)
 ```

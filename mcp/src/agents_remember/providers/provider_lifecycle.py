@@ -27,14 +27,6 @@ from typing import Any
 def runtime_root_from_script() -> Path:
     return Path(__file__).resolve().parents[1]
 
-
-def install_shared_import_path() -> None:
-    shared_root = runtime_root_from_script() / "skills" / "U-01-core-skills" / "_shared"
-    sys.path.insert(0, str(shared_root))
-
-
-install_shared_import_path()
-
 from agents_remember.providers.context_providers import (  # noqa: E402
     CGC_CGCIGNORE_PATCH_ID,
     CGC_DELETE_PATCH_ID,

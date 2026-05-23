@@ -15,12 +15,12 @@ runtime_install(dry_run=false)
 
 ## Expose Skills
 
-VS Code discovers project skills from `.github/skills`, `.claude/skills`, and `.agents/skills`, and personal skills from `~/.copilot/skills`, `~/.claude/skills`, and `~/.agents/skills`. You can also configure additional locations with `chat.agentSkillsLocations`.
+VS Code discovers project skills from `.github/skills`, `.claude/skills`, and `.agents/skills`, and personal skills from `~/.copilot/skills`, `~/.claude/skills`, and `~/.agents/skills`. You can also configure additional locations with `chat.agentSkillsLocations`. Place the MCP settings under the matching registration folder, such as `.agents/mcp/`, and the skill target is inferred as the sibling `skills/` folder.
 
 For a workspace-local cross-agent install:
 
 ```text
-skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
+skills_install(dry_run=false)
 ```
 
 If you prefer to point VS Code directly at the installed runtime, add the installed skill roots in the workspace settings:

@@ -18,8 +18,8 @@ runtime_install(dry_run=false, include_benchmarks=true)
 Then inspect or run them through the MCP benchmark tools:
 
 ```text
-benchmark_prepare(target="case", case_id="agents-remember-md-drift-workflow")
-benchmark_run(target="case", case_id="agents-remember-md-drift-workflow", dry_run=true)
+codex_benchmark_prepare(target="case", case_id="agents-remember-md-drift-workflow")
+codex_benchmark_run(target="case", case_id="agents-remember-md-drift-workflow", dry_run=true)
 ```
 
 For source-package debugging, run the package module from a checkout where

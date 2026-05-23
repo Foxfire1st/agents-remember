@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = MCP_ROOT.parent
 MCP_SRC = MCP_ROOT / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -18,17 +17,7 @@ from agents_remember.worktrees.worktree_contract import (  # noqa: E402
     write_contract,
 )
 
-OLD_RESOLVER = (
-    REPO_ROOT
-    / "runtime"
-    / "skills"
-    / "U-01-core-skills"
-    / "C-08-ar-coordination-context-resolver"
-    / "scripts"
-    / "ar_coordination_context_resolver.py"
-)
-
-PARITY_KEYS = (
+CONTEXT_KEYS = (
     "topology",
     "code_repository_name",
     "code_repository_root",
@@ -55,21 +44,13 @@ PARITY_KEYS = (
 )
 
 
-class ResolverParityTests(unittest.TestCase):
-    def test_external_memory_resolution_matches_old_script(self) -> None:
+class ResolverCliTests(unittest.TestCase):
+    def test_external_memory_resolution_reports_expected_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             fixture = create_external_fixture(root)
 
-            old = run_old_resolver(
-                "--code-repository-name",
-                "agents-remember-md",
-                "--workspace-root",
-                str(fixture["workspace"]),
-                "--coordination-root",
-                str(fixture["coordination"]),
-            )
-            new = run_package_resolver(
+            context = run_package_resolver(
                 "--code-repository-name",
                 "agents-remember-md",
                 "--workspace-root",
@@ -78,22 +59,17 @@ class ResolverParityTests(unittest.TestCase):
                 str(fixture["coordination"]),
             )
 
-            assert_parity(self, old, new)
+            assert_context_shape(self, context)
+            self.assertEqual(context["topology"], "external")
+            self.assertEqual(context["coordination_root"], fixture["coordination"].as_posix())
+            self.assertEqual(context["memory_root"], fixture["memory"].as_posix())
 
-    def test_internal_memory_resolution_matches_old_script(self) -> None:
+    def test_internal_memory_resolution_reports_expected_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             fixture = create_internal_fixture(root)
 
-            old = run_old_resolver(
-                "--code-repository-name",
-                "agents-remember-md",
-                "--code-repository-root",
-                str(fixture["repo"]),
-                "--topology",
-                "internal",
-            )
-            new = run_package_resolver(
+            context = run_package_resolver(
                 "--code-repository-name",
                 "agents-remember-md",
                 "--code-repository-root",
@@ -102,9 +78,12 @@ class ResolverParityTests(unittest.TestCase):
                 "internal",
             )
 
-            assert_parity(self, old, new)
+            assert_context_shape(self, context)
+            self.assertEqual(context["topology"], "internal")
+            self.assertEqual(context["code_repository_root"], fixture["repo"].as_posix())
+            self.assertEqual(context["memory_root"], (fixture["repo"] / "ar-memory").as_posix())
 
-    def test_worktree_contract_resolution_matches_old_script(self) -> None:
+    def test_worktree_contract_resolution_reports_expected_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             fixture = create_external_fixture(root)
@@ -129,15 +108,7 @@ class ResolverParityTests(unittest.TestCase):
             )
             write_contract(contract.contract_path, contract)
 
-            old = run_old_resolver(
-                "--code-repository-name",
-                "agents-remember-md",
-                "--workspace-root",
-                str(fixture["workspace"]),
-                "--contract-path",
-                str(contract.contract_path),
-            )
-            new = run_package_resolver(
+            context = run_package_resolver(
                 "--code-repository-name",
                 "agents-remember-md",
                 "--workspace-root",
@@ -146,19 +117,18 @@ class ResolverParityTests(unittest.TestCase):
                 str(contract.contract_path),
             )
 
-            assert_parity(self, old, new)
+            assert_context_shape(self, context)
+            self.assertEqual(context["contract_path"], contract.contract_path.as_posix())
+            self.assertEqual(context["worktree_group"], contract.worktree_group.as_posix())
+            self.assertEqual(context["code_worktree"], contract.code_worktree.as_posix())
 
 
-def assert_parity(
+def assert_context_shape(
     testcase: unittest.TestCase,
-    old: dict[str, object],
-    new: dict[str, object],
+    context: dict[str, object],
 ) -> None:
     testcase.maxDiff = None
-    testcase.assertEqual(
-        {key: old[key] for key in PARITY_KEYS},
-        {key: new[key] for key in PARITY_KEYS},
-    )
+    testcase.assertEqual(set(CONTEXT_KEYS), set(context.keys()))
 
 
 def create_external_fixture(root: Path) -> dict[str, Path]:
@@ -225,12 +195,6 @@ def create_memory_settings(
         json.dumps(settings, indent=2),
         encoding="utf-8",
     )
-
-
-def run_old_resolver(*args: str) -> dict[str, object]:
-    env = os.environ.copy()
-    env.pop("PYTHONPATH", None)
-    return run_json([sys.executable, str(OLD_RESOLVER), *args, "--format", "json"], env=env)
 
 
 def run_package_resolver(*args: str) -> dict[str, object]:

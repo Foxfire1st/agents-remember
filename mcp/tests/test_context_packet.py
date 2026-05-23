@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
 import subprocess
 import sys
 import tempfile
@@ -11,7 +10,6 @@ from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
-REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
@@ -28,16 +26,6 @@ from agents_remember.worktrees.worktree_contract import (  # noqa: E402
     write_contract,
 )
 from test_config import settings_payload, write_json  # noqa: E402
-
-OLD_WORKTREE_MANAGER = (
-    REPO_ROOT
-    / "runtime"
-    / "skills"
-    / "U-01-core-skills"
-    / "C-09-git-worktree-manager"
-    / "scripts"
-    / "git_worktree_manager.py"
-)
 
 
 class ContextPacketTests(unittest.TestCase):
@@ -152,10 +140,6 @@ class ContextPacketTests(unittest.TestCase):
             self.assertEqual(packet["worktree"]["contractPath"], contract.contract_path.as_posix())
             self.assertEqual(packet["worktree"]["phase"], "worktree-started")
             self.assertEqual(packet["worktree"]["rawStatus"], status_payload(contract))
-            self.assertEqual(
-                packet["worktree"]["rawStatus"],
-                old_worktree_status(contract.contract_path),
-            )
 
     def test_cli_outputs_json_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -212,25 +196,6 @@ def run_git(repo: Path, args: list[str]) -> None:
     result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
-
-
-def old_worktree_status(contract_path: Path) -> dict[str, object]:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(OLD_WORKTREE_MANAGER),
-            "status",
-            "--contract-path",
-            str(contract_path),
-        ],
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise AssertionError(result.stderr or result.stdout)
-    return json.loads(result.stdout)
 
 
 if __name__ == "__main__":

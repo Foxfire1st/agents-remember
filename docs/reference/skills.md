@@ -50,8 +50,13 @@ Those skills handle research, synthesis, design, planning, implementation, and a
 Use:
 
 ```text
-skills_install(install_root="/absolute/path/to/<skills-folder>", dry_run=false)
+skills_install(dry_run=false)
 ```
+
+The install target is normally inferred from the MCP settings location:
+`<registration-root>/mcp/<settings>.json` installs into
+`<registration-root>/skills/`. Use `harnessSkillRoot` only for non-standard
+harness layouts.
 
 Use `layout="flat"` when the harness requires direct `<skill-name>/SKILL.md` folders.
 

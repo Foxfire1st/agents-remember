@@ -29,29 +29,29 @@ This skill's standard workflow operates on one repository at a time.
 
 ## Procedure
 
-### Preferred helper
+### Preferred MCP Tool
 
-Use `C-08-ar-coordination-context-resolver` to resolve the target repository's active memory and coordination context, then use the bundled helper for repo-wide checks instead of rewriting shell loops:
+Use `C-08-ar-coordination-context-resolver` or MCP `resolve_context` to confirm
+the target repository's active memory and coordination context, then request the
+MCP drift tool for repo-wide checks instead of rewriting shell loops:
 
-```bash
-<this-skill-dir>/scripts/check_onboarding_drift.py \
-  --code-repository-root <code-repository-root>
+```text
+drift_check(repo_id="<repo-id>", detail_limit=50)
 ```
 
-By default the helper writes the Markdown report to `<coordination_root>/temp/drift-reports/<repo-name>/<repo-name>_<branch-name>_drift-report.md`. That keeps temporary drift artifacts out of task contract folders while still keeping them under the local coordination root, and each repository/branch run gets a collision-resistant filename.
+By default the MCP drift tool writes the Markdown report to `<coordination_root>/temp/drift-reports/<repo-name>/<repo-name>_<branch-name>_drift-report.md`. That keeps temporary drift artifacts out of task contract folders while still keeping them under the local coordination root, and each repository/branch run gets a collision-resistant filename.
 
-The helper passes the explicit code repository root through the C-08 resolver. For explicit external-memory scaffolding, pass the coordination root and keep the code repository root explicit:
+The MCP tool resolves the configured repository through the server-owned C-08
+resolver service. For explicit external-memory repair or topology inspection,
+call `resolve_context(repo_id="<repo-id>", topology="external")` first, then run
+`drift_check` against the same configured repository.
 
-```bash
-<this-skill-dir>/scripts/check_onboarding_drift.py \
-  --code-repository-root <code-repository-root> \
-  --topology external \
-  --coordination-root <ar-coordination-root>
-```
+Report placement remains owned by C-08's resolved `coordination_root`. Temporary drift reports belong under the resolved `temp_root`, outside durable memory, so drift checks do not dirty versioned memory.
 
-If `--report` is supplied, C-08's resolved `coordination_root` still owns report placement. Relative paths are resolved from the resolved `temp_root`. Absolute paths are only used as-is when they are already inside the resolved coordination root and outside the resolved `memory_root`; paths inside the durable memory repo are redirected to `<coordination_root>/temp/drift-reports/<repo-name>/` so temporary reports do not dirty versioned memory. Absolute paths outside the coordination root are redirected the same way. The repo/branch-prefixed default filename applies whenever `--report` is omitted.
-
-The `--onboarding-root` override remains available when a caller already resolved the code repository onboarding root. Topology detection, coordination-root resolution, settings parsing, storage semantics, and `pathRules` parsing belong to C-08; this helper consumes that resolved context and classifies drift. The helper requires Python 3 and `git`, uses only the Python standard library, prints a tab-separated summary by default, and can also emit `--format json` or `--format csv`. If the executable bit is unavailable in a local checkout, fall back to invoking the script with the machine's Python 3 interpreter.
+Topology detection, coordination-root resolution, settings parsing, storage
+semantics, and `pathRules` parsing belong to C-08; `drift_check` consumes that
+resolved context and classifies drift. The skill tree is instruction-only;
+installed and development workflows use the MCP/package route.
 
 ### 1. Resolve onboarding units in the repository
 
@@ -63,7 +63,7 @@ Primary drift detection supports sidecar markdown onboarding under the resolved 
 
 Root and route-local overviews do not map one-to-one to a source file. They are verified against their recorded `sourceRoute`: C-02 compares that route from `lastVerifiedCommitHash` through `HEAD` and checks the same route for staged or unstaged local changes.
 
-Repo entity catalogs are verified through deterministic entity fingerprints. Each `## Entity Inventory` entry must have a matching `## Entity Fingerprints` row. Each entity fingerprint row records `git-blob-set-v1`, an aggregate hash over a curated set of repo-relative evidence paths. The script sorts the paths, resolves each `HEAD:<path>` Git blob hash, hashes the `path + blob_hash` list, and compares the stored aggregate. Agent judgment belongs in choosing or refreshing the evidence path set; C-02 only checks the stored fingerprint deterministically.
+Repo entity catalogs are verified through deterministic entity fingerprints. Each `## Entity Inventory` entry must have a matching `## Entity Fingerprints` row. Each entity fingerprint row records `git-blob-set-v1`, an aggregate hash over a curated set of repo-relative evidence paths. The drift engine sorts the paths, resolves each `HEAD:<path>` Git blob hash, hashes the `path + blob_hash` list, and compares the stored aggregate. Agent judgment belongs in choosing or refreshing the evidence path set; C-02 only checks the stored fingerprint deterministically.
 
 ### 2. Extract verification metadata
 

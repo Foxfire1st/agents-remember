@@ -736,37 +736,20 @@ def run_id() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
 
-def resolve_windows_executable(command: str) -> str:
-    command_path = Path(command)
-    has_path = command_path.parent != Path(".") or command_path.is_absolute() or "/" in command or "\\" in command
-    if command_path.suffix:
-        return command
-
-    extensions = (".cmd", ".exe", ".bat", ".com")
-    if has_path:
-        for extension in extensions:
-            candidate = command_path.with_name(command_path.name + extension)
-            if candidate.is_file():
-                return str(candidate)
-        return command
-
-    for extension in extensions:
-        resolved = shutil.which(command + extension)
-        if resolved:
-            return resolved
-    resolved = shutil.which(command)
-    return resolved or command
+class CodexExecutableNotFound(RuntimeError):
+    """Raised when the Codex benchmark runner cannot resolve Codex from PATH."""
 
 
-def resolve_codex_bin(codex_bin: str) -> str:
-    if sys.platform != "win32":
-        return codex_bin
-    return resolve_windows_executable(codex_bin)
+def resolve_codex_executable() -> str:
+    resolved = shutil.which("codex")
+    if resolved:
+        return resolved
+    raise CodexExecutableNotFound("codex executable was not found on PATH")
 
 
-def codex_command(codex_bin: str, cwd: Path, final_message_path: Path) -> list[str]:
+def codex_command(cwd: Path, final_message_path: Path) -> list[str]:
     return [
-        resolve_codex_bin(codex_bin),
+        resolve_codex_executable(),
         "exec",
         "--json",
         "--ephemeral",
@@ -800,7 +783,6 @@ def run_one(
     variant: dict[str, Any],
     repetition: int,
     output_root: Path,
-    codex_bin: str,
     dry_run: bool,
 ) -> None:
     prompt_id = str(prompt["id"])
@@ -819,7 +801,7 @@ def run_one(
     stderr_path = run_prefix.with_suffix(".stderr")
     metadata_path = run_prefix.with_suffix(".metadata.json")
     final_message_path = run_prefix.with_suffix(".final.md")
-    command = codex_command(codex_bin, cwd, final_message_path)
+    command = codex_command(cwd, final_message_path)
 
     if dry_run:
         print(f"Would write JSONL to {jsonl_path}")
@@ -879,7 +861,6 @@ def run_case(
     prompt_id: str | None,
     variant_id: str | None,
     repetitions: int | None,
-    codex_bin: str,
     jobs: int | None,
     dry_run: bool,
     skip_prepare: bool,
@@ -923,7 +904,6 @@ def run_case(
                     variant=variant,
                     repetition=repetition,
                     output_root=output_root,
-                    codex_bin=codex_bin,
                     dry_run=True,
                 )
         return output_root
@@ -944,7 +924,6 @@ def run_case(
                     variant=variant,
                     repetition=repetition,
                     output_root=output_root,
-                    codex_bin=codex_bin,
                     dry_run=False,
                 ): (prompt, variant, repetition)
                 for prompt, variant, repetition in task_batch
@@ -1162,7 +1141,6 @@ def command_run(args: argparse.Namespace) -> int:
             prompt_id=args.prompt,
             variant_id=args.variant,
             repetitions=args.repetitions,
-            codex_bin=args.codex_bin,
             jobs=args.jobs,
             dry_run=args.dry_run,
             skip_prepare=args.skip_prepare,
@@ -1214,7 +1192,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--prompt", help="Run only one prompt id.")
     run_parser.add_argument("--variant", help="Run only one variant id.")
     run_parser.add_argument("--repetitions", type=int, help="Override repetitions per prompt variant.")
-    run_parser.add_argument("--codex-bin", default="codex", help="Codex executable to run.")
     run_parser.add_argument(
         "--jobs",
         type=int,

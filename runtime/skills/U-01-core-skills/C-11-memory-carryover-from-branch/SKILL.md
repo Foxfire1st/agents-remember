@@ -9,31 +9,20 @@ Use this skill when a protected official code branch receives delayed or batched
 
 C-11 is not a Git merge. It is a selective memory reconciliation step. It proves which source-branch code changes are represented in the official branch, then carries only the corresponding onboarding into official memory and refreshes verification metadata against the official code commit.
 
-## Command
+## MCP Tools
 
-```bash
-<this-skill-dir>/scripts/memory_carryover.py plan \
-  --code-repository-root <code-repository-root> \
-  --official-code-ref <official-ref> \
-  --source-code-ref <source-ref> \
-  --old-base <base-ref-or-sha> \
-  --official-memory <official-memory-repo> \
-  --source-memory <source-memory-repo> \
-  --code-repository-name <code-repository-name>
+Use the Agents Remember MCP memory carryover tools as the normal installed
+runtime entry point:
 
-<this-skill-dir>/scripts/memory_carryover.py apply \
-  --code-repository-root <code-repository-root> \
-  --official-code-ref <official-ref> \
-  --source-code-ref <source-ref> \
-  --old-base <base-ref-or-sha> \
-  --official-memory <official-memory-repo> \
-  --source-memory <source-memory-repo> \
-  --code-repository-name <code-repository-name> \
-  --approved \
-  --approval-note "<developer approval>"
+```text
+memory_carryover_plan(repo_id="<repo-id>", source_memory="<source-memory-repo>", official_code_ref="<official-ref>", source_code_ref="<source-ref>", old_base="<base-ref-or-sha>")
+memory_carryover_apply(repo_id="<repo-id>", source_memory="<source-memory-repo>", official_code_ref="<official-ref>", source_code_ref="<source-ref>", old_base="<base-ref-or-sha>", intent_note="<developer intent>")
 ```
 
-Run `plan` first. Use `apply` only after reviewing the candidate report. `apply` mutates official memory only; it does not move code branches.
+Run `memory_carryover_plan` first. Use `memory_carryover_apply` only after
+reviewing the candidate report. Apply mutates official memory only; it does not
+move code branches. The skill tree is instruction-only; installed and
+development workflows use the MCP/package route.
 
 ## Evidence Tiers
 
@@ -58,5 +47,5 @@ Only proven tiers are auto-carry candidates. Same-path overlap is review-require
 2. C-11 must not copy source branch ledger rows into official memory.
 3. C-11 must refresh carried onboarding metadata to the official code commit, not the source branch commit.
 4. C-11 must not auto-carry same-path-only evidence.
-5. C-11 must not overwrite existing different official onboarding unless `--replace-existing` or explicit review-required inclusion is used.
+5. C-11 must not overwrite existing different official onboarding unless `replace_existing=true` or explicit review-required inclusion is used.
 6. C-02 remains the branch-accuracy drift detector; C-11 only imports richer memory whose code validity has been proven or explicitly approved.

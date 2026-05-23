@@ -30,16 +30,12 @@ Install the runtime through the MCP server:
 runtime_install(dry_run=false)
 ```
 
-Expose packaged skills to the project:
+Place the MCP settings under the Claude Code registration folder, such as
+`.claude/mcp/`. The skill target is inferred as the sibling `.claude/skills/`
+folder. Then expose packaged skills:
 
 ```text
-skills_install(install_root="/absolute/path/to/.claude/skills", dry_run=false)
-```
-
-For user-wide Claude Code skills:
-
-```text
-skills_install(install_root="/absolute/path/to/.claude/skills", dry_run=false)
+skills_install(dry_run=false)
 ```
 
 Claude Code supports project and personal skill folders and discovers nested `.claude/skills` directories. The default namespace layout is usually enough:

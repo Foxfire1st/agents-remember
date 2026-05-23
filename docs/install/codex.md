@@ -28,16 +28,12 @@ Install the runtime first through the MCP server:
 runtime_install(dry_run=false)
 ```
 
-Then expose the packaged skill tree:
+Place the MCP settings under the Codex registration folder, such as
+`.agents/mcp/`. The skill target is inferred as the sibling `.agents/skills/`
+folder. Then expose the packaged skill tree:
 
 ```text
-skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
-```
-
-For user-wide skills:
-
-```text
-skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
+skills_install(dry_run=false)
 ```
 
 The default tree layout copies:

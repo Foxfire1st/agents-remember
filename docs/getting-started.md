@@ -52,10 +52,12 @@ The benchmark package is idempotent. Reinstalling refreshes package-owned benchm
 
 Some agent tools can read skills from a repository in the workspace. Others require skills to live in a specific folder. Use the MCP `skills_install` tool instead of copying skill folders by hand.
 
-For recursive skill scanners such as Codex and Claude Code:
+For recursive skill scanners such as Codex and Claude Code, place the MCP
+settings under the harness registration folder, such as
+`/absolute/path/to/.agents/mcp/`, and run:
 
 ```text
-skills_install(install_root="/absolute/path/to/.agents/skills", dry_run=false)
+skills_install(dry_run=false)
 ```
 
 This creates one copied namespace tree:
@@ -64,10 +66,12 @@ This creates one copied namespace tree:
 .agents/skills/agents-remember-md/
 ```
 
-For direct skill-folder scanners such as Cursor or Windsurf:
+For direct skill-folder scanners such as Cursor or Windsurf, place the MCP
+settings under the matching harness registration folder, such as
+`/absolute/path/to/.windsurf/mcp/`, then run:
 
 ```text
-skills_install(install_root="/absolute/path/to/.windsurf/skills", layout="flat", dry_run=false)
+skills_install(layout="flat", dry_run=false)
 ```
 
 This creates one copied folder per skill using the lowercase `name` from each `SKILL.md`.

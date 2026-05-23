@@ -72,7 +72,7 @@ class McpConfigTests(unittest.TestCase):
     def test_loads_authority_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
+            path = root / ".agents" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
 
             config = load_config(path)
@@ -87,6 +87,7 @@ class McpConfigTests(unittest.TestCase):
                 config.transcript_root,
                 root / "ar-coordination" / "providers" / "logs" / "mcp",
             )
+            self.assertEqual(config.harness_skill_root, root / ".agents" / "skills")
             self.assertEqual(
                 config.repositories["agents-remember-md"].path,
                 root / "workspace" / "agents-remember-md",
@@ -130,6 +131,28 @@ class McpConfigTests(unittest.TestCase):
                 ).as_posix(),
             )
 
+    def test_harness_skill_root_is_none_without_registration_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+
+            config = load_config(path)
+
+            self.assertIsNone(config.harness_skill_root)
+
+    def test_harness_skill_root_override_wins_over_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            payload["harnessSkillRoot"] = str(root / "custom" / "skills")
+            path = root / ".agents" / "mcp" / "settings.json"
+            write_json(path, payload)
+
+            config = load_config(path)
+
+            self.assertEqual(config.harness_skill_root, root / "custom" / "skills")
+
     def test_loads_repository_contract_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -166,6 +189,17 @@ class McpConfigTests(unittest.TestCase):
             write_json(path, payload)
 
             with self.assertRaisesRegex(ConfigError, "outside configured repo boundaries"):
+                load_config(path)
+
+    def test_harness_skill_root_must_be_absolute_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            payload["harnessSkillRoot"] = ".agents/skills"
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            with self.assertRaisesRegex(ConfigError, "harnessSkillRoot.*absolute"):
                 load_config(path)
 
     def test_provider_settings_reject_derived_path_fields(self) -> None:

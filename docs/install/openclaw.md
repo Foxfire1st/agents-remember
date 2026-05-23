@@ -33,19 +33,15 @@ runtime_install(dry_run=false)
 OpenClaw commonly uses global skills under `~/.openclaw/skills/` and workspace skills under `<workspace>/skills/`, with workspace skills taking precedence.
 
 Agents Remember skills should be installed through the MCP `skills_install`
-tool. Use the default nested/tree install layout. Do not use flat layout unless
+tool. Place the MCP settings under a registration folder with a sibling
+`skills/` directory, or set `harnessSkillRoot` for OpenClaw layouts that do not
+use that convention. Use the default nested/tree install layout. Do not use flat layout unless
 OpenClaw requires direct `<skill-name>/SKILL.md` folders.
 
-Install workspace skills with the default nested layout:
+Install skills with the default nested layout:
 
 ```text
-skills_install(install_root="/absolute/path/to/openclaw-workspace/skills", dry_run=false)
-```
-
-For shared global skills:
-
-```text
-skills_install(install_root="/absolute/path/to/.openclaw/skills", dry_run=false)
+skills_install(dry_run=false)
 ```
 
 ## Long-running Turns

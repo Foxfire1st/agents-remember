@@ -11,35 +11,20 @@ import fnmatch
 import json
 import re
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, TypedDict
 
 
-SHARED_MODULE_ROOT = Path(__file__).resolve().parents[2] / "_shared"
-if SHARED_MODULE_ROOT.exists():
-    sys.path.insert(0, str(SHARED_MODULE_ROOT))
-
-try:
-    from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
-    from agents_remember.worktrees.worktree_contract import (
-        ContractError,
-        WorktreeContract,
-        load_contract,
-        task_root_candidates,
-        task_root_for,
-        worktree_group_for,
-    )
-except ImportError:  # pragma: no cover - keeps repair possible when helper modules are unavailable.
-    LedgerError = ValueError
-    ContractError = ValueError
-    WorktreeContract = None  # type: ignore[assignment]
-    load_ledger = None  # type: ignore[assignment]
-    load_contract = None  # type: ignore[assignment]
-    task_root_candidates = None  # type: ignore[assignment]
-    task_root_for = None  # type: ignore[assignment]
-    worktree_group_for = None  # type: ignore[assignment]
+from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+    task_root_candidates,
+    task_root_for,
+    worktree_group_for,
+)
 
 
 DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"

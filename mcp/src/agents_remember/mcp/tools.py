@@ -10,10 +10,10 @@ from agents_remember.controllers.runtime_install import (
     run_runtime_install,
 )
 from agents_remember.controllers.skill_tools import (
-    benchmark_prepare_tool,
-    benchmark_run_tool,
     cgc_query_tool,
     cgc_visualize_tool,
+    codex_benchmark_prepare_tool,
+    codex_benchmark_run_tool,
     direct_closeout_apply_tool,
     direct_closeout_preview_tool,
     drift_check_tool,
@@ -71,8 +71,8 @@ PUBLIC_TOOLS = (
     "memory_baseline_adopt",
     "memory_carryover_plan",
     "memory_carryover_apply",
-    "benchmark_prepare",
-    "benchmark_run",
+    "codex_benchmark_prepare",
+    "codex_benchmark_run",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 
@@ -96,6 +96,11 @@ def server_info_payload(config: McpRuntimeConfig) -> dict[str, Any]:
         "coordinationRoot": config.coordination_root.as_posix(),
         "workspaceRoot": config.workspace_root.as_posix(),
         "transcriptRoot": config.transcript_root.as_posix(),
+        "harnessSkillRoot": (
+            config.harness_skill_root.as_posix()
+            if config.harness_skill_root
+            else None
+        ),
         "allowedRepoIds": list(config.allowed_repo_ids),
         "allowedProviderIds": list(config.allowed_provider_ids),
         "tools": list(PUBLIC_TOOLS),
@@ -190,7 +195,7 @@ def memory_init_payload(
 
 
 def skills_install_payload(
-    install_root: str,
+    config: McpRuntimeConfig,
     *,
     layout: str = "tree",
     dry_run: bool = True,
@@ -198,7 +203,7 @@ def skills_install_payload(
     archive_existing: bool = False,
 ) -> dict[str, Any]:
     return skills_install_tool(
-        install_root=install_root,
+        config,
         layout=layout,
         dry_run=dry_run,
         overwrite=overwrite,
@@ -519,7 +524,7 @@ def memory_carryover_apply_payload(
     )
 
 
-def benchmark_prepare_payload(
+def codex_benchmark_prepare_payload(
     config: McpRuntimeConfig,
     *,
     target: str = "all",
@@ -530,7 +535,7 @@ def benchmark_prepare_payload(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
-    return benchmark_prepare_tool(
+    return codex_benchmark_prepare_tool(
         config,
         target=target,
         case_id=case_id,
@@ -542,7 +547,7 @@ def benchmark_prepare_payload(
     )
 
 
-def benchmark_run_payload(
+def codex_benchmark_run_payload(
     config: McpRuntimeConfig,
     *,
     target: str = "all",
@@ -551,7 +556,6 @@ def benchmark_run_payload(
     prompt: str | None = None,
     variant: str | None = None,
     repetitions: int | None = None,
-    codex_bin: str = "codex",
     jobs: int | None = None,
     dry_run: bool = True,
     skip_prepare: bool = False,
@@ -559,7 +563,7 @@ def benchmark_run_payload(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
-    return benchmark_run_tool(
+    return codex_benchmark_run_tool(
         config,
         target=target,
         case_id=case_id,
@@ -567,7 +571,6 @@ def benchmark_run_payload(
         prompt=prompt,
         variant=variant,
         repetitions=repetitions,
-        codex_bin=codex_bin,
         jobs=jobs,
         dry_run=dry_run,
         skip_prepare=skip_prepare,

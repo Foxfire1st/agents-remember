@@ -7,16 +7,35 @@ description: "Initialize or repair the Agents Remember memory root for a target 
 
 Create the minimal memory root required before onboarding or task workflows can use Agents Remember for a target repository.
 
-This skill initializes durable repo memory. It does not install the coordinator runtime, expose harness skills, create task worktrees, or generate onboarding content. Request MCP `runtime_install` for coordinator runtime installation, MCP `skills_install` for harness skill exposure, and `C-03-repo-bootstrap` after this scaffold exists when the developer wants onboarding content generated.
+This skill initializes durable repo memory through MCP `memory_init`. It does not install the coordinator runtime, expose harness skills, create task worktrees, or generate onboarding content. Request MCP `runtime_install` for coordinator runtime installation, MCP `skills_install` for harness skill exposure, and `C-03-repo-bootstrap` after this scaffold exists when the developer wants onboarding content generated.
 
 Use `C-08-ar-coordination-context-resolver` to inspect an existing repository's active context. This skill creates or repairs missing memory scaffolding; it does not replace C-08 as the normal resolver.
 
 ## Inputs
 
-- `code_repository_root`: root directory of the code repository whose memory is being initialized. Default to the repository the developer asked to work on.
+- `repo_id`: configured MCP repository ID whose memory is being initialized. This is the normal installed runtime input.
+- `code_repository_root`: root directory of the code repository whose memory is being initialized. Use this only for conceptual review or source-debugging; normal installed runtime calls identify the configured repository by `repo_id`.
 - `topology`: `internal` by default. Use `external` only when the developer explicitly asks for an external memory repo.
-- `coordination_root`: required for external-memory initialization unless the installed runtime root is already obvious from the current skill location or the developer provided a path.
+- `coordination_root`: supplied by MCP settings for normal installed runtime calls.
 - `mode`: `create-missing` by default. Use `repair` only when the developer explicitly asks to fix existing memory scaffold files.
+
+## MCP Tools
+
+Use the Agents Remember MCP setup tools as the normal installed runtime entry
+points:
+
+```text
+memory_init(repo_id="<repo-id>", dry_run=true, initialize_git=true)
+memory_init(repo_id="<repo-id>", dry_run=false, initialize_git=true)
+runtime_install(dry_run=false, include_benchmarks=false, install_provider_deps=false)
+skills_install(layout="tree", dry_run=false, overwrite=true)
+```
+
+Use `memory_init` for creating or repairing the configured memory root for a
+repo. Use `runtime_install` only when the coordinator runtime scaffold itself is
+missing or stale. Use `skills_install` only when the registered harness skill
+root needs to be refreshed. The skill tree is instruction-only; installed and
+development workflows use the MCP/package route.
 
 ## Safety Rules
 

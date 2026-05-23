@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.benchmarks import runner as benchmark_runner  # noqa: E402
 from agents_remember.mcp.config import load_config  # noqa: E402
 from agents_remember.mcp.server import create_server  # noqa: E402
 from agents_remember.mcp.tools import (  # noqa: E402
     PUBLIC_TOOLS,
     cgc_query_payload,
     context_packet_payload,
+    codex_benchmark_run_payload,
     memory_init_payload,
     ping_payload,
     route_index_refresh_payload,
@@ -48,7 +52,7 @@ class McpToolTests(unittest.TestCase):
     def test_server_info_payload_reports_safe_config_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
+            path = root / ".agents" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -58,6 +62,10 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["server"], "agents-remember")
             self.assertEqual(payload["transport"], "stdio")
             self.assertEqual(payload["configPath"], path.resolve().as_posix())
+            self.assertEqual(
+                payload["harnessSkillRoot"],
+                (root / ".agents" / "skills").as_posix(),
+            )
             self.assertEqual(payload["allowedRepoIds"], ["agents-remember-md"])
             self.assertEqual(
                 payload["allowedProviderIds"],
@@ -72,7 +80,7 @@ class McpToolTests(unittest.TestCase):
     def test_server_constructs_with_context_packet_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
+            path = root / ".agents" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -100,7 +108,7 @@ class McpToolTests(unittest.TestCase):
     def test_runtime_install_tool_uses_configured_coordination_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
+            path = root / ".agents" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -147,20 +155,94 @@ class McpToolTests(unittest.TestCase):
             "memory_baseline_adopt",
             "memory_carryover_plan",
             "memory_carryover_apply",
-            "benchmark_prepare",
-            "benchmark_run",
+            "codex_benchmark_prepare",
+            "codex_benchmark_run",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
+        self.assertNotIn("benchmark_prepare", PUBLIC_TOOLS)
+        self.assertNotIn("benchmark_run", PUBLIC_TOOLS)
+
+    def test_codex_benchmark_run_reports_missing_codex_from_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with patch(
+                "agents_remember.controllers.skill_tools."
+                "benchmark_runner.resolve_codex_executable",
+                side_effect=benchmark_runner.CodexExecutableNotFound(
+                    "codex executable was not found on PATH"
+                ),
+            ):
+                payload = codex_benchmark_run_payload(config)
+
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["operation"], "codex_benchmark_run")
+            self.assertEqual(payload["executable"], "codex")
+            self.assertEqual(payload["resolution"], "PATH")
 
     def test_skills_install_payload_is_copy_only_and_dry_run_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            payload = skills_install_payload(str(Path(tmp_dir) / "skills"))
+            root = Path(tmp_dir)
+            path = root / ".agents" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            payload = skills_install_payload(config)
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "skills_install")
             self.assertTrue(payload["dryRun"])
             self.assertEqual(payload["layout"], "tree")
+            self.assertEqual(
+                payload["installRoot"],
+                (root / ".agents" / "skills").as_posix(),
+            )
             self.assertTrue(payload["planned"])
+
+    def test_skills_install_payload_replaces_legacy_symlink_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".agents" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+            install_root = root / ".agents" / "skills"
+            install_root.mkdir(parents=True)
+            old_target = root / "old-symlink-target"
+            old_target.mkdir()
+            destination = install_root / "agents-remember-md"
+            try:
+                os.symlink(old_target, destination, target_is_directory=True)
+            except OSError as error:
+                raise unittest.SkipTest(f"directory symlinks unavailable: {error}") from error
+
+            payload = skills_install_payload(
+                config,
+                dry_run=False,
+                overwrite=True,
+                archive_existing=False,
+            )
+
+            self.assertTrue(payload["ok"])
+            self.assertIn(destination.as_posix(), payload["removed"])
+            self.assertIn(destination.as_posix(), payload["installed"])
+            self.assertTrue(destination.is_dir())
+            self.assertFalse(destination.is_symlink() or os.path.islink(destination))
+            self.assertTrue(old_target.exists())
+            self.assertTrue((destination / "U-01-core-skills" / "C-00-initialize-memory-repo" / "SKILL.md").exists())
+
+    def test_skills_install_payload_requires_configured_harness_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+            config = load_config(path)
+
+            with self.assertRaisesRegex(ValueError, "harnessSkillRoot"):
+                skills_install_payload(config)
 
     def test_memory_init_payload_uses_configured_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

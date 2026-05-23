@@ -32,17 +32,17 @@ Install the runtime through the MCP server:
 runtime_install(dry_run=false)
 ```
 
-Hermes local skills commonly live under `~/.hermes/skills/`. Use a category folder and flat layout so each visible skill folder matches the skill name:
+Hermes local skills commonly live under `~/.hermes/skills/`. Place the MCP
+settings under `~/.hermes/mcp/` to infer `~/.hermes/skills/`, or set
+`harnessSkillRoot` to a category folder when you want one. Then use flat layout
+so each visible skill folder matches the skill name:
 
 ```text
-skills_install(install_root="/absolute/path/to/.hermes/skills/agents-remember-md", layout="flat", dry_run=false)
+skills_install(layout="flat", dry_run=false)
 ```
 
-You can also install into a shared skills directory and add it to `~/.hermes/config.yaml`:
-
-```text
-skills_install(install_root="/absolute/path/to/.agents/skills/agents-remember-md", layout="flat", dry_run=false)
-```
+You can also use `harnessSkillRoot` for a shared skills directory and add it to
+`~/.hermes/config.yaml` when it does not follow the sibling-folder convention:
 
 ```yaml
 skills:

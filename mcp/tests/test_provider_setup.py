@@ -9,15 +9,8 @@ import zipfile
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-MCP_SRC = REPO_ROOT / "mcp" / "src"
-MCP_PACKAGE_ROOT = MCP_SRC / "agents_remember"
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
-
-import agents_remember  # noqa: E402
-
-if str(MCP_PACKAGE_ROOT) not in agents_remember.__path__:
-    agents_remember.__path__.append(str(MCP_PACKAGE_ROOT))
 
 from agents_remember.providers import provider_setup  # noqa: E402
 

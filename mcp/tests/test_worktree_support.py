@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import os
@@ -17,19 +16,11 @@ from typing import Optional
 from unittest import mock
 
 
-CORE_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = CORE_ROOT.parent.parent.parent
-SHARED_ROOT = CORE_ROOT / "_shared"
-SHARED_PACKAGE_ROOT = SHARED_ROOT / "agents_remember"
-MCP_PACKAGE_ROOT = REPO_ROOT / "mcp" / "src" / "agents_remember"
-sys.path.insert(0, str(SHARED_ROOT))
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(MCP_SRC))
 
-import agents_remember  # noqa: E402
-
-if str(SHARED_PACKAGE_ROOT) not in agents_remember.__path__:
-    agents_remember.__path__.insert(0, str(SHARED_PACKAGE_ROOT))
-
-from agents_remember.memory_ledger import (  # noqa: E402
+from agents_remember.kernel import coordination_context_resolver as resolver  # noqa: E402
+from agents_remember.kernel.memory_ledger import (  # noqa: E402
     LedgerError,
     create_initial_ledger,
     ledger_to_text,
@@ -37,39 +28,11 @@ from agents_remember.memory_ledger import (  # noqa: E402
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.worktree_contract import default_contract, load_contract, task_root_candidates, write_contract  # noqa: E402
-
-agents_remember.__path__.append(str(MCP_PACKAGE_ROOT))
 from agents_remember.benchmarks import runner as benchmark_runner  # noqa: E402
-
-
-RESOLVER_PATH = CORE_ROOT / "C-08-ar-coordination-context-resolver" / "scripts" / "ar_coordination_context_resolver.py"
-RESOLVER_SPEC = importlib.util.spec_from_file_location("coordination_context_resolver", RESOLVER_PATH)
-assert RESOLVER_SPEC is not None and RESOLVER_SPEC.loader is not None
-resolver = importlib.util.module_from_spec(RESOLVER_SPEC)
-sys.modules[RESOLVER_SPEC.name] = resolver
-RESOLVER_SPEC.loader.exec_module(resolver)
-
-WORKTREE_MANAGER_PATH = CORE_ROOT / "C-09-git-worktree-manager" / "scripts" / "git_worktree_manager.py"
-WORKTREE_MANAGER_SPEC = importlib.util.spec_from_file_location("git_worktree_manager", WORKTREE_MANAGER_PATH)
-assert WORKTREE_MANAGER_SPEC is not None and WORKTREE_MANAGER_SPEC.loader is not None
-worktree_manager = importlib.util.module_from_spec(WORKTREE_MANAGER_SPEC)
-sys.modules[WORKTREE_MANAGER_SPEC.name] = worktree_manager
-WORKTREE_MANAGER_SPEC.loader.exec_module(worktree_manager)
-
-ADOPT_BASELINE_PATH = CORE_ROOT / "C-10-adopt-memory-baseline" / "scripts" / "adopt_memory_baseline.py"
-ADOPT_BASELINE_SPEC = importlib.util.spec_from_file_location("adopt_memory_baseline", ADOPT_BASELINE_PATH)
-assert ADOPT_BASELINE_SPEC is not None and ADOPT_BASELINE_SPEC.loader is not None
-adopt_baseline = importlib.util.module_from_spec(ADOPT_BASELINE_SPEC)
-sys.modules[ADOPT_BASELINE_SPEC.name] = adopt_baseline
-ADOPT_BASELINE_SPEC.loader.exec_module(adopt_baseline)
-
-MEMORY_CARRYOVER_PATH = CORE_ROOT / "C-11-memory-carryover-from-branch" / "scripts" / "memory_carryover.py"
-MEMORY_CARRYOVER_SPEC = importlib.util.spec_from_file_location("memory_carryover", MEMORY_CARRYOVER_PATH)
-assert MEMORY_CARRYOVER_SPEC is not None and MEMORY_CARRYOVER_SPEC.loader is not None
-memory_carryover = importlib.util.module_from_spec(MEMORY_CARRYOVER_SPEC)
-sys.modules[MEMORY_CARRYOVER_SPEC.name] = memory_carryover
-MEMORY_CARRYOVER_SPEC.loader.exec_module(memory_carryover)
+from agents_remember.memory import baseline as adopt_baseline  # noqa: E402
+from agents_remember.memory import carryover as memory_carryover  # noqa: E402
+from agents_remember.worktrees import git_worktree_manager as worktree_manager  # noqa: E402
+from agents_remember.worktrees.worktree_contract import default_contract, load_contract, task_root_candidates, write_contract  # noqa: E402
 
 drift = adopt_baseline.drift
 
@@ -1631,23 +1594,19 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             self.assertFalse(link.exists() or link.is_symlink())
             self.assertTrue((target / "SKILL.md").is_file())
 
-    def test_windows_codex_bin_prefers_cmd_shim(self) -> None:
+    def test_codex_executable_resolves_from_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            extensionless = root / "codex"
             cmd = root / "codex.cmd"
-            extensionless.write_text("#!/bin/sh\n", encoding="utf-8")
             cmd.write_text("@echo off\n", encoding="utf-8")
 
             def fake_which(command: str) -> str | None:
-                candidate = root / command
-                if candidate.exists():
-                    return str(candidate)
+                if command == "codex":
+                    return str(cmd)
                 return None
 
-            with mock.patch.object(benchmark_runner.sys, "platform", "win32"):
-                with mock.patch.object(benchmark_runner.shutil, "which", side_effect=fake_which):
-                    self.assertEqual(benchmark_runner.resolve_codex_bin("codex"), str(cmd))
+            with mock.patch.object(benchmark_runner.shutil, "which", side_effect=fake_which):
+                self.assertEqual(benchmark_runner.resolve_codex_executable(), str(cmd))
 
     def test_prepare_repo_reuses_cached_commit_without_fetch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

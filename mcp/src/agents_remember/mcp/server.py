@@ -7,10 +7,10 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import ConfigError, McpRuntimeConfig, load_config
 from .tools import (
-    benchmark_prepare_payload,
-    benchmark_run_payload,
     cgc_query_payload,
     cgc_visualize_payload,
+    codex_benchmark_prepare_payload,
+    codex_benchmark_run_payload,
     context_packet_payload,
     direct_closeout_apply_payload,
     direct_closeout_preview_payload,
@@ -117,14 +117,13 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def skills_install(
-        install_root: str,
         layout: str = "tree",
         dry_run: bool = True,
         overwrite: bool = False,
         archive_existing: bool = False,
     ) -> dict[str, Any]:
         return skills_install_payload(
-            install_root,
+            config,
             layout=layout,
             dry_run=dry_run,
             overwrite=overwrite,
@@ -405,7 +404,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
-    def benchmark_prepare(
+    def codex_benchmark_prepare(
         target: str = "all",
         case_id: str | None = None,
         benchmarks_root: str | None = None,
@@ -414,7 +413,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         skill_exposure_mode: str = "copy",
         provider_timeout: int = 1800,
     ) -> dict[str, Any]:
-        return benchmark_prepare_payload(
+        return codex_benchmark_prepare_payload(
             config,
             target=target,
             case_id=case_id,
@@ -426,14 +425,13 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
-    def benchmark_run(
+    def codex_benchmark_run(
         target: str = "all",
         case_id: str | None = None,
         benchmarks_root: str | None = None,
         prompt: str | None = None,
         variant: str | None = None,
         repetitions: int | None = None,
-        codex_bin: str = "codex",
         jobs: int | None = None,
         dry_run: bool = True,
         skip_prepare: bool = False,
@@ -441,7 +439,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         skill_exposure_mode: str = "copy",
         provider_timeout: int = 1800,
     ) -> dict[str, Any]:
-        return benchmark_run_payload(
+        return codex_benchmark_run_payload(
             config,
             target=target,
             case_id=case_id,
@@ -449,7 +447,6 @@ def create_server(config: McpRuntimeConfig) -> Any:
             prompt=prompt,
             variant=variant,
             repetitions=repetitions,
-            codex_bin=codex_bin,
             jobs=jobs,
             dry_run=dry_run,
             skip_prepare=skip_prepare,

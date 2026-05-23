@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -103,16 +105,16 @@ def _copy_skill_tree(
     overwrite: bool,
     archive_existing: bool,
 ) -> None:
-    if destination.exists() or destination.is_symlink():
+    if _exists_or_link(destination):
         if archive_existing:
             archived = _archive_path(destination, install_root, dry_run)
             summary.archived.append(archived.as_posix())
         elif overwrite:
             if not dry_run:
-                if destination.is_dir() and not destination.is_symlink():
+                if destination.is_dir() and not _is_link(destination):
                     shutil.rmtree(destination)
                 else:
-                    destination.unlink()
+                    _unlink_path(destination)
             summary.removed.append(destination.as_posix())
         else:
             raise FileExistsError(
@@ -125,6 +127,29 @@ def _copy_skill_tree(
 
     shutil.copytree(source, destination, ignore=IGNORED_COPY_PATTERNS)
     summary.installed.append(destination.as_posix())
+
+
+def _exists_or_link(path: Path) -> bool:
+    return path.exists() or path.is_symlink() or os.path.lexists(path)
+
+
+def _is_link(path: Path) -> bool:
+    if path.is_symlink() or os.path.islink(path):
+        return True
+    try:
+        attrs = path.lstat().st_file_attributes
+    except AttributeError:
+        return False
+    except FileNotFoundError:
+        return False
+    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _unlink_path(path: Path) -> None:
+    try:
+        path.unlink()
+    except IsADirectoryError:
+        path.rmdir()
 
 
 def _archive_path(path: Path, install_root: Path, dry_run: bool) -> Path:

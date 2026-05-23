@@ -7,11 +7,10 @@ import unittest
 from pathlib import Path
 
 
-CORE_ROOT = Path(__file__).resolve().parents[1]
-SHARED_ROOT = CORE_ROOT / "_shared"
-sys.path.insert(0, str(SHARED_ROOT))
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.route_index import build_route_indexes, sidecar_status  # noqa: E402
+from agents_remember.kernel.route_index import build_route_indexes, sidecar_status  # noqa: E402
 
 
 class RouteIndexTests(unittest.TestCase):

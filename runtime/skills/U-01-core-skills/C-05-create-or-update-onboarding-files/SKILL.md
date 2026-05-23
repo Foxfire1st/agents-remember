@@ -102,7 +102,7 @@ Existing onboarding is durable memory, not disposable generated output. Preserve
 13. Reference health checking is mandatory during onboarding maintenance. Do not assume existing `Docs References`, `Repo-Internal References`, or `Cross-Repo References` are still valid.
 14. `Update History` sections are append-only: preserve existing entries and add newer entries for corrections, superseded notes, or follow-up clarification.
 15. When changed paths imply route-level creation, refresh, move, or deletion, route to C-03 `existing-memory-slice-maintenance` before creating piecemeal file-level onboarding.
-16. After creating, updating, moving, or deleting route overviews or file-level sidecars, refresh generated route indexes with `scripts/build_route_indexes.py`.
+16. After creating, updating, moving, or deleting route overviews or file-level sidecars, refresh generated route indexes with MCP `route_index_refresh`.
 17. Keep each route overview's `## Hot Path Summary` short and current; it is copied into generated indexes for C-04 discovery.
 18. Do not delete onboarding for moved, split, merged, or deleted source until checking whether its documented behavior can be moved into a current onboarding target.
 
@@ -114,7 +114,7 @@ missing-sidecar lists in overview prose.
 Use:
 
 ```text
-python <C-05>/scripts/build_route_indexes.py --code-repository-root <repo> --onboarding-root <onboarding_root> --repository <repo-name>
+route_index_refresh(repo_id="<repo-id>", dry_run=false)
 ```
 
 The generator:
@@ -133,6 +133,9 @@ If the generator reports stale or surprising coverage, fix the onboarding
 structure or source-sidecar mismatch before treating the index as current.
 If `hotPath.summary` is empty or stale, update the owning overview; do not hand
 edit the generated index.
+
+The skill tree is instruction-only; installed and development workflows use the
+MCP/package route.
 
 ## Source Discovery Rule
 

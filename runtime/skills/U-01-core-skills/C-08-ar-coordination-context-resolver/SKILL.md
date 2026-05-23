@@ -64,21 +64,28 @@ The resolver returns one coordination context for the target repository:
 
 Mixed workspaces are resolved per target repository. One external memory repo does not move neighboring local repositories onto the coordination root, and one local repository does not prevent another repository from using external memory.
 
-## Helper
+## MCP Tools
 
-Use the bundled helper as the single source of truth for resolver logic:
+Use the Agents Remember MCP resolver tools as the normal installed runtime entry
+point:
 
-```bash
-<this-skill-dir>/scripts/ar_coordination_context_resolver.py \
-  --code-repository-name <code-repository-name> \
-  --workspace-root <workspace-root> \
-  --format json
+```text
+resolve_context(repo_id="<repo-id>", task_name="<task>", contract_path="<contract.md>", worktree_name="<worktree>", topology="<internal|external>")
 ```
 
-Callers that already have the code repository root can pass `--code-repository-root <code-repository-root>`. Explicit external-memory operations can pass `--topology external --coordination-root <ar-coordination-root>`.
-Worktree-aware callers can pass `--task-name`, `--worktree-name`, or `--contract-path`.
+For startup context that also needs provider status or drift summary, request:
 
-The helper uses only the Python standard library, including the built-in JSON parser for `settings.json`. If the executable bit is unavailable, invoke it with the machine's Python 3 interpreter.
+```text
+context_packet(repo_id="<repo-id>", include_providers=true, include_drift=false)
+```
+
+The MCP server owns the authority settings for repository IDs, workspace roots,
+coordination root, and provider configuration. Callers that already know a
+checkout path should still identify the configured repository through the MCP
+settings rather than inventing a parallel resolver path.
+
+The skill tree is instruction-only; installed and development workflows use the
+MCP/package route.
 
 ## Consumers
 
@@ -90,6 +97,6 @@ The helper uses only the Python standard library, including the built-in JSON pa
 ## Boundaries
 
 1. C-08 owns topology detection, coordination-root and memory-root resolution, JSON-first settings parsing with Markdown fallback, storage semantics, `pathRules`, task-contract fact loading, and cross-repo allowance parsing.
-2. Other skills may import or call the C-08 helper, but they must not keep parallel resolver implementations.
-3. The top `AGENTS.md` topology explanation remains fallback guidance for humans and agents if the helper cannot run.
+2. Other skills may request MCP `resolve_context` or `context_packet`, but they must not keep parallel resolver implementations.
+3. The top `AGENTS.md` topology explanation remains orientation guidance for humans and agents, not a replacement runtime path.
 4. C-08 resolves where context lives; it does not create missing scaffolding or Git worktrees. Use `C-00-initialize-memory-repo` for memory-root creation and C-09 for worktree lifecycle mutation.

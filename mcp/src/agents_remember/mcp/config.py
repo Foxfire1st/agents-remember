@@ -34,6 +34,7 @@ class McpRuntimeConfig:
     coordination_root: Path
     workspace_root: Path
     transcript_root: Path
+    harness_skill_root: Path | None = None
     repositories: dict[str, RepositoryScope] = field(default_factory=dict)
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
@@ -81,6 +82,11 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     transcript_root = optional_absolute_path(data, "transcriptRoot", owner="MCP settings")
     if transcript_root is None:
         transcript_root = coordination_root / "providers" / "logs" / "mcp"
+    harness_skill_root = optional_absolute_path(
+        data,
+        "harnessSkillRoot",
+        owner="MCP settings",
+    ) or infer_harness_skill_root(config_path)
 
     if path_is_relative_to(config_path, coordination_root):
         raise ConfigError("MCP settings must not live inside the coordinator root")
@@ -98,6 +104,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         coordination_root=coordination_root,
         workspace_root=workspace_root,
         transcript_root=transcript_root,
+        harness_skill_root=harness_skill_root,
         repositories=repositories,
         providers=providers,
         timeout_caps=timeout_caps,
@@ -151,6 +158,12 @@ def parse_repositories(
             contract_path=contract_path,
         )
     return repositories
+
+
+def infer_harness_skill_root(config_path: Path) -> Path | None:
+    if config_path.parent.name != "mcp":
+        return None
+    return (config_path.parent.parent / "skills").resolve()
 
 
 def parse_providers(raw: object, coordination_root: Path) -> dict[str, ProviderScope]:

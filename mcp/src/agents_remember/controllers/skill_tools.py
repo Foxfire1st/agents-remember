@@ -115,15 +115,20 @@ def memory_init_tool(
 
 
 def skills_install_tool(
+    config: McpRuntimeConfig,
     *,
-    install_root: str,
     layout: str = "tree",
     dry_run: bool = True,
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:
+    if config.harness_skill_root is None:
+        raise ValueError(
+            "MCP settings must live under <registration-root>/mcp/ or define "
+            "harnessSkillRoot before skills_install can run"
+        )
     return install_skills(
-        install_root=Path(install_root).resolve(),
+        install_root=config.harness_skill_root,
         layout=layout,
         dry_run=dry_run,
         overwrite=overwrite,
@@ -544,7 +549,7 @@ def memory_carryover_apply_tool(
     return run_package_main(operation="memory_carryover_apply", main=carryover.main, argv=argv)
 
 
-def benchmark_prepare_tool(
+def codex_benchmark_prepare_tool(
     config: McpRuntimeConfig,
     *,
     target: str = "all",
@@ -562,15 +567,26 @@ def benchmark_prepare_tool(
         target,
     ]
     _append_positional(argv, case_id)
-    argv.extend(["--skill-exposure-mode", skill_exposure_mode, "--provider-timeout", str(provider_timeout)])
+    argv.extend(
+        [
+            "--skill-exposure-mode",
+            skill_exposure_mode,
+            "--provider-timeout",
+            str(provider_timeout),
+        ]
+    )
     if force_clone:
         argv.append("--force-clone")
     if dry_run:
         argv.append("--dry-run")
-    return run_package_main(operation="benchmark_prepare", main=benchmark_runner.main, argv=argv)
+    return run_package_main(
+        operation="codex_benchmark_prepare",
+        main=benchmark_runner.main,
+        argv=argv,
+    )
 
 
-def benchmark_run_tool(
+def codex_benchmark_run_tool(
     config: McpRuntimeConfig,
     *,
     target: str = "all",
@@ -579,7 +595,6 @@ def benchmark_run_tool(
     prompt: str | None = None,
     variant: str | None = None,
     repetitions: int | None = None,
-    codex_bin: str = "codex",
     jobs: int | None = None,
     dry_run: bool = True,
     skip_prepare: bool = False,
@@ -587,13 +602,40 @@ def benchmark_run_tool(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
-    argv = ["--benchmarks-root", _benchmark_root(config, benchmarks_root).as_posix(), "run", target]
+    try:
+        codex_executable = benchmark_runner.resolve_codex_executable()
+    except benchmark_runner.CodexExecutableNotFound as error:
+        return {
+            "ok": False,
+            "operation": "codex_benchmark_run",
+            "error": str(error),
+            "executable": "codex",
+            "resolution": "PATH",
+            "recoveryAction": (
+                "Install the Codex CLI or ensure `codex` is on the MCP server "
+                "process PATH."
+            ),
+        }
+
+    argv = [
+        "--benchmarks-root",
+        _benchmark_root(config, benchmarks_root).as_posix(),
+        "run",
+        target,
+    ]
     _append_positional(argv, case_id)
     _append_option(argv, "--prompt", prompt)
     _append_option(argv, "--variant", variant)
     if repetitions is not None:
         argv.extend(["--repetitions", str(repetitions)])
-    argv.extend(["--codex-bin", codex_bin, "--skill-exposure-mode", skill_exposure_mode, "--provider-timeout", str(provider_timeout)])
+    argv.extend(
+        [
+            "--skill-exposure-mode",
+            skill_exposure_mode,
+            "--provider-timeout",
+            str(provider_timeout),
+        ]
+    )
     if jobs is not None:
         argv.extend(["--jobs", str(jobs)])
     if dry_run:
@@ -602,7 +644,14 @@ def benchmark_run_tool(
         argv.append("--skip-prepare")
     if force_clone:
         argv.append("--force-clone")
-    return run_package_main(operation="benchmark_run", main=benchmark_runner.main, argv=argv)
+    result = run_package_main(
+        operation="codex_benchmark_run",
+        main=benchmark_runner.main,
+        argv=argv,
+    )
+    result["codexExecutable"] = codex_executable
+    result["codexResolution"] = "PATH"
+    return result
 
 
 def _repo(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:

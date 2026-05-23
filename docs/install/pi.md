@@ -27,24 +27,12 @@ Install the runtime through the MCP server:
 runtime_install(dry_run=false)
 ```
 
-Pi loads skills from project `.pi/skills`, project `.agents/skills`, global `~/.pi/agent/skills`, global `~/.agents/skills`, settings entries, package entries, and repeated `--skill <path>` flags.
+Pi loads skills from project `.pi/skills`, project `.agents/skills`, global `~/.pi/agent/skills`, global `~/.agents/skills`, settings entries, package entries, and repeated `--skill <path>` flags. Place the MCP settings under the matching registration folder, such as `.pi/mcp/` or `.agents/mcp/`, and the skill target is inferred as the sibling `skills/` folder.
 
 Use flat layout for Pi-native skill roots:
 
 ```text
-skills_install(install_root="/absolute/path/to/.pi/skills", layout="flat", dry_run=false)
-```
-
-For a shared project install:
-
-```text
-skills_install(install_root="/absolute/path/to/.agents/skills", layout="flat", dry_run=false)
-```
-
-For global Pi skills:
-
-```text
-skills_install(install_root="/absolute/path/to/.pi/agent/skills", layout="flat", dry_run=false)
+skills_install(layout="flat", dry_run=false)
 ```
 
 Pi can discover `SKILL.md` directories recursively, but skill names should still match their parent folder for clean validation.

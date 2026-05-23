@@ -30,24 +30,12 @@ Install the runtime through the MCP server:
 runtime_install(dry_run=false)
 ```
 
-Windsurf workspace skills live in `.windsurf/skills/<skill-name>/SKILL.md`. Global skills live in `~/.codeium/windsurf/skills/<skill-name>/SKILL.md`. Windsurf also discovers `.agents/skills` and `~/.agents/skills` for cross-agent compatibility.
+Windsurf workspace skills live in `.windsurf/skills/<skill-name>/SKILL.md`. Global skills live in `~/.codeium/windsurf/skills/<skill-name>/SKILL.md`. Windsurf also discovers `.agents/skills` and `~/.agents/skills` for cross-agent compatibility. Place the MCP settings under the matching registration folder, such as `.windsurf/mcp/` or `.agents/mcp/`, and the skill target is inferred as the sibling `skills/` folder.
 
 Use the flat layout:
 
 ```text
-skills_install(install_root="/absolute/path/to/.windsurf/skills", layout="flat", dry_run=false)
-```
-
-For a shared project-level install:
-
-```text
-skills_install(install_root="/absolute/path/to/.agents/skills", layout="flat", dry_run=false)
-```
-
-For global Windsurf skills:
-
-```text
-skills_install(install_root="/absolute/path/to/.codeium/windsurf/skills", layout="flat", dry_run=false)
+skills_install(layout="flat", dry_run=false)
 ```
 
 Cascade can invoke skills automatically or manually with `@skill-name`.

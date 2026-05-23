@@ -9,23 +9,27 @@ Use this skill when a task should run through an explicit code/memory worktree w
 
 C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It owns Git worktree state, task contracts, direct checkout closeout, external-memory compatibility checks, and approved closeout sequencing. It does not replace the workflow that performs the actual implementation.
 
-## Commands
+## MCP Tools
 
-The bundled helper exposes these subcommands:
+Use the Agents Remember MCP worktree tools as the normal installed runtime
+entry point:
 
-```bash
-<this-skill-dir>/scripts/git_worktree_manager.py start --code-repository-name <code-repository-name> --task-name <task> --worktree-name <name>
-<this-skill-dir>/scripts/git_worktree_manager.py attach --code-repository-name <code-repository-name> --task-name <task>
-<this-skill-dir>/scripts/git_worktree_manager.py status --code-repository-name <code-repository-name> --task-name <task>
-<this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --dry-run ...
-<this-skill-dir>/scripts/git_worktree_manager.py closeout --contract-path <contract.md> --approved --approval-note <note> ...
-<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --code-repository-name <code-repository-name> --dry-run ...
-<this-skill-dir>/scripts/git_worktree_manager.py direct-closeout --code-repository-name <code-repository-name> --approved --approval-note <note> ...
-<this-skill-dir>/scripts/git_worktree_manager.py integrate --contract-path <contract.md> --approved --strategy ff-only
-<this-skill-dir>/scripts/git_worktree_manager.py cleanup --contract-path <contract.md> --approved
+```text
+worktree_start(repo_id="<repo-id>", task_name="<task>", worktree_name="<name>", workflow_kind="light-task", dry_run=false)
+worktree_attach(repo_id="<repo-id>", task_name="<task>")
+worktree_status(repo_id="<repo-id>", task_name="<task>")
+worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+direct_closeout_preview(repo_id="<repo-id>", task_name="<task>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+direct_closeout_apply(repo_id="<repo-id>", task_name="<task>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_integrate(contract_path="<contract.md>", strategy="ff-only", dry_run=false)
+worktree_cleanup(contract_path="<contract.md>", dry_run=false)
 ```
 
-Callers that already know the checkout path may pass `--code-repository-root <code-repository-root>` instead of relying on `--workspace-root` lookup.
+Callers identify repositories by configured MCP `repo_id`. The MCP server owns
+workspace root, coordination root, provider setup settings, and path containment.
+The skill tree is instruction-only; installed and development workflows use the
+MCP/package route.
 
 ## Pre-Worktree Intake
 
@@ -39,13 +43,13 @@ The intended order is:
 4. decide whether the work is chat-only, W-02 light task, heavy task, or external workflow
 5. choose or review the task slug and workflow variables
 6. create the durable task wrapper when one is needed
-7. run C-09 `start` only after the task identity is stable and external memory is clean
+7. request MCP `worktree_start` only after the task identity is stable and external memory is clean
 
 For W-02 light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. C-09 then places `contract.md` beside that `task.md` when worktrees are created.
 
 ## Start / Attach / Status
 
-`start` resolves C-08 context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
+`worktree_start` resolves C-08 context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
 
 When external memory is enabled, C-09 validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. Missing external memory is not a C-09 bootstrap path; run `C-00-initialize-memory-repo` first. If no compatible memory state exists, C-09 stops and reports the allowed human choices:
 
@@ -53,13 +57,13 @@ When external memory is enabled, C-09 validates the memory repo and `memory.md` 
 2. `disabled-memory`
 3. `custom`
 
-`attach` and `status` read the existing contract and report recoverable state without mutating Git. `status` includes a lifecycle phase, dirty worktree flags, a summary, and the next safe command.
+`worktree_attach` and `worktree_status` read the existing contract and report recoverable state without mutating Git. `worktree_status` includes a lifecycle phase, dirty worktree flags, a summary, and the next safe command.
 
 ## Closeout
 
-Closeout is explicitly human-gated. Implementation approval is not commit approval. Agents must first run `closeout --dry-run` to prepare a non-mutating commit preview, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Dry-run closeout does not require `--approved`, and it reports the closeout order plus the affected onboarding metadata and entity fingerprint refresh plan.
+Closeout is explicitly human-gated. Implementation approval is not commit approval. Agents must first request `worktree_closeout_preview` to prepare a non-mutating commit preview, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. The preview reports the closeout order plus the affected onboarding metadata and entity fingerprint refresh plan.
 
-Real closeout creates commits and therefore requires both `--approved` and `--approval-note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
+Real closeout creates commits and therefore uses `worktree_closeout_apply` with an `intent_note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
 
 Closeout stops if the recorded code or external-memory source branch moved since task start.
 
@@ -81,9 +85,9 @@ Push behavior is not automatic.
 
 ## Direct Closeout
 
-Use `direct-closeout` only for small approved edits made in the current source checkout, or for memory-only polish that does not need isolated worktrees or durable task artifacts. If the work is parallel, long-running, conflict-prone, review-heavy, or needs replay/integration bookkeeping, use the normal C-09 worktree flow instead.
+Use `direct_closeout_preview` / `direct_closeout_apply` only for small approved edits made in the current source checkout, or for memory-only polish that does not need isolated worktrees or durable task artifacts. If the work is parallel, long-running, conflict-prone, review-heavy, or needs replay/integration bookkeeping, use the normal C-09 worktree flow instead.
 
-Direct closeout is still explicitly human-gated. Agents must run `direct-closeout --dry-run` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout requires both `--approved` and `--approval-note`.
+Direct closeout is still explicitly human-gated. Agents must request `direct_closeout_preview` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout uses `direct_closeout_apply` with an `intent_note`.
 
 Direct closeout resolves the current C-08 context, requires external memory mode, and requires the code checkout and memory repo to be on the same selected branch. Ledger compatibility is based on code-to-memory commit mappings, not branch metadata.
 
