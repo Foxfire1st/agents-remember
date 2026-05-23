@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,86 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+@dataclass(frozen=True)
+class CgcSeedOptions:
+    source_coordination_root: Path | None = None
+    source_settings_path: Path | None = None
+    repo_id: str | None = None
+    source_repo_id: str | None = None
+    source_repo_root: Path | None = None
+    target_repo_root: Path | None = None
+    bundle_dir: Path | None = None
+    allow_commit_mismatch: bool = False
+    allow_same_coordination_root: bool = False
+
+
+@dataclass(frozen=True)
+class IsolatedCgcOptions:
+    runtime_root: Path | None = None
+    settings_path: Path | None = None
+    container_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderSetupRequest:
+    action: str
+    coordination_root: Path
+    settings_path: Path
+    timeout: int = 1800
+    dry_run: bool = False
+    skip_watchers: bool = False
+    skip_grepai: bool = False
+    cgc_refresh_fallback: bool = True
+    cgc_seed: CgcSeedOptions = CgcSeedOptions()
+    cgc_isolated: IsolatedCgcOptions = IsolatedCgcOptions()
+
+    def normalized(self) -> ProviderSetupRequest:
+        return ProviderSetupRequest(
+            action=self.action,
+            coordination_root=self.coordination_root.resolve(),
+            settings_path=self.settings_path.resolve(),
+            timeout=self.timeout,
+            dry_run=self.dry_run,
+            skip_watchers=self.skip_watchers,
+            skip_grepai=self.skip_grepai,
+            cgc_refresh_fallback=self.cgc_refresh_fallback,
+            cgc_seed=CgcSeedOptions(
+                source_coordination_root=_resolve_optional_path(
+                    self.cgc_seed.source_coordination_root
+                ),
+                source_settings_path=_resolve_optional_path(self.cgc_seed.source_settings_path),
+                repo_id=self.cgc_seed.repo_id,
+                source_repo_id=self.cgc_seed.source_repo_id,
+                source_repo_root=_resolve_optional_path(self.cgc_seed.source_repo_root),
+                target_repo_root=_resolve_optional_path(self.cgc_seed.target_repo_root),
+                bundle_dir=_resolve_optional_path(self.cgc_seed.bundle_dir),
+                allow_commit_mismatch=self.cgc_seed.allow_commit_mismatch,
+                allow_same_coordination_root=self.cgc_seed.allow_same_coordination_root,
+            ),
+            cgc_isolated=IsolatedCgcOptions(
+                runtime_root=_resolve_optional_path(self.cgc_isolated.runtime_root),
+                settings_path=_resolve_optional_path(self.cgc_isolated.settings_path),
+                container_name=self.cgc_isolated.container_name,
+            ),
+        )
+
+
+def _resolve_optional_path(path: Path | None) -> Path | None:
+    return path.resolve() if path is not None else None
+
+
+def require_settings_path(from_settings: Path | None) -> Path:
+    if from_settings is None:
+        raise RuntimeError(
+            "provider setup requires an explicit settings path; "
+            "coordinator system/settings.json is not an authority source"
+        )
+    return from_settings.resolve()
+
+
 def settings_path(coordination_root: Path, from_settings: Path | None = None) -> Path:
-    return from_settings or coordination_root / "system" / "settings.json"
+    _ = coordination_root
+    return require_settings_path(from_settings)
 
 
 def load_settings(
@@ -46,6 +125,62 @@ def load_settings(
     if not path.exists():
         return None
     return load_json(path)
+
+
+def request_from_args(args: argparse.Namespace) -> ProviderSetupRequest:
+    return ProviderSetupRequest(
+        action=args.action,
+        coordination_root=args.coordination_root,
+        settings_path=require_settings_path(args.from_settings),
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+        skip_watchers=args.skip_watchers,
+        skip_grepai=args.skip_grepai,
+        cgc_refresh_fallback=args.cgc_refresh_fallback,
+        cgc_seed=CgcSeedOptions(
+            source_coordination_root=args.cgc_seed_source_coordination_root,
+            source_settings_path=args.cgc_seed_source_from_settings,
+            repo_id=args.cgc_seed_repo_id,
+            source_repo_id=args.cgc_seed_source_repo_id,
+            source_repo_root=args.cgc_seed_source_repo_root,
+            target_repo_root=args.cgc_seed_target_repo_root,
+            bundle_dir=args.cgc_seed_bundle_dir,
+            allow_commit_mismatch=args.cgc_seed_allow_commit_mismatch,
+            allow_same_coordination_root=args.cgc_seed_allow_same_coordination_root,
+        ),
+        cgc_isolated=IsolatedCgcOptions(
+            runtime_root=args.cgc_isolated_runtime_root,
+            settings_path=args.cgc_isolated_settings_path,
+            container_name=args.cgc_isolated_container_name,
+        ),
+    )
+
+
+def args_from_request(request: ProviderSetupRequest) -> argparse.Namespace:
+    normalized = request.normalized()
+    return argparse.Namespace(
+        action=normalized.action,
+        coordination_root=normalized.coordination_root,
+        from_settings=normalized.settings_path,
+        timeout=normalized.timeout,
+        dry_run=normalized.dry_run,
+        skip_watchers=normalized.skip_watchers,
+        skip_grepai=normalized.skip_grepai,
+        cgc_refresh_fallback=normalized.cgc_refresh_fallback,
+        cgc_seed_source_coordination_root=normalized.cgc_seed.source_coordination_root,
+        cgc_seed_source_from_settings=normalized.cgc_seed.source_settings_path,
+        cgc_seed_repo_id=normalized.cgc_seed.repo_id,
+        cgc_seed_source_repo_id=normalized.cgc_seed.source_repo_id,
+        cgc_seed_source_repo_root=normalized.cgc_seed.source_repo_root,
+        cgc_seed_target_repo_root=normalized.cgc_seed.target_repo_root,
+        cgc_seed_bundle_dir=normalized.cgc_seed.bundle_dir,
+        cgc_seed_allow_commit_mismatch=normalized.cgc_seed.allow_commit_mismatch,
+        cgc_seed_allow_same_coordination_root=normalized.cgc_seed.allow_same_coordination_root,
+        cgc_isolated_runtime_root=normalized.cgc_isolated.runtime_root,
+        cgc_isolated_settings_path=normalized.cgc_isolated.settings_path,
+        cgc_isolated_container_name=normalized.cgc_isolated.container_name,
+        cgc_from_settings=None,
+    )
 
 
 def context_providers(settings: dict[str, Any]) -> dict[str, Any]:
@@ -751,7 +886,15 @@ def prepare_enabled_providers(
     return results
 
 
+def run_provider_setup(request: ProviderSetupRequest) -> dict[str, Any]:
+    return _action_payload_from_args(args_from_request(request))
+
+
 def action_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return run_provider_setup(request_from_args(args))
+
+
+def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
     settings = load_settings(args.coordination_root, args.from_settings)
     if settings is None:
         return {
@@ -792,7 +935,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "prepare"))
     parser.add_argument("--coordination-root", type=Path, required=True)
-    parser.add_argument("--from-settings", type=Path)
+    parser.add_argument("--from-settings", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")

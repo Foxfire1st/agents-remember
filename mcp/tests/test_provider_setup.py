@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -15,6 +17,42 @@ from agents_remember.providers import provider_setup
 
 
 class ProviderSetupTests(unittest.TestCase):
+    def test_settings_path_requires_explicit_provider_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(RuntimeError, "requires an explicit settings path"):
+                provider_setup.settings_path(root, None)
+
+    def test_parser_requires_from_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parser = provider_setup.build_parser()
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                parser.parse_args(["prepare", "--coordination-root", tmp])
+
+    def test_run_provider_setup_accepts_typed_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings_path = root / "provider-settings.json"
+            settings_path.write_text(
+                json.dumps({"contextProviders": {"enabled": False, "providers": {}}}),
+                encoding="utf-8",
+            )
+
+            payload = provider_setup.run_provider_setup(
+                provider_setup.ProviderSetupRequest(
+                    action="prepare",
+                    coordination_root=root,
+                    settings_path=settings_path,
+                    dry_run=True,
+                )
+            )
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["settingsFile"], settings_path.as_posix())
+            self.assertEqual(payload["enabled"]["grepai-memory"], False)
+            self.assertEqual(payload["enabled"]["codegraphcontext-code"], False)
+            self.assertEqual(payload["results"], [])
+
     def test_rewrite_cgc_bundle_paths_rewrites_json_jsonl_and_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

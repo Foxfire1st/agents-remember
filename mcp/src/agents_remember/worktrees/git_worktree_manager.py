@@ -398,43 +398,33 @@ def prepare_providers_for_start(
             ).as_posix(),
         }
 
-    argv = [
-        "prepare",
-        "--coordination-root",
-        target_coordination_root.as_posix(),
-        "--from-settings",
-        provider_setup.settings_path(target_coordination_root, provider_settings_path).as_posix(),
-        "--timeout",
-        str(args.provider_timeout),
-        "--json",
-        "--cgc-seed-source-coordination-root",
-        source_coordination_root.as_posix(),
-        "--cgc-seed-repo-id",
-        context.code_repository_name,
-        "--cgc-seed-source-repo-root",
-        source_repo_root.as_posix(),
-        "--cgc-seed-target-repo-root",
-        target_repo_root.as_posix(),
-        "--cgc-isolated-runtime-root",
-        provider_runtime_root.as_posix(),
-        "--skip-grepai",
-    ]
-    if args.dry_run:
-        argv.append("--dry-run")
-
-    setup_args = provider_setup.build_parser().parse_args(argv)
-    payload = provider_setup.action_payload(setup_args)
+    request = provider_setup.ProviderSetupRequest(
+        action="prepare",
+        coordination_root=target_coordination_root,
+        settings_path=provider_setup.settings_path(
+            target_coordination_root, provider_settings_path
+        ),
+        timeout=args.provider_timeout,
+        dry_run=args.dry_run,
+        skip_grepai=True,
+        cgc_seed=provider_setup.CgcSeedOptions(
+            source_coordination_root=source_coordination_root,
+            repo_id=context.code_repository_name,
+            source_repo_root=source_repo_root,
+            target_repo_root=target_repo_root,
+        ),
+        cgc_isolated=provider_setup.IsolatedCgcOptions(runtime_root=provider_runtime_root),
+    )
+    payload = provider_setup.run_provider_setup(request)
     if not payload.get("ok"):
         return {
             "state": "blocked",
             "reason": "provider setup failed",
             "payload": payload,
-            "argv": argv,
         }
     return {
         "state": "planned" if args.dry_run else "prepared",
         "payload": payload,
-        "argv": argv,
     }
 
 

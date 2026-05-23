@@ -444,33 +444,24 @@ def prepare_configured_providers(
             print(f"Would skip benchmark provider setup; no providers enabled in {settings_path}")
         return
 
-    argv = [
-        "prepare",
-        "--coordination-root",
-        coordination_root.as_posix(),
-        "--from-settings",
-        settings_path.as_posix(),
-        "--timeout",
-        str(provider_timeout),
-        "--json",
-    ]
-    if cgc_seed_source_coordination_root is not None:
-        argv.extend(
-            [
-                "--cgc-seed-source-coordination-root",
-                cgc_seed_source_coordination_root.as_posix(),
-                "--cgc-seed-repo-id",
-                cgc_seed_repo_id,
-            ]
-        )
-    if dry_run:
-        argv.append("--dry-run")
     if dry_run:
         print(
-            "Would run in "
-            f"{coordination_root}: python -m agents_remember.providers.provider_setup {' '.join(argv)}"
+            "Would run provider setup service for "
+            f"{coordination_root} with settings {settings_path}"
         )
-    payload = provider_setup.action_payload(provider_setup.build_parser().parse_args(argv))
+    payload = provider_setup.run_provider_setup(
+        provider_setup.ProviderSetupRequest(
+            action="prepare",
+            coordination_root=coordination_root,
+            settings_path=settings_path,
+            timeout=provider_timeout,
+            dry_run=dry_run,
+            cgc_seed=provider_setup.CgcSeedOptions(
+                source_coordination_root=cgc_seed_source_coordination_root,
+                repo_id=cgc_seed_repo_id,
+            ),
+        )
+    )
     if not payload.get("ok"):
         raise RuntimeError(json.dumps(payload, indent=2))
 
