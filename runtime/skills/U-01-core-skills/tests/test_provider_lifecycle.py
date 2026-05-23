@@ -9,8 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-RUNTIME_ROOT = Path(__file__).resolve().parents[3]
-PROVIDER_LIFECYCLE_PATH = RUNTIME_ROOT / "scripts" / "provider-lifecycle.py"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+PROVIDER_LIFECYCLE_PATH = REPO_ROOT / "scripts" / "provider-lifecycle.py"
 SPEC = importlib.util.spec_from_file_location("provider_lifecycle", PROVIDER_LIFECYCLE_PATH)
 if SPEC is None or SPEC.loader is None:
     raise ImportError(f"Unable to load provider lifecycle module from {PROVIDER_LIFECYCLE_PATH}")
@@ -526,6 +526,55 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["startupTimedOut"])
         self.assertEqual(result["pid"], 4321)
+
+    def test_grepai_start_fails_when_launcher_exits_but_watcher_is_not_running(self) -> None:
+        probes = [
+            {"running": False, "pid": None, "managedAlive": False, "nativeRunning": False, "status": {"returncode": 0}},
+            {"running": False, "pid": None, "managedAlive": False, "nativeRunning": False, "status": {"returncode": 0}},
+        ]
+        originals = {
+            "grepai_layout_from_args": provider_lifecycle.grepai_layout_from_args,
+            "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
+            "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
+            "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
+            "run_command": provider_lifecycle.run_command,
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                memory = root / "memory"
+                memory.mkdir()
+                layout = provider_lifecycle.grepai_runtime_layout(
+                    coordination_root=root / "coordination",
+                    workspace_name="agents-remember-memory",
+                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
+                )
+                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
+                layout.binary_path.write_text("binary\n", encoding="utf-8")
+                provider_lifecycle.grepai_layout_from_args = lambda args: (root / "settings.json", {}, layout)
+                provider_lifecycle.require_durable_process_namespace = lambda action: None
+                provider_lifecycle.ensure_grepai_runtime_layout = lambda runtime_layout: runtime_layout.state_file.parent.mkdir(parents=True, exist_ok=True)
+                provider_lifecycle.grepai_probe_watcher = lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
+                provider_lifecycle.run_command = lambda command, **kwargs: {
+                    "command": command,
+                    "returncode": 0,
+                    "stdout": "Workspace watcher agents-remember-memory started (PID 1234)\n",
+                    "stderr": "",
+                    "timedOut": False,
+                }
+
+                args = SimpleNamespace(dry_run=False, timeout=1)
+                result = provider_lifecycle.grepai_run(args, "start")
+        finally:
+            provider_lifecycle.grepai_layout_from_args = originals["grepai_layout_from_args"]
+            provider_lifecycle.require_durable_process_namespace = originals["require_durable_process_namespace"]
+            provider_lifecycle.ensure_grepai_runtime_layout = originals["ensure_grepai_runtime_layout"]
+            provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
+            provider_lifecycle.run_command = originals["run_command"]
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["pid"], 1234)
+        self.assertIn("recoveryAction", result)
 
     def test_watchers_run_reports_partial_results_and_recovery_actions(self) -> None:
         originals = {

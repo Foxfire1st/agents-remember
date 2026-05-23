@@ -29,8 +29,7 @@ for external memory repos.
 ```text
 ar-coordination/
 ├── system/
-│   ├── settings.md
-│   └── settings.json
+│   └── settings.md
 ├── memory-repos/
 ├── tasks/
 ├── notes/
@@ -49,9 +48,12 @@ rule.
 
 ## Context Providers
 
-The coordinator may define optional `contextProviders` in `settings.json`.
-Providers are local discovery accelerators. They do not replace source files,
-verified onboarding, drift checks, branch validity, or memory promotion rules.
+The coordinator does not own machine-readable provider authority. Provider
+allow-lists, repository roots, workspace roots, and generated provider lifecycle
+settings belong to the Agents Remember MCP settings file outside this
+coordinator root. Providers are local discovery accelerators. They do not
+replace source files, verified onboarding, drift checks, branch validity, or
+memory promotion rules.
 
 Use providers by retrieval substrate:
 
@@ -65,16 +67,9 @@ Use providers by retrieval substrate:
   location is known but hidden contracts, invariants, and code truths are
   unknown.
 
-Provider settings should stay declarative: roots, runtime locations, watch
-mode, freshness hooks, and transport policy. Start/stop/status/refresh behavior
-belongs to provider lifecycle tooling, not to this prose file.
-
-Installers, benchmark preparation, and worktree preparation should enter
-provider setup through `scripts/provider-setup.py`. That script centralizes
-dependency installation, watcher startup, and CGC seed import so benchmark and
-worktree flows do not reimplement the same provider logic. These flows should
-skip provider work entirely when the relevant `settings.json` does not enable
-providers.
+Provider settings should stay declarative in MCP settings. Start/stop/status,
+refresh, install, and integrity behavior belongs to MCP/package-owned lifecycle
+tooling, not coordinator-owned scripts.
 
 Provider installs should be coordination-owned. Use pinned requirements under
 `providers/requirements/`, runtime-owned binaries under `providers/_bin/`,
@@ -93,9 +88,9 @@ managed default mirrors those roots into provider-owned index roots before
 launching GrepAI, because GrepAI still keeps per-project symbol/config artifacts
 beside each configured project path. The lifecycle manager writes GrepAI
 workspace config, logs, provider state, and mirrored index roots under
-`providers/grepai/`, while all memory roots share one lifecycle-owned
+`providers/runners/grepai/`, while all memory roots share one lifecycle-owned
 PostgreSQL/pgvector Docker DBMS with persistent data under
-`provider-data/grepai/postgres/`. A `.grepai/` directory inside any indexed
+`providers/data/grepai/postgres/`. A `.grepai/` directory inside any indexed
 memory root is a containment failure, not durable memory.
 
 Relationship providers must keep runtime artifacts out of code repositories
@@ -103,9 +98,9 @@ unless a repository-local config file is explicitly approved. For
 CodeGraphContext, configure one `codegraphcontext-code` provider with a `roots`
 array of `{ repoId, path }` entries. The lifecycle manager expands those entries
 into per-repo runtime roots under
-`providers/codegraphcontext/<repo-id>/.codegraphcontext/`, while all repos share
+`providers/runners/codegraphcontext/<repo-id>/.codegraphcontext/`, while all repos share
 one lifecycle-owned FalkorDB Docker DBMS with persistent data under
-`provider-data/codegraphcontext/falkordb/`.
+`providers/data/codegraphcontext/falkordb/`.
 
 Treat CGC runtime environment and persisted CGC config as separate surfaces.
 `processEnvTemplate` is applied when launching CGC commands and should not be
@@ -113,12 +108,12 @@ blindly written into `<instanceRoot>/.codegraphcontext/.env`. Persist only keys
 accepted by the installed CGC version.
 
 Provider reinstall/update is non-destructive to provider data by default.
-`providers/` is disposable scaffolding and may be deleted and recreated from
-source during install. Runtime reinstall then installs dependencies for
-providers enabled in the live coordinator settings, using the copied provider
-pins and patches. Durable provider databases live under `provider-data/`;
-deleting FalkorDB data, graph namespaces, or repository indexes still requires
-an explicit destructive lifecycle command.
+`providers/` contains a mix of package-owned defaults and live provider runtime
+state. MCP runtime reinstall may recreate provider binaries, virtual
+environments, runner instances, copied pins, and patches, while preserving
+`providers/data/` and `providers/logs/`. Durable provider databases live under
+`providers/data/`; deleting FalkorDB data, graph namespaces, or repository
+indexes still requires an explicit destructive lifecycle command.
 
 CGC versions that create `.cgcignore` inside the indexed source repo are not
 acceptable for managed provider mode until patched or fixed upstream. The

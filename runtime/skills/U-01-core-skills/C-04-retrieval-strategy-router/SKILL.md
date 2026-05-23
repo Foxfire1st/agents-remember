@@ -32,33 +32,16 @@ Semantics, then switch to Intent once candidate routes are known.
 Use Semantics when the request is vague or fuzzy. Semantics will retrieve from onboardings which
 allows to discover the symbols/routes/files hints to relevant source code.
 
-Run GrepAI through the lifecycle wrapper so searches use the provider-owned
-workspace environment rather than a global user config.
-
-```bash
-python <coordination_root>/scripts/provider-lifecycle.py grepai \
-  --coordination-root <coordination_root> \
-  --json \
-  run -- search \
-  "<specific concept, behavior, error, or route question>" \
-  --workspace <workspace> \
-  --toon --compact --limit 5
-```
+First request an MCP `context_packet(repo_id="<repoId>", include_providers=true)`
+when the MCP server is configured. Use provider results only when the packet
+reports healthy provider state and the MCP exposes an appropriate provider
+query tool. Coordinator-local provider lifecycle scripts are not installed
+runtime tools.
 
 The two highest-value GrepAI patterns are broad semantic routing and scoped
 memory-project search. Examples here are synthetic response shapes only; do not
 copy private repository names, symbols, paths, snippets, or results into
 reusable skill examples.
-
-```bash
-python <coordination_root>/scripts/provider-lifecycle.py grepai \
-  --coordination-root <coordination_root> \
-  --json \
-  run -- search \
-  "where is retry backoff behavior documented" \
-  --workspace <workspace> \
-  --toon --compact --limit 5
-```
 
 Synthetic answer shape:
 
@@ -71,17 +54,6 @@ results[3]{project,path,lines,score}:
 
 Use this when the route is unknown and the next step is choosing which
 overview, sidecar, or source area to confirm.
-
-```bash
-python <coordination_root>/scripts/provider-lifecycle.py grepai \
-  --coordination-root <coordination_root> \
-  --json \
-  run -- search \
-  "validation rules for imported records" \
-  --workspace <workspace> \
-  --project <memoryProject> \
-  --json --compact --limit 5
-```
 
 Synthetic answer shape:
 
@@ -111,31 +83,13 @@ Use CGC (CodeGraphContext) when an anchor/symbol is known to find relationships 
 can replace multiple direct `rg` reads. CGC is a powerful substrate for relationship questions:
 callers, callees, dependencies, ownership, inheritance, impact paths, or neighboring code.
 
-```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  --json \
-  run -- find name <anchor>
-
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  --json \
-  run -- analyze callers <function_or_method>
-```
+First request an MCP `context_packet(repo_id="<repoId>", include_providers=true)`
+when the MCP server is configured. Use CGC only when the packet reports healthy
+CGC state and the MCP exposes an appropriate relationship query tool.
 
 The two highest-value CGC patterns are impact tracing and complexity triage.
 Examples here are synthetic response shapes only; do not copy private
 repository names, symbols, or paths into reusable skill examples.
-
-```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze calls handleRequest \
-  --file <repo>/src/http/request-handler.ts
-```
 
 Synthetic answer shape:
 
@@ -150,13 +104,6 @@ Total: 3 function(s)
 
 Use `analyze callers` for the reverse direction and `analyze chain` when two
 symbols are known and the missing question is whether one can reach the other.
-
-```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --coordination-root <coordination_root> \
-  --repo-id <repoId> \
-  run -- analyze complexity --limit 5
-```
 
 Synthetic answer shape:
 

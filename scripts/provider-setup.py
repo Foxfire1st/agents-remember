@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Prepare Agents Remember context providers for a coordination root.
 
-This script is the shared orchestration layer used by installers, benchmark
-workspace preparation, and worktree provider setup. Provider-specific
-mechanics remain in provider-lifecycle.py.
+This source-checkout script is the shared manual/debug orchestration layer for
+benchmark workspace preparation and provider seed work. MCP runtime install uses
+package-local provider lifecycle code instead of coordinator-local scripts.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ def isolated_cgc_settings(args: argparse.Namespace, settings: dict[str, Any]) ->
             "path": args.cgc_seed_target_repo_root.resolve().as_posix(),
         }
     ]
-    cgc["runtimeRoot"] = (isolated_root / "providers" / "codegraphcontext").as_posix()
+    cgc["runtimeRoot"] = (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix()
     cgc["instanceRootTemplate"] = "<runtimeRoot>/<repoId>"
     cgc["venvRoot"] = (args.coordination_root / "providers" / "_venvs" / "codegraphcontext").as_posix()
     cgc["requirementsFile"] = (args.coordination_root / "providers" / "requirements" / "codegraphcontext.txt").as_posix()
@@ -147,7 +147,7 @@ def isolated_cgc_settings(args: argparse.Namespace, settings: dict[str, Any]) ->
     backend = cgc.get("backend")
     if not isinstance(backend, dict):
         backend = {}
-    backend["runtimeRoot"] = (isolated_root / "provider-data" / "codegraphcontext" / "falkordb").as_posix()
+    backend["runtimeRoot"] = (isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb").as_posix()
     backend["dataRoot"] = "<backendRuntimeRoot>/data"
     backend["imageLockFile"] = (
         isolated_root / "providers" / "requirements" / "codegraphcontext-falkordb-docker.lock"
@@ -252,7 +252,7 @@ def parse_json_stdout(stdout: str) -> Any:
 
 
 def lifecycle_script(coordination_root: Path) -> Path:
-    return coordination_root / "scripts" / "provider-lifecycle.py"
+    return Path(__file__).resolve().with_name("provider-lifecycle.py")
 
 
 def run_lifecycle(

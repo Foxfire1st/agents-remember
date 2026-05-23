@@ -132,7 +132,7 @@ def default_benchmarks_root() -> Path:
         candidate = parent / "benchmarks"
         if (candidate / "cases").is_dir():
             return candidate
-        if (parent / "runtime" / "scripts").is_dir() and (parent / "benchmarks" / "cases").is_dir():
+        if (parent / "scripts").is_dir() and (parent / "benchmarks" / "cases").is_dir():
             return parent / "benchmarks"
     return Path.cwd() / "benchmarks"
 
@@ -238,7 +238,11 @@ def find_runtime_source() -> tuple[str, Path]:
     for parent in script_path.parents:
         if (parent / "runtime" / "skills").is_dir() and (parent / "runtime" / "agents-md-files").is_dir():
             return "source", parent
-        if (parent / "skills").is_dir() and (parent / "scripts").is_dir() and (parent / "AGENTS.md").is_file():
+        if (
+            (parent / "skills").is_dir()
+            and (parent / "scripts" / "install-skills.sh").is_file()
+            and (parent / "AGENTS.md").is_file()
+        ):
             return "installed", parent
     raise RuntimeError("could not locate Agents Remember runtime source")
 
@@ -316,9 +320,6 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
         replace_tree(runtime_root / "scripts", coordination_root / "scripts", dry_run)
         for source_rel, target_rel in AGENTS_MD_TARGETS.items():
             copy_file(root / source_rel, coordination_root / target_rel, dry_run)
-        default_settings = runtime_root / "system" / "defaults" / "examples" / "coordinator" / "settings.json"
-        if default_settings.exists():
-            copy_file(default_settings, coordination_root / "system" / "settings.json", dry_run)
     else:
         replace_tree(root / "skills", coordination_root / "skills", dry_run)
         replace_tree(root / "scripts", coordination_root / "scripts", dry_run)
@@ -326,13 +327,19 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
             source = root / relative
             if source.exists():
                 copy_file(source, coordination_root / relative, dry_run)
-        settings = root / "system" / "settings.json"
-        if settings.exists():
-            copy_file(settings, coordination_root / "system" / "settings.json", dry_run)
 
     sync_provider_assets(mode, root, coordination_root, dry_run)
 
-    for folder in ("memory-repos", "tasks", "worktrees", "notes", "temp", "provider-data"):
+    for folder in (
+        "memory-repos",
+        "tasks",
+        "worktrees",
+        "notes",
+        "temp",
+        "providers/data",
+        "providers/logs",
+        "providers/runners",
+    ):
         path = coordination_root / folder
         if dry_run:
             print(f"Would ensure directory {path}")
@@ -541,7 +548,7 @@ def default_cgc_seed_source_coordination_root(benchmarks_root: Path, target_coor
         if resolved in seen or resolved == target_coordination_root.resolve():
             continue
         seen.add(resolved)
-        if (resolved / "scripts" / "provider-lifecycle.py").is_file() and (resolved / "system" / "settings.json").is_file():
+        if (resolved / "providers" / "runners" / "codegraphcontext").is_dir():
             return resolved
     return None
 
@@ -564,9 +571,9 @@ def prepare_configured_providers(
             print(f"Would skip benchmark provider setup; no providers enabled in {settings_path}")
         return
 
-    script = coordination_root / "scripts" / "provider-setup.py"
+    script = Path(__file__).resolve().parent / "provider-setup.py"
     if not dry_run and not script.is_file():
-        raise RuntimeError(f"benchmark provider setup script missing: {script}")
+        raise RuntimeError(f"benchmark provider setup source script missing: {script}")
     command = [
         sys.executable,
         script.as_posix(),

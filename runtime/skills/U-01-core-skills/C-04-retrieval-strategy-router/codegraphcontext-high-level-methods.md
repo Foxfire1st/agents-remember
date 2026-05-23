@@ -8,14 +8,15 @@ paths into training-style examples.
 Run CGC through the managed provider wrapper:
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- <cgc command>
 ```
 
-Add `--from-settings <coordination_root>/system/settings.json` when the
-coordinator settings are not discoverable from the runtime root.
+When running this lower-level script directly, pass the same generated provider
+settings file the MCP would use with `--from-settings`. Provider authority does
+not come from coordinator `system/settings.json`.
 
 CGC is not just a locator. `find name <anchor>` is a useful smoke test, but the
 high-level methods below expose call edges, reverse call edges, import
@@ -43,7 +44,7 @@ Use `calls` when the anchor function is known and the missing packet is what it
 invokes next.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze calls handleRequest \
@@ -72,7 +73,7 @@ Use `callers` when the anchor function is known and the missing packet is who
 can reach it.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze callers dispatchCommand \
@@ -100,7 +101,7 @@ Use `chain` to prove whether one known function can reach another through call
 edges.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze chain handleRequest saveAuditEvent \
@@ -131,7 +132,7 @@ data, inspect a few `IMPORTS` edges or source imports and retry with the module
 string.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze deps ../shared/validation --no-external
@@ -154,7 +155,7 @@ Use this for module impact checks and import-neighborhood discovery.
 Use `tree` for class inheritance and attached methods.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze tree CachedRepository \
@@ -187,7 +188,7 @@ call sites.
 Use `complexity` to identify large or risky functions before changing a route.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze complexity --limit 5
@@ -216,7 +217,7 @@ result as a prompt for source confirmation, because dynamic callbacks,
 framework entry points, event handlers, and reflection can look unused.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze dead-code
@@ -242,7 +243,7 @@ Use this for cleanup investigation, not as deletion proof.
 Use `overrides` to find all class implementations of a method name.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze overrides serialize
@@ -267,7 +268,7 @@ Use `variable` to find occurrences of a variable name, optionally limited to a
 file.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze variable requestId \
@@ -297,7 +298,7 @@ Use `kotlin-call-audit` only for repositories with Kotlin code. It reports
 multi-target callsite ambiguity in Kotlin call edges.
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
+python <agents-remember-md>/scripts/provider-lifecycle.py cgc \
   --coordination-root <coordination_root> \
   --repo-id <repoId> \
   run -- analyze kotlin-call-audit --limit 10

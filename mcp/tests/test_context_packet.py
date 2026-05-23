@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+MCP_TESTS = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(MCP_SRC))
+sys.path.insert(0, str(MCP_TESTS))
+
+from agents_remember.cli.context_packet import main as cli_main  # noqa: E402
+from agents_remember.controllers.context_packet import (  # noqa: E402
+    ContextPacketError,
+    ContextPacketRequest,
+    build_context_packet,
+)
+from agents_remember.mcp.config import load_config  # noqa: E402
+from agents_remember.worktrees.git_worktree_manager import status_payload  # noqa: E402
+from agents_remember.worktrees.worktree_contract import (  # noqa: E402
+    default_contract,
+    write_contract,
+)
+from test_config import settings_payload, write_json  # noqa: E402
+
+OLD_WORKTREE_MANAGER = (
+    REPO_ROOT
+    / "runtime"
+    / "skills"
+    / "U-01-core-skills"
+    / "C-09-git-worktree-manager"
+    / "scripts"
+    / "git_worktree_manager.py"
+)
+
+
+class ContextPacketTests(unittest.TestCase):
+    def test_builds_packet_from_allowed_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md"),
+            )
+
+            self.assertTrue(packet["ok"])
+            self.assertEqual(packet["operation"], "context_packet")
+            self.assertEqual(packet["contextPacketVersion"], 1)
+            self.assertEqual(packet["repo"]["state"], "available")
+            self.assertTrue(packet["repo"]["head"])
+            self.assertFalse(packet["repo"]["dirty"])
+            self.assertEqual(packet["memory"]["mode"], "external")
+            self.assertEqual(packet["worktree"], {"state": "inactive"})
+            self.assertEqual(packet["providers"]["state"], "checked")
+            self.assertIn("enabled", packet["providers"]["rawStatus"])
+            self.assertIn("results", packet["providers"]["rawStatus"])
+            self.assertIn("processNamespace", packet["providers"]["rawStatus"])
+            self.assertIn("recoveryActions", packet["providers"]["rawStatus"])
+            self.assertEqual(packet["drift"], {"status": "notChecked"})
+
+    def test_builds_drift_summary_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md", include_drift=True),
+            )
+
+            self.assertEqual(packet["drift"]["status"], "checked")
+            self.assertEqual(packet["drift"]["count"], 0)
+            self.assertEqual(packet["drift"]["actionableCount"], 0)
+            self.assertTrue(packet["drift"]["reportPath"].endswith("_drift-report.md"))
+            self.assertTrue(Path(packet["drift"]["reportPath"]).exists())
+
+    def test_rejects_unknown_repo_before_filesystem_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = write_and_load_config(root)
+
+            with self.assertRaisesRegex(ContextPacketError, "not allowed"):
+                build_context_packet(config, ContextPacketRequest(repo_id="other-repo"))
+
+    def test_reports_unavailable_git_facts_for_non_git_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo = root / "workspace" / "agents-remember-md"
+            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            repo.mkdir(parents=True, exist_ok=True)
+            (memory / "system").mkdir(parents=True, exist_ok=True)
+            (memory / "onboarding").mkdir(parents=True, exist_ok=True)
+            (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md"),
+            )
+
+            self.assertFalse(packet["ok"])
+            self.assertEqual(packet["repo"]["state"], "unavailable")
+            self.assertIn("git", packet["repo"]["error"])
+
+    def test_reports_active_worktree_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            repo = root / "workspace" / "agents-remember-md"
+            coordination_root = root / "ar-coordination"
+            contract = default_contract(
+                task_name="Context Packet",
+                repo_name="agents-remember-md",
+                workflow_kind="light",
+                memory_mode="external",
+                coordination_root=coordination_root,
+                code_repo_path=repo,
+                code_source_branch=current_branch(repo),
+                code_work_branch="ar/context-packet",
+                code_base_commit=current_head(repo),
+                worktree_name="context-packet",
+                memory_repo_path=coordination_root / "memory-repos" / "ar-agents-remember-md",
+                memory_source_branch="main",
+                memory_work_branch="ar/context-packet-memory",
+                memory_base_commit=current_head(repo),
+            )
+            write_contract(contract.contract_path, contract)
+            payload = settings_payload(root)
+            payload["repositories"]["agents-remember-md"]["contractPath"] = str(
+                contract.contract_path
+            )
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, payload)
+            config = load_config(config_path)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md"),
+            )
+
+            self.assertEqual(packet["worktree"]["state"], "active")
+            self.assertEqual(packet["worktree"]["contractPath"], contract.contract_path.as_posix())
+            self.assertEqual(packet["worktree"]["phase"], "worktree-started")
+            self.assertEqual(packet["worktree"]["rawStatus"], status_payload(contract))
+            self.assertEqual(
+                packet["worktree"]["rawStatus"],
+                old_worktree_status(contract.contract_path),
+            )
+
+    def test_cli_outputs_json_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                exit_code = cli_main(["--config", str(config_path), "--repo", "agents-remember-md"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn('"operation": "context_packet"', output.getvalue())
+
+
+def write_and_load_config(root: Path):
+    config_path = root / "mcp-settings.json"
+    write_json(config_path, settings_payload(root))
+    return load_config(config_path)
+
+
+def initialize_context_fixture(root: Path) -> None:
+    repo = root / "workspace" / "agents-remember-md"
+    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+    (memory / "system").mkdir(parents=True, exist_ok=True)
+    (memory / "onboarding").mkdir(parents=True, exist_ok=True)
+    (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+    repo.mkdir(parents=True, exist_ok=True)
+    run_git(repo, ["init"])
+    run_git(repo, ["config", "user.email", "agents-remember@example.invalid"])
+    run_git(repo, ["config", "user.name", "Agents Remember"])
+    (repo / "README.md").write_text("# Fixture\n", encoding="utf-8")
+    run_git(repo, ["add", "README.md"])
+    run_git(repo, ["commit", "-m", "init"])
+
+
+def current_branch(repo: Path) -> str:
+    return git_output(repo, ["branch", "--show-current"]) or "master"
+
+
+def current_head(repo: Path) -> str:
+    return git_output(repo, ["rev-parse", "HEAD"])
+
+
+def git_output(repo: Path, args: list[str]) -> str:
+    result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout)
+    return result.stdout.strip()
+
+
+def run_git(repo: Path, args: list[str]) -> None:
+    result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout)
+
+
+def old_worktree_status(contract_path: Path) -> dict[str, object]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(OLD_WORKTREE_MANAGER),
+            "status",
+            "--contract-path",
+            str(contract_path),
+        ],
+        text=True,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout)
+    return json.loads(result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

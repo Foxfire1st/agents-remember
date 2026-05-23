@@ -25,7 +25,11 @@ from typing import Any
 
 
 def runtime_root_from_script() -> Path:
-    return Path(__file__).resolve().parents[1]
+    source_root = Path(__file__).resolve().parents[1]
+    runtime_root = source_root / "runtime"
+    if runtime_root.is_dir():
+        return runtime_root
+    return source_root
 
 
 def install_shared_import_path() -> None:
@@ -121,7 +125,7 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def default_coordination_root() -> Path:
-    """Infer the installed coordination root from this script's location."""
+    """Infer a default root for direct manual calls."""
 
     return Path(__file__).resolve().parents[1]
 
@@ -2448,7 +2452,7 @@ def grepai_install(args: argparse.Namespace) -> dict[str, Any]:
         "lastAction": "install",
         "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    write_json(args.coordination_root / "providers" / "grepai" / "install-state.json", install_state)
+    write_json(layout.runtime_root / "install-state.json", install_state)
     return {
         "provider": "grepai",
         "action": "install",
@@ -2633,7 +2637,7 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
         startup_timed_out = bool(result.get("timedOut"))
         already_running = grepai_watch_already_running_from_output(output) or bool(post_probe["running"] and result.get("returncode") not in {0, None})
         watcher_running = bool(post_probe["running"] or (isinstance(watch_pid, int) and process_alive(watch_pid)))
-        ok = bool(result["returncode"] == 0 or watcher_running)
+        ok = watcher_running
         write_json(
             state_file,
             grepai_watch_state(
@@ -2914,7 +2918,7 @@ def add_grepai_common_args(parser: argparse.ArgumentParser) -> None:
         "--runtime-root",
         type=Path,
         default=argparse.SUPPRESS,
-        help="Provider runtime root. Defaults to <coordination-root>/providers/grepai.",
+        help="Provider runtime root. Defaults to <coordination-root>/providers/runners/grepai.",
     )
 
 

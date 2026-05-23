@@ -101,12 +101,12 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual(layout.repo_id, "my-app")
             self.assertEqual(
                 layout.runtime_root,
-                root / "ar-coordination" / "providers" / "codegraphcontext" / "my-app",
+                root / "ar-coordination" / "providers" / "runners" / "codegraphcontext" / "my-app",
             )
             self.assertEqual(layout.cgc_root, layout.runtime_root / ".codegraphcontext")
             self.assertEqual(
                 layout.backend_root,
-                root / "ar-coordination" / "provider-data" / "codegraphcontext" / "falkordb",
+                root / "ar-coordination" / "providers" / "data" / "codegraphcontext" / "falkordb",
             )
             self.assertEqual(layout.backend_data_root, layout.backend_root / "data")
             self.assertEqual(layout.venv_root, root / "ar-coordination" / "providers" / "_venvs" / "codegraphcontext")
@@ -214,14 +214,14 @@ class ContextProviderLayoutTests(unittest.TestCase):
             root = Path(tmp)
             (root / "my-app").mkdir()
             provider = {
-                "runtimeRoot": "<coordination_root>/providers/codegraphcontext",
+                "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                 "instanceRootTemplate": "<runtimeRoot>/<repoId>",
                 "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                 "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
                 "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                 "stateFileTemplate": "<instanceRoot>/provider-state.json",
                 "backend": {
-                    "runtimeRoot": "<coordination_root>/provider-data/codegraphcontext/falkordb",
+                    "runtimeRoot": "<coordination_root>/providers/data/codegraphcontext/falkordb",
                     "dataRoot": "<backendRuntimeRoot>/data",
                 },
             }
@@ -236,10 +236,10 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
 
             self.assertEqual(layout.repo_id, "my-app")
-            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "codegraphcontext" / "my-app")
+            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "runners" / "codegraphcontext" / "my-app")
             self.assertEqual(
                 layout.backend_data_root,
-                root / "ar-coordination" / "provider-data" / "codegraphcontext" / "falkordb" / "data",
+                root / "ar-coordination" / "providers" / "data" / "codegraphcontext" / "falkordb" / "data",
             )
             self.assertEqual(layout.state_file, layout.runtime_root / "provider-state.json")
             self.assertEqual(layout.cgcignore_patterns, ("vendor/generated/",))
@@ -248,7 +248,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             provider = {
-                "runtimeRoot": "<coordination_root>/providers/codegraphcontext",
+                "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                 "instanceRootTemplate": "<runtimeRoot>/<repoId>",
                 "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                 "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
@@ -281,11 +281,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
 
             self.assertEqual(layout.workspace_name, "agents-remember-memory")
-            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "grepai")
+            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "runners" / "grepai")
             self.assertEqual(layout.workspace_config_file, layout.home_root / ".grepai" / "workspace.yaml")
             self.assertEqual(layout.state_file, layout.runtime_root / "state" / "provider-state.json")
             self.assertEqual(layout.logs_root, layout.runtime_root / "logs")
-            self.assertEqual(layout.backend_root, root / "ar-coordination" / "provider-data" / "grepai" / "postgres")
+            self.assertEqual(layout.backend_root, root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres")
             self.assertEqual(layout.backend_data_root, layout.backend_root / "data")
             self.assertEqual(layout.env()["HOME"], layout.home_root.as_posix())
             self.assertEqual(layout.env()["XDG_STATE_HOME"], (layout.state_root / "xdg").as_posix())
@@ -299,11 +299,14 @@ class ContextProviderLayoutTests(unittest.TestCase):
             internal_memory.mkdir(parents=True)
             provider = {
                 "workspace": "agents-remember-memory",
-                "runtimeRoot": "<coordination_root>/providers/grepai",
+                "runtimeRoot": "<coordination_root>/providers/runners/grepai",
                 "requirementsFile": "<coordination_root>/providers/requirements/grepai.txt",
                 "stateFile": "<runtimeRoot>/state/provider-state.json",
+                "watch": {
+                    "logDir": "<coordination_root>/providers/logs/grepai",
+                },
                 "backend": {
-                    "runtimeRoot": "<coordination_root>/provider-data/grepai/postgres",
+                    "runtimeRoot": "<coordination_root>/providers/data/grepai/postgres",
                     "dataRoot": "<backendRuntimeRoot>/data",
                 },
                 "roots": [
@@ -323,13 +326,14 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual(layout.roots[1].source_path, internal_memory)
             self.assertEqual(
                 layout.roots[0].path,
-                root / "ar-coordination" / "providers" / "grepai" / "index-roots" / "ar-my-app",
+                root / "ar-coordination" / "providers" / "runners" / "grepai" / "index-roots" / "ar-my-app",
             )
             self.assertEqual(
                 layout.roots[1].path,
-                root / "ar-coordination" / "providers" / "grepai" / "index-roots" / "my-app-internal",
+                root / "ar-coordination" / "providers" / "runners" / "grepai" / "index-roots" / "my-app-internal",
             )
-            self.assertEqual(layout.backend_data_root, root / "ar-coordination" / "provider-data" / "grepai" / "postgres" / "data")
+            self.assertEqual(layout.backend_data_root, root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres" / "data")
+            self.assertEqual(layout.logs_root, root / "ar-coordination" / "providers" / "logs" / "grepai")
 
     def test_grepai_syncs_provider_owned_index_roots_from_memory_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -344,7 +348,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 roots=(
                     GrepaiMemoryRoot(
                         project_id="ar-my-app",
-                        path=root / "ar-coordination" / "providers" / "grepai" / "index-roots" / "ar-my-app",
+                path=root / "ar-coordination" / "providers" / "runners" / "grepai" / "index-roots" / "ar-my-app",
                         source_path=source,
                     ),
                 ),

@@ -7,6 +7,10 @@ The source checkout packages runtime assets under `runtime/`. The installer reco
 ```text
 agents-remember-md/
   installer/install-runtime.py
+  scripts/
+    provider-lifecycle.py
+    provider-setup.py
+    run-benchmarks.py
   runtime/
     agents-md-files/
       coordinator/AGENTS.md
@@ -15,8 +19,6 @@ agents-remember-md/
       tasks/AGENTS.md
     scripts/
       install-skills.sh
-      provider-setup.py
-      run-benchmarks.py
     providers/
       requirements/
       patches/
@@ -38,9 +40,13 @@ ar-coordination/
     requirements/
     patches/
     _venvs/
-    <provider>/<instance-id>/
-  provider-data/
-    <provider>/
+    _bin/
+    runners/
+      <provider>/<instance-id>/
+    data/
+      <provider>/
+    logs/
+      <provider>/
   scripts/
   skills/
   system/
@@ -60,32 +66,28 @@ ar-coordination/
 
 - installed coordinator `AGENTS.md` templates
 - installed skills
-- installed scripts
+- installed `scripts/install-skills.sh`
 - installed provider defaults, such as pinned requirement files and patch
   assets
-- installed provider dependencies for enabled providers, unless
-  `--skip-provider-deps` is passed
 - optional benchmark fixtures when `--include-benchmarks` is passed
 
 It does not own live settings, notes, tasks, worktrees, normal memory repo content, temp files, onboarding content, or provider databases.
 
-`ar-coordination/providers/` is disposable provider scaffolding. Reinstall removes and recreates it from `runtime/providers/`, then installs dependencies for providers enabled in the live coordinator settings. Pinned requirements, patches, provider venvs, installed binaries, logs, and per-instance runtime state must be recoverable. Durable provider data lives outside that tree under `ar-coordination/provider-data/`.
+`ar-coordination/providers/` is provider runtime state. The source installer
+reconciles package-owned defaults from `runtime/providers/` and preserves live
+provider binaries, venvs, runner instances, data, and logs. Provider dependency
+installation and full provider reinstall are MCP-owned operations driven by
+MCP authority settings. Pinned requirements, patches, provider venvs, installed
+binaries, logs, and per-instance runtime state must be recoverable. Durable
+provider data lives under `ar-coordination/providers/data/`.
 
-Provider dependencies and artifacts are coordination-owned runtime state. Package defaults live under `runtime/providers/` and install into `ar-coordination/providers/`, while live provider installs use runtime-owned binaries under `providers/_bin/`, Python venvs under `providers/_venvs/<provider>/`, and provider-family artifacts under `providers/<provider>/`. For GrepAI, `contextProviders.providers.grepai-memory.roots` expands into workspace projects; managed mode mirrors those roots into `providers/grepai/index-roots/` before launching GrepAI so its unavoidable per-project `.grepai/` config and symbol files stay under provider-owned runtime paths. GrepAI workspace config, logs, state, cache, and mirrors live under `providers/grepai/`, while all roots share one lifecycle-owned PostgreSQL/pgvector Docker backend whose persistent data root is under `provider-data/grepai/postgres/`. For CodeGraphContext, `contextProviders.providers.codegraphcontext-code.roots` expands into per-repo instance roots under `providers/codegraphcontext/<repo-id>/.codegraphcontext/` so `.env`, `config.yaml`, `.cgcignore`, logs, and state remain outside indexed source repositories. Those repo instances share one lifecycle-owned FalkorDB Docker backend whose persistent data root is under `provider-data/codegraphcontext/falkordb/`, and reinstall/update must preserve `provider-data/` unless an explicit destructive lifecycle command is requested.
+Provider dependencies and artifacts are coordination-owned runtime state. Package defaults live under `runtime/providers/` and install into `ar-coordination/providers/`, while live provider installs use runtime-owned binaries under `providers/_bin/`, Python venvs under `providers/_venvs/<provider>/`, and provider-family artifacts under `providers/runners/<provider>/`. For GrepAI, MCP-derived provider settings expand memory roots into workspace projects; managed mode mirrors those roots into `providers/runners/grepai/index-roots/` before launching GrepAI so its unavoidable per-project `.grepai/` config and symbol files stay under provider-owned runtime paths. GrepAI workspace config, runtime logs, state, cache, and mirrors live under `providers/runners/grepai/`, while user-facing logs live under `providers/logs/grepai/` and all roots share one lifecycle-owned PostgreSQL/pgvector Docker backend whose persistent data root is under `providers/data/grepai/postgres/`. For CodeGraphContext, MCP-derived provider settings expand code roots into per-repo instance roots under `providers/runners/codegraphcontext/<repo-id>/.codegraphcontext/` so `.env`, `config.yaml`, `.cgcignore`, logs, and state remain outside indexed source repositories. Those repo instances share one lifecycle-owned FalkorDB Docker backend whose persistent data root is under `providers/data/codegraphcontext/falkordb/`, and reinstall/update must preserve `providers/data/` and `providers/logs/` unless an explicit destructive lifecycle command is requested.
 
-`scripts/provider-setup.py` is the shared provider orchestration layer. The
-installer calls it for dependency installation only when live coordinator
-settings enable providers, benchmark preparation calls it only when the
-benchmark-local `settings.json` enables providers, and C-09 worktree start calls
-it only when the target coordinator enables `codegraphcontext-code`. CGC preparation
-first tries to seed the target backend by exporting a bundle from a source
-coordinator, rewriting indexed paths to the target repository root, and loading
-that bundle into the target backend; only an unconfigured or failed seed falls
-back to `cgc refresh-all`. C-09 worktree preparation passes an isolated runtime
-root under the worktree group, so the worktree gets its own provider runtime and
-FalkorDB data under `worktrees/<repo>/<task>/provider-runtime/` while still
-reusing the installed coordinator's CGC virtual environment, requirements, and
-patches.
+The Python provider lifecycle scripts live under source/package-owned
+`scripts/`; they are not installed into coordinator runtimes. Normal provider
+install/status/start flows go through MCP tools and package-local provider
+modules. The source-level scripts remain for source checkout debugging and
+benchmark preparation mechanics that need explicit generated provider settings.
 
 When benchmark installation is enabled, the installer reconciles package-owned benchmark content under `ar-coordination/benchmarks/` and preserves only user-generated outputs under `ar-coordination/benchmarks/user-runs/`. Source benchmark content includes case manifests, prompts, author results, docs, and workspace templates, not pre-created workspaces. Generated benchmark workspaces are resettable state; normal user memory under `ar-coordination/memory-repos/` is not touched.
 

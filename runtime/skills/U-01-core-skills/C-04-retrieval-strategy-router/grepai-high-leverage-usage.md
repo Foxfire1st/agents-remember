@@ -14,23 +14,22 @@ known.
 ## Managed Invocation
 
 Use the runtime-owned GrepAI binary and provider-owned environment. This keeps
-workspace config, logs, state, and cache under `providers/grepai/` instead of
+workspace config, logs, state, and cache under `providers/runners/grepai/` instead of
 using a global user install. On Windows or in API callers, set the same
 environment variables programmatically rather than relying on POSIX `env`
 syntax.
 
 ```bash
-cd <coordination_root>/providers/grepai
+cd <coordination_root>/providers/runners/grepai
 env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  HOME=<coordination_root>/providers/runners/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/runners/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/runners/grepai/cache/xdg \
   <coordination_root>/providers/_bin/grepai <command>
 ```
 
-The managed workspace name normally comes from
-`contextProviders.providers.grepai-memory.workspace`; examples use
-`<workspace>`.
+The managed workspace name comes from the MCP-generated GrepAI lifecycle
+settings; examples use `<workspace>`.
 
 ## Choosing A Command
 
@@ -51,11 +50,11 @@ Use broad workspace search when the task is vague and the missing packet is
 "where should I look first?"
 
 ```bash
-cd <coordination_root>/providers/grepai
+cd <coordination_root>/providers/runners/grepai
 env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  HOME=<coordination_root>/providers/runners/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/runners/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/runners/grepai/cache/xdg \
   <coordination_root>/providers/_bin/grepai search \
   "where is the retry backoff behavior documented" \
   --workspace <workspace> \
@@ -80,11 +79,11 @@ Use project scoping after C-08 or earlier discovery tells you which memory
 project is relevant. This avoids cross-repo noise and keeps the answer small.
 
 ```bash
-cd <coordination_root>/providers/grepai
+cd <coordination_root>/providers/runners/grepai
 env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  HOME=<coordination_root>/providers/runners/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/runners/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/runners/grepai/cache/xdg \
   <coordination_root>/providers/_bin/grepai search \
   "validation rules for imported records" \
   --workspace <workspace> \
@@ -118,11 +117,11 @@ Use path scoping when you already know the likely route and need the most
 relevant sidecar or overview inside it.
 
 ```bash
-cd <coordination_root>/providers/grepai
+cd <coordination_root>/providers/runners/grepai
 env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  HOME=<coordination_root>/providers/runners/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/runners/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/runners/grepai/cache/xdg \
   <coordination_root>/providers/_bin/grepai search \
   "how rejected records are surfaced to operators" \
   --workspace <workspace> \
@@ -160,11 +159,11 @@ is configured. Use GrepAI trace only when CGC is unavailable or when the
 GrepAI-indexed project is the only available source of symbol relationships.
 
 ```bash
-cd <coordination_root>/providers/grepai
+cd <coordination_root>/providers/runners/grepai
 env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  HOME=<coordination_root>/providers/runners/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/runners/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/runners/grepai/cache/xdg \
   <coordination_root>/providers/_bin/grepai trace graph \
   "processImportedRecord" \
   --workspace <workspace> \
@@ -196,11 +195,11 @@ edit direction with source.
 Use status commands when search results look stale or missing.
 
 ```bash
-cd <coordination_root>/providers/grepai
+cd <coordination_root>/providers/runners/grepai
 env \
-  HOME=<coordination_root>/providers/grepai/home \
-  XDG_STATE_HOME=<coordination_root>/providers/grepai/state/xdg \
-  XDG_CACHE_HOME=<coordination_root>/providers/grepai/cache/xdg \
+  HOME=<coordination_root>/providers/runners/grepai/home \
+  XDG_STATE_HOME=<coordination_root>/providers/runners/grepai/state/xdg \
+  XDG_CACHE_HOME=<coordination_root>/providers/runners/grepai/cache/xdg \
   <coordination_root>/providers/_bin/grepai workspace status <workspace>
 ```
 
@@ -216,7 +215,7 @@ Last update: recent
 For lifecycle-managed health, prefer:
 
 ```bash
-python <coordination_root>/scripts/provider-lifecycle.py grepai \
+python <agents-remember-md>/scripts/provider-lifecycle.py grepai \
   --coordination-root <coordination_root> \
   status --json
 ```
@@ -234,3 +233,4 @@ python <coordination_root>/scripts/provider-lifecycle.py grepai \
   and bounded source reads before answering or editing.
 - Do not use a global GrepAI binary/config path in reusable instructions; use
   the runtime-owned binary and provider-owned environment.
+

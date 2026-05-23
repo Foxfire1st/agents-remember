@@ -48,9 +48,9 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
    python3 agents-remember-md/installer/install-runtime.py ./ar-coordination
    ```
 
-   Reinstall recreates the package-owned runtime scaffold and installs
-   dependencies for providers enabled in `ar-coordination/system/settings.json`.
-   Use `--skip-provider-deps` only for a scaffolding-only repair.
+   Reinstall reconciles package-owned runtime scaffold files only. Provider
+   dependencies and provider runner reinstall are MCP-owned operations driven
+   from MCP settings outside the coordinator root.
 
    Benchmark fixtures are optional. To install or refresh them too:
 
@@ -110,7 +110,7 @@ Different tools discover instructions and skills differently. Use the install pa
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
 - [Cost-aware Bootstrap](docs/guides/cost-aware-bootstrap.md) - model and wave-sizing choices for token-heavy repository bootstrap.
-- [Settings Reference](docs/reference/settings-json.md) - `system/settings.json` shape.
+- [Settings Reference](docs/reference/settings-json.md) - memory-layer `system/settings.json` and MCP authority settings.
 - [Skills Reference](docs/reference/skills.md) - the installed skill families.
 
 ## Repository Layout
@@ -120,10 +120,13 @@ agents-remember-md/
   AGENTS.md                         # source checkout instructions
   README.md                         # public front door
   installer/install-runtime.py      # runtime installer
+  scripts/
+    provider-lifecycle.py           # source/package-owned provider lifecycle helper
+    provider-setup.py               # source/package-owned provider setup helper
+    run-benchmarks.py               # optional benchmark runner
   runtime/
     agents-md-files/                # installed AGENTS.md templates
     scripts/install-skills.sh       # harness skill symlink adapter
-    scripts/run-benchmarks.py       # optional benchmark runner
     skills/                         # installed skill source tree
     system/defaults/examples/       # scaffold examples used by initialization
   benchmarks/                       # optional benchmark package source
@@ -137,6 +140,7 @@ The installed runtime lives in `ar-coordination/`, not in the source checkout:
 ar-coordination/
   AGENTS.md
   scripts/
+    install-skills.sh
   skills/
   system/
   memory-repos/

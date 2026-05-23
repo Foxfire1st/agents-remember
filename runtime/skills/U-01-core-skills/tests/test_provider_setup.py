@@ -9,8 +9,8 @@ import zipfile
 from pathlib import Path
 
 
-RUNTIME_ROOT = Path(__file__).resolve().parents[3]
-PROVIDER_SETUP_PATH = RUNTIME_ROOT / "scripts" / "provider-setup.py"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+PROVIDER_SETUP_PATH = REPO_ROOT / "scripts" / "provider-setup.py"
 SPEC = importlib.util.spec_from_file_location("provider_setup", PROVIDER_SETUP_PATH)
 if SPEC is None or SPEC.loader is None:
     raise ImportError(f"Unable to load provider setup module from {PROVIDER_SETUP_PATH}")
@@ -72,7 +72,7 @@ class ProviderSetupTests(unittest.TestCase):
                     "providers": {
                         "codegraphcontext-code": {
                             "enabled": True,
-                            "runtimeRoot": "<coordination_root>/providers/codegraphcontext",
+                            "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                             "instanceRootTemplate": "<runtimeRoot>/<repoId>",
                             "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                             "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
@@ -80,7 +80,7 @@ class ProviderSetupTests(unittest.TestCase):
                             "stateFileTemplate": "<instanceRoot>/provider-state.json",
                             "backend": {
                                 "image": "falkordb/falkordb:v4.18.7",
-                                "runtimeRoot": "<coordination_root>/provider-data/codegraphcontext/falkordb",
+                                "runtimeRoot": "<coordination_root>/providers/data/codegraphcontext/falkordb",
                                 "dataRoot": "<backendRuntimeRoot>/data",
                                 "containerName": "ar-cgc-falkordb",
                             },
@@ -100,11 +100,11 @@ class ProviderSetupTests(unittest.TestCase):
             cgc = isolated["contextProviders"]["providers"]["codegraphcontext-code"]
 
             self.assertEqual(cgc["roots"], [{"repoId": "agents-remember-md", "path": target_repo.resolve().as_posix()}])
-            self.assertEqual(cgc["runtimeRoot"], (isolated_root / "providers" / "codegraphcontext").as_posix())
+            self.assertEqual(cgc["runtimeRoot"], (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix())
             self.assertEqual(cgc["venvRoot"], (coordination_root / "providers" / "_venvs" / "codegraphcontext").as_posix())
             self.assertEqual(
                 cgc["backend"]["runtimeRoot"],
-                (isolated_root / "provider-data" / "codegraphcontext" / "falkordb").as_posix(),
+                (isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb").as_posix(),
             )
             self.assertTrue(cgc["backend"]["containerName"].startswith("ar-cgc-falkordb-agents-remember-md-"))
 

@@ -23,17 +23,11 @@ ar-coordination/tasks/<repo>/<task-slug>/
 
 The contract records worktree paths, review state, closeout commits, integration commits, and cleanup state.
 
-During `start`, C-09 also prepares context providers for the new code worktree
-when the target coordinator's `settings.json` enables `codegraphcontext-code`,
-unless `--skip-provider-setup` is passed. Provider preparation is delegated to
-the installed `scripts/provider-setup.py` instead of duplicating provider logic
-inside the worktree manager. The default setup uses the source coordinator as
-the CGC seed source, exports the existing CGC bundle for the source repo,
-rewrites indexed paths to the new code worktree, and loads the result into a
-worktree-local CGC backend under the worktree group. That gives worktree tasks
-their own FalkorDB runtime/data while avoiding a full re-index when the source
-and worktree commits match. If CGC is not enabled in settings, C-09 reports
-provider setup as skipped.
+Provider authority has moved to MCP settings outside the coordinator root, and
+coordinator-local Python provider scripts are no longer installed runtime
+assets. Legacy C-09 provider preparation is therefore skipped unless a future
+MCP worktree/provider operation handles the isolated provider runtime for the
+new code worktree.
 
 ## Closeout Order
 

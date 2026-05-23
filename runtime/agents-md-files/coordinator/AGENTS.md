@@ -68,31 +68,31 @@ Infer which code repository is supposed to be worked on for a given task from th
 
 Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
 
-After C-08 resolves the target repository and coordination root, check the
-coordination settings at `<coordination_root>/system/settings.json` for provider
-configuration. `contextProviders` is coordinator-level configuration; do not
-decide provider availability from the resolved memory repo's
+After C-08 resolves the target repository and coordination root, prefer the
+Agents Remember MCP `context_packet` tool when that server is configured.
+Provider authority comes from the MCP settings file, not from coordinator
+`system/settings.json`, and not from the resolved memory repo's
 `system/settings.json`.
 
-If enabled `contextProviders` are configured, run:
+If the MCP settings configure providers, run:
 
 ```text
-python3 <coordination_root>/scripts/provider-lifecycle.py watchers status --json
+context_packet(repo_id="<repo-id>", include_providers=true)
 ```
 
-If the watchers are down, turn them on:
+If the packet reports stopped or degraded providers, report that state and use
+the MCP provider/runtime operations that match the requested work. Do not infer
+provider permission from coordinator files.
 
-```text
-python3 <coordination_root>/scripts/provider-lifecycle.py cgc start
-```
-
-Skip this provider check when no context providers are configured.
+Skip this provider check when no MCP server is configured or the MCP settings
+report no providers.
 
 ### Routing
 
 - Use `system/settings.md` for global agent instructions, cross-repo defaults,
   layout, and operator notes.
-- Use `system/settings.json` for machine-readable coordinator layout hints.
+- Use `system/settings.md` for model-facing coordinator notes. Machine-readable
+  MCP authority settings live outside the coordinator root.
 - Use `system/tools.md` for tools and commands that are valid across all or many
   repositories.
 - Use `system/sources.md` for workspace-wide source registries.

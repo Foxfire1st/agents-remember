@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "coordinationRoot": "C:/absolute/path/to/ar-coordination",
+  "workspaceRoot": "C:/absolute/path/to/workspace",
+  "transcriptRoot": "C:/absolute/path/to/ar-coordination/providers/logs/mcp",
+  "repositories": {
+    "agents-remember-md": {
+      "memorySettingsIncludes": [],
+      "contractPath": null
+    }
+  },
+  "providers": {
+    "codegraphcontext-code": {},
+    "grepai-memory": {}
+  },
+  "timeoutCaps": {
+    "toolSeconds": 30,
+    "providerSeconds": 120
+  }
+}

@@ -14,13 +14,17 @@ the relevant repository you must perform these seven gates in order:
 Gate 1: Invoke `C-08-ar-coordination-context-resolver` for the target repository and use its resolved context for the authoritative `coordination_root`, `memory_root`,
 onboarding root, settings path, task root, docs root, system files, storage semantics, `pathRules`, task/worktree context, ledger path, and cross-repo allowances.
 
-Gate 2: If `<coordination_root>/system/settings.json` has enabled `contextProviders`, run:
+Gate 2: If the Agents Remember MCP server is configured, call its
+`context_packet` tool for the target repo with provider inspection enabled.
+Provider authority comes from the MCP settings file, not from coordinator
+`system/settings.json`.
 
 ```text
-python <coordination_root>/scripts/provider-lifecycle.py watchers status --json
+context_packet(repo_id="<repo-id>", include_providers=true)
 ```
 
-Skip this gate when no context providers are configured.
+Skip this gate only when no Agents Remember MCP server is configured or the MCP
+settings report no providers.
 
 Gate 3: Run `C-02-onboarding-drift-detection` for the relevant repository and then read its drift report.
 Do not for any reason skip execution of the drift detection skill.

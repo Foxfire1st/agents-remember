@@ -60,7 +60,7 @@ memory_carryover = importlib.util.module_from_spec(MEMORY_CARRYOVER_SPEC)
 sys.modules[MEMORY_CARRYOVER_SPEC.name] = memory_carryover
 MEMORY_CARRYOVER_SPEC.loader.exec_module(memory_carryover)
 
-BENCHMARK_RUNNER_PATH = CORE_ROOT.parent.parent / "scripts" / "run-benchmarks.py"
+BENCHMARK_RUNNER_PATH = CORE_ROOT.parent.parent.parent / "scripts" / "run-benchmarks.py"
 BENCHMARK_RUNNER_SPEC = importlib.util.spec_from_file_location("run_benchmarks", BENCHMARK_RUNNER_PATH)
 assert BENCHMARK_RUNNER_SPEC is not None and BENCHMARK_RUNNER_SPEC.loader is not None
 benchmark_runner = importlib.util.module_from_spec(BENCHMARK_RUNNER_SPEC)

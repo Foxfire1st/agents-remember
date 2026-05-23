@@ -324,121 +324,14 @@ def command_start(args: argparse.Namespace) -> int:
     return 0
 
 
-def parse_json_stdout(stdout: str) -> object:
-    text = stdout.strip()
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
-def settings_provider_enabled(coordination_root: Path, provider_id: str) -> bool:
-    settings_path = coordination_root / "system" / "settings.json"
-    if not settings_path.exists():
-        return False
-    try:
-        data = json.loads(settings_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise RuntimeError(f"cannot read coordinator settings from {settings_path}: {error}") from error
-    if not isinstance(data, dict):
-        raise RuntimeError(f"coordinator settings must be a JSON object: {settings_path}")
-    context = data.get("contextProviders")
-    if not isinstance(context, dict) or context.get("enabled") is not True:
-        return False
-    providers = context.get("providers")
-    if not isinstance(providers, dict):
-        return False
-    provider = providers.get(provider_id)
-    return isinstance(provider, dict) and provider.get("enabled") is True
-
-
 def prepare_providers_for_start(context, contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
     if args.skip_provider_setup:
         return {"state": "skipped", "reason": "provider setup was skipped"}
 
-    target_coordination_root = (args.provider_coordination_root or context.coordination_root).resolve()
-    source_coordination_root = (args.provider_seed_source_coordination_root or context.coordination_root).resolve()
-    source_repo_root = context.code_repository_root.resolve()
-    target_repo_root = contract.code_worktree.resolve()
-    provider_runtime_root = (args.provider_runtime_root or contract.worktree_group / "provider-runtime").resolve()
-
-    try:
-        cgc_enabled = settings_provider_enabled(target_coordination_root, "codegraphcontext-code")
-    except RuntimeError as error:
-        return {
-            "state": "blocked",
-            "reason": str(error),
-            "targetCoordinationRoot": target_coordination_root.as_posix(),
-        }
-    if not cgc_enabled:
-        return {
-            "state": "skipped",
-            "reason": "codegraphcontext-code is not enabled in settings.json",
-            "settingsFile": (target_coordination_root / "system" / "settings.json").as_posix(),
-        }
-
-    script = target_coordination_root / "scripts" / "provider-setup.py"
-    if not args.dry_run and not script.is_file():
-        return {
-            "state": "blocked",
-            "reason": f"provider setup script missing: {script}",
-            "targetCoordinationRoot": target_coordination_root.as_posix(),
-        }
-
-    command = [
-        sys.executable,
-        script.as_posix(),
-        "prepare",
-        "--coordination-root",
-        target_coordination_root.as_posix(),
-        "--timeout",
-        str(args.provider_timeout),
-        "--json",
-        "--cgc-seed-source-coordination-root",
-        source_coordination_root.as_posix(),
-        "--cgc-seed-repo-id",
-        context.code_repository_name,
-        "--cgc-seed-source-repo-root",
-        source_repo_root.as_posix(),
-        "--cgc-seed-target-repo-root",
-        target_repo_root.as_posix(),
-        "--cgc-isolated-runtime-root",
-        provider_runtime_root.as_posix(),
-        "--skip-grepai",
-    ]
-
-    if args.dry_run:
-        return {
-            "state": "planned",
-            "command": command,
-            "cwd": target_coordination_root.as_posix(),
-        }
-
-    completed = subprocess.run(
-        command,
-        cwd=target_coordination_root,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    payload = parse_json_stdout(completed.stdout)
-    if completed.returncode != 0:
-        return {
-            "state": "blocked",
-            "reason": "provider setup command failed",
-            "returncode": completed.returncode,
-            "stdout": completed.stdout,
-            "stderr": completed.stderr,
-            "payload": payload,
-            "command": command,
-        }
     return {
-        "state": "prepared",
-        "payload": payload,
-        "command": command,
+        "state": "skipped",
+        "reason": "provider setup is MCP-owned; coordinator-local provider scripts are not installed",
+        "nextAction": "use MCP runtime/provider operation for isolated worktree provider setup",
     }
 
 
@@ -1344,10 +1237,6 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--memory-choice", choices=("reconciliation", "disabled-memory", "custom"))
     start.add_argument("--custom-instruction")
     start.add_argument("--skip-provider-setup", action="store_true")
-    start.add_argument("--provider-coordination-root", type=Path)
-    start.add_argument("--provider-seed-source-coordination-root", type=Path)
-    start.add_argument("--provider-runtime-root", type=Path)
-    start.add_argument("--provider-timeout", type=int, default=1800)
     start.add_argument("--dry-run", action="store_true")
     start.set_defaults(func=command_start)
 

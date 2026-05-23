@@ -10,82 +10,37 @@ selected memory layer's `system/tools.md`, not here.
 
 No global commands configured yet.
 
-When `system/settings.json` enables context providers, the provider lifecycle
-tooling should expose bounded `status`, `start`, `stop`, `refresh`, and
-`doctor` commands per provider instance. Until that tooling is installed,
-agents may use configured providers manually only after checking the configured
-root and keeping provider output small.
+When the Agents Remember MCP settings enable context providers, use MCP tools
+for normal status and install flows. The MCP settings file is the authority for
+allowed repos, providers, workspace paths, and runtime roots.
 
-Use `provider-setup.py` for coordinator setup flows that need provider
-dependencies, benchmark/worktree preparation, or CGC seed import. It is the
-shared orchestration layer used by the installer, benchmark runner, and C-09
-worktree manager; `provider-lifecycle.py` remains the lower-level per-provider
-mechanic. Callers should enter provider setup only when the relevant
-`settings.json` enables providers; otherwise they should skip provider setup.
+Use `runtime_install` for runtime installation and provider dependency install.
+Use `context_packet` for startup status, including provider status and runner
+integrity. Provider lifecycle Python scripts are source/package-owned mechanics,
+not installed coordinator runtime scripts.
 
 Expected provider setup and lifecycle command shapes:
 
 ```bash
-# Shared provider setup
-python <coordination_root>/scripts/provider-setup.py install \
-  --coordination-root <coordination_root>
-python <coordination_root>/scripts/provider-setup.py prepare \
-  --coordination-root <coordination_root> \
-  --cgc-seed-source-coordination-root <source_coordination_root> \
-  --cgc-seed-repo-id <repoId>
+# MCP tools
+runtime_install(dry_run=true, include_benchmarks=false, install_provider_deps=true)
+context_packet(repo_id="<repoId>", include_providers=true)
 
-# GrepAI memory provider
-python <coordination_root>/scripts/provider-lifecycle.py grepai backend-status
-python <coordination_root>/scripts/provider-lifecycle.py grepai status
-python <coordination_root>/scripts/provider-lifecycle.py grepai start
+# GrepAI memory provider native query after MCP install/status
 <coordination_root>/providers/_bin/grepai search "<query>" \
   --workspace agents-remember-memory --json --compact --limit 5
-
-# CodeGraphContext relationship provider
-python <coordination_root>/scripts/provider-lifecycle.py watchers status
-python <coordination_root>/scripts/provider-lifecycle.py watchers start
-python <coordination_root>/scripts/provider-lifecycle.py watchers shutdown-all
-
-# CodeGraphContext-only debug/provider operations
-python <coordination_root>/scripts/provider-lifecycle.py cgc apply-settings
-python <coordination_root>/scripts/provider-lifecycle.py cgc status \
-  --repo-id <repoId>
-python <coordination_root>/scripts/provider-lifecycle.py cgc start
-python <coordination_root>/scripts/provider-lifecycle.py cgc start \
-  --repo-id <repoId>
-python <coordination_root>/scripts/provider-lifecycle.py cgc shutdown-all
-python <coordination_root>/scripts/provider-lifecycle.py cgc stop \
-  --repo-id <repoId>
-python <coordination_root>/scripts/provider-lifecycle.py cgc doctor \
-  --repo-id <repoId>
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --repo-id <repoId> \
-  --json \
-  run -- analyze callers <symbol>
-python <coordination_root>/scripts/provider-lifecycle.py cgc \
-  --repo-id <repoId> \
-  visualize --port 8000
 ```
 
-The aggregate `watchers` command reads enabled providers from
-`<coordination_root>/system/settings.json`; `watchers start` starts the GrepAI
-memory workspace watcher and all configured CGC code watchers, and
-`watchers shutdown-all` stops the managed watchers it owns.
-
-`provider-setup.py prepare` installs enabled provider dependencies, refreshes
-GrepAI memory when enabled, and for CGC first tries to export a `.cgc` bundle
-from the source coordinator, rewrite indexed paths to the target repo root, and
-load the rewritten bundle into the target backend. It falls back to
-`cgc refresh-all` only when seeding is not configured or cannot be used.
-Worktree starts should pass an isolated CGC runtime root so the worktree uses
-its own FalkorDB backend instead of mutating the main coordinator backend.
+Manual provider debugging should run through source/package-owned tooling with
+explicit generated settings, not through coordinator-local Python scripts. The
+normal agent path is the MCP tool surface.
 
 The GrepAI lifecycle command reads `contextProviders.providers.grepai-memory`,
 expands its workspace roots into explicit projects, ensures the shared
 PostgreSQL/pgvector Docker backend is healthy, writes GrepAI workspace config
-under `providers/grepai/home/.grepai/workspace.yaml`, mirrors indexed memory
-roots under `providers/grepai/index-roots/` when `mirrorRoots` is enabled, and
-records runtime state under `providers/grepai/state/`. GrepAI must be launched through the
+under `providers/runners/grepai/home/.grepai/workspace.yaml`, mirrors indexed memory
+roots under `providers/runners/grepai/index-roots/` when `mirrorRoots` is enabled, and
+records runtime state under `providers/runners/grepai/state/`. GrepAI must be launched through the
 runtime-owned binary at `providers/_bin/grepai`; managed mode should not fall
 back to a globally installed `grepai`.
 
@@ -93,11 +48,9 @@ The CGC lifecycle command reads `contextProviders.providers.codegraphcontext-cod
 expands its `roots` array into per-repo runtime instances, ensures the shared
 FalkorDB Docker backend is healthy, applies `processEnvTemplate` for the selected
 repo, and records resolved ports plus browser URL in provider state.
-The lifecycle script infers the coordinator root from its installed path and
-defaults to `<coordination_root>/system/settings.json`. `--coordination-root`
-is only needed for unusual runs against a different coordinator, and
-`--from-settings` is only a debug override for testing an alternate settings
-file. Running `cgc start` without `--repo-id` starts every configured CGC root;
+The MCP derives the coordinator root from authority settings and passes
+generated lifecycle settings internally. Running `cgc start`
+without `--repo-id` starts every configured CGC root;
 pass `--repo-id` only for a single repo. Running `cgc stop`, `cgc stop-all`, or
 `cgc shutdown-all` stops every configured CGC root; pass `--repo-id` to
 `cgc stop` only for a single repo.
