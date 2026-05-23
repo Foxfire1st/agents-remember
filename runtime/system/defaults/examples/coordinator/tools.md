@@ -3,8 +3,8 @@
 Use this file for tools and commands that are useful across all or many code
 repositories attached to this coordinator.
 
-Repo-specific checks, commands, branch workflow, and coding tools belong in the
-selected memory layer's `system/tools.md`, not here.
+Repo-specific checks, commands, branch workflow, and code quality tools belong
+in the selected memory layer's `system/tools.md`, not here.
 
 ## Global Commands
 

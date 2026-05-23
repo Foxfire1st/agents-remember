@@ -8,7 +8,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.install import runtime as install_runtime  # noqa: E402
+from agents_remember.install import runtime as install_runtime
 
 
 def write_file(path: Path, content: str = "x\n") -> None:
@@ -40,7 +40,12 @@ class InstallRuntimeTests(unittest.TestCase):
             grepai_exe = providers_root / "_bin" / "grepai.exe"
             cgc_exe = providers_root / "_venvs" / "codegraphcontext" / "Scripts" / "cgc.exe"
             cgc_state = (
-                providers_root / "runners" / "codegraphcontext" / "repo" / ".codegraphcontext" / "state.json"
+                providers_root
+                / "runners"
+                / "codegraphcontext"
+                / "repo"
+                / ".codegraphcontext"
+                / "state.json"
             )
             grepai_watch_log = (
                 providers_root / "runners" / "grepai" / "memory-repos" / "logs" / "watch.log"
@@ -86,9 +91,7 @@ class InstallRuntimeTests(unittest.TestCase):
             grepai_data = providers_root / "data" / "grepai" / "postgres.db"
             grepai_log = providers_root / "logs" / "grepai" / "watch.log"
             old_venv = providers_root / "_venvs" / "old" / "python.exe"
-            mcp_package = (
-                coordination_root / "src" / "agents_remember" / "mcp" / "__init__.py"
-            )
+            mcp_package = coordination_root / "src" / "agents_remember" / "mcp" / "__init__.py"
 
             write_file(grepai_data, "live data\n")
             write_file(grepai_log, "live log\n")
@@ -113,9 +116,7 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertTrue((providers_root / "logs" / "mcp").is_dir())
             self.assertTrue((providers_root / "runners" / "codegraphcontext").is_dir())
             self.assertTrue((providers_root / "runners" / "grepai").is_dir())
-            self.assertTrue(
-                (providers_root / "requirements" / "codegraphcontext.txt").exists()
-            )
+            self.assertTrue((providers_root / "requirements" / "codegraphcontext.txt").exists())
             self.assertFalse((coordination_root / "mcp").exists())
             self.assertFalse(mcp_package.exists())
 

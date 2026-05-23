@@ -17,8 +17,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
-from agents_remember.kernel.coordination_context_resolver import (  # noqa: E402
+from agents_remember.kernel.coordination_context_resolver import (
     StorageSettings,
     clean_scalar,
     normalize_rel_path,
@@ -26,7 +25,6 @@ from agents_remember.kernel.coordination_context_resolver import (  # noqa: E402
     resolve_storage_for_source,
     sidecar_storage_label,
 )
-
 
 CLASSIFICATIONS = (
     "up to date",
@@ -37,7 +35,13 @@ CLASSIFICATIONS = (
     "disabled",
     "unsupported",
 )
-ACTIONABLE_CLASSIFICATIONS = {"drifted", "missing verification", "missing", "orphaned", "unsupported"}
+ACTIONABLE_CLASSIFICATIONS = {
+    "drifted",
+    "missing verification",
+    "missing",
+    "orphaned",
+    "unsupported",
+}
 INLINE_START_MARKER = "@ar-onboarding"
 INLINE_END_MARKER = "@ar-onboarding-end"
 GIT_BLOB_SET_ALGORITHM = "git-blob-set-v1"
@@ -78,8 +82,7 @@ def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str
         cwd=repo_root,
         text=True,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 
@@ -324,10 +327,14 @@ def repo_root_placeholder() -> str:
 
 
 def local_route_change_note(repo_root: Path, source_route: str) -> str:
-    return local_change_note(repo_root, "." if source_route in {"", repo_root_placeholder()} else source_route)
+    return local_change_note(
+        repo_root, "." if source_route in {"", repo_root_placeholder()} else source_route
+    )
 
 
-def classify_overview_onboarding(onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings) -> DriftRow:
+def classify_overview_onboarding(
+    onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings
+) -> DriftRow:
     metadata = parse_table_metadata(onboarding_file)
     doc_type = metadata.get("doc_type", "")
     repository = metadata.get("repository", repo_root.name)
@@ -483,7 +490,10 @@ def parse_entity_fingerprint_rows(path: Path) -> list[EntityFingerprint]:
             continue
         if not headers:
             continue
-        row = {header: cells[index] if index < len(cells) else "" for index, header in enumerate(headers)}
+        row = {
+            header: cells[index] if index < len(cells) else ""
+            for index, header in enumerate(headers)
+        }
         entity = clean_scalar(row.get("entity", "")).strip()
         algorithm = clean_scalar(row.get("algorithm", "")).strip("`")
         fingerprint = clean_scalar(row.get("fingerprint", "")).strip("`")
@@ -585,7 +595,9 @@ def classify_entity_fingerprint(
             affected_sections=f"entity catalog; {row.entity}",
             note="Entity fingerprint row is missing a fingerprint value or evidence paths.",
         )
-    missing_paths = [source_path for source_path in row.evidence_paths if not (repo_root / source_path).exists()]
+    missing_paths = [
+        source_path for source_path in row.evidence_paths if not (repo_root / source_path).exists()
+    ]
     if missing_paths:
         return DriftRow(
             onboarding_file=onboarding_ref,
@@ -707,7 +719,9 @@ def orphaned_entity_fingerprint_row(
     )
 
 
-def classify_entity_catalog(onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings) -> list[DriftRow]:
+def classify_entity_catalog(
+    onboarding_file: Path, repo_root: Path, onboarding_root: Path, settings: StorageSettings
+) -> list[DriftRow]:
     metadata = parse_table_metadata(onboarding_file)
     repository = metadata.get("repository", repo_root.name)
     last_updated = metadata.get("lastUpdated", "")
@@ -758,9 +772,13 @@ def classify_entity_catalog(onboarding_file: Path, repo_root: Path, onboarding_r
         ]
     fingerprint_entities = {row.entity for row in rows}
     rows_by_inventory = [
-        classify_entity_fingerprint(onboarding_file, onboarding_root, repo_root, settings, repository, last_updated, row)
+        classify_entity_fingerprint(
+            onboarding_file, onboarding_root, repo_root, settings, repository, last_updated, row
+        )
         if row.entity in inventory_entities
-        else orphaned_entity_fingerprint_row(onboarding_file, onboarding_root, repository, settings, last_updated, row)
+        else orphaned_entity_fingerprint_row(
+            onboarding_file, onboarding_root, repository, settings, last_updated, row
+        )
         for row in rows
     ]
     missing_inventory_rows = [
@@ -824,7 +842,9 @@ def classify_sidecar_onboarding(
         classification="drifted" if actionable else "up to date",
         trust="medium" if actionable else "high",
         affected_sections="entity catalog",
-        note=f"{len(actionable)} actionable entity fingerprint rows." if actionable else "All entity fingerprint rows are up to date.",
+        note=f"{len(actionable)} actionable entity fingerprint rows."
+        if actionable
+        else "All entity fingerprint rows are up to date.",
     )
 
 
@@ -842,34 +862,42 @@ def classify_sidecar_onboarding_units(
         return classify_entity_catalog(onboarding_file, repo_root, onboarding_root, settings)
 
     source_file = normalize_rel_path(metadata.get("path", ""))
-    storage_mode = resolve_storage_for_source(source_file, settings, repo_root.name) if source_file else settings.mode
+    storage_mode = (
+        resolve_storage_for_source(source_file, settings, repo_root.name)
+        if source_file
+        else settings.mode
+    )
     onboarding_ref = rel(onboarding_file, onboarding_root)
     if storage_mode == "disabled":
-        return [DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_file,
-            repository=metadata.get("repository", repo_root.name),
-            storage_mode="disabled",
-            last_verified_hash=metadata.get("lastVerifiedCommitHash", ""),
-            last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
-            classification="disabled",
-            trust="high",
-            affected_sections="none",
-            note="Source path is excluded by pathRules.",
-        )]
+        return [
+            DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_file,
+                repository=metadata.get("repository", repo_root.name),
+                storage_mode="disabled",
+                last_verified_hash=metadata.get("lastVerifiedCommitHash", ""),
+                last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
+                classification="disabled",
+                trust="high",
+                affected_sections="none",
+                note="Source path is excluded by pathRules.",
+            )
+        ]
     if not sidecar_storage_label(storage_mode):
-        return [DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_file,
-            repository=metadata.get("repository", repo_root.name),
-            storage_mode=storage_mode,
-            last_verified_hash=metadata.get("lastVerifiedCommitHash", ""),
-            last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
-            classification="unsupported",
-            trust="low",
-            affected_sections="resolver; storage configuration",
-            note=f"Sidecar onboarding exists but the source path resolves to '{storage_mode}'.",
-        )]
+        return [
+            DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_file,
+                repository=metadata.get("repository", repo_root.name),
+                storage_mode=storage_mode,
+                last_verified_hash=metadata.get("lastVerifiedCommitHash", ""),
+                last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
+                classification="unsupported",
+                trust="low",
+                affected_sections="resolver; storage configuration",
+                note=f"Sidecar onboarding exists but the source path resolves to '{storage_mode}'.",
+            )
+        ]
     row = classify_external_onboarding(onboarding_file, repo_root)
     row.onboarding_file = onboarding_ref
     row.storage_mode = storage_mode
@@ -894,7 +922,9 @@ def expand_inline_bounds(source_text: str, start_index: int, end_index: int) -> 
     start_line_start, _ = line_bounds(source_text, start_index)
     previous_line_end = start_line_start - 1
     previous_line_start = source_text.rfind("\n", 0, max(previous_line_end, 0)) + 1
-    previous_line = source_text[previous_line_start:previous_line_end].strip() if start_line_start > 0 else ""
+    previous_line = (
+        source_text[previous_line_start:previous_line_end].strip() if start_line_start > 0 else ""
+    )
     block_start = start_line_start
     expected_end = COMMON_BLOCK_DELIMITERS.get(previous_line)
     if expected_end:
@@ -910,7 +940,7 @@ def expand_inline_bounds(source_text: str, start_index: int, end_index: int) -> 
         next_line = source_text[next_line_start:next_line_end].strip()
         if next_line == expected_end:
             block_end = next_line_end
-    if block_end < len(source_text) and source_text[block_end:block_end + 1] == "\n":
+    if block_end < len(source_text) and source_text[block_end : block_end + 1] == "\n":
         block_end += 1
     return block_start, block_end
 
@@ -928,7 +958,9 @@ def extract_inline_onboarding_block(source_text: str) -> InlineBlock | None:
         stripped = line.strip()
         if not stripped or stripped in {INLINE_START_MARKER, INLINE_END_MARKER}:
             continue
-        if stripped.startswith(("/*", "*/", "<!--", "-->", '"""', "'''", "=begin", "=end", "{-", "-}", "(*", "*)")):
+        if stripped.startswith(
+            ("/*", "*/", "<!--", "-->", '"""', "'''", "=begin", "=end", "{-", "-}", "(*", "*)")
+        ):
             continue
         if ":" not in stripped:
             continue
@@ -1019,7 +1051,9 @@ def classify_inline_source(source_file: str, repo_root: Path) -> DriftRow:
         last_verified_date=verified_at,
         classification=classification,
         trust="high" if classification == "up to date" else "medium",
-        affected_sections="none" if classification == "up to date" else "logic; invariants; metadata",
+        affected_sections="none"
+        if classification == "up to date"
+        else "logic; invariants; metadata",
         note=(
             "Inline source digest matches the current source body."
             if classification == "up to date"
@@ -1028,7 +1062,9 @@ def classify_inline_source(source_file: str, repo_root: Path) -> DriftRow:
     )
 
 
-def classify_source(source_file: str, repo_root: Path, onboarding_root: Path, settings: StorageSettings) -> DriftRow:
+def classify_source(
+    source_file: str, repo_root: Path, onboarding_root: Path, settings: StorageSettings
+) -> DriftRow:
     storage_mode = resolve_storage_for_source(source_file, settings, repo_root.name)
     if storage_mode == "disabled":
         return DriftRow(
@@ -1076,7 +1112,9 @@ def rel(path: Path | str, base: Path) -> str:
         return path.as_posix()
 
 
-def write_markdown_report(rows: list[DriftRow], report_path: Path, repo_root: Path, onboarding_root: Path) -> None:
+def write_markdown_report(
+    rows: list[DriftRow], report_path: Path, repo_root: Path, onboarding_root: Path
+) -> None:
     generated = dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
     head = run_git(repo_root, ["rev-parse", "--short", "HEAD"])
     head_text = head.stdout.strip() if head.returncode == 0 else "unknown"
@@ -1141,7 +1179,11 @@ def resolve_report_path(
 ) -> Path:
     if report_path is None:
         return default_report_path(temp_root, repo_root)
-    if memory_root is not None and report_path.is_absolute() and report_path.resolve().is_relative_to(memory_root.resolve()):
+    if (
+        memory_root is not None
+        and report_path.is_absolute()
+        and report_path.resolve().is_relative_to(memory_root.resolve())
+    ):
         return default_report_dir(temp_root, repo_root) / report_path.name
     if report_path.is_absolute():
         if report_path.resolve().is_relative_to(coordination_root.resolve()):
@@ -1153,7 +1195,7 @@ def resolve_report_path(
     return default_report_dir(temp_root, repo_root) / report_path.name
 
 
-def print_text(rows: list[DriftRow], onboarding_root: Path) -> None:
+def print_text(rows: list[DriftRow], _onboarding_root: Path) -> None:
     for row in rows:
         print(
             f"{row.onboarding_file}\t"
@@ -1220,7 +1262,12 @@ def print_csv(rows: list[DriftRow], onboarding_root: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--code-repository-root", required=True, type=Path, help="Root directory of the code repository to check.")
+    parser.add_argument(
+        "--code-repository-root",
+        required=True,
+        type=Path,
+        help="Root directory of the code repository to check.",
+    )
     parser.add_argument(
         "--onboarding-root",
         type=Path,
@@ -1246,7 +1293,9 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Optional Markdown report output path. Relative paths resolve from the C-08 temp root; absolute paths are constrained to the coordination root.",
     )
-    parser.add_argument("--format", choices=("text", "json", "csv"), default="text", help="Stdout format.")
+    parser.add_argument(
+        "--format", choices=("text", "json", "csv"), default="text", help="Stdout format."
+    )
     parser.add_argument(
         "--fail-on-actionable",
         action="store_true",
@@ -1274,19 +1323,32 @@ def main(argv: list[str] | None = None) -> int:
 
     git_check = run_git(code_repository_root, ["rev-parse", "--show-toplevel"])
     if git_check.returncode != 0:
-        parser.error(f"code repository root is not a git repository: {code_repository_root}\n{git_check.stderr.strip()}")
+        parser.error(
+            f"code repository root is not a git repository: {code_repository_root}\n{git_check.stderr.strip()}"
+        )
     settings = context.storage
     rows = [
         row
         for path in discover_onboarding_files(context.onboarding_root)
-        for row in classify_sidecar_onboarding_units(path, code_repository_root, context.onboarding_root, settings)
+        for row in classify_sidecar_onboarding_units(
+            path, code_repository_root, context.onboarding_root, settings
+        )
     ]
-    rows.extend(classify_inline_source(path, code_repository_root) for path in discover_inline_onboarding_sources(code_repository_root, settings))
+    rows.extend(
+        classify_inline_source(path, code_repository_root)
+        for path in discover_inline_onboarding_sources(code_repository_root, settings)
+    )
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
 
     write_markdown_report(
         rows,
-        resolve_report_path(args.report, context.coordination_root, context.temp_root, code_repository_root, context.memory_root),
+        resolve_report_path(
+            args.report,
+            context.coordination_root,
+            context.temp_root,
+            code_repository_root,
+            context.memory_root,
+        ),
         code_repository_root,
         context.onboarding_root,
     )
@@ -1298,7 +1360,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print_text(rows, context.onboarding_root)
 
-    if args.fail_on_actionable and any(row.classification in ACTIONABLE_CLASSIFICATIONS for row in rows):
+    if args.fail_on_actionable and any(
+        row.classification in ACTIONABLE_CLASSIFICATIONS for row in rows
+    ):
         return 1
     return 0
 

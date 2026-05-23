@@ -70,9 +70,7 @@ Resolve the active memory and coordination context for the code repository befor
 
 After C-08 resolves the target repository and coordination root, prefer the
 Agents Remember MCP `context_packet` tool when that server is configured.
-Provider authority comes from the MCP settings file, not from coordinator
-`system/settings.json`, and not from the resolved memory repo's
-`system/settings.json`.
+Provider authority comes from the MCP settings file.
 
 If the MCP settings configure providers, run:
 
@@ -81,8 +79,7 @@ context_packet(repo_id="<repo-id>", include_providers=true)
 ```
 
 If the packet reports stopped or degraded providers, report that state and use
-the MCP provider/runtime operations that match the requested work. Do not infer
-provider permission from coordinator files.
+the MCP provider/runtime operations that match the requested work.
 
 Skip this provider check when no MCP server is configured or the MCP settings
 report no providers.
@@ -93,8 +90,8 @@ report no providers.
   layout, and operator notes.
 - Use `system/settings.md` for model-facing coordinator notes. Machine-readable
   MCP authority settings live outside the coordinator root.
-- Use `system/tools.md` for tools and commands that are valid across all or many
-  repositories.
+- Use `system/tools.md` for tools, commands, and code quality checks that are
+  valid across all or many repositories.
 - Use `system/sources.md` for workspace-wide source registries.
 - Do not put rules that are valid for only one code repository in coordinator
   files; put them in that repository's memory layer.
@@ -108,8 +105,8 @@ report no providers.
   guidance belongs in the memory layer's `system/*` files.
 - `system/settings.md` for human and agent instructions.
 - `system/settings.json` for storage, path-rule, and cross-repo policy.
-- `system/tools.md` for repo-specific checks, branch workflow, and local command
-  notes.
+- `system/tools.md` for repo-specific test, lint, typecheck, build,
+  smoke-check, branch workflow, and local command notes.
 - `system/sources.md` for domain documentation and external references.
 - `system/coding-guidelines.md` when present for repo-specific coding rules.
 
@@ -130,3 +127,10 @@ the more specific authority for its code repository.
   approval gates required by the selected workflow.
 - When coordinator-wide guidance and memory-layer guidance conflict, prefer the
   memory-layer rule for that repository.
+
+## Code Quality Instructions
+
+After C-08 resolves context, use the resolved memory layer's `system/tools.md`
+for repository-specific test, lint, typecheck, build, smoke-check, branch, and
+local command guidance. Use `system/coding-guidelines.md` when present for
+repo-specific coding rules.

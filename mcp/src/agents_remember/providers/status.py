@@ -96,9 +96,7 @@ def _provider_items(config: McpRuntimeConfig, status: dict[str, Any]) -> list[di
     if not isinstance(results, list):
         results = []
     by_provider = {
-        str(result.get("provider")): result
-        for result in results
-        if isinstance(result, dict)
+        str(result.get("provider")): result for result in results if isinstance(result, dict)
     }
     items: list[dict[str, Any]] = []
     if "codegraphcontext-code" in config.providers:

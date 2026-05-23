@@ -10,14 +10,14 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.mcp.config import load_config  # noqa: E402
-from agents_remember.providers.integrity import (  # noqa: E402
+from agents_remember.mcp.config import load_config
+from agents_remember.providers.integrity import (
     check_provider_runner_integrity,
     manifest_path_for_config,
     write_provider_runner_manifest,
 )
-from agents_remember.providers.status import provider_status_packet  # noqa: E402
-from test_config import settings_payload, write_json  # noqa: E402
+from agents_remember.providers.status import provider_status_packet
+from test_config import settings_payload, write_json
 
 
 class ProviderIntegrityTests(unittest.TestCase):

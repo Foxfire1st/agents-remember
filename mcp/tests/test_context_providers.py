@@ -5,19 +5,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.providers.context_providers import (  # noqa: E402
+from agents_remember.providers.context_providers import (
     CGC_CGCIGNORE_PATCH_ID,
+    CGC_DELETE_CONTAINS_ORIGINAL_SNIPPET,
+    CGC_DELETE_NODE_ORIGINAL_SNIPPET,
     CGC_DELETE_PATCH_ID,
-    CGC_DISCOVERY_EXTENSIONS_PATCH_ID,
     CGC_DELETE_PATCH_MARKER,
     CGC_DELETE_PREFIX_ORIGINAL_SNIPPET,
     CGC_DELETE_REL_ORIGINAL_SNIPPET,
-    CGC_DELETE_CONTAINS_ORIGINAL_SNIPPET,
-    CGC_DELETE_NODE_ORIGINAL_SNIPPET,
+    CGC_DISCOVERY_EXTENSIONS_PATCH_ID,
     CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET,
     CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID,
     CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_MARKER,
@@ -25,10 +24,9 @@ from agents_remember.providers.context_providers import (  # noqa: E402
     CGC_GRAPH_BUILDER_PARSER_ORIGINAL_SNIPPET,
     CGC_GRAPH_BUILDER_PRESCAN_ORIGINAL_SNIPPET,
     CGC_GRAPH_BUILDER_TABLEGEN_PATCH_MARKER,
-    CGC_PATCH_MARKER,
-    CGC_PIN,
-    CGC_REQUIREMENTS,
     CGC_ORIGINAL_SNIPPET,
+    CGC_PATCH_MARKER,
+    CGC_REQUIREMENTS,
     CGC_VIZ_CLI_ROUTE_PATCH_ID,
     CGC_VIZ_CLI_ROUTE_PATCH_MARKER,
     CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET,
@@ -42,9 +40,9 @@ from agents_remember.providers.context_providers import (  # noqa: E402
     CGC_VIZ_SERVER_ROUTE_PATCH_ID,
     CGC_VIZ_SERVER_ROUTE_PATCH_MARKER,
     CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET,
+    GREPAI_PIN,
     ContextProviderError,
     GrepaiMemoryRoot,
-    GREPAI_PIN,
     apply_cgc_cgcignore_patch,
     apply_cgc_delete_patch,
     apply_cgc_discovery_extensions_patch,
@@ -52,34 +50,34 @@ from agents_remember.providers.context_providers import (  # noqa: E402
     apply_cgc_viz_cli_route_patch,
     apply_cgc_viz_repo_query_patch,
     apply_cgc_viz_server_route_patch,
-    assert_no_source_provider_artifacts,
     assert_no_grepai_root_provider_artifacts,
+    assert_no_source_provider_artifacts,
     cgc_cgcignore_patch_applied,
     cgc_delete_patch_applied,
     cgc_discovery_extensions_patch_applied,
     cgc_graph_builder_extensions_patch_applied,
+    cgc_runtime_layout,
+    cgc_runtime_layout_from_provider_settings,
     cgc_viz_cli_route_patch_applied,
     cgc_viz_repo_query_patch_applied,
     cgc_viz_server_route_patch_applied,
     cleanup_cgc_runtime_artifacts,
-    cgc_runtime_layout,
-    cgc_runtime_layout_from_provider_settings,
     ensure_cgc_runtime_layout,
-    ensure_grepai_runtime_layout,
     ensure_grepai_requirements_file,
-    grepai_runtime_layout,
-    grepai_runtime_layout_from_provider_settings,
-    grepai_workspace_config_text,
-    find_cgc_cli_helpers_module,
+    ensure_grepai_runtime_layout,
     find_cgc_cgcignore_module,
+    find_cgc_cli_helpers_module,
     find_cgc_discovery_module,
     find_cgc_graph_builder_module,
     find_cgc_viz_server_module,
     find_cgc_writer_module,
+    grepai_root_provider_artifacts,
+    grepai_runtime_layout,
+    grepai_runtime_layout_from_provider_settings,
+    grepai_workspace_config_text,
     read_provider_pin,
     remove_grepai_root_provider_artifacts,
     source_provider_artifacts,
-    grepai_root_provider_artifacts,
     stable_provider_id,
     sync_grepai_index_roots,
     write_grepai_workspace_config,
@@ -108,7 +106,10 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 root / "ar-coordination" / "providers" / "data" / "codegraphcontext" / "falkordb",
             )
             self.assertEqual(layout.backend_data_root, layout.backend_root / "data")
-            self.assertEqual(layout.venv_root, root / "ar-coordination" / "providers" / "_venvs" / "codegraphcontext")
+            self.assertEqual(
+                layout.venv_root,
+                root / "ar-coordination" / "providers" / "_venvs" / "codegraphcontext",
+            )
             self.assertEqual(
                 layout.requirements_file,
                 root / "ar-coordination" / "providers" / "requirements" / "codegraphcontext.txt",
@@ -145,7 +146,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
 
             layout.code_repo_root.mkdir(parents=True)
-            (layout.code_repo_root / ".gitignore").write_text("/samples\n.tmp_drt\n", encoding="utf-8")
+            (layout.code_repo_root / ".gitignore").write_text(
+                "/samples\n.tmp_drt\n", encoding="utf-8"
+            )
             layout.env_file.parent.mkdir(parents=True)
             layout.env_file.write_text("DEFAULT_DATABASE=kuzudb\n", encoding="utf-8")
 
@@ -155,7 +158,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 layout.requirements_file.read_text(encoding="utf-8"),
                 "\n".join(CGC_REQUIREMENTS) + "\n",
             )
-            self.assertIn("database: falkordb-remote", layout.config_file.read_text(encoding="utf-8"))
+            self.assertIn(
+                "database: falkordb-remote", layout.config_file.read_text(encoding="utf-8")
+            )
             env_text = layout.env_file.read_text(encoding="utf-8")
             self.assertIn("DEFAULT_DATABASE=falkordb-remote", env_text)
             self.assertNotIn("CGC_RUNTIME_DB_TYPE=", env_text)
@@ -205,7 +210,12 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertTrue(layout.backend_data_root.exists())
             self.assertEqual(
                 sorted(item["reason"] for item in removals),
-                ["legacy-embedded-db", "legacy-embedded-global", "legacy-embedded-kuzu", "unconfigured-cgc-instance"],
+                [
+                    "legacy-embedded-db",
+                    "legacy-embedded-global",
+                    "legacy-embedded-kuzu",
+                    "unconfigured-cgc-instance",
+                ],
             )
 
     def test_cgc_layout_expands_provider_settings_roots(self) -> None:
@@ -235,10 +245,19 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
 
             self.assertEqual(layout.repo_id, "my-app")
-            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "runners" / "codegraphcontext" / "my-app")
+            self.assertEqual(
+                layout.runtime_root,
+                root / "ar-coordination" / "providers" / "runners" / "codegraphcontext" / "my-app",
+            )
             self.assertEqual(
                 layout.backend_data_root,
-                root / "ar-coordination" / "providers" / "data" / "codegraphcontext" / "falkordb" / "data",
+                root
+                / "ar-coordination"
+                / "providers"
+                / "data"
+                / "codegraphcontext"
+                / "falkordb"
+                / "data",
             )
             self.assertEqual(layout.state_file, layout.runtime_root / "provider-state.json")
             self.assertEqual(layout.cgcignore_patterns, ("vendor/generated/",))
@@ -280,11 +299,20 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
 
             self.assertEqual(layout.workspace_name, "agents-remember-memory")
-            self.assertEqual(layout.runtime_root, root / "ar-coordination" / "providers" / "runners" / "grepai")
-            self.assertEqual(layout.workspace_config_file, layout.home_root / ".grepai" / "workspace.yaml")
-            self.assertEqual(layout.state_file, layout.runtime_root / "state" / "provider-state.json")
+            self.assertEqual(
+                layout.runtime_root, root / "ar-coordination" / "providers" / "runners" / "grepai"
+            )
+            self.assertEqual(
+                layout.workspace_config_file, layout.home_root / ".grepai" / "workspace.yaml"
+            )
+            self.assertEqual(
+                layout.state_file, layout.runtime_root / "state" / "provider-state.json"
+            )
             self.assertEqual(layout.logs_root, layout.runtime_root / "logs")
-            self.assertEqual(layout.backend_root, root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres")
+            self.assertEqual(
+                layout.backend_root,
+                root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres",
+            )
             self.assertEqual(layout.backend_data_root, layout.backend_root / "data")
             self.assertEqual(layout.env()["HOME"], layout.home_root.as_posix())
             self.assertEqual(layout.env()["XDG_STATE_HOME"], (layout.state_root / "xdg").as_posix())
@@ -309,7 +337,10 @@ class ContextProviderLayoutTests(unittest.TestCase):
                     "dataRoot": "<backendRuntimeRoot>/data",
                 },
                 "roots": [
-                    {"projectId": "ar-my-app", "path": "<coordination_root>/memory-repos/ar-my-app"},
+                    {
+                        "projectId": "ar-my-app",
+                        "path": "<coordination_root>/memory-repos/ar-my-app",
+                    },
                     {"projectId": "my-app-internal", "path": str(internal_memory)},
                 ],
             }
@@ -320,19 +351,38 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
 
             self.assertEqual(layout.workspace_name, "agents-remember-memory")
-            self.assertEqual([item.project_id for item in layout.roots], ["ar-my-app", "my-app-internal"])
+            self.assertEqual(
+                [item.project_id for item in layout.roots], ["ar-my-app", "my-app-internal"]
+            )
             self.assertEqual(layout.roots[0].source_path, external_memory)
             self.assertEqual(layout.roots[1].source_path, internal_memory)
             self.assertEqual(
                 layout.roots[0].path,
-                root / "ar-coordination" / "providers" / "runners" / "grepai" / "index-roots" / "ar-my-app",
+                root
+                / "ar-coordination"
+                / "providers"
+                / "runners"
+                / "grepai"
+                / "index-roots"
+                / "ar-my-app",
             )
             self.assertEqual(
                 layout.roots[1].path,
-                root / "ar-coordination" / "providers" / "runners" / "grepai" / "index-roots" / "my-app-internal",
+                root
+                / "ar-coordination"
+                / "providers"
+                / "runners"
+                / "grepai"
+                / "index-roots"
+                / "my-app-internal",
             )
-            self.assertEqual(layout.backend_data_root, root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres" / "data")
-            self.assertEqual(layout.logs_root, root / "ar-coordination" / "providers" / "logs" / "grepai")
+            self.assertEqual(
+                layout.backend_data_root,
+                root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres" / "data",
+            )
+            self.assertEqual(
+                layout.logs_root, root / "ar-coordination" / "providers" / "logs" / "grepai"
+            )
 
     def test_grepai_syncs_provider_owned_index_roots_from_memory_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -347,7 +397,13 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 roots=(
                     GrepaiMemoryRoot(
                         project_id="ar-my-app",
-                path=root / "ar-coordination" / "providers" / "runners" / "grepai" / "index-roots" / "ar-my-app",
+                        path=root
+                        / "ar-coordination"
+                        / "providers"
+                        / "runners"
+                        / "grepai"
+                        / "index-roots"
+                        / "ar-my-app",
                         source_path=source,
                     ),
                 ),
@@ -357,7 +413,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             synced = sync_grepai_index_roots(layout)
 
             self.assertEqual(synced[0]["projectId"], "ar-my-app")
-            self.assertEqual((layout.roots[0].path / "overview.md").read_text(encoding="utf-8"), "# Overview\n")
+            self.assertEqual(
+                (layout.roots[0].path / "overview.md").read_text(encoding="utf-8"), "# Overview\n"
+            )
             self.assertFalse((layout.roots[0].path / ".grepai").exists())
             self.assertTrue((source / ".grepai").exists())
 
@@ -404,9 +462,13 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual(grepai_root_provider_artifacts(root), [])
 
             (root / ".grepai").mkdir()
-            self.assertEqual([path.name for path in grepai_root_provider_artifacts(root)], [".grepai"])
+            self.assertEqual(
+                [path.name for path in grepai_root_provider_artifacts(root)], [".grepai"]
+            )
             with self.assertRaises(ContextProviderError):
-                assert_no_grepai_root_provider_artifacts((GrepaiMemoryRoot(project_id="memory", path=root),))
+                assert_no_grepai_root_provider_artifacts(
+                    (GrepaiMemoryRoot(project_id="memory", path=root),)
+                )
 
     def test_grepai_removes_disposable_provider_artifacts_in_indexed_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -417,7 +479,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             (artifact / "symbols.gob").write_text("generated\n", encoding="utf-8")
             (root / "overview.md").write_text("# Overview\n", encoding="utf-8")
 
-            removals = remove_grepai_root_provider_artifacts((GrepaiMemoryRoot(project_id="memory", path=root),))
+            removals = remove_grepai_root_provider_artifacts(
+                (GrepaiMemoryRoot(project_id="memory", path=root),)
+            )
 
             self.assertEqual(removals, [{"projectId": "memory", "path": artifact.as_posix()}])
             self.assertFalse(artifact.exists())
@@ -430,7 +494,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual(source_provider_artifacts(code_root), [])
 
             (code_root / ".cgcignore").write_text("# generated\n", encoding="utf-8")
-            self.assertEqual([path.name for path in source_provider_artifacts(code_root)], [".cgcignore"])
+            self.assertEqual(
+                [path.name for path in source_provider_artifacts(code_root)], [".cgcignore"]
+            )
 
             with self.assertRaises(ContextProviderError):
                 assert_no_source_provider_artifacts(code_root)
@@ -443,7 +509,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertTrue(apply_cgc_cgcignore_patch(target))
             self.assertTrue(cgc_cgcignore_patch_applied(target))
             self.assertIn(CGC_PATCH_MARKER, target.read_text(encoding="utf-8"))
-            self.assertIn("if not local_cgcignore_path.exists():", target.read_text(encoding="utf-8"))
+            self.assertIn(
+                "if not local_cgcignore_path.exists():", target.read_text(encoding="utf-8")
+            )
             self.assertFalse(apply_cgc_cgcignore_patch(target))
 
     def test_cgc_delete_patch_is_idempotent(self) -> None:
@@ -496,7 +564,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertIn(CGC_GRAPH_BUILDER_TABLEGEN_PATCH_MARKER, text)
             self.assertIn('".cc": "cpp"', text)
             self.assertIn('".td",', text)
-            self.assertIn("for cpp_ext in ('.cpp', '.cc', '.cxx', '.c++', '.C', '.h', '.hpp', '.hh')", text)
+            self.assertIn(
+                "for cpp_ext in ('.cpp', '.cc', '.cxx', '.c++', '.C', '.h', '.hpp', '.hh')", text
+            )
             self.assertFalse(apply_cgc_graph_builder_extensions_patch(target))
 
     def test_cgc_discovery_extensions_patch_is_idempotent(self) -> None:
@@ -514,7 +584,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
     def test_cgc_viz_repo_query_patch_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "server.py"
-            target.write_text(f"def get_graph():\n{CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET}", encoding="utf-8")
+            target.write_text(
+                f"def get_graph():\n{CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET}", encoding="utf-8"
+            )
 
             self.assertTrue(apply_cgc_viz_repo_query_patch(target))
             text = target.read_text(encoding="utf-8")
@@ -571,12 +643,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
     def test_find_cgc_cli_helpers_module_accepts_windows_venv_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = (
-                Path(tmp)
-                / "Lib"
-                / "site-packages"
-                / "codegraphcontext"
-                / "cli"
-                / "cli_helpers.py"
+                Path(tmp) / "Lib" / "site-packages" / "codegraphcontext" / "cli" / "cli_helpers.py"
             )
             target.parent.mkdir(parents=True)
             target.write_text("# module\n", encoding="utf-8")
@@ -586,12 +653,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
     def test_find_cgc_cgcignore_module_accepts_windows_venv_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = (
-                Path(tmp)
-                / "Lib"
-                / "site-packages"
-                / "codegraphcontext"
-                / "core"
-                / "cgcignore.py"
+                Path(tmp) / "Lib" / "site-packages" / "codegraphcontext" / "core" / "cgcignore.py"
             )
             target.parent.mkdir(parents=True)
             target.write_text("# module\n", encoding="utf-8")
@@ -648,14 +710,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
 
     def test_find_cgc_viz_server_module_accepts_windows_venv_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            target = (
-                Path(tmp)
-                / "Lib"
-                / "site-packages"
-                / "codegraphcontext"
-                / "viz"
-                / "server.py"
-            )
+            target = Path(tmp) / "Lib" / "site-packages" / "codegraphcontext" / "viz" / "server.py"
             target.parent.mkdir(parents=True)
             target.write_text("# module\n", encoding="utf-8")
 
@@ -674,12 +729,20 @@ class ContextProviderLayoutTests(unittest.TestCase):
         self.assertEqual(stable_provider_id("   "), "repo")
 
     def test_patch_id_is_stable(self) -> None:
-        self.assertEqual(CGC_CGCIGNORE_PATCH_ID, "codegraphcontext-0.4.10-cgcignore-runtime-root-v2")
+        self.assertEqual(
+            CGC_CGCIGNORE_PATCH_ID, "codegraphcontext-0.4.10-cgcignore-runtime-root-v2"
+        )
         self.assertEqual(CGC_DELETE_PATCH_ID, "codegraphcontext-0.4.10-windows-delete-prefix-v1")
-        self.assertEqual(CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID, "codegraphcontext-0.4.10-cpp-cc-td-extensions-v1")
-        self.assertEqual(CGC_DISCOVERY_EXTENSIONS_PATCH_ID, "codegraphcontext-0.4.10-td-generic-discovery-v1")
+        self.assertEqual(
+            CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID, "codegraphcontext-0.4.10-cpp-cc-td-extensions-v1"
+        )
+        self.assertEqual(
+            CGC_DISCOVERY_EXTENSIONS_PATCH_ID, "codegraphcontext-0.4.10-td-generic-discovery-v1"
+        )
         self.assertEqual(CGC_VIZ_REPO_QUERY_PATCH_ID, "codegraphcontext-0.4.10-viz-repo-query-v1")
-        self.assertEqual(CGC_VIZ_SERVER_ROUTE_PATCH_ID, "codegraphcontext-0.4.10-viz-server-route-v1")
+        self.assertEqual(
+            CGC_VIZ_SERVER_ROUTE_PATCH_ID, "codegraphcontext-0.4.10-viz-server-route-v1"
+        )
         self.assertEqual(CGC_VIZ_CLI_ROUTE_PATCH_ID, "codegraphcontext-0.4.10-viz-cli-route-v1")
 
 

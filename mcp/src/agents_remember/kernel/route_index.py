@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 SCHEMA_VERSION = 1
 INDEX_FILE_NAME = "overview.index.json"
@@ -289,7 +289,7 @@ def _iter_source_files(code_root: Path) -> Iterable[str]:
 
 
 def _routing_terms(
-    overview_path: Path,
+    _overview_path: Path,
     route: str,
     covered_files: list[str],
     child_routes: list[str],
@@ -512,7 +512,7 @@ def _nearest_route_parent(route: str, routes: set[str]) -> str:
         if parent in routes:
             return parent
         parent = parent.rsplit("/", 1)[0] if "/" in parent else ""
-    return "" if "" in routes else ""
+    return ""
 
 
 def _route_covers(route: str, source_path: str) -> bool:

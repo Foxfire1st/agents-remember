@@ -15,17 +15,14 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, TypedDict
 
-
 from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
-    WorktreeContract,
     load_contract,
     task_root_candidates,
     task_root_for,
     worktree_group_for,
 )
-
 
 DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"
 
@@ -33,7 +30,13 @@ DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"
 class MissingMemoryError(ValueError):
     """Raised when neither supported durable memory location exists."""
 
-    def __init__(self, code_repository_name: str, internal_root: Path, coordination_root: Path, external_memory: Path) -> None:
+    def __init__(
+        self,
+        code_repository_name: str,
+        internal_root: Path,
+        coordination_root: Path,
+        external_memory: Path,
+    ) -> None:
         self.code_repository_name = code_repository_name
         self.internal_root = internal_root
         self.coordination_root = coordination_root
@@ -138,7 +141,7 @@ def clean_scalar(value: str) -> str:
     value = value.strip()
     if value.startswith("`") and value.endswith("`"):
         value = value[1:-1]
-    if value.startswith(("\"", "'")) and value.endswith(("\"", "'")) and len(value) >= 2:
+    if value.startswith(('"', "'")) and value.endswith(('"', "'")) and len(value) >= 2:
         value = value[1:-1]
     return value.strip()
 
@@ -148,7 +151,10 @@ def normalize_rel_path(value: str) -> str:
 
 
 def extract_yaml_blocks(markdown_text: str) -> list[str]:
-    return [match.group(1) for match in re.finditer(r"```(?:yaml|yml)?\n(.*?)```", markdown_text, re.DOTALL)]
+    return [
+        match.group(1)
+        for match in re.finditer(r"```(?:yaml|yml)?\n(.*?)```", markdown_text, re.DOTALL)
+    ]
 
 
 def default_storage_mode(topology: Literal["internal", "external"]) -> str:
@@ -170,7 +176,7 @@ def external_memory_root(coordination_root: Path, code_repository_name: str) -> 
 def settings_path_for_roots(
     memory_root: Path,
     coordination_root: Path,
-    topology: Literal["internal", "external"],
+    _topology: Literal["internal", "external"],
 ) -> Path:
     memory_settings = memory_root / "system" / "settings.md"
     coordination_settings = coordination_root / "system" / "settings.md"
@@ -189,7 +195,10 @@ def memory_roots_from_settings(
 ) -> tuple[Path, Path]:
     settings_root = settings_path.resolve().parent.parent
     if topology == "external":
-        if settings_root.name == f"ar-{code_repository_name}" and settings_root.parent.name == "memory-repos":
+        if (
+            settings_root.name == f"ar-{code_repository_name}"
+            and settings_root.parent.name == "memory-repos"
+        ):
             return settings_root.parent.parent, settings_root
         return settings_root, external_memory_root(settings_root, code_repository_name)
     if settings_root.name == "ar-memory":
@@ -217,14 +226,18 @@ def resolve_path_from_declaring_file(value: str, declaring_file: Path) -> Path:
     return (declaring_file.parent / candidate).resolve()
 
 
-def resolve_coordination_root_hint(coordination_root: Path | None, agents_repo: Path | None = None) -> Path:
+def resolve_coordination_root_hint(
+    coordination_root: Path | None, agents_repo: Path | None = None
+) -> Path:
     if coordination_root is not None:
         return coordination_root.resolve()
 
     resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
     env_path = resolved_agents_repo / ".env"
     values = parse_env_file(env_path)
-    if "AR_COORDINATION_ROOT" not in values and looks_like_installed_coordination_root(resolved_agents_repo):
+    if "AR_COORDINATION_ROOT" not in values and looks_like_installed_coordination_root(
+        resolved_agents_repo
+    ):
         return resolved_agents_repo
     root = values.get("AR_COORDINATION_ROOT", DEFAULT_AR_COORDINATION_ROOT)
     return resolve_path_from_declaring_file(root, env_path)
@@ -239,12 +252,20 @@ def find_code_repository_root(workspace_root: Path, code_repository_name: str) -
     if direct.exists():
         return direct
 
-    matches = [path for path in workspace_root.iterdir() if path.is_dir() and path.name == code_repository_name]
+    matches = [
+        path
+        for path in workspace_root.iterdir()
+        if path.is_dir() and path.name == code_repository_name
+    ]
     if len(matches) == 1:
         return matches[0].resolve()
     if len(matches) > 1:
-        raise ValueError(f"multiple code repositories named {code_repository_name!r} found under {workspace_root}")
-    raise ValueError(f"code repository {code_repository_name!r} was not found under {workspace_root}")
+        raise ValueError(
+            f"multiple code repositories named {code_repository_name!r} found under {workspace_root}"
+        )
+    raise ValueError(
+        f"code repository {code_repository_name!r} was not found under {workspace_root}"
+    )
 
 
 def infer_settings_path(onboarding_root: Path) -> Path:
@@ -264,7 +285,10 @@ def path_settings_path_for(settings_path: Path) -> Path:
 def infer_topology_from_onboarding_root(onboarding_root: Path) -> Literal["internal", "external"]:
     if onboarding_root.parent.name == "ar-memory":
         return "internal"
-    if onboarding_root.parent.parent.name == "memory-repos" and onboarding_root.parent.name.startswith("ar-"):
+    if (
+        onboarding_root.parent.parent.name == "memory-repos"
+        and onboarding_root.parent.name.startswith("ar-")
+    ):
         return "external"
     raise ValueError(
         "onboarding_root must point to a supported memory location: "
@@ -339,7 +363,9 @@ def optional_bool(value: object, label: str, default: bool) -> bool:
     return value
 
 
-def parse_cross_repo_allow(value: object, label: str) -> tuple[list[CrossRepoAllowEntry], list[str]]:
+def parse_cross_repo_allow(
+    value: object, label: str
+) -> tuple[list[CrossRepoAllowEntry], list[str]]:
     if value is None:
         return [], []
     if not isinstance(value, list):
@@ -352,12 +378,16 @@ def parse_cross_repo_allow(value: object, label: str) -> tuple[list[CrossRepoAll
             repo = clean_scalar(item)
             reason = "legacy string crossRepo.allow entries are invalid for v2; expectedBranch is required"
             errors.append(f"{item_label}: {reason}")
-            entries.append(CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason))
+            entries.append(
+                CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason)
+            )
             continue
         if not isinstance(item, dict):
             reason = "crossRepo.allow entries must be objects"
             errors.append(f"{item_label}: {reason}")
-            entries.append(CrossRepoAllowEntry(repo="", expected_branch="", state="excluded", reason=reason))
+            entries.append(
+                CrossRepoAllowEntry(repo="", expected_branch="", state="excluded", reason=reason)
+            )
             continue
         repo = item.get("repo")
         expected_branch = item.get("expectedBranch")
@@ -374,7 +404,9 @@ def parse_cross_repo_allow(value: object, label: str) -> tuple[list[CrossRepoAll
             expected_branch_value = clean_scalar(expected_branch)
         try:
             include_code = optional_bool(item.get("includeCode"), f"{item_label}.includeCode", True)
-            include_memory = optional_bool(item.get("includeMemory"), f"{item_label}.includeMemory", False)
+            include_memory = optional_bool(
+                item.get("includeMemory"), f"{item_label}.includeMemory", False
+            )
         except ValueError as error:
             include_code = True
             include_memory = False
@@ -405,7 +437,9 @@ def parse_json_settings(
         raise ValueError(f"invalid JSON settings in {settings_path}: {error}") from error
 
     root = require_mapping(data, "settings.json root")
-    onboarding = optional_mapping(root.get("onboarding"), "onboarding") if "onboarding" in root else root
+    onboarding = (
+        optional_mapping(root.get("onboarding"), "onboarding") if "onboarding" in root else root
+    )
     mode = default_storage_mode(topology)
     settings = StorageSettings(mode=mode, default=mode)
     storage = optional_mapping(onboarding.get("storage") or root.get("storage"), "storage")
@@ -421,12 +455,16 @@ def parse_json_settings(
             raise ValueError("storage default must be a string")
         settings.default = clean_scalar(configured_default) or settings.default
 
-    raw_path_rules = onboarding.get("pathRules") if "pathRules" in onboarding else root.get("pathRules")
+    raw_path_rules = (
+        onboarding.get("pathRules") if "pathRules" in onboarding else root.get("pathRules")
+    )
     settings.path_rules = parse_json_path_rules(raw_path_rules)
 
     cross_repo = CrossRepoSettings()
     cross_repo_mapping = optional_mapping(root.get("crossRepo"), "crossRepo")
-    cross_repo.allow, cross_repo.errors = parse_cross_repo_allow(cross_repo_mapping.get("allow"), "crossRepo.allow")
+    cross_repo.allow, cross_repo.errors = parse_cross_repo_allow(
+        cross_repo_mapping.get("allow"), "crossRepo.allow"
+    )
     return settings, cross_repo
 
 
@@ -460,8 +498,12 @@ def parse_json_path_rule(value: object, label: str) -> StorageRule:
     exclude = optional_mapping(rule.get("exclude"), f"{label}.exclude")
     parsed_rule["includes"] = string_list(include.get("paths"), f"{label}.include.paths", ["*"])
     parsed_rule["excludes"] = string_list(exclude.get("paths"), f"{label}.exclude.paths")
-    parsed_rule["include_file_types"] = string_list(include.get("fileTypes"), f"{label}.include.fileTypes")
-    parsed_rule["exclude_file_types"] = string_list(exclude.get("fileTypes"), f"{label}.exclude.fileTypes")
+    parsed_rule["include_file_types"] = string_list(
+        include.get("fileTypes"), f"{label}.include.fileTypes"
+    )
+    parsed_rule["exclude_file_types"] = string_list(
+        exclude.get("fileTypes"), f"{label}.exclude.fileTypes"
+    )
     return parsed_rule
 
 
@@ -479,7 +521,9 @@ def parse_settings_block(
     in_cross_repo = False
     in_cross_repo_allow = False
     current_rule: StorageRule | None = None
-    current_list: Literal["includes", "excludes", "include_file_types", "exclude_file_types"] | None = None
+    current_list: (
+        Literal["includes", "excludes", "include_file_types", "exclude_file_types"] | None
+    ) = None
     current_eligibility_section: Literal["include", "exclude"] | None = None
     include_paths: list[str] = []
     exclude_paths: list[str] = []
@@ -521,18 +565,33 @@ def parse_settings_block(
                         for value in inner.split(","):
                             repo = clean_scalar(value)
                             if repo:
-                                cross_repo.allow.append(CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason))
+                                cross_repo.allow.append(
+                                    CrossRepoAllowEntry(
+                                        repo=repo,
+                                        expected_branch="",
+                                        state="excluded",
+                                        reason=reason,
+                                    )
+                                )
                                 cross_repo.errors.append(reason)
                 elif raw_value and raw_value != "[]":
                     repo = clean_scalar(raw_value)
-                    cross_repo.allow.append(CrossRepoAllowEntry(repo=repo, expected_branch="", state="excluded", reason=reason))
+                    cross_repo.allow.append(
+                        CrossRepoAllowEntry(
+                            repo=repo, expected_branch="", state="excluded", reason=reason
+                        )
+                    )
                     cross_repo.errors.append(reason)
                 continue
             if indent == 4 and in_cross_repo_allow and stripped.startswith("- "):
                 value = clean_scalar(stripped[2:])
                 if value:
                     reason = "legacy string crossRepo.allow entries are invalid for v2; expectedBranch is required"
-                    cross_repo.allow.append(CrossRepoAllowEntry(repo=value, expected_branch="", state="excluded", reason=reason))
+                    cross_repo.allow.append(
+                        CrossRepoAllowEntry(
+                            repo=value, expected_branch="", state="excluded", reason=reason
+                        )
+                    )
                     cross_repo.errors.append(reason)
                 continue
             continue
@@ -575,7 +634,11 @@ def parse_settings_block(
                     current_eligibility_section = "include" if stripped == "include:" else "exclude"
                     current_list = None
                     continue
-                if indent == 8 and stripped in {"paths:", "fileTypes:"} and current_eligibility_section:
+                if (
+                    indent == 8
+                    and stripped in {"paths:", "fileTypes:"}
+                    and current_eligibility_section
+                ):
                     if current_eligibility_section == "include":
                         current_list = "includes" if stripped == "paths:" else "include_file_types"
                     else:
@@ -684,7 +747,11 @@ def parse_settings_block(
             }
         )
 
-    return settings if saw_storage or saw_path_rules else None, cross_repo, saw_storage or saw_path_rules or saw_cross_repo
+    return (
+        settings if saw_storage or saw_path_rules else None,
+        cross_repo,
+        saw_storage or saw_path_rules or saw_cross_repo,
+    )
 
 
 def normalize_rule_base(rule_path: str, scoped_repo_path: str) -> str:
@@ -735,7 +802,9 @@ def matches_any(patterns: list[str], candidate: str) -> bool:
     )
 
 
-def rule_patterns(rule: StorageRule, key: Literal["includes", "excludes"], default: list[str]) -> list[str]:
+def rule_patterns(
+    rule: StorageRule, key: Literal["includes", "excludes"], default: list[str]
+) -> list[str]:
     values = rule.get(key)
     if isinstance(values, list):
         return [str(value) for value in values]
@@ -777,7 +846,9 @@ def sidecar_storage_label(storage_mode: str) -> bool:
     return storage_mode in {"repo-sidecar", "memory-repo"}
 
 
-def resolve_storage_for_source(source_file: str, settings: StorageSettings, scoped_repo_path: str) -> str:
+def resolve_storage_for_source(
+    source_file: str, settings: StorageSettings, scoped_repo_path: str
+) -> str:
     normalized_source = normalize_rel_path(source_file)
     rules = settings.path_rules or []
 
@@ -796,7 +867,9 @@ def resolve_storage_for_source(source_file: str, settings: StorageSettings, scop
             continue
         if not matches_file_type(rule, relative_source):
             continue
-        if (excludes and matches_any(excludes, relative_source)) or excludes_file_type(rule, relative_source):
+        if (excludes and matches_any(excludes, relative_source)) or excludes_file_type(
+            rule, relative_source
+        ):
             return "disabled"
         if settings.mode == "hybrid":
             return str(rule.get("storage", settings.default or "external"))
@@ -841,8 +914,7 @@ def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str
         cwd=repo_root,
         text=True,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 
@@ -899,26 +971,58 @@ def resolve_cross_repo_entry(
         )
     code_path = (workspace_root / entry.repo).resolve()
     if not code_path.exists():
-        return _entry_with_state(entry, "excluded", f"external code path missing: {code_path.as_posix()}")
+        return _entry_with_state(
+            entry, "excluded", f"external code path missing: {code_path.as_posix()}"
+        )
     code_branch = git_branch(code_path)
     code_head = git_head(code_path)
     code_info = {"path": code_path.as_posix(), "branch": code_branch, "head": code_head}
     if not code_branch:
-        return _entry_with_state(entry, "excluded", "external code repo is detached or not a git repository", code_info)
+        return _entry_with_state(
+            entry, "excluded", "external code repo is detached or not a git repository", code_info
+        )
     if code_branch != entry.expected_branch:
-        return _entry_with_state(entry, "excluded", f"external code repo is on branch {code_branch}, expected {entry.expected_branch}", code_info)
+        return _entry_with_state(
+            entry,
+            "excluded",
+            f"external code repo is on branch {code_branch}, expected {entry.expected_branch}",
+            code_info,
+        )
     if not entry.include_memory:
-        return _entry_with_state(entry, "included-code-only", "memory inclusion disabled for this entry", code_info)
+        return _entry_with_state(
+            entry, "included-code-only", "memory inclusion disabled for this entry", code_info
+        )
 
     memory_path = (coordination_root / "memory-repos" / f"ar-{entry.repo}").resolve()
     if not memory_path.exists():
-        return _entry_with_state(entry, "included-code-only", f"external memory repo missing: {memory_path.as_posix()}", code_info)
+        return _entry_with_state(
+            entry,
+            "included-code-only",
+            f"external memory repo missing: {memory_path.as_posix()}",
+            code_info,
+        )
     memory_branch = git_branch(memory_path)
-    memory_info = {"path": memory_path.as_posix(), "branch": memory_branch, "ledgerPath": (memory_path / "memory.md").as_posix()}
+    memory_info = {
+        "path": memory_path.as_posix(),
+        "branch": memory_branch,
+        "ledgerPath": (memory_path / "memory.md").as_posix(),
+    }
     if memory_branch != entry.expected_branch:
-        return _entry_with_state(entry, "included-code-only", f"external memory repo is on branch {memory_branch or 'detached'}, expected {entry.expected_branch}", code_info, memory_info)
+        return _entry_with_state(
+            entry,
+            "included-code-only",
+            f"external memory repo is on branch {memory_branch or 'detached'}, expected {entry.expected_branch}",
+            code_info,
+            memory_info,
+        )
     if load_ledger is None:
-        return _entry_with_state(entry, "included-code-only", "memory ledger helper is unavailable", code_info, memory_info)
+        return _entry_with_state(
+            entry,
+            "included-code-only",
+            "memory ledger helper is unavailable",
+            code_info,
+            memory_info,
+        )
     try:
         ledger = load_ledger(memory_path / "memory.md")
     except LedgerError as error:
@@ -969,10 +1073,18 @@ def detect_coordination_selection(
         inferred_topology = requested_topology
         if inferred_topology is None:
             settings_root = resolved_settings.parent.parent
-            inferred_topology = "external" if settings_root in (coordination_root, external_root_for_repo) else "internal"
-        coordination_root, memory_root = memory_roots_from_settings(resolved_settings, code_repository_root, code_repository_name, inferred_topology)
+            inferred_topology = (
+                "external"
+                if settings_root in (coordination_root, external_root_for_repo)
+                else "internal"
+            )
+        coordination_root, memory_root = memory_roots_from_settings(
+            resolved_settings, code_repository_root, code_repository_name, inferred_topology
+        )
         if not memory_root.exists():
-            raise MissingMemoryError(code_repository_name, internal_root, coordination_root, external_root_for_repo)
+            raise MissingMemoryError(
+                code_repository_name, internal_root, coordination_root, external_root_for_repo
+            )
         return CoordinationSelection(
             topology=inferred_topology,
             coordination_root=coordination_root,
@@ -982,22 +1094,32 @@ def detect_coordination_selection(
 
     if requested_topology == "internal":
         if not internal_root.exists():
-            raise MissingMemoryError(code_repository_name, internal_root, coordination_root, external_root_for_repo)
+            raise MissingMemoryError(
+                code_repository_name, internal_root, coordination_root, external_root_for_repo
+            )
         settings = settings_path_for_roots(internal_root, internal_coordination, "internal")
         return CoordinationSelection("internal", internal_coordination, internal_root, settings)
     if requested_topology == "external":
         if not external_root_for_repo.exists():
-            raise MissingMemoryError(code_repository_name, internal_root, coordination_root, external_root_for_repo)
+            raise MissingMemoryError(
+                code_repository_name, internal_root, coordination_root, external_root_for_repo
+            )
         settings = settings_path_for_roots(external_root_for_repo, coordination_root, "external")
-        return CoordinationSelection("external", coordination_root, external_root_for_repo, settings)
+        return CoordinationSelection(
+            "external", coordination_root, external_root_for_repo, settings
+        )
 
     if internal_root.exists():
         settings = settings_path_for_roots(internal_root, internal_coordination, "internal")
         return CoordinationSelection("internal", internal_coordination, internal_root, settings)
     if external_root_for_repo.exists():
         settings = settings_path_for_roots(external_root_for_repo, coordination_root, "external")
-        return CoordinationSelection("external", coordination_root, external_root_for_repo, settings)
-    raise MissingMemoryError(code_repository_name, internal_root, coordination_root, external_root_for_repo)
+        return CoordinationSelection(
+            "external", coordination_root, external_root_for_repo, settings
+        )
+    raise MissingMemoryError(
+        code_repository_name, internal_root, coordination_root, external_root_for_repo
+    )
 
 
 def resolve_coordination_context(
@@ -1019,17 +1141,29 @@ def resolve_coordination_context(
     if code_repository_root is not None:
         resolved_code_repository_root = code_repository_root.resolve()
         resolved_code_repository_name = code_repository_name or resolved_code_repository_root.name
-        resolved_workspace_root = workspace_root.resolve() if workspace_root else resolved_code_repository_root.parent
+        resolved_workspace_root = (
+            workspace_root.resolve() if workspace_root else resolved_code_repository_root.parent
+        )
     else:
         if not code_repository_name:
-            raise ValueError("code_repository_name is required when code_repository_root is not supplied")
+            raise ValueError(
+                "code_repository_name is required when code_repository_root is not supplied"
+            )
         resolved_code_repository_name = code_repository_name
-        resolved_code_repository_root = find_code_repository_root(resolved_workspace_root, resolved_code_repository_name)
+        resolved_code_repository_root = find_code_repository_root(
+            resolved_workspace_root, resolved_code_repository_name
+        )
 
     if onboarding_root is not None:
         resolved_onboarding_root = onboarding_root.resolve()
-        resolved_settings_path = settings_path.resolve() if settings_path else infer_settings_path(resolved_onboarding_root)
-        resolved_topology = requested_topology or infer_topology_from_onboarding_root(resolved_onboarding_root)
+        resolved_settings_path = (
+            settings_path.resolve()
+            if settings_path
+            else infer_settings_path(resolved_onboarding_root)
+        )
+        resolved_topology = requested_topology or infer_topology_from_onboarding_root(
+            resolved_onboarding_root
+        )
         coordination_root, memory_root = memory_roots_from_settings(
             resolved_settings_path,
             resolved_code_repository_root,
@@ -1107,31 +1241,59 @@ def build_coordination_context(
     coordination_system_root = coordination_root / "system"
     system_root = memory_system_root if memory_system_root.exists() else coordination_system_root
     path_settings_path = path_settings_path_for(settings_path)
-    resolved_contract = resolve_contract(contract_path, coordination_root, code_repository_name, task_name)
+    resolved_contract = resolve_contract(
+        contract_path, coordination_root, code_repository_name, task_name
+    )
     contract = resolved_contract[0]
     resolved_contract_path = resolved_contract[1]
     repository_task_root = coordination_root / "tasks" / code_repository_name
-    task_root = contract.task_root if contract is not None else (
-        task_root_for(coordination_root, code_repository_name, task_name) if task_name and task_root_for is not None else repository_task_root
+    task_root = (
+        contract.task_root
+        if contract is not None
+        else (
+            task_root_for(coordination_root, code_repository_name, task_name)
+            if task_name and task_root_for is not None
+            else repository_task_root
+        )
     )
     temp_root = coordination_root / "temp"
-    worktree_group = contract.worktree_group if contract is not None else (
-        worktree_group_for(coordination_root, code_repository_name, worktree_name) if worktree_name and worktree_group_for is not None else None
+    worktree_group = (
+        contract.worktree_group
+        if contract is not None
+        else (
+            worktree_group_for(coordination_root, code_repository_name, worktree_name)
+            if worktree_name and worktree_group_for is not None
+            else None
+        )
     )
     code_worktree = contract.code_worktree if contract is not None else None
     memory_worktree = contract.memory_worktree if contract is not None else None
-    ledger_path = contract.ledger_path if contract is not None else (
-        memory_root / "memory.md" if topology == "external" else None
+    ledger_path = (
+        contract.ledger_path
+        if contract is not None
+        else (memory_root / "memory.md" if topology == "external" else None)
     )
-    memory_mode = contract.memory_mode if contract is not None else ("internal" if topology == "internal" else "external")
+    memory_mode = (
+        contract.memory_mode
+        if contract is not None
+        else ("internal" if topology == "internal" else "external")
+    )
     if memory_worktree is not None:
         effective_memory_root = memory_worktree
     elif memory_mode == "disabled":
         effective_memory_root = memory_root
     else:
         effective_memory_root = memory_root
-    effective_onboarding_root = effective_memory_root / "onboarding" if (effective_memory_root / "onboarding").exists() else onboarding_root
-    effective_docs_root = effective_memory_root / "docs" if (effective_memory_root / "docs").exists() else coordination_root / "docs"
+    effective_onboarding_root = (
+        effective_memory_root / "onboarding"
+        if (effective_memory_root / "onboarding").exists()
+        else onboarding_root
+    )
+    effective_docs_root = (
+        effective_memory_root / "docs"
+        if (effective_memory_root / "docs").exists()
+        else coordination_root / "docs"
+    )
     resolved_cross_repo = resolve_cross_repo_settings(
         cross_repo,
         workspace_root or code_repository_root.parent,
@@ -1210,7 +1372,9 @@ def cross_repo_entry_to_dict(entry: CrossRepoAllowEntry) -> dict[str, object]:
 
 
 def cross_repo_to_dict(cross_repo: CrossRepoSettings) -> dict[str, object]:
-    payload: dict[str, object] = {"allow": [cross_repo_entry_to_dict(entry) for entry in cross_repo.allow]}
+    payload: dict[str, object] = {
+        "allow": [cross_repo_entry_to_dict(entry) for entry in cross_repo.allow]
+    }
     if cross_repo.errors:
         payload["errors"] = cross_repo.errors
     return payload
@@ -1226,7 +1390,9 @@ def context_to_dict(context: CoordinationContext) -> dict[str, object]:
         "memory_mode": context.memory_mode,
         "onboarding_root": path_to_string(context.onboarding_root),
         "settings_path": path_to_string(context.settings_path),
-        "path_settings_path": path_to_string(context.path_settings_path) if context.path_settings_path else "",
+        "path_settings_path": path_to_string(context.path_settings_path)
+        if context.path_settings_path
+        else "",
         "task_root": path_to_string(context.task_root),
         "temp_root": path_to_string(context.temp_root),
         "docs_root": path_to_string(context.docs_root),
@@ -1236,7 +1402,9 @@ def context_to_dict(context: CoordinationContext) -> dict[str, object]:
         "contract_path": path_to_string(context.contract_path) if context.contract_path else "",
         "worktree_group": path_to_string(context.worktree_group) if context.worktree_group else "",
         "code_worktree": path_to_string(context.code_worktree) if context.code_worktree else "",
-        "memory_worktree": path_to_string(context.memory_worktree) if context.memory_worktree else "",
+        "memory_worktree": path_to_string(context.memory_worktree)
+        if context.memory_worktree
+        else "",
         "ledger_path": path_to_string(context.ledger_path) if context.ledger_path else "",
         "storage": storage_to_dict(context.storage),
         "pathRules": [path_rule_to_dict(rule) for rule in context.path_rules],
@@ -1273,17 +1441,55 @@ def print_text(context: CoordinationContext) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--code-repository-name", help="Code repository name to resolve. This is the normal agent-facing input.")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
-    parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
-    parser.add_argument("--topology", choices=("internal", "external"), help="Optional topology override.")
-    parser.add_argument("--coordination-root", type=Path, help="Optional coordination root hint or override.")
-    parser.add_argument("--settings-path", type=Path, help="Optional active settings.md override. A sibling settings.json is preferred for machine-readable path settings when present.")
-    parser.add_argument("--onboarding-root", type=Path, help="Override for an already resolved code repository onboarding root.")
-    parser.add_argument("--contract-path", type=Path, help="Optional worktree task contract.md path to resolve task/worktree context.")
-    parser.add_argument("--task-name", help="Optional task name used to locate coordination tasks under ar-coordination/tasks/<code-repository-name>/<task-name>-ar/contract.md.")
-    parser.add_argument("--worktree-name", help="Optional worktree name used to compute the worktree group when no contract exists.")
-    parser.add_argument("--agents-repo", type=Path, help="Optional agents-remember-md checkout path for .env discovery.")
+    parser.add_argument(
+        "--code-repository-name",
+        help="Code repository name to resolve. This is the normal agent-facing input.",
+    )
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Workspace root used to find --code-repository-name.",
+    )
+    parser.add_argument(
+        "--code-repository-root",
+        type=Path,
+        help="Root directory of the code repository to resolve.",
+    )
+    parser.add_argument(
+        "--topology", choices=("internal", "external"), help="Optional topology override."
+    )
+    parser.add_argument(
+        "--coordination-root", type=Path, help="Optional coordination root hint or override."
+    )
+    parser.add_argument(
+        "--settings-path",
+        type=Path,
+        help="Optional active settings.md override. A sibling settings.json is preferred for machine-readable path settings when present.",
+    )
+    parser.add_argument(
+        "--onboarding-root",
+        type=Path,
+        help="Override for an already resolved code repository onboarding root.",
+    )
+    parser.add_argument(
+        "--contract-path",
+        type=Path,
+        help="Optional worktree task contract.md path to resolve task/worktree context.",
+    )
+    parser.add_argument(
+        "--task-name",
+        help="Optional task name used to locate coordination tasks under ar-coordination/tasks/<code-repository-name>/<task-name>-ar/contract.md.",
+    )
+    parser.add_argument(
+        "--worktree-name",
+        help="Optional worktree name used to compute the worktree group when no contract exists.",
+    )
+    parser.add_argument(
+        "--agents-repo",
+        type=Path,
+        help="Optional agents-remember-md checkout path for .env discovery.",
+    )
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format.")
     args = parser.parse_args(argv)
 

@@ -9,8 +9,8 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import ConfigError, load_config, require_config_path  # noqa: E402
-from agents_remember.providers.settings import lifecycle_settings_from_config  # noqa: E402
+from agents_remember.mcp.config import ConfigError, load_config, require_config_path
+from agents_remember.providers.settings import lifecycle_settings_from_config
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -25,9 +25,7 @@ def settings_payload(root: Path) -> dict:
         "version": 1,
         "coordinationRoot": str(coordination_root),
         "workspaceRoot": str(workspace_root),
-        "repositories": {
-            "agents-remember-md": {}
-        },
+        "repositories": {"agents-remember-md": {}},
         "providers": {
             "codegraphcontext-code": {},
             "grepai-memory": {},
@@ -111,12 +109,7 @@ class McpConfigTests(unittest.TestCase):
             self.assertEqual(
                 providers["grepai-memory"]["backend"]["runtimeRoot"],
                 (
-                    root
-                    / "ar-coordination"
-                    / "providers"
-                    / "data"
-                    / "grepai"
-                    / "postgres"
+                    root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres"
                 ).as_posix(),
             )
             self.assertEqual(
@@ -183,7 +176,7 @@ class McpConfigTests(unittest.TestCase):
                     / "system"
                     / "settings.json"
                 ),
-                str(root / "outside" / "settings.json")
+                str(root / "outside" / "settings.json"),
             ]
             path = root / "mcp-settings.json"
             write_json(path, payload)

@@ -8,11 +8,10 @@ import unittest
 import zipfile
 from pathlib import Path
 
-
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.providers import provider_setup  # noqa: E402
+from agents_remember.providers import provider_setup
 
 
 class ProviderSetupTests(unittest.TestCase):
@@ -30,7 +29,9 @@ class ProviderSetupTests(unittest.TestCase):
             with zipfile.ZipFile(source_bundle, "w") as bundle:
                 bundle.writestr(
                     "metadata.json",
-                    json.dumps({"repo_path": source_text, "nested": {"path": f"{source_text}/file.py"}}),
+                    json.dumps(
+                        {"repo_path": source_text, "nested": {"path": f"{source_text}/file.py"}}
+                    ),
                 )
                 bundle.writestr(
                     "nodes.jsonl",
@@ -38,15 +39,25 @@ class ProviderSetupTests(unittest.TestCase):
                 )
                 bundle.writestr(
                     "edges.jsonl",
-                    json.dumps({"from_path": f"{source_text}/file.py", "to_path": f"{source_text}/other.py"}) + "\n",
+                    json.dumps(
+                        {
+                            "from_path": f"{source_text}/file.py",
+                            "to_path": f"{source_text}/other.py",
+                        }
+                    )
+                    + "\n",
                 )
                 bundle.writestr("README.md", f"Indexed repository: {source_text}\n")
 
-            result = provider_setup.rewrite_cgc_bundle_paths(source_bundle, target_bundle, source_root, target_root)
+            result = provider_setup.rewrite_cgc_bundle_paths(
+                source_bundle, target_bundle, source_root, target_root
+            )
 
             self.assertGreaterEqual(result["replacementCount"], 4)
             with zipfile.ZipFile(target_bundle, "r") as bundle:
-                combined = "\n".join(bundle.read(name).decode("utf-8") for name in bundle.namelist())
+                combined = "\n".join(
+                    bundle.read(name).decode("utf-8") for name in bundle.namelist()
+                )
             self.assertNotIn(source_root.resolve().as_posix(), combined)
             self.assertIn(target_root.resolve().as_posix(), combined)
 
@@ -96,14 +107,25 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertIsNotNone(isolated)
             cgc = isolated["contextProviders"]["providers"]["codegraphcontext-code"]
 
-            self.assertEqual(cgc["roots"], [{"repoId": "agents-remember-md", "path": target_repo.resolve().as_posix()}])
-            self.assertEqual(cgc["runtimeRoot"], (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix())
-            self.assertEqual(cgc["venvRoot"], (coordination_root / "providers" / "_venvs" / "codegraphcontext").as_posix())
+            self.assertEqual(
+                cgc["roots"],
+                [{"repoId": "agents-remember-md", "path": target_repo.resolve().as_posix()}],
+            )
+            self.assertEqual(
+                cgc["runtimeRoot"],
+                (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix(),
+            )
+            self.assertEqual(
+                cgc["venvRoot"],
+                (coordination_root / "providers" / "_venvs" / "codegraphcontext").as_posix(),
+            )
             self.assertEqual(
                 cgc["backend"]["runtimeRoot"],
                 (isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb").as_posix(),
             )
-            self.assertTrue(cgc["backend"]["containerName"].startswith("ar-cgc-falkordb-agents-remember-md-"))
+            self.assertTrue(
+                cgc["backend"]["containerName"].startswith("ar-cgc-falkordb-agents-remember-md-")
+            )
 
     def test_run_command_forces_utf8_for_lifecycle_children(self) -> None:
         captured = {}

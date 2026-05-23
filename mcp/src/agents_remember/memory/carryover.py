@@ -13,9 +13,12 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
-from agents_remember.kernel.memory_ledger import LedgerError, load_ledger, prepend_mapping, write_ledger
-
+from agents_remember.kernel.memory_ledger import (
+    LedgerError,
+    load_ledger,
+    prepend_mapping,
+    write_ledger,
+)
 
 PROVEN_EVIDENCE = {"exact-landed-commit", "patch-id-match", "final-content-match"}
 
@@ -31,14 +34,15 @@ class CarryoverCandidate:
     official_exists: bool
 
 
-def run_git(repo: Path, args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+def run_git(
+    repo: Path, args: list[str], *, input_text: str | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
         cwd=repo,
         input=input_text,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 
@@ -85,7 +89,9 @@ def commit_if_dirty(repo: Path, message: str) -> str:
 
 
 def changed_paths(repo: Path, base_ref: str, head_ref: str) -> set[str]:
-    output = require_git(repo, ["diff", "--name-only", "--diff-filter=ACMRT", base_ref, head_ref, "--"])
+    output = require_git(
+        repo, ["diff", "--name-only", "--diff-filter=ACMRT", base_ref, head_ref, "--"]
+    )
     return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
 
 
@@ -119,19 +125,33 @@ def patch_id(repo: Path, base_ref: str, head_ref: str, source_path: str) -> str 
     return result.stdout.split()[0]
 
 
-def evidence_for_path(repo: Path, base_ref: str, official_ref: str, source_ref: str, source_path: str) -> tuple[str, str]:
+def evidence_for_path(
+    repo: Path, base_ref: str, official_ref: str, source_ref: str, source_path: str
+) -> tuple[str, str]:
     if not path_exists_at_ref(repo, official_ref, source_path):
         return "not-landed", "source path is not present on official code ref"
     for commit in path_commits(repo, base_ref, source_ref, source_path):
         if is_ancestor(repo, commit, official_ref):
-            return "exact-landed-commit", f"source branch commit {commit} is an ancestor of official code ref"
+            return (
+                "exact-landed-commit",
+                f"source branch commit {commit} is an ancestor of official code ref",
+            )
     source_patch = patch_id(repo, base_ref, source_ref, source_path)
     official_patch = patch_id(repo, base_ref, official_ref, source_path)
     if source_patch and official_patch and source_patch == official_patch:
-        return "patch-id-match", "old-base-to-source-branch patch matches old-base-to-official patch"
+        return (
+            "patch-id-match",
+            "old-base-to-source-branch patch matches old-base-to-official patch",
+        )
     if blob_at_ref(repo, source_ref, source_path) == blob_at_ref(repo, official_ref, source_path):
-        return "final-content-match", "source branch and official source content match at the selected refs"
-    return "same-path-changed", "official and source branch changed this path but no equivalence was proven"
+        return (
+            "final-content-match",
+            "source branch and official source content match at the selected refs",
+        )
+    return (
+        "same-path-changed",
+        "official and source branch changed this path but no equivalence was proven",
+    )
 
 
 def onboarding_path(memory_root: Path, source_path: str) -> Path:
@@ -152,12 +172,25 @@ def candidate_for_path(
     branch_onboarding = onboarding_path(source_memory, source_path)
     official_onboarding = onboarding_path(official_memory, source_path)
     official_exists = official_onboarding.exists()
-    evidence, reason = evidence_for_path(code_repository_root, old_base, official_ref, source_ref, source_path)
-    decision = "auto-carry" if evidence in PROVEN_EVIDENCE else "review-required" if evidence == "same-path-changed" else "reject"
+    evidence, reason = evidence_for_path(
+        code_repository_root, old_base, official_ref, source_ref, source_path
+    )
+    decision = (
+        "auto-carry"
+        if evidence in PROVEN_EVIDENCE
+        else "review-required"
+        if evidence == "same-path-changed"
+        else "reject"
+    )
     if not branch_onboarding.exists():
         decision = "reject"
         reason = "source branch onboarding does not exist"
-    elif official_exists and branch_onboarding.read_text(encoding="utf-8") != official_onboarding.read_text(encoding="utf-8") and not replace_existing:
+    elif (
+        official_exists
+        and branch_onboarding.read_text(encoding="utf-8")
+        != official_onboarding.read_text(encoding="utf-8")
+        and not replace_existing
+    ):
         decision = "review-required"
         reason = "official onboarding already exists with different content; use --replace-existing after review"
     return CarryoverCandidate(
@@ -194,7 +227,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, object]:
         for source_path in sorted(source_changed)
         if source_path in official_changed
     ]
-    absent_paths = sorted(source_path for source_path in source_changed if source_path not in official_changed)
+    absent_paths = sorted(
+        source_path for source_path in source_changed if source_path not in official_changed
+    )
     for source_path in absent_paths:
         if source_path in {candidate.source_path for candidate in candidates}:
             continue
@@ -245,12 +280,15 @@ def refresh_onboarding_metadata(path: Path, verified_commit: str, verified_date:
     path.write_text(text, encoding="utf-8")
 
 
-def selected_candidates(plan: dict[str, object], include_review_required: set[str]) -> list[dict[str, object]]:
+def selected_candidates(
+    plan: dict[str, object], include_review_required: set[str]
+) -> list[dict[str, object]]:
     selected = []
     for candidate in plan["candidates"]:
         assert isinstance(candidate, dict)
         if candidate["decision"] == "auto-carry" or (
-            candidate["decision"] == "review-required" and candidate["source_path"] in include_review_required
+            candidate["decision"] == "review-required"
+            and candidate["source_path"] in include_review_required
         ):
             selected.append(candidate)
     return selected
@@ -272,7 +310,9 @@ def apply_carryover(args: argparse.Namespace) -> dict[str, object]:
         source = Path(str(candidate["branch_onboarding"]))
         target = Path(str(candidate["official_onboarding"]))
         if not source.exists():
-            raise RuntimeError(f"selected candidate is missing source branch onboarding: {source.as_posix()}")
+            raise RuntimeError(
+                f"selected candidate is missing source branch onboarding: {source.as_posix()}"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         refresh_onboarding_metadata(target, official_head, official_date)
@@ -302,7 +342,11 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--official-memory", type=Path, required=True)
     parser.add_argument("--source-memory", type=Path, required=True)
     parser.add_argument("--code-repository-name", required=True)
-    parser.add_argument("--replace-existing", action="store_true", help="Allow proven candidates to replace existing different official onboarding.")
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Allow proven candidates to replace existing different official onboarding.",
+    )
 
 
 def command_plan(args: argparse.Namespace) -> int:

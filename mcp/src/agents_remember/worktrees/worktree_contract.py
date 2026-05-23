@@ -11,7 +11,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 CONTRACT_SCHEMA = "ar-worktree-contract/v1"
 VALID_MEMORY_MODES = {"internal", "external", "disabled"}
 
@@ -122,7 +121,9 @@ def default_contract(
     task_artifact = task_root / "task.md"
     worktree_group = worktree_group_for(coordination_root, repo_name, worktree_name)
     code_worktree = worktree_group / slugify(worktree_name)
-    memory_worktree = worktree_group / f"memory-{slugify(worktree_name)}" if memory_mode == "external" else None
+    memory_worktree = (
+        worktree_group / f"memory-{slugify(worktree_name)}" if memory_mode == "external" else None
+    )
     ledger_path = memory_worktree / "memory.md" if memory_worktree else None
     return WorktreeContract(
         task_id=task_id,
@@ -380,7 +381,8 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         ledger_path=_optional_path(memory.get("ledger", "")),
         memory_state=memory.get("state", ""),
         human_review_status=human_review.get("status", "pending-review"),
-        approved_for_commit=human_review.get("approved_for_commit", "no").lower() in {"yes", "true", "1"},
+        approved_for_commit=human_review.get("approved_for_commit", "no").lower()
+        in {"yes", "true", "1"},
         commit_approval_note=human_review.get("commit_approval_note", ""),
         closeout_status=closeout.get("status", "not-started"),
         code_commit=closeout.get("code_commit", ""),

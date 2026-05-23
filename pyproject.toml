@@ -15,7 +15,19 @@ select = [
   "RUF",
 ]
 ignore = [
+  "E501",    # Ruff format owns wrapping; long literals stay readable as-is.
+  "PLR0911", # Radon reports complexity pressure for refactor planning.
+  "PLR0912", # Radon reports complexity pressure for refactor planning.
+  "PLR0915", # Radon reports complexity pressure for refactor planning.
+  "PLR2004", # Numeric parser/state-machine sentinels are clearer inline.
   "PLR0913", # too many arguments: useful warning, noisy during refactor
+]
+
+[tool.ruff.lint.per-file-ignores]
+"mcp/tests/*.py" = [
+  "ARG001", # Test doubles intentionally match patched callable signatures.
+  "ARG005", # Test doubles intentionally match patched callable signatures.
+  "E402",   # Tests insert mcp/src before importing the package under test.
 ]
 
 [tool.ruff.lint.mccabe]

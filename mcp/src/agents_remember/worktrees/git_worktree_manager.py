@@ -14,7 +14,6 @@ import subprocess
 from dataclasses import asdict, replace
 from pathlib import Path
 
-
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -32,7 +31,6 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
-
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
 
 
@@ -42,8 +40,7 @@ def run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
         cwd=repo,
         text=True,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 
@@ -96,7 +93,9 @@ def ensure_git_identity(repo: Path) -> None:
         require_git(repo, ["config", "user.name", "Agents Remember"])
 
 
-def ensure_worktree(repo: Path, worktree: Path, branch: str, source_branch: str, dry_run: bool) -> str:
+def ensure_worktree(
+    repo: Path, worktree: Path, branch: str, source_branch: str, dry_run: bool
+) -> str:
     if worktree.exists():
         return "existing"
     if dry_run:
@@ -197,7 +196,9 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "code_worktree_exists": contract.code_worktree.exists(),
         "code_worktree_dirty": worktree_dirty(contract.code_worktree),
         "memory_worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
-        "memory_worktree_exists": contract.memory_worktree.exists() if contract.memory_worktree else False,
+        "memory_worktree_exists": contract.memory_worktree.exists()
+        if contract.memory_worktree
+        else False,
         "memory_worktree_dirty": worktree_dirty(contract.memory_worktree),
         "ledger_path": contract.ledger_path.as_posix() if contract.ledger_path else "",
         "human_review_status": contract.human_review_status,
@@ -239,8 +240,16 @@ def command_start(args: argparse.Namespace) -> int:
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
     base_commit = head_commit(repo, source_branch)
     memory_mode = args.memory_mode or context.memory_mode
-    memory_repo = context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}" if memory_mode == "external" else None
-    memory_base = head_commit(memory_repo) if memory_repo is not None and memory_repo.exists() and (memory_repo / ".git").exists() else ""
+    memory_repo = (
+        context.coordination_root / "memory-repos" / f"ar-{context.code_repository_name}"
+        if memory_mode == "external"
+        else None
+    )
+    memory_base = (
+        head_commit(memory_repo)
+        if memory_repo is not None and memory_repo.exists() and (memory_repo / ".git").exists()
+        else ""
+    )
     contract = default_contract(
         task_name=args.task_name,
         repo_name=context.code_repository_name,
@@ -260,19 +269,34 @@ def command_start(args: argparse.Namespace) -> int:
 
     if contract.contract_path.exists():
         contract = load_contract(contract.contract_path)
-        print(json.dumps({"state": "attached-existing-contract", **status_payload(contract)}, indent=2))
+        print(
+            json.dumps(
+                {"state": "attached-existing-contract", **status_payload(contract)}, indent=2
+            )
+        )
         return 0
 
-    code_state = ensure_worktree(repo, contract.code_worktree, contract.code_work_branch, contract.code_source_branch, args.dry_run)
+    code_state = ensure_worktree(
+        repo,
+        contract.code_worktree,
+        contract.code_work_branch,
+        contract.code_source_branch,
+        args.dry_run,
+    )
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":
-        print(json.dumps({
-            "state": "blocked",
-            "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-            "next_action": "choose-memory-recovery",
-            "code_worktree": code_state,
-            "memory": memory_state,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "state": "blocked",
+                    "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
+                    "next_action": "choose-memory-recovery",
+                    "code_worktree": code_state,
+                    "memory": memory_state,
+                },
+                indent=2,
+            )
+        )
         return 2
     if contract.memory_mode == "external" and memory_state["state"] == "disabled":
         contract = replace(
@@ -288,28 +312,38 @@ def command_start(args: argparse.Namespace) -> int:
         )
     provider_state = prepare_providers_for_start(context, contract, args)
     if provider_state["state"] == "blocked":
-        print(json.dumps({
-            "state": "blocked",
-            "summary": "Worktree provider setup could not be prepared safely.",
-            "next_action": "choose-provider-setup-recovery",
-            "code_worktree": code_state,
-            "memory": memory_state,
-            "providers": provider_state,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "state": "blocked",
+                    "summary": "Worktree provider setup could not be prepared safely.",
+                    "next_action": "choose-provider-setup-recovery",
+                    "code_worktree": code_state,
+                    "memory": memory_state,
+                    "providers": provider_state,
+                },
+                indent=2,
+            )
+        )
         return 2
     if not args.dry_run:
         write_contract(contract.contract_path, contract)
-    print(json.dumps({
-        "state": "started",
-        "summary": "Worktree task started; continue the wrapped workflow before closeout.",
-        "next_action": "work",
-        "code_worktree": code_state,
-        "memory": memory_state,
-        "providers": provider_state,
-        "contract_path": contract.contract_path.as_posix(),
-        "task_artifact": contract.task_artifact.as_posix(),
-        "contract": contract_payload(contract),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "state": "started",
+                "summary": "Worktree task started; continue the wrapped workflow before closeout.",
+                "next_action": "work",
+                "code_worktree": code_state,
+                "memory": memory_state,
+                "providers": provider_state,
+                "contract_path": contract.contract_path.as_posix(),
+                "task_artifact": contract.task_artifact.as_posix(),
+                "contract": contract_payload(contract),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -323,20 +357,32 @@ def parse_json_stdout(stdout: str) -> object:
         return None
 
 
-def prepare_providers_for_start(context, contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
+def prepare_providers_for_start(
+    context, contract: WorktreeContract, args: argparse.Namespace
+) -> dict[str, object]:
     if args.skip_provider_setup:
         return {"state": "skipped", "reason": "provider setup was skipped"}
 
-    target_coordination_root = (args.provider_coordination_root or context.coordination_root).resolve()
-    source_coordination_root = (args.provider_seed_source_coordination_root or context.coordination_root).resolve()
+    target_coordination_root = (
+        args.provider_coordination_root or context.coordination_root
+    ).resolve()
+    source_coordination_root = (
+        args.provider_seed_source_coordination_root or context.coordination_root
+    ).resolve()
     source_repo_root = context.code_repository_root.resolve()
     target_repo_root = contract.code_worktree.resolve()
-    provider_runtime_root = (args.provider_runtime_root or contract.worktree_group / "provider-runtime").resolve()
-    provider_settings_path = args.provider_from_settings.resolve() if args.provider_from_settings else None
+    provider_runtime_root = (
+        args.provider_runtime_root or contract.worktree_group / "provider-runtime"
+    ).resolve()
+    provider_settings_path = (
+        args.provider_from_settings.resolve() if args.provider_from_settings else None
+    )
 
     try:
         settings = provider_setup.load_settings(target_coordination_root, provider_settings_path)
-        cgc_enabled = bool(settings) and provider_setup.provider_enabled(settings, "codegraphcontext-code")
+        cgc_enabled = bool(settings) and provider_setup.provider_enabled(
+            settings, "codegraphcontext-code"
+        )
     except RuntimeError as error:
         return {
             "state": "blocked",
@@ -347,7 +393,9 @@ def prepare_providers_for_start(context, contract: WorktreeContract, args: argpa
         return {
             "state": "skipped",
             "reason": "codegraphcontext-code is not enabled in provider settings",
-            "settingsFile": provider_setup.settings_path(target_coordination_root, provider_settings_path).as_posix(),
+            "settingsFile": provider_setup.settings_path(
+                target_coordination_root, provider_settings_path
+            ).as_posix(),
         }
 
     argv = [
@@ -390,7 +438,9 @@ def prepare_providers_for_start(context, contract: WorktreeContract, args: argpa
     }
 
 
-def prepare_memory_for_start(contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
+def prepare_memory_for_start(
+    contract: WorktreeContract, args: argparse.Namespace
+) -> dict[str, object]:
     if contract.memory_mode == "internal":
         return {"state": "internal", "reason": "memory lives in the code worktree"}
     if contract.memory_mode == "disabled":
@@ -480,7 +530,9 @@ def contract_context(contract: WorktreeContract):
     )
 
 
-def onboarding_metadata_row(text: str, field: str, value: str, *, code: bool = False) -> tuple[str, bool]:
+def onboarding_metadata_row(
+    text: str, field: str, value: str, *, code: bool = False
+) -> tuple[str, bool]:
     rendered = f"`{value}`" if code else value
     pattern = re.compile(rf"(\|\s*{re.escape(field)}\s*\|\s*)`?[^|`]*`?(\s*\|)")
     updated, count = pattern.subn(rf"\g<1>{rendered}\g<2>", text, count=1)
@@ -496,7 +548,9 @@ def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> di
     missing: list[str] = []
     unsupported: list[str] = []
     for source_path in changed_paths:
-        storage = resolver.resolve_storage_for_source(source_path, context.storage, context.code_repository_name)
+        storage = resolver.resolve_storage_for_source(
+            source_path, context.storage, context.code_repository_name
+        )
         if storage == "disabled":
             continue
         if not resolver.sidecar_storage_label(storage):
@@ -506,10 +560,12 @@ def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> di
         if not onboarding_path.exists():
             missing.append(source_path)
             continue
-        required.append({
-            "source_path": source_path,
-            "onboarding_file": onboarding_path.as_posix(),
-        })
+        required.append(
+            {
+                "source_path": source_path,
+                "onboarding_file": onboarding_path.as_posix(),
+            }
+        )
     return {
         "required": required,
         "missing": missing,
@@ -556,17 +612,21 @@ def parse_entity_fingerprint_rows(catalog_path: Path) -> list[dict[str, object]]
             continue
         algorithm = cells[header["algorithm"]].strip("`")
         evidence_cell = cells[header["evidencepaths"]]
-        rows.append({
-            "line_index": index,
-            "entity": cells[header["entity"]].strip("`"),
-            "algorithm": algorithm,
-            "fingerprint": cells[header["fingerprint"]].strip("`"),
-            "evidence_paths": re.findall(r"`([^`]+)`", evidence_cell),
-        })
+        rows.append(
+            {
+                "line_index": index,
+                "entity": cells[header["entity"]].strip("`"),
+                "algorithm": algorithm,
+                "fingerprint": cells[header["fingerprint"]].strip("`"),
+                "evidence_paths": re.findall(r"`([^`]+)`", evidence_cell),
+            }
+        )
     return rows
 
 
-def entity_fingerprint_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
+def entity_fingerprint_refresh_plan_for_context(
+    context, changed_paths: list[str]
+) -> dict[str, object]:
     changed = set(changed_paths)
     catalog_path = context.onboarding_root / "entities.md"
     required: list[dict[str, object]] = []
@@ -578,17 +638,21 @@ def entity_fingerprint_refresh_plan_for_context(context, changed_paths: list[str
             continue
         entity = str(row["entity"])
         if row["algorithm"] != ENTITY_FINGERPRINT_ALGORITHM:
-            unsupported.append({
-                "entity": entity,
-                "algorithm": str(row["algorithm"]),
-            })
+            unsupported.append(
+                {
+                    "entity": entity,
+                    "algorithm": str(row["algorithm"]),
+                }
+            )
             continue
-        required.append({
-            "entity": entity,
-            "onboarding_file": catalog_path.as_posix(),
-            "evidence_paths": evidence_paths,
-            "affected_paths": affected_paths,
-        })
+        required.append(
+            {
+                "entity": entity,
+                "onboarding_file": catalog_path.as_posix(),
+                "evidence_paths": evidence_paths,
+                "affected_paths": affected_paths,
+            }
+        )
     return {
         "required": required,
         "unsupported": unsupported,
@@ -604,7 +668,9 @@ def compute_git_blob_set_fingerprint(repo_root: Path, evidence_paths: list[str])
     return f"sha256:{digest}"
 
 
-def refresh_entity_fingerprints_for_context(context, changed_paths: list[str]) -> list[dict[str, object]]:
+def refresh_entity_fingerprints_for_context(
+    context, changed_paths: list[str]
+) -> list[dict[str, object]]:
     plan = entity_fingerprint_refresh_plan_for_context(context, changed_paths)
     unsupported = plan["unsupported"]
     if unsupported:
@@ -620,11 +686,15 @@ def refresh_entity_fingerprints_for_context(context, changed_paths: list[str]) -
     catalog_path = Path(required[0]["onboarding_file"])
     lines = catalog_path.read_text(encoding="utf-8").splitlines()
     refreshed: list[dict[str, object]] = []
-    rows_by_entity = {str(row["entity"]): row for row in parse_entity_fingerprint_rows(catalog_path)}
+    rows_by_entity = {
+        str(row["entity"]): row for row in parse_entity_fingerprint_rows(catalog_path)
+    }
     for item in required:
         entity = str(item["entity"])
         row = rows_by_entity[entity]
-        fingerprint = compute_git_blob_set_fingerprint(context.code_repository_root, list(item["evidence_paths"]))
+        fingerprint = compute_git_blob_set_fingerprint(
+            context.code_repository_root, list(item["evidence_paths"])
+        )
         line_index = int(row["line_index"])
         old_fingerprint = str(row["fingerprint"])
         if old_fingerprint:
@@ -635,25 +705,33 @@ def refresh_entity_fingerprints_for_context(context, changed_paths: list[str]) -
                 f"{catalog_path.as_posix()} row {entity!r} is missing a fingerprint. "
                 "Run C-05 create-or-update-onboarding-files, then rerun closeout."
             )
-        refreshed.append({
-            "entity": entity,
-            "onboarding_file": catalog_path.as_posix(),
-            "fingerprint": fingerprint,
-            "affected_paths": item["affected_paths"],
-        })
+        refreshed.append(
+            {
+                "entity": entity,
+                "onboarding_file": catalog_path.as_posix(),
+                "fingerprint": fingerprint,
+                "affected_paths": item["affected_paths"],
+            }
+        )
     catalog_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return refreshed
 
 
-def onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+def onboarding_refresh_plan(
+    contract: WorktreeContract, changed_paths: list[str]
+) -> dict[str, object]:
     return onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
 
 
-def entity_fingerprint_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+def entity_fingerprint_refresh_plan(
+    contract: WorktreeContract, changed_paths: list[str]
+) -> dict[str, object]:
     return entity_fingerprint_refresh_plan_for_context(contract_context(contract), changed_paths)
 
 
-def validate_onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
+def validate_onboarding_refresh_plan_for_context(
+    context, changed_paths: list[str]
+) -> dict[str, object]:
     plan = onboarding_refresh_plan_for_context(context, changed_paths)
     missing = plan["missing"]
     unsupported = plan["unsupported"]
@@ -680,7 +758,9 @@ def validate_onboarding_refresh_plan_for_context(context, changed_paths: list[st
     return plan
 
 
-def validate_onboarding_refresh_plan(contract: WorktreeContract, changed_paths: list[str]) -> dict[str, object]:
+def validate_onboarding_refresh_plan(
+    contract: WorktreeContract, changed_paths: list[str]
+) -> dict[str, object]:
     return validate_onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
 
 
@@ -695,7 +775,9 @@ def refresh_onboarding_metadata_for_context(
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
         text = onboarding_path.read_text(encoding="utf-8")
-        text, hash_found = onboarding_metadata_row(text, "lastVerifiedCommitHash", verified_commit, code=True)
+        text, hash_found = onboarding_metadata_row(
+            text, "lastVerifiedCommitHash", verified_commit, code=True
+        )
         text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
         if not hash_found or not date_found:
             raise RuntimeError(
@@ -714,23 +796,38 @@ def refresh_onboarding_metadata(
     verified_commit: str,
     verified_date: str,
 ) -> list[dict[str, str]]:
-    return refresh_onboarding_metadata_for_context(contract_context(contract), changed_paths, verified_commit, verified_date)
+    return refresh_onboarding_metadata_for_context(
+        contract_context(contract), changed_paths, verified_commit, verified_date
+    )
 
 
-def closeout_preview_payload(contract: WorktreeContract, args: argparse.Namespace) -> dict[str, object]:
-    ledger_message = args.ledger_commit_message or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
+def closeout_preview_payload(
+    contract: WorktreeContract, args: argparse.Namespace
+) -> dict[str, object]:
+    ledger_message = (
+        args.ledger_commit_message
+        or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
+    )
     code_dirty = worktree_dirty(contract.code_worktree)
     memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
     changed_paths = changed_worktree_paths(contract.code_worktree)
-    metadata_refresh = onboarding_refresh_plan(contract, changed_paths) if contract.memory_mode == "external" else {
-        "required": [],
-        "missing": [],
-        "unsupported": [],
-    }
-    entity_refresh = entity_fingerprint_refresh_plan(contract, changed_paths) if contract.memory_mode == "external" else {
-        "required": [],
-        "unsupported": [],
-    }
+    metadata_refresh = (
+        onboarding_refresh_plan(contract, changed_paths)
+        if contract.memory_mode == "external"
+        else {
+            "required": [],
+            "missing": [],
+            "unsupported": [],
+        }
+    )
+    entity_refresh = (
+        entity_fingerprint_refresh_plan(contract, changed_paths)
+        if contract.memory_mode == "external"
+        else {
+            "required": [],
+            "unsupported": [],
+        }
+    )
     payload = {
         "state": "would-closeout",
         **status_payload(contract),
@@ -782,8 +879,14 @@ def command_closeout(args: argparse.Namespace) -> int:
             "code source branch moved since task start: "
             f"{contract.code_source_branch} is {current_code_source}, expected {contract.code_base_commit}"
         )
-    if contract.memory_mode == "external" and contract.memory_repo_path is not None and contract.memory_base_commit:
-        current_memory_source = head_commit(contract.memory_repo_path, contract.memory_source_branch)
+    if (
+        contract.memory_mode == "external"
+        and contract.memory_repo_path is not None
+        and contract.memory_base_commit
+    ):
+        current_memory_source = head_commit(
+            contract.memory_repo_path, contract.memory_source_branch
+        )
         if current_memory_source != contract.memory_base_commit:
             raise RuntimeError(
                 "memory source branch moved since task start: "
@@ -796,7 +899,9 @@ def command_closeout(args: argparse.Namespace) -> int:
         raise RuntimeError("closeout requires --approved after explicit commit approval")
     approval_note = args.approval_note.replace("\n", " ").strip()
     if not approval_note:
-        raise RuntimeError("closeout requires --approval-note describing the developer's explicit commit approval")
+        raise RuntimeError(
+            "closeout requires --approval-note describing the developer's explicit commit approval"
+        )
     changed_paths = changed_worktree_paths(contract.code_worktree)
     if contract.memory_mode == "external":
         validate_onboarding_refresh_plan(contract, changed_paths)
@@ -808,13 +913,21 @@ def command_closeout(args: argparse.Namespace) -> int:
     if contract.memory_mode == "external":
         if contract.memory_worktree is None or contract.ledger_path is None:
             raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
-        refreshed_onboarding = refresh_onboarding_metadata(contract, changed_paths, code_commit, code_commit_date)
-        refreshed_entities = refresh_entity_fingerprints_for_context(contract_context(contract), changed_paths)
+        refreshed_onboarding = refresh_onboarding_metadata(
+            contract, changed_paths, code_commit, code_commit_date
+        )
+        refreshed_entities = refresh_entity_fingerprints_for_context(
+            contract_context(contract), changed_paths
+        )
         memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
         ledger = load_ledger(contract.ledger_path)
         write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
         require_git(contract.memory_worktree, ["add", "memory.md"])
-        ledger_commit = commit_if_dirty(contract.memory_worktree, args.ledger_commit_message or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}")
+        ledger_commit = commit_if_dirty(
+            contract.memory_worktree,
+            args.ledger_commit_message
+            or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
+        )
     updated = replace(
         contract,
         human_review_status="approved",
@@ -826,17 +939,24 @@ def command_closeout(args: argparse.Namespace) -> int:
         ledger_commit=ledger_commit,
     )
     write_contract(contract.contract_path, updated)
-    print(json.dumps({
-        "state": "closed",
-        **status_payload(updated),
-        "summary": "Closeout completed; integrate the task branches back into their source branches.",
-        "next_action": "integrate",
-        "code_commit": code_commit,
-        "memory_content_commit": memory_commit,
-        "ledger_commit": ledger_commit,
-        "refreshed_onboarding": refreshed_onboarding,
-        "refreshed_entities": refreshed_entities if contract.memory_mode == "external" else [],
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "state": "closed",
+                **status_payload(updated),
+                "summary": "Closeout completed; integrate the task branches back into their source branches.",
+                "next_action": "integrate",
+                "code_commit": code_commit,
+                "memory_content_commit": memory_commit,
+                "ledger_commit": ledger_commit,
+                "refreshed_onboarding": refreshed_onboarding,
+                "refreshed_entities": refreshed_entities
+                if contract.memory_mode == "external"
+                else [],
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -844,9 +964,13 @@ def validate_direct_external_context(context, source_branch: str) -> object:
     if context.memory_mode != "external":
         raise RuntimeError("direct closeout currently requires external memory mode")
     if not context.memory_root.exists() or not (context.memory_root / ".git").exists():
-        raise RuntimeError(f"external memory repo is missing or is not a Git repo: {context.memory_root.as_posix()}")
+        raise RuntimeError(
+            f"external memory repo is missing or is not a Git repo: {context.memory_root.as_posix()}"
+        )
     if current_branch(context.code_repository_root) != source_branch:
-        raise RuntimeError(f"code repository is on {current_branch(context.code_repository_root)}, expected {source_branch}")
+        raise RuntimeError(
+            f"code repository is on {current_branch(context.code_repository_root)}, expected {source_branch}"
+        )
     memory_branch = current_branch(context.memory_root)
     if memory_branch != source_branch:
         raise RuntimeError(f"memory repo is on {memory_branch}, expected {source_branch}")
@@ -854,14 +978,19 @@ def validate_direct_external_context(context, source_branch: str) -> object:
     return ledger
 
 
-def direct_closeout_preview_payload(context, args: argparse.Namespace, source_branch: str) -> dict[str, object]:
+def direct_closeout_preview_payload(
+    context, args: argparse.Namespace, source_branch: str
+) -> dict[str, object]:
     validate_direct_external_context(context, source_branch)
     code_dirty = worktree_dirty(context.code_repository_root)
     memory_dirty = worktree_dirty(context.memory_root)
     changed_paths = changed_worktree_paths(context.code_repository_root)
     metadata_refresh = onboarding_refresh_plan_for_context(context, changed_paths)
     entity_refresh = entity_fingerprint_refresh_plan_for_context(context, changed_paths)
-    ledger_message = args.ledger_commit_message or f"[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
+    ledger_message = (
+        args.ledger_commit_message
+        or "[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
+    )
     return {
         "state": "would-direct-closeout",
         "phase": "commit-approval-pending",
@@ -891,14 +1020,19 @@ def direct_closeout_preview_payload(context, args: argparse.Namespace, source_br
                 "worktree": context.code_repository_root.as_posix(),
             },
             "memory": {
-                "would_commit": memory_dirty or bool(metadata_refresh["required"]) or bool(entity_refresh["required"]),
+                "would_commit": memory_dirty
+                or bool(metadata_refresh["required"])
+                or bool(entity_refresh["required"]),
                 "message": args.memory_commit_message,
                 "worktree": context.memory_root.as_posix(),
                 "metadata_refresh_after_code_commit": True,
                 "entity_fingerprint_refresh_after_code_commit": True,
             },
             "ledger": {
-                "would_update": code_dirty or memory_dirty or bool(metadata_refresh["required"]) or bool(entity_refresh["required"]),
+                "would_update": code_dirty
+                or memory_dirty
+                or bool(metadata_refresh["required"])
+                or bool(entity_refresh["required"]),
                 "message": ledger_message,
                 "path": (context.memory_root / "memory.md").as_posix(),
             },
@@ -917,7 +1051,9 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
         raise RuntimeError("direct closeout requires --approved after explicit commit approval")
     approval_note = args.approval_note.replace("\n", " ").strip()
     if not approval_note:
-        raise RuntimeError("direct closeout requires --approval-note describing the developer's explicit commit approval")
+        raise RuntimeError(
+            "direct closeout requires --approval-note describing the developer's explicit commit approval"
+        )
 
     changed_paths = changed_worktree_paths(context.code_repository_root)
     memory_was_dirty = worktree_dirty(context.memory_root)
@@ -927,7 +1063,9 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
 
     code_commit = commit_if_dirty(context.code_repository_root, args.code_commit_message)
     code_commit_date = commit_date(context.code_repository_root, code_commit)
-    refreshed_onboarding = refresh_onboarding_metadata_for_context(context, changed_paths, code_commit, code_commit_date)
+    refreshed_onboarding = refresh_onboarding_metadata_for_context(
+        context, changed_paths, code_commit, code_commit_date
+    )
     refreshed_entities = refresh_entity_fingerprints_for_context(context, changed_paths)
     memory_commit = commit_if_dirty(context.memory_root, args.memory_commit_message)
     ledger_path = context.memory_root / "memory.md"
@@ -936,24 +1074,30 @@ def command_direct_closeout(args: argparse.Namespace) -> int:
     require_git(context.memory_root, ["add", "memory.md"])
     ledger_commit = commit_if_dirty(
         context.memory_root,
-        args.ledger_commit_message or f"[direct-closeout] Ledger sync: {code_commit} -> {memory_commit}",
+        args.ledger_commit_message
+        or f"[direct-closeout] Ledger sync: {code_commit} -> {memory_commit}",
     )
-    print(json.dumps({
-        "state": "direct-closed",
-        "phase": "done",
-        "code_repository_name": context.code_repository_name,
-        "code_repository_root": context.code_repository_root.as_posix(),
-        "memory_repo": context.memory_root.as_posix(),
-        "source_branch": source_branch,
-        "summary": "Direct closeout completed; code, memory content, and ledger commits were created on the current branches.",
-        "approval_note": approval_note,
-        "changed_code_paths": changed_paths,
-        "code_commit": code_commit,
-        "memory_content_commit": memory_commit,
-        "ledger_commit": ledger_commit,
-        "refreshed_onboarding": refreshed_onboarding,
-        "refreshed_entities": refreshed_entities,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "state": "direct-closed",
+                "phase": "done",
+                "code_repository_name": context.code_repository_name,
+                "code_repository_root": context.code_repository_root.as_posix(),
+                "memory_repo": context.memory_root.as_posix(),
+                "source_branch": source_branch,
+                "summary": "Direct closeout completed; code, memory content, and ledger commits were created on the current branches.",
+                "approval_note": approval_note,
+                "changed_code_paths": changed_paths,
+                "code_commit": code_commit,
+                "memory_content_commit": memory_commit,
+                "ledger_commit": ledger_commit,
+                "refreshed_onboarding": refreshed_onboarding,
+                "refreshed_entities": refreshed_entities,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -961,7 +1105,9 @@ def integration_branch(contract: WorktreeContract) -> str:
     return f"{contract.memory_work_branch}-integration"
 
 
-def blocked_integration_payload(contract: WorktreeContract, state: str, reason: str, persist: bool = True, **extra: object) -> dict[str, object]:
+def blocked_integration_payload(
+    contract: WorktreeContract, state: str, reason: str, persist: bool = True, **extra: object
+) -> dict[str, object]:
     blocked = replace(contract, integration_status="blocked")
     if persist:
         write_contract(blocked.contract_path, blocked)
@@ -994,21 +1140,35 @@ def validate_integrate_contract(contract: WorktreeContract) -> None:
     if head_commit(contract.code_worktree) != contract.code_commit:
         raise RuntimeError("code worktree HEAD does not match closeout code_commit")
     if contract.memory_mode == "external":
-        if contract.memory_repo_path is None or contract.memory_worktree is None or contract.ledger_path is None:
-            raise RuntimeError("external-memory integration requires memory repo, worktree, and ledger path")
+        if (
+            contract.memory_repo_path is None
+            or contract.memory_worktree is None
+            or contract.ledger_path is None
+        ):
+            raise RuntimeError(
+                "external-memory integration requires memory repo, worktree, and ledger path"
+            )
         if not contract.memory_content_commit or not contract.ledger_commit:
-            raise RuntimeError("external-memory integration requires closeout memory_content_commit and ledger_commit")
+            raise RuntimeError(
+                "external-memory integration requires closeout memory_content_commit and ledger_commit"
+            )
         if current_branch(contract.memory_repo_path) != contract.memory_source_branch:
-            raise RuntimeError(f"memory source repo must have {contract.memory_source_branch} checked out")
+            raise RuntimeError(
+                f"memory source repo must have {contract.memory_source_branch} checked out"
+            )
         if current_branch(contract.memory_worktree) != contract.memory_work_branch:
-            raise RuntimeError(f"memory worktree must have {contract.memory_work_branch} checked out")
+            raise RuntimeError(
+                f"memory worktree must have {contract.memory_work_branch} checked out"
+            )
         require_clean(contract.memory_repo_path, "memory source repo")
         require_clean(contract.memory_worktree, "memory worktree")
         if head_commit(contract.memory_worktree) != contract.ledger_commit:
             raise RuntimeError("memory worktree HEAD does not match closeout ledger_commit")
 
 
-def replay_code_if_needed(contract: WorktreeContract, current_code_source: str) -> tuple[str, dict[str, object] | None]:
+def replay_code_if_needed(
+    contract: WorktreeContract, current_code_source: str
+) -> tuple[str, dict[str, object] | None]:
     if is_ancestor(contract.code_repo_path, current_code_source, contract.code_commit):
         return contract.code_commit, None
     result = run_git(contract.code_worktree, ["rebase", contract.code_source_branch])
@@ -1027,7 +1187,7 @@ def replay_code_if_needed(contract: WorktreeContract, current_code_source: str) 
 def replay_memory_content(
     contract: WorktreeContract,
     integrated_code_commit: str,
-    current_memory_source: str,
+    _current_memory_source: str,
     ledger_message: str,
 ) -> tuple[str, str, dict[str, object] | None]:
     assert contract.memory_repo_path is not None
@@ -1035,37 +1195,57 @@ def replay_memory_content(
     assert contract.ledger_path is not None
     scratch_branch = integration_branch(contract)
     if branch_exists(contract.memory_repo_path, scratch_branch):
-        return "", "", blocked_integration_payload(
-            contract,
-            "blocked-existing-integration-branch",
-            f"memory integration branch already exists: {scratch_branch}",
-            conflict_scope="memory",
-            branch=scratch_branch,
+        return (
+            "",
+            "",
+            blocked_integration_payload(
+                contract,
+                "blocked-existing-integration-branch",
+                f"memory integration branch already exists: {scratch_branch}",
+                conflict_scope="memory",
+                branch=scratch_branch,
+            ),
         )
-    result = run_git(contract.memory_worktree, ["checkout", "-b", scratch_branch, contract.memory_content_commit])
+    result = run_git(
+        contract.memory_worktree, ["checkout", "-b", scratch_branch, contract.memory_content_commit]
+    )
     if result.returncode != 0:
-        return "", "", blocked_integration_payload(
-            contract,
-            "blocked-memory-replay",
-            "could not create memory integration branch",
-            stdout=result.stdout.strip(),
-            stderr=result.stderr.strip(),
-            conflict_scope="memory",
+        return (
+            "",
+            "",
+            blocked_integration_payload(
+                contract,
+                "blocked-memory-replay",
+                "could not create memory integration branch",
+                stdout=result.stdout.strip(),
+                stderr=result.stderr.strip(),
+                conflict_scope="memory",
+            ),
         )
-    result = run_git(contract.memory_worktree, ["rebase", "--onto", contract.memory_source_branch, contract.memory_base_commit])
+    result = run_git(
+        contract.memory_worktree,
+        ["rebase", "--onto", contract.memory_source_branch, contract.memory_base_commit],
+    )
     if result.returncode != 0:
-        return "", "", blocked_integration_payload(
-            contract,
-            "blocked-memory-conflict",
-            "memory replay conflicted; resolve with the developer before moving memory main",
-            stdout=result.stdout.strip(),
-            stderr=result.stderr.strip(),
-            conflict_scope="memory",
-            branch=scratch_branch,
+        return (
+            "",
+            "",
+            blocked_integration_payload(
+                contract,
+                "blocked-memory-conflict",
+                "memory replay conflicted; resolve with the developer before moving memory main",
+                stdout=result.stdout.strip(),
+                stderr=result.stderr.strip(),
+                conflict_scope="memory",
+                branch=scratch_branch,
+            ),
         )
     integrated_memory_content_commit = head_commit(contract.memory_worktree)
     ledger = load_ledger(contract.ledger_path)
-    write_ledger(contract.ledger_path, prepend_mapping(ledger, integrated_code_commit, integrated_memory_content_commit))
+    write_ledger(
+        contract.ledger_path,
+        prepend_mapping(ledger, integrated_code_commit, integrated_memory_content_commit),
+    )
     require_git(contract.memory_worktree, ["add", "memory.md"])
     integrated_ledger_commit = commit_if_dirty(contract.memory_worktree, ledger_message)
     return integrated_memory_content_commit, integrated_ledger_commit, None
@@ -1082,34 +1262,50 @@ def command_integrate(args: argparse.Namespace) -> int:
 
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
     current_memory_source = ""
-    code_replay_required = not is_ancestor(contract.code_repo_path, current_code_source, contract.code_commit)
+    code_replay_required = not is_ancestor(
+        contract.code_repo_path, current_code_source, contract.code_commit
+    )
     memory_replay_required = False
     if contract.memory_mode == "external":
         assert contract.memory_repo_path is not None
-        current_memory_source = head_commit(contract.memory_repo_path, contract.memory_source_branch)
-        memory_replay_required = not is_ancestor(contract.memory_repo_path, current_memory_source, contract.ledger_commit)
+        current_memory_source = head_commit(
+            contract.memory_repo_path, contract.memory_source_branch
+        )
+        memory_replay_required = not is_ancestor(
+            contract.memory_repo_path, current_memory_source, contract.ledger_commit
+        )
     if args.strategy == "ff-only" and (code_replay_required or memory_replay_required):
-        print(json.dumps(blocked_integration_payload(
-            contract,
-            "blocked-non-ff",
-            "source branch moved; rerun with --strategy replay after reviewing parallel changes",
-            persist=not args.dry_run,
-            code_replay_required=code_replay_required,
-            memory_replay_required=memory_replay_required,
-        ), indent=2))
+        print(
+            json.dumps(
+                blocked_integration_payload(
+                    contract,
+                    "blocked-non-ff",
+                    "source branch moved; rerun with --strategy replay after reviewing parallel changes",
+                    persist=not args.dry_run,
+                    code_replay_required=code_replay_required,
+                    memory_replay_required=memory_replay_required,
+                ),
+                indent=2,
+            )
+        )
         return 2
 
     if args.dry_run:
-        print(json.dumps({
-            "state": "would-integrate",
-            **status_payload(contract),
-            "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
-            "next_action": "integrate",
-            "strategy": args.strategy,
-            "code_replay_required": code_replay_required,
-            "memory_replay_required": memory_replay_required,
-            "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "state": "would-integrate",
+                    **status_payload(contract),
+                    "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
+                    "next_action": "integrate",
+                    "strategy": args.strategy,
+                    "code_replay_required": code_replay_required,
+                    "memory_replay_required": memory_replay_required,
+                    "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
+                },
+                indent=2,
+            )
+        )
         return 0
 
     integrated_code_commit = contract.code_commit
@@ -1119,7 +1315,9 @@ def command_integrate(args: argparse.Namespace) -> int:
             print(json.dumps(blocked, indent=2))
             return 2
     if not is_ancestor(contract.code_repo_path, current_code_source, integrated_code_commit):
-        raise RuntimeError("integrated code commit is not a fast-forward from the current code source branch")
+        raise RuntimeError(
+            "integrated code commit is not a fast-forward from the current code source branch"
+        )
 
     integrated_memory_content_commit = contract.memory_content_commit
     integrated_ledger_commit = contract.ledger_commit
@@ -1127,20 +1325,29 @@ def command_integrate(args: argparse.Namespace) -> int:
         assert contract.memory_repo_path is not None
         needs_new_ledger = args.strategy == "replay" and (
             integrated_code_commit != contract.code_commit
-            or not is_ancestor(contract.memory_repo_path, current_memory_source, contract.ledger_commit)
+            or not is_ancestor(
+                contract.memory_repo_path, current_memory_source, contract.ledger_commit
+            )
         )
         if needs_new_ledger:
-            integrated_memory_content_commit, integrated_ledger_commit, blocked = replay_memory_content(
-                contract,
-                integrated_code_commit,
-                current_memory_source,
-                args.ledger_commit_message or f"[{contract.task_id}] Integration ledger sync: {integrated_code_commit} -> {contract.memory_content_commit}",
+            integrated_memory_content_commit, integrated_ledger_commit, blocked = (
+                replay_memory_content(
+                    contract,
+                    integrated_code_commit,
+                    current_memory_source,
+                    args.ledger_commit_message
+                    or f"[{contract.task_id}] Integration ledger sync: {integrated_code_commit} -> {contract.memory_content_commit}",
+                )
             )
             if blocked is not None:
                 print(json.dumps(blocked, indent=2))
                 return 2
-        if not is_ancestor(contract.memory_repo_path, current_memory_source, integrated_ledger_commit):
-            raise RuntimeError("integrated memory ledger commit is not a fast-forward from the current memory source branch")
+        if not is_ancestor(
+            contract.memory_repo_path, current_memory_source, integrated_ledger_commit
+        ):
+            raise RuntimeError(
+                "integrated memory ledger commit is not a fast-forward from the current memory source branch"
+            )
 
     require_git(contract.code_repo_path, ["merge", "--ff-only", integrated_code_commit])
     if contract.memory_mode == "external":
@@ -1149,7 +1356,9 @@ def command_integrate(args: argparse.Namespace) -> int:
         ledger = load_ledger(contract.memory_repo_path / "memory.md")
         mapping = find_mapping(ledger, integrated_code_commit)
         if mapping is None or mapping.memory_commit != integrated_memory_content_commit:
-            raise RuntimeError("integrated memory ledger does not map landed code commit to landed memory content commit")
+            raise RuntimeError(
+                "integrated memory ledger does not map landed code commit to landed memory content commit"
+            )
 
     updated = replace(
         contract,
@@ -1161,17 +1370,22 @@ def command_integrate(args: argparse.Namespace) -> int:
         cleanup="pending",
     )
     write_contract(contract.contract_path, updated)
-    print(json.dumps({
-        "state": "integrated",
-        **status_payload(updated),
-        "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
-        "next_action": "cleanup",
-        "strategy": args.strategy,
-        "integrated_code_commit": integrated_code_commit,
-        "integrated_memory_content_commit": integrated_memory_content_commit,
-        "integrated_ledger_commit": integrated_ledger_commit,
-        "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "state": "integrated",
+                **status_payload(updated),
+                "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
+                "next_action": "cleanup",
+                "strategy": args.strategy,
+                "integrated_code_commit": integrated_code_commit,
+                "integrated_memory_content_commit": integrated_memory_content_commit,
+                "integrated_ledger_commit": integrated_ledger_commit,
+                "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -1224,55 +1438,105 @@ def command_cleanup(args: argparse.Namespace) -> int:
         raise RuntimeError("cleanup requires integration.status completed")
 
     removed_worktrees = {
-        "code": remove_registered_worktree(contract.code_repo_path, contract.code_worktree, args.dry_run),
+        "code": remove_registered_worktree(
+            contract.code_repo_path, contract.code_worktree, args.dry_run
+        ),
     }
-    if contract.memory_mode == "external" and contract.memory_repo_path is not None and contract.memory_worktree is not None:
-        removed_worktrees["memory"] = remove_registered_worktree(contract.memory_repo_path, contract.memory_worktree, args.dry_run)
+    if (
+        contract.memory_mode == "external"
+        and contract.memory_repo_path is not None
+        and contract.memory_worktree is not None
+    ):
+        removed_worktrees["memory"] = remove_registered_worktree(
+            contract.memory_repo_path, contract.memory_worktree, args.dry_run
+        )
 
     branches = {
-        "code": delete_branch_if_merged(contract.code_repo_path, contract.code_work_branch, args.dry_run),
+        "code": delete_branch_if_merged(
+            contract.code_repo_path, contract.code_work_branch, args.dry_run
+        ),
     }
-    if contract.memory_mode == "external" and contract.memory_repo_path is not None and contract.memory_work_branch:
-        branches["memory"] = delete_branch_if_merged(contract.memory_repo_path, contract.memory_work_branch, args.dry_run)
+    if (
+        contract.memory_mode == "external"
+        and contract.memory_repo_path is not None
+        and contract.memory_work_branch
+    ):
+        branches["memory"] = delete_branch_if_merged(
+            contract.memory_repo_path, contract.memory_work_branch, args.dry_run
+        )
         integration_work_branch = integration_branch(contract)
         if branch_exists(contract.memory_repo_path, integration_work_branch):
-            branches["memory_integration"] = delete_branch_if_merged(contract.memory_repo_path, integration_work_branch, args.dry_run)
+            branches["memory_integration"] = delete_branch_if_merged(
+                contract.memory_repo_path, integration_work_branch, args.dry_run
+            )
 
     directories = {
         "worktree_group": remove_empty_dir(contract.worktree_group, args.dry_run),
     }
     if contract.worktree_group.parent.exists():
-        directories["repo_worktree_group"] = remove_empty_dir(contract.worktree_group.parent, args.dry_run)
+        directories["repo_worktree_group"] = remove_empty_dir(
+            contract.worktree_group.parent, args.dry_run
+        )
 
     updated = contract if args.dry_run else replace(contract, cleanup="completed")
     if not args.dry_run:
         write_contract(contract.contract_path, updated)
 
     already_clean = (
-        all(not item.get("removed") and item.get("reason") == "already-absent" for item in removed_worktrees.values())
-        and all(not item.get("deleted") and item.get("reason") == "already-absent" for item in branches.values())
+        all(
+            not item.get("removed") and item.get("reason") == "already-absent"
+            for item in removed_worktrees.values()
+        )
+        and all(
+            not item.get("deleted") and item.get("reason") == "already-absent"
+            for item in branches.values()
+        )
         and updated.cleanup == "completed"
     )
-    state = "would-cleanup" if args.dry_run else ("already-clean" if already_clean else "cleanup-completed")
-    kept_branches = {key: value for key, value in branches.items() if not value.get("deleted") and value.get("reason") not in {"already-absent", None}}
-    print(json.dumps({
-        "state": state,
-        **status_payload(updated),
-        "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
-        "next_action": "done",
-        "removed_worktrees": removed_worktrees,
-        "branches": branches,
-        "directories": directories,
-        "kept_branches": kept_branches,
-    }, indent=2))
+    state = (
+        "would-cleanup"
+        if args.dry_run
+        else ("already-clean" if already_clean else "cleanup-completed")
+    )
+    kept_branches = {
+        key: value
+        for key, value in branches.items()
+        if not value.get("deleted") and value.get("reason") not in {"already-absent", None}
+    }
+    print(
+        json.dumps(
+            {
+                "state": state,
+                **status_payload(updated),
+                "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
+                "next_action": "done",
+                "removed_worktrees": removed_worktrees,
+                "branches": branches,
+                "directories": directories,
+                "kept_branches": kept_branches,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--code-repository-name", help="Code repository name to resolve.")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
-    parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
-    parser.add_argument("--topology", choices=("internal", "external"), help="Optional topology override.")
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Workspace root used to find --code-repository-name.",
+    )
+    parser.add_argument(
+        "--code-repository-root",
+        type=Path,
+        help="Root directory of the code repository to resolve.",
+    )
+    parser.add_argument(
+        "--topology", choices=("internal", "external"), help="Optional topology override."
+    )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument("--contract-path", type=Path, help="Path to an existing contract.md.")
     parser.add_argument("--task-name", help="Task name used for task folder resolution.")

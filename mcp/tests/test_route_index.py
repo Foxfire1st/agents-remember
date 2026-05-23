@@ -6,11 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel.route_index import build_route_indexes, sidecar_status  # noqa: E402
+from agents_remember.kernel.route_index import build_route_indexes, sidecar_status
 
 
 class RouteIndexTests(unittest.TestCase):
@@ -21,8 +20,12 @@ class RouteIndexTests(unittest.TestCase):
             onboarding_root = root / "memory" / "onboarding"
 
             (code_root / "src" / "app").mkdir(parents=True)
-            (code_root / "src" / "app" / "service.py").write_text("def run(): pass\n", encoding="utf-8")
-            (code_root / "src" / "app" / "missing.py").write_text("def gap(): pass\n", encoding="utf-8")
+            (code_root / "src" / "app" / "service.py").write_text(
+                "def run(): pass\n", encoding="utf-8"
+            )
+            (code_root / "src" / "app" / "missing.py").write_text(
+                "def gap(): pass\n", encoding="utf-8"
+            )
             (code_root / "README.md").write_text("# Repo\n", encoding="utf-8")
 
             (onboarding_root / "src" / "app").mkdir(parents=True)
@@ -53,11 +56,17 @@ class RouteIndexTests(unittest.TestCase):
             self.assertEqual(result.routes, 2)
             self.assertEqual(result.written, 2)
 
-            root_index = json.loads((onboarding_root / "overview.index.json").read_text(encoding="utf-8"))
+            root_index = json.loads(
+                (onboarding_root / "overview.index.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(root_index["route"], "")
             self.assertEqual(root_index["childRoutes"][0]["route"], "src/app")
 
-            route_index = json.loads((onboarding_root / "src" / "app" / "overview.index.json").read_text(encoding="utf-8"))
+            route_index = json.loads(
+                (onboarding_root / "src" / "app" / "overview.index.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             self.assertEqual(route_index["sourceScope"], ["src/app/**"])
             self.assertEqual(route_index["coveredFiles"], ["src/app/service.py"])
             self.assertEqual(route_index["coverageCounts"]["fileSidecars"], 1)
@@ -101,7 +110,9 @@ class RouteIndexTests(unittest.TestCase):
 
             build_route_indexes(code_root=code_root, onboarding_root=onboarding_root)
 
-            route_index = json.loads((onboarding_root / "pkg" / "overview.index.json").read_text(encoding="utf-8"))
+            route_index = json.loads(
+                (onboarding_root / "pkg" / "overview.index.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(route_index["coveredFiles"], [])
             self.assertEqual(route_index["coverageCounts"]["fileSidecars"], 0)
             self.assertEqual(route_index["hotPath"]["summary"], "")

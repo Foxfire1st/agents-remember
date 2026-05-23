@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig
@@ -62,8 +61,7 @@ def initialize_memory(
                 cwd=memory_root,
                 text=True,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 check=False,
             )
             git.update(

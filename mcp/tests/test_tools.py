@@ -14,18 +14,18 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.benchmarks import runner as benchmark_runner  # noqa: E402
-from agents_remember.mcp.config import load_config  # noqa: E402
-from agents_remember.mcp.server import create_server  # noqa: E402
-from agents_remember.mcp.tools import (  # noqa: E402
+from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.mcp.config import load_config
+from agents_remember.mcp.server import create_server
+from agents_remember.mcp.tools import (
     PUBLIC_TOOLS,
-    cgc_callers_payload,
     cgc_callees_payload,
+    cgc_callers_payload,
     cgc_complexity_payload,
     cgc_dependencies_payload,
     cgc_symbol_search_payload,
-    context_packet_payload,
     codex_benchmark_run_payload,
+    context_packet_payload,
     memory_init_payload,
     ping_payload,
     route_index_refresh_payload,
@@ -33,7 +33,7 @@ from agents_remember.mcp.tools import (  # noqa: E402
     server_info_payload,
     skills_install_payload,
 )
-from test_config import settings_payload  # noqa: E402
+from test_config import settings_payload
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -179,8 +179,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.skill_tools."
-                "benchmark_runner.resolve_codex_executable",
+                "agents_remember.controllers.skill_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
@@ -240,7 +239,11 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(destination.is_dir())
             self.assertFalse(destination.is_symlink() or os.path.islink(destination))
             self.assertTrue(old_target.exists())
-            self.assertTrue((destination / "U-01-core-skills" / "C-00-initialize-memory-repo" / "SKILL.md").exists())
+            self.assertTrue(
+                (
+                    destination / "U-01-core-skills" / "C-00-initialize-memory-repo" / "SKILL.md"
+                ).exists()
+            )
 
     def test_skills_install_payload_requires_configured_harness_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

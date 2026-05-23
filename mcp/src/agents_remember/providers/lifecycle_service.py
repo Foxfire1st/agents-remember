@@ -24,7 +24,7 @@ class ProviderLifecycleServiceConfig:
     timeout: int = 60
     python: str = sys.executable
 
-    def normalized(self) -> "ProviderLifecycleServiceConfig":
+    def normalized(self) -> ProviderLifecycleServiceConfig:
         return ProviderLifecycleServiceConfig(
             coordination_root=self.coordination_root.resolve(),
             settings_path=self.settings_path.resolve(),
@@ -72,7 +72,12 @@ def run_cgc_lifecycle(
             "refresh-all": provider_lifecycle.cgc_refresh_all,
         }
         return handlers[action](args)
-    except (ContextProviderError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+    except (
+        ContextProviderError,
+        subprocess.TimeoutExpired,
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
         return {
             "provider": "codegraphcontext",
             "action": action,
@@ -110,7 +115,12 @@ def run_grepai_lifecycle(
     )
     try:
         return provider_lifecycle.grepai_run(args, action)
-    except (ContextProviderError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+    except (
+        ContextProviderError,
+        subprocess.TimeoutExpired,
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
         return {
             "provider": "grepai",
             "action": action,
@@ -141,7 +151,12 @@ def run_watchers_lifecycle(
     )
     try:
         return provider_lifecycle.watchers_run(args, action)
-    except (ContextProviderError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+    except (
+        ContextProviderError,
+        subprocess.TimeoutExpired,
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
         return {
             "provider": "watchers",
             "action": action,

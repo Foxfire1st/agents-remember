@@ -38,9 +38,7 @@ code_repository_name = agents-remember-md
 
 After C-08 resolves the target repository and coordination root, prefer the
 Agents Remember MCP `context_packet` tool when that server is configured.
-Provider authority comes from the MCP settings file, not from coordinator
-`system/settings.json`, and not from the resolved memory repo's
-`system/settings.json`.
+Provider authority comes from the MCP settings file.
 
 If the MCP settings configure providers, request:
 
@@ -59,7 +57,7 @@ guidance:
 
 - `system/settings.md`
 - `system/settings.json`
-- `system/tools.md`
+- `system/tools.md` for repo-specific tools, commands, and code quality checks
 - `system/sources.md`
 - `system/coding-guidelines.md`, when present
 
@@ -88,3 +86,11 @@ runtime settings live under the selected `ar-coordination/` or memory root.
 - Do not create, close out, integrate, push, or clean up worktrees without the
   approval gates required by the selected workflow.
 - Do not move protected branches unless the developer explicitly asks.
+
+## Code Quality Instructions
+
+After implementing Python code in this source checkout, run Ruff and Radon from
+the `agents-remember-md/` source repository root. Use the resolved memory
+layer's `system/tools.md` for the exact Ruff, Radon, test, build, smoke-check,
+branch, and local command guidance. Use `system/coding-guidelines.md` when
+present for repo-specific coding rules.

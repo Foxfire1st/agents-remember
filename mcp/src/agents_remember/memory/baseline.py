@@ -10,7 +10,6 @@ import argparse
 import json
 from pathlib import Path
 
-
 from agents_remember.drift import onboarding_drift as drift
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.memory_ledger import (
@@ -38,14 +37,24 @@ def run_drift(context, report_path: Path | None):
     rows = [
         row
         for path in drift.discover_onboarding_files(context.onboarding_root)
-        for row in drift.classify_sidecar_onboarding_units(path, context.code_repository_root, context.onboarding_root, context.storage)
+        for row in drift.classify_sidecar_onboarding_units(
+            path, context.code_repository_root, context.onboarding_root, context.storage
+        )
     ]
     rows.extend(
         drift.classify_inline_source(path, context.code_repository_root)
-        for path in drift.discover_inline_onboarding_sources(context.code_repository_root, context.storage)
+        for path in drift.discover_inline_onboarding_sources(
+            context.code_repository_root, context.storage
+        )
     )
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    report = drift.resolve_report_path(report_path, context.coordination_root, context.temp_root, context.code_repository_root, context.memory_root)
+    report = drift.resolve_report_path(
+        report_path,
+        context.coordination_root,
+        context.temp_root,
+        context.code_repository_root,
+        context.memory_root,
+    )
     drift.write_markdown_report(rows, report, context.code_repository_root, context.onboarding_root)
     return rows, report
 
@@ -85,7 +94,11 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
         else:
             worktree_manager.require_git(context.memory_root, ["checkout", "-b", memory_branch])
 
-    existing_paths = [path.name for path in (context.memory_root / name for name in ("onboarding", "docs", "system")) if path.exists()]
+    existing_paths = [
+        path.name
+        for path in (context.memory_root / name for name in ("onboarding", "docs", "system"))
+        if path.exists()
+    ]
     if not existing_paths:
         raise RuntimeError(
             f"memory root has no onboarding, docs, or system content: {context.memory_root}. "
@@ -172,7 +185,9 @@ def command_adopt(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
     if payload["drift"]["actionable"] and not args.accept_drift:
-        payload["message"] = "actionable drift blocks adoption; refresh onboarding with C-05 or rerun with --accept-drift"
+        payload["message"] = (
+            "actionable drift blocks adoption; refresh onboarding with C-05 or rerun with --accept-drift"
+        )
         print(json.dumps(payload, indent=2))
         return 2
     if args.dry_run:
@@ -193,9 +208,20 @@ def command_adopt(args: argparse.Namespace) -> int:
 
 def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--code-repository-name", help="Code repository name to resolve.")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="Workspace root used to find --code-repository-name.")
-    parser.add_argument("--code-repository-root", type=Path, help="Root directory of the code repository to resolve.")
-    parser.add_argument("--topology", choices=("internal", "external"), help="Optional topology override.")
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Workspace root used to find --code-repository-name.",
+    )
+    parser.add_argument(
+        "--code-repository-root",
+        type=Path,
+        help="Root directory of the code repository to resolve.",
+    )
+    parser.add_argument(
+        "--topology", choices=("internal", "external"), help="Optional topology override."
+    )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument("--report", type=Path, help="Optional C-02 drift report path.")
 
@@ -210,8 +236,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     adopt = subparsers.add_parser("adopt")
     add_common(adopt)
-    adopt.add_argument("--accept-drift", action="store_true", help="Accept current onboarding as factual enough to become the baseline.")
-    adopt.add_argument("--source-branch", help="Code branch to map in memory.md. Defaults to current branch.")
+    adopt.add_argument(
+        "--accept-drift",
+        action="store_true",
+        help="Accept current onboarding as factual enough to become the baseline.",
+    )
+    adopt.add_argument(
+        "--source-branch", help="Code branch to map in memory.md. Defaults to current branch."
+    )
     adopt.add_argument("--work-branch", help="Memory branch to use. Defaults to source branch.")
     adopt.add_argument("--dry-run", action="store_true")
     adopt.set_defaults(func=command_adopt)

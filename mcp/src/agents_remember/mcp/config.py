@@ -255,8 +255,7 @@ def parse_path_list(raw: object, *, owner: str) -> list[Path]:
     if not isinstance(raw, list):
         raise ConfigError(f"{owner} must be a list")
     return [
-        require_absolute_json_path(value, f"{owner}[{index}]")
-        for index, value in enumerate(raw)
+        require_absolute_json_path(value, f"{owner}[{index}]") for index, value in enumerate(raw)
     ]
 
 

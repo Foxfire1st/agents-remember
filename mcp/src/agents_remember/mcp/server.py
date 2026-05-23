@@ -7,8 +7,8 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import ConfigError, McpRuntimeConfig, load_config
 from .tools import (
-    cgc_callers_payload,
     cgc_callees_payload,
+    cgc_callers_payload,
     cgc_complexity_payload,
     cgc_dependencies_payload,
     cgc_symbol_search_payload,

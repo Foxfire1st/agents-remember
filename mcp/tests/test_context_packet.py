@@ -13,19 +13,19 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.cli.context_packet import main as cli_main  # noqa: E402
-from agents_remember.controllers.context_packet import (  # noqa: E402
+from agents_remember.cli.context_packet import main as cli_main
+from agents_remember.controllers.context_packet import (
     ContextPacketError,
     ContextPacketRequest,
     build_context_packet,
 )
-from agents_remember.mcp.config import load_config  # noqa: E402
-from agents_remember.worktrees.git_worktree_manager import status_payload  # noqa: E402
-from agents_remember.worktrees.worktree_contract import (  # noqa: E402
+from agents_remember.mcp.config import load_config
+from agents_remember.worktrees.git_worktree_manager import status_payload
+from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )
-from test_config import settings_payload, write_json  # noqa: E402
+from test_config import settings_payload, write_json
 
 
 class ContextPacketTests(unittest.TestCase):

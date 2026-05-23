@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 CGC_PROVIDER = "codegraphcontext"
 CGC_PIN = "codegraphcontext==0.4.10"
 CGC_REQUIREMENTS = (
@@ -98,19 +97,19 @@ def read_gitignore_patterns(repo_root: Path) -> tuple[str, ...]:
 
 
 CGC_PATCH_MARKER = "Agents Remember patch: prefer explicit .cgcignore path without overwriting it"
-CGC_ORIGINAL_SNIPPET = '''    if local_cgcignore_path is None:
+CGC_ORIGINAL_SNIPPET = """    if local_cgcignore_path is None:
         local_cgcignore_path = ignore_root / ".cgcignore"
         ensure_default_cgcignore(local_cgcignore_path, default_patterns)
-'''
-CGC_OLD_PATCHED_SNIPPET = '''    if local_cgcignore_path is None:
+"""
+CGC_OLD_PATCHED_SNIPPET = """    if local_cgcignore_path is None:
         # Agents Remember patch: prefer explicit .cgcignore path before repo-local creation.
         if explicit_cgcignore_path is not None:
             local_cgcignore_path = explicit_cgcignore_path
         else:
             local_cgcignore_path = ignore_root / ".cgcignore"
         ensure_default_cgcignore(local_cgcignore_path, default_patterns)
-'''
-CGC_PATCHED_SNIPPET = f'''    if local_cgcignore_path is None:
+"""
+CGC_PATCHED_SNIPPET = f"""    if local_cgcignore_path is None:
         # {CGC_PATCH_MARKER}.
         if explicit_cgcignore_path is not None:
             local_cgcignore_path = explicit_cgcignore_path
@@ -118,27 +117,29 @@ CGC_PATCHED_SNIPPET = f'''    if local_cgcignore_path is None:
             local_cgcignore_path = ignore_root / ".cgcignore"
         if not local_cgcignore_path.exists():
             ensure_default_cgcignore(local_cgcignore_path, default_patterns)
-'''
+"""
 
-CGC_DELETE_PATCH_MARKER = "Agents Remember patch: delete repository paths with slash and backslash child prefixes"
-CGC_DELETE_PREFIX_ORIGINAL_SNIPPET = '''        repo_path_str = repo_path
+CGC_DELETE_PATCH_MARKER = (
+    "Agents Remember patch: delete repository paths with slash and backslash child prefixes"
+)
+CGC_DELETE_PREFIX_ORIGINAL_SNIPPET = """        repo_path_str = repo_path
         path_prefix = repo_path_str + "/"
         with self.driver.session() as session:
-'''
-CGC_DELETE_PREFIX_PATCHED_SNIPPET = f'''        repo_path_str = repo_path
+"""
+CGC_DELETE_PREFIX_PATCHED_SNIPPET = f"""        repo_path_str = repo_path
         path_prefix = repo_path_str + "/"
         # {CGC_DELETE_PATCH_MARKER}.
         path_prefix_backslash = repo_path_str + "\\\\"
         with self.driver.session() as session:
-'''
-CGC_DELETE_REL_ORIGINAL_SNIPPET = '''                    result = session.run(
+"""
+CGC_DELETE_REL_ORIGINAL_SNIPPET = """                    result = session.run(
                         f"MATCH (a)-[r:{rel_type}]->(b) "
                         "WHERE a.path STARTS WITH $prefix OR b.path STARTS WITH $prefix "
                         "WITH r LIMIT 5000 DELETE r RETURN count(r) AS deleted",
                         prefix=path_prefix,
                     ).single()
-'''
-CGC_DELETE_REL_PATCHED_SNIPPET = '''                    result = session.run(
+"""
+CGC_DELETE_REL_PATCHED_SNIPPET = """                    result = session.run(
                         f"MATCH (a)-[r:{rel_type}]->(b) "
                         "WHERE a.path STARTS WITH $prefix OR b.path STARTS WITH $prefix "
                         "OR a.path STARTS WITH $prefix_backslash OR b.path STARTS WITH $prefix_backslash "
@@ -146,59 +147,63 @@ CGC_DELETE_REL_PATCHED_SNIPPET = '''                    result = session.run(
                         prefix=path_prefix,
                         prefix_backslash=path_prefix_backslash,
                     ).single()
-'''
-CGC_DELETE_CONTAINS_ORIGINAL_SNIPPET = '''                    "MATCH (a)-[r:CONTAINS]->(b) "
+"""
+CGC_DELETE_CONTAINS_ORIGINAL_SNIPPET = """                    "MATCH (a)-[r:CONTAINS]->(b) "
                     "WHERE a.path STARTS WITH $prefix OR a.path = $path "
                     "WITH r LIMIT 10000 DELETE r RETURN count(r) AS deleted",
                     prefix=path_prefix,
                     path=repo_path_str,
-'''
-CGC_DELETE_CONTAINS_PATCHED_SNIPPET = '''                    "MATCH (a)-[r:CONTAINS]->(b) "
+"""
+CGC_DELETE_CONTAINS_PATCHED_SNIPPET = """                    "MATCH (a)-[r:CONTAINS]->(b) "
                     "WHERE a.path STARTS WITH $prefix OR a.path STARTS WITH $prefix_backslash OR a.path = $path "
                     "WITH r LIMIT 10000 DELETE r RETURN count(r) AS deleted",
                     prefix=path_prefix,
                     prefix_backslash=path_prefix_backslash,
                     path=repo_path_str,
-'''
-CGC_DELETE_NODE_ORIGINAL_SNIPPET = '''                    result = session.run(
+"""
+CGC_DELETE_NODE_ORIGINAL_SNIPPET = """                    result = session.run(
                         f"MATCH (n:{label}) WHERE n.path STARTS WITH $prefix "
                         "WITH n LIMIT 10000 DETACH DELETE n RETURN count(n) AS deleted",
                         prefix=path_prefix,
                     ).single()
-'''
-CGC_DELETE_NODE_PATCHED_SNIPPET = '''                    result = session.run(
+"""
+CGC_DELETE_NODE_PATCHED_SNIPPET = """                    result = session.run(
                         f"MATCH (n:{label}) WHERE n.path STARTS WITH $prefix OR n.path STARTS WITH $prefix_backslash "
                         "WITH n LIMIT 10000 DETACH DELETE n RETURN count(n) AS deleted",
                         prefix=path_prefix,
                         prefix_backslash=path_prefix_backslash,
                     ).single()
-'''
-CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_MARKER = "Agents Remember patch: include TensorFlow C++ source extensions"
-CGC_GRAPH_BUILDER_TABLEGEN_PATCH_MARKER = "Agents Remember patch: keep TensorFlow TableGen files discoverable"
-CGC_GRAPH_BUILDER_PARSER_ORIGINAL_SNIPPET = '''            ".cpp": "cpp",
+"""
+CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_MARKER = (
+    "Agents Remember patch: include TensorFlow C++ source extensions"
+)
+CGC_GRAPH_BUILDER_TABLEGEN_PATCH_MARKER = (
+    "Agents Remember patch: keep TensorFlow TableGen files discoverable"
+)
+CGC_GRAPH_BUILDER_PARSER_ORIGINAL_SNIPPET = """            ".cpp": "cpp",
             ".h": "cpp",
-'''
-CGC_GRAPH_BUILDER_PARSER_PATCHED_SNIPPET = f'''            ".cpp": "cpp",
+"""
+CGC_GRAPH_BUILDER_PARSER_PATCHED_SNIPPET = f"""            ".cpp": "cpp",
             # {CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_MARKER}.
             ".cc": "cpp",
             ".cxx": "cpp",
             ".c++": "cpp",
             ".C": "cpp",
             ".h": "cpp",
-'''
-CGC_GRAPH_BUILDER_GENERIC_ORIGINAL_SNIPPET = '''        self.generic_extensions = {
+"""
+CGC_GRAPH_BUILDER_GENERIC_ORIGINAL_SNIPPET = """        self.generic_extensions = {
             ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg", ".md", ".txt", ".env",
             ".bat", ".ps1", ".dockerignore", ".gitignore"
         }
-'''
-CGC_GRAPH_BUILDER_GENERIC_PATCHED_SNIPPET = f'''        self.generic_extensions = {{
+"""
+CGC_GRAPH_BUILDER_GENERIC_PATCHED_SNIPPET = f"""        self.generic_extensions = {{
             ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg", ".md", ".txt", ".env",
             ".bat", ".ps1", ".dockerignore", ".gitignore",
             # {CGC_GRAPH_BUILDER_TABLEGEN_PATCH_MARKER}.
             ".td",
         }}
-'''
-CGC_GRAPH_BUILDER_PRESCAN_ORIGINAL_SNIPPET = '''        if '.cpp' in files_by_lang:
+"""
+CGC_GRAPH_BUILDER_PRESCAN_ORIGINAL_SNIPPET = """        if '.cpp' in files_by_lang:
             from .languages import cpp as cpp_lang_module
             imports_map.update(cpp_lang_module.pre_scan_cpp(files_by_lang['.cpp'], self.get_parser('.cpp')))
         if '.h' in files_by_lang:
@@ -210,27 +215,29 @@ CGC_GRAPH_BUILDER_PRESCAN_ORIGINAL_SNIPPET = '''        if '.cpp' in files_by_la
         if '.hh' in files_by_lang:
             from .languages import cpp as cpp_lang_module
             imports_map.update(cpp_lang_module.pre_scan_cpp(files_by_lang['.hh'], self.get_parser('.hh')))
-'''
-CGC_GRAPH_BUILDER_PRESCAN_PATCHED_SNIPPET = '''        cpp_files = []
+"""
+CGC_GRAPH_BUILDER_PRESCAN_PATCHED_SNIPPET = """        cpp_files = []
         for cpp_ext in ('.cpp', '.cc', '.cxx', '.c++', '.C', '.h', '.hpp', '.hh'):
             cpp_files.extend(files_by_lang.get(cpp_ext, []))
         if cpp_files:
             from .languages import cpp as cpp_lang_module
             imports_map.update(cpp_lang_module.pre_scan_cpp(cpp_files, self.get_parser('.cpp')))
-'''
-CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET = '''_GENERIC_EXTENSIONS: FrozenSet[str] = frozenset({
+"""
+CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET = """_GENERIC_EXTENSIONS: FrozenSet[str] = frozenset({
     ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg",
     ".md", ".txt", ".env", ".bat", ".ps1", ".dockerignore", ".gitignore",
 })
-'''
-CGC_DISCOVERY_GENERIC_PATCHED_SNIPPET = f'''_GENERIC_EXTENSIONS: FrozenSet[str] = frozenset({{
+"""
+CGC_DISCOVERY_GENERIC_PATCHED_SNIPPET = f"""_GENERIC_EXTENSIONS: FrozenSet[str] = frozenset({{
     ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg",
     ".md", ".txt", ".env", ".bat", ".ps1", ".dockerignore", ".gitignore",
     # {CGC_GRAPH_BUILDER_TABLEGEN_PATCH_MARKER}.
     ".td",
 }})
-'''
-CGC_VIZ_REPO_QUERY_PATCH_MARKER = "Agents Remember patch: bound visualizer repo graph query by path prefix"
+"""
+CGC_VIZ_REPO_QUERY_PATCH_MARKER = (
+    "Agents Remember patch: bound visualizer repo graph query by path prefix"
+)
 CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET = '''                # Get all nodes within the repository scope
                 query = """
                 MATCH (r:Repository {path: $repo_path})
@@ -258,23 +265,25 @@ CGC_VIZ_REPO_QUERY_PATCHED_SNIPPET = f'''                # {CGC_VIZ_REPO_QUERY_P
                 result = session.run(query, repo_path=repo_path)
 '''
 CGC_VIZ_SERVER_ROUTE_PATCH_MARKER = "Agents Remember patch: route local visualizer root to explorer"
-CGC_VIZ_SERVER_RESPONSES_ORIGINAL_SNIPPET = "from fastapi.responses import HTMLResponse, FileResponse\n"
+CGC_VIZ_SERVER_RESPONSES_ORIGINAL_SNIPPET = (
+    "from fastapi.responses import HTMLResponse, FileResponse\n"
+)
 CGC_VIZ_SERVER_RESPONSES_PATCHED_SNIPPET = (
     "from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse\n"
 )
-CGC_VIZ_SERVER_GLOBAL_ORIGINAL_SNIPPET = '''# Path to static directory
+CGC_VIZ_SERVER_GLOBAL_ORIGINAL_SNIPPET = """# Path to static directory
 _static_dir: Optional[str] = None
-'''
-CGC_VIZ_SERVER_GLOBAL_PATCHED_SNIPPET = '''# Path to static directory
+"""
+CGC_VIZ_SERVER_GLOBAL_PATCHED_SNIPPET = """# Path to static directory
 _static_dir: Optional[str] = None
 # Default SPA route used when the local server is opened at /.
 _default_route: Optional[str] = None
-'''
-CGC_VIZ_SERVER_FALLBACK_ORIGINAL_SNIPPET = '''    global _static_dir
+"""
+CGC_VIZ_SERVER_FALLBACK_ORIGINAL_SNIPPET = """    global _static_dir
     if not _static_dir:
         return HTMLResponse("Static directory not configured", status_code=500)
-'''
-CGC_VIZ_SERVER_FALLBACK_PATCHED_SNIPPET = f'''    global _static_dir, _default_route
+"""
+CGC_VIZ_SERVER_FALLBACK_PATCHED_SNIPPET = f"""    global _static_dir, _default_route
     if full_path in ("", "/") and _default_route:
         # {CGC_VIZ_SERVER_ROUTE_PATCH_MARKER}.
         return RedirectResponse(_default_route)
@@ -282,13 +291,13 @@ CGC_VIZ_SERVER_FALLBACK_PATCHED_SNIPPET = f'''    global _static_dir, _default_r
         return JSONResponse({{"detail": "Not found"}}, status_code=404)
     if not _static_dir:
         return HTMLResponse("Static directory not configured", status_code=500)
-'''
-CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET = '''def run_server(host: str = "127.0.0.1", port: int = 8000, static_dir: Optional[str] = None):
+"""
+CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET = """def run_server(host: str = "127.0.0.1", port: int = 8000, static_dir: Optional[str] = None):
     global _static_dir
     _static_dir = static_dir
     uvicorn.run(app, host=host, port=port)
-'''
-CGC_VIZ_SERVER_RUN_PATCHED_SNIPPET = '''def run_server(
+"""
+CGC_VIZ_SERVER_RUN_PATCHED_SNIPPET = """def run_server(
     host: str = "127.0.0.1",
     port: int = 8000,
     static_dir: Optional[str] = None,
@@ -298,26 +307,28 @@ CGC_VIZ_SERVER_RUN_PATCHED_SNIPPET = '''def run_server(
     _static_dir = static_dir
     _default_route = default_route
     uvicorn.run(app, host=host, port=port)
-'''
-CGC_VIZ_CLI_ROUTE_PATCH_MARKER = "Agents Remember patch: make visualizer root open the explorer route"
+"""
+CGC_VIZ_CLI_ROUTE_PATCH_MARKER = (
+    "Agents Remember patch: make visualizer root open the explorer route"
+)
 CGC_VIZ_CLI_URL_ORIGINAL_SNIPPET = (
-    '    query_string = urllib.parse.urlencode(params)\n'
+    "    query_string = urllib.parse.urlencode(params)\n"
     '    visualization_url = f"{backend_url}/explore?{query_string}"\n'
-    '    \n'
+    "    \n"
     '    console.print(f"[green]Starting visualizer server on {backend_url}...[/green]")\n'
 )
 CGC_VIZ_CLI_URL_PATCHED_SNIPPET = (
-    f'    query_string = urllib.parse.urlencode(params)\n'
-    f'    # {CGC_VIZ_CLI_ROUTE_PATCH_MARKER}.\n'
+    f"    query_string = urllib.parse.urlencode(params)\n"
+    f"    # {CGC_VIZ_CLI_ROUTE_PATCH_MARKER}.\n"
     f'    default_route = f"/explore?{{query_string}}"\n'
     f'    visualization_url = f"{{backend_url}}{{default_route}}"\n'
-    f'    \n'
+    f"    \n"
     f'    console.print(f"[green]Starting visualizer server on {{backend_url}}...[/green]")\n'
 )
-CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET = '''        run_server(host="127.0.0.1", port=port, static_dir=str(static_dir))
-'''
-CGC_VIZ_CLI_RUN_PATCHED_SNIPPET = '''        run_server(host="127.0.0.1", port=port, static_dir=str(static_dir), default_route=default_route)
-'''
+CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET = """        run_server(host="127.0.0.1", port=port, static_dir=str(static_dir))
+"""
+CGC_VIZ_CLI_RUN_PATCHED_SNIPPET = """        run_server(host="127.0.0.1", port=port, static_dir=str(static_dir), default_route=default_route)
+"""
 
 
 class ContextProviderError(ValueError):
@@ -487,7 +498,9 @@ def read_provider_pin(requirements_file: Path, package_name: str) -> str:
     """Read a single pinned requirement such as ``grepai==0.35.0``."""
 
     if not requirements_file.exists():
-        raise ContextProviderError(f"provider requirements file does not exist: {requirements_file}")
+        raise ContextProviderError(
+            f"provider requirements file does not exist: {requirements_file}"
+        )
 
     package_name = package_name.lower()
     pins: list[str] = []
@@ -502,7 +515,9 @@ def read_provider_pin(requirements_file: Path, package_name: str) -> str:
         pins.append(line.split("==", 1)[1].strip())
 
     if len(pins) != 1 or not pins[0]:
-        raise ContextProviderError(f"expected exactly one {package_name} pin in {requirements_file}")
+        raise ContextProviderError(
+            f"expected exactly one {package_name} pin in {requirements_file}"
+        )
     return pins[0]
 
 
@@ -538,7 +553,9 @@ def grepai_runtime_layout(
         roots=tuple(roots),
         providers_root=providers_root,
         runtime_root=runtime_root,
-        requirements_file=(requirements_file or provider_requirements_file(coordination_root, GREPAI_PROVIDER)).resolve(),
+        requirements_file=(
+            requirements_file or provider_requirements_file(coordination_root, GREPAI_PROVIDER)
+        ).resolve(),
         binary_path=provider_binary_path(coordination_root, GREPAI_PROVIDER),
         config_root=runtime_root / "config",
         workspace_config_file=runtime_root / "home" / ".grepai" / "workspace.yaml",
@@ -576,15 +593,21 @@ def grepai_roots_from_provider_settings(
             if "path" not in root:
                 raise ContextProviderError("each grepai-memory root must define path")
             raw_path = str(root["path"])
-            project_id = stable_provider_id(str(root.get("projectId") or root.get("repoId") or Path(raw_path).name))
+            project_id = stable_provider_id(
+                str(root.get("projectId") or root.get("repoId") or Path(raw_path).name)
+            )
         else:
             raise ContextProviderError("each grepai-memory root must be a path string or object")
 
         expanded = Path(expand_template(raw_path, base_variables)).resolve()
         if "<" in expanded.as_posix() or ">" in expanded.as_posix():
-            raise ContextProviderError(f"unresolved grepai root path placeholder: {expanded.as_posix()}")
+            raise ContextProviderError(
+                f"unresolved grepai root path placeholder: {expanded.as_posix()}"
+            )
         if not expanded.exists() or not expanded.is_dir():
-            raise ContextProviderError(f"grepai root path does not exist or is not a directory: {expanded.as_posix()}")
+            raise ContextProviderError(
+                f"grepai root path does not exist or is not a directory: {expanded.as_posix()}"
+            )
         if project_id in seen:
             raise ContextProviderError(f"duplicate grepai project id: {project_id}")
         seen.add(project_id)
@@ -604,7 +627,9 @@ def grepai_runtime_layout_from_provider_settings(
     }
     provider_runtime_root = Path(
         expand_template(
-            str(provider_settings.get("runtimeRoot", "<coordination_root>/providers/runners/grepai")),
+            str(
+                provider_settings.get("runtimeRoot", "<coordination_root>/providers/runners/grepai")
+            ),
             base_variables,
         )
     ).resolve()
@@ -613,8 +638,15 @@ def grepai_runtime_layout_from_provider_settings(
         backend_settings = {}
     backend_runtime_root = Path(
         expand_template(
-            str(backend_settings.get("runtimeRoot", "<coordination_root>/providers/data/grepai/postgres")),
-            {"coordination_root": coordination_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix()},
+            str(
+                backend_settings.get(
+                    "runtimeRoot", "<coordination_root>/providers/data/grepai/postgres"
+                )
+            ),
+            {
+                "coordination_root": coordination_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+            },
         )
     ).resolve()
     backend_data_root = Path(
@@ -629,14 +661,21 @@ def grepai_runtime_layout_from_provider_settings(
     ).resolve()
     requirements_file = Path(
         expand_template(
-            str(provider_settings.get("requirementsFile", "<coordination_root>/providers/requirements/grepai.txt")),
+            str(
+                provider_settings.get(
+                    "requirementsFile", "<coordination_root>/providers/requirements/grepai.txt"
+                )
+            ),
             base_variables,
         )
     ).resolve()
     state_file = Path(
         expand_template(
             str(provider_settings.get("stateFile", "<runtimeRoot>/state/provider-state.json")),
-            {"coordination_root": coordination_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix()},
+            {
+                "coordination_root": coordination_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+            },
         )
     ).resolve()
     watch_settings = provider_settings.get("watch", {})
@@ -645,7 +684,10 @@ def grepai_runtime_layout_from_provider_settings(
     logs_root = Path(
         expand_template(
             str(watch_settings.get("logDir", "<coordination_root>/providers/logs/grepai")),
-            {"coordination_root": coordination_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix()},
+            {
+                "coordination_root": coordination_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+            },
         )
     ).resolve()
     workspace_name = str(provider_settings.get("workspace", "agents-remember-memory"))
@@ -709,9 +751,13 @@ def sync_grepai_index_roots(layout: GrepaiRuntimeLayout) -> list[dict[str, str]]
         source = root.source_path.resolve()
         target = root.path.resolve()
         if not source.exists() or not source.is_dir():
-            raise ContextProviderError(f"grepai source root does not exist or is not a directory: {source.as_posix()}")
+            raise ContextProviderError(
+                f"grepai source root does not exist or is not a directory: {source.as_posix()}"
+            )
         if not target.is_relative_to(runtime_root):
-            raise ContextProviderError(f"refusing to sync GrepAI mirror outside provider runtime root: {target.as_posix()}")
+            raise ContextProviderError(
+                f"refusing to sync GrepAI mirror outside provider runtime root: {target.as_posix()}"
+            )
         if target.exists():
             shutil.rmtree(target)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -721,7 +767,9 @@ def sync_grepai_index_roots(layout: GrepaiRuntimeLayout) -> list[dict[str, str]]
             symlinks=True,
             ignore=shutil.ignore_patterns(".git", ".grepai", "__pycache__"),
         )
-        synced.append({"projectId": root.project_id, "source": source.as_posix(), "path": target.as_posix()})
+        synced.append(
+            {"projectId": root.project_id, "source": source.as_posix(), "path": target.as_posix()}
+        )
     return synced
 
 
@@ -769,7 +817,11 @@ def grepai_workspace_config_text(
     if endpoint:
         lines.append(f"      endpoint: {_yaml_quote(str(endpoint))}")
     dimensions = embedder_settings.get("dimensions")
-    if dimensions is None and provider == "ollama" and model in {"nomic-embed-text", "nomic-embed-text-v2-moe"}:
+    if (
+        dimensions is None
+        and provider == "ollama"
+        and model in {"nomic-embed-text", "nomic-embed-text-v2-moe"}
+    ):
         dimensions = 768
     if dimensions is not None:
         lines.append(f"      dimensions: {_yaml_scalar(dimensions)}")
@@ -833,7 +885,9 @@ def cgc_runtime_layout(
         runtime_root=runtime_root,
         cgc_root=cgc_root,
         venv_root=(venv_root or providers_root / "_venvs" / CGC_PROVIDER).resolve(),
-        requirements_file=(requirements_file or provider_requirements_file(coordination_root, CGC_PROVIDER)).resolve(),
+        requirements_file=(
+            requirements_file or provider_requirements_file(coordination_root, CGC_PROVIDER)
+        ).resolve(),
         patches_root=(patches_root or providers_root / "patches" / CGC_PROVIDER).resolve(),
         state_file=(state_file or runtime_root / "provider-state.json").resolve(),
         cgcignore_path=cgc_root / ".cgcignore",
@@ -867,9 +921,13 @@ def cgc_runtime_layout_from_provider_settings(
     }
     code_repo_root = Path(expand_template(str(root_settings["path"]), base_variables))
     if "<" in code_repo_root.as_posix() or ">" in code_repo_root.as_posix():
-        raise ContextProviderError(f"unresolved codegraphcontext root path placeholder: {code_repo_root.as_posix()}")
+        raise ContextProviderError(
+            f"unresolved codegraphcontext root path placeholder: {code_repo_root.as_posix()}"
+        )
     if not code_repo_root.exists() or not code_repo_root.is_dir():
-        raise ContextProviderError(f"codegraphcontext root path does not exist or is not a directory: {code_repo_root.as_posix()}")
+        raise ContextProviderError(
+            f"codegraphcontext root path does not exist or is not a directory: {code_repo_root.as_posix()}"
+        )
     provider_runtime_root = Path(
         expand_template(
             str(provider_settings["runtimeRoot"]),
@@ -886,7 +944,11 @@ def cgc_runtime_layout_from_provider_settings(
     backend_settings = provider_settings.get("backend", {})
     backend_runtime_root = Path(
         expand_template(
-            str(backend_settings.get("runtimeRoot", "<coordination_root>/providers/data/codegraphcontext/falkordb")),
+            str(
+                backend_settings.get(
+                    "runtimeRoot", "<coordination_root>/providers/data/codegraphcontext/falkordb"
+                )
+            ),
             {
                 "coordination_root": coordination_root.as_posix(),
                 "runtimeRoot": provider_runtime_root.as_posix(),
@@ -910,14 +972,24 @@ def cgc_runtime_layout_from_provider_settings(
             backend_state = json.loads(backend_state_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             backend_state = {}
-    state_ports = backend_state.get("backend", {}).get("ports", {}) if isinstance(backend_state, dict) else {}
+    state_ports = (
+        backend_state.get("backend", {}).get("ports", {}) if isinstance(backend_state, dict) else {}
+    )
     state_falkordb_port = state_ports.get("falkordb", {}) if isinstance(state_ports, dict) else {}
     if not isinstance(state_falkordb_port, dict):
         state_falkordb_port = {}
     ports = backend_settings.get("ports", {})
     falkordb_port = ports.get("falkordb", {}) if isinstance(ports, dict) else {}
-    backend_bind_host = str(state_falkordb_port.get("bindHost", falkordb_port.get("bindHost", CGC_FALKORDB_DEFAULT_HOST)))
-    backend_host_port = str(state_falkordb_port.get("hostPort", falkordb_port.get("hostPort", CGC_FALKORDB_DEFAULT_PORT)))
+    backend_bind_host = str(
+        state_falkordb_port.get(
+            "bindHost", falkordb_port.get("bindHost", CGC_FALKORDB_DEFAULT_HOST)
+        )
+    )
+    backend_host_port = str(
+        state_falkordb_port.get(
+            "hostPort", falkordb_port.get("hostPort", CGC_FALKORDB_DEFAULT_PORT)
+        )
+    )
     if backend_host_port == "auto":
         backend_host_port = os.environ.get("FALKORDB_PORT", CGC_FALKORDB_DEFAULT_PORT)
     process_env_template = None
@@ -935,24 +1007,42 @@ def cgc_runtime_layout_from_provider_settings(
     cgcignore_patterns: list[str] = []
     for pattern_group in (provider_cgcignore_patterns, root_cgcignore_patterns):
         if isinstance(pattern_group, list):
-            cgcignore_patterns.extend(str(pattern).strip() for pattern in pattern_group if str(pattern).strip())
+            cgcignore_patterns.extend(
+                str(pattern).strip() for pattern in pattern_group if str(pattern).strip()
+            )
     watch_settings = provider_settings.get("watch", {})
     watch_cwd = Path(
         expand_template(
             str(watch_settings.get("cwdTemplate", "<instanceRoot>")),
-            {"instanceRoot": instance_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix(), "repoId": repo_id},
+            {
+                "instanceRoot": instance_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+                "repoId": repo_id,
+            },
         )
     ).resolve()
     watch_log_file = Path(
         expand_template(
-            str(watch_settings.get("logFileTemplate", "<instanceRoot>/.codegraphcontext/logs/watch.log")),
-            {"instanceRoot": instance_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix(), "repoId": repo_id},
+            str(
+                watch_settings.get(
+                    "logFileTemplate", "<instanceRoot>/.codegraphcontext/logs/watch.log"
+                )
+            ),
+            {
+                "instanceRoot": instance_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+                "repoId": repo_id,
+            },
         )
     ).resolve()
     state_file = Path(
         expand_template(
             str(provider_settings.get("stateFileTemplate", "<instanceRoot>/provider-state.json")),
-            {"instanceRoot": instance_root.as_posix(), "runtimeRoot": provider_runtime_root.as_posix(), "repoId": repo_id},
+            {
+                "instanceRoot": instance_root.as_posix(),
+                "runtimeRoot": provider_runtime_root.as_posix(),
+                "repoId": repo_id,
+            },
         )
     ).resolve()
 
@@ -1032,7 +1122,9 @@ def write_provider_state(layout: CgcRuntimeLayout, data: dict[str, Any]) -> None
     """Write provider state as pretty JSON."""
 
     layout.state_file.parent.mkdir(parents=True, exist_ok=True)
-    layout.state_file.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    layout.state_file.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def file_sha256(path: Path) -> str:
@@ -1085,8 +1177,13 @@ def remove_grepai_root_provider_artifacts(
         root_path = (root.source_path or root.path).resolve()
         for artifact in grepai_root_provider_artifacts(root_path):
             resolved_artifact = artifact.resolve()
-            if artifact.name not in GREPAI_ROOT_ARTIFACT_NAMES or resolved_artifact.parent != root_path:
-                raise ContextProviderError(f"refusing to remove unexpected GrepAI artifact path: {artifact.as_posix()}")
+            if (
+                artifact.name not in GREPAI_ROOT_ARTIFACT_NAMES
+                or resolved_artifact.parent != root_path
+            ):
+                raise ContextProviderError(
+                    f"refusing to remove unexpected GrepAI artifact path: {artifact.as_posix()}"
+                )
             removals.append(
                 {
                     "projectId": root.project_id,
@@ -1106,7 +1203,9 @@ def _remove_runtime_path(path: Path, dry_run: bool) -> None:
         path.unlink()
 
 
-def cleanup_cgc_runtime_artifacts(layouts: list[CgcRuntimeLayout], *, dry_run: bool = False) -> list[dict[str, str]]:
+def cleanup_cgc_runtime_artifacts(
+    layouts: list[CgcRuntimeLayout], *, dry_run: bool = False
+) -> list[dict[str, str]]:
     """Remove stale CGC runtime artifacts that are outside the desired layout."""
 
     if not layouts:
@@ -1123,8 +1222,12 @@ def cleanup_cgc_runtime_artifacts(layouts: list[CgcRuntimeLayout], *, dry_run: b
         if resolved_child in configured_roots:
             continue
         if not resolved_child.is_relative_to(provider_root):
-            raise ContextProviderError(f"refusing to remove CGC path outside provider root: {child}")
-        generated_instance = (child / ".codegraphcontext").exists() or (child / "provider-state.json").exists()
+            raise ContextProviderError(
+                f"refusing to remove CGC path outside provider root: {child}"
+            )
+        generated_instance = (child / ".codegraphcontext").exists() or (
+            child / "provider-state.json"
+        ).exists()
         legacy_provider_dir = child.name.startswith("_")
         if generated_instance or legacy_provider_dir:
             removals.append({"path": child.as_posix(), "reason": "unconfigured-cgc-instance"})
@@ -1138,7 +1241,9 @@ def cleanup_cgc_runtime_artifacts(layouts: list[CgcRuntimeLayout], *, dry_run: b
             if not target.exists():
                 continue
             if not target.is_relative_to(cgc_root):
-                raise ContextProviderError(f"refusing to remove CGC path outside instance root: {target}")
+                raise ContextProviderError(
+                    f"refusing to remove CGC path outside instance root: {target}"
+                )
             removals.append({"path": target.as_posix(), "reason": f"legacy-embedded-{name}"})
             _remove_runtime_path(target, dry_run)
 
@@ -1154,9 +1259,13 @@ def find_cgc_cgcignore_module(venv_root: Path) -> Path:
     ]
     matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
     if not matches:
-        raise ContextProviderError(f"could not find CodeGraphContext cgcignore.py under {venv_root}")
+        raise ContextProviderError(
+            f"could not find CodeGraphContext cgcignore.py under {venv_root}"
+        )
     if len(matches) > 1:
-        raise ContextProviderError(f"multiple CodeGraphContext cgcignore.py files found under {venv_root}")
+        raise ContextProviderError(
+            f"multiple CodeGraphContext cgcignore.py files found under {venv_root}"
+        )
     return matches[0]
 
 
@@ -1171,7 +1280,9 @@ def find_cgc_writer_module(venv_root: Path) -> Path:
     if not matches:
         raise ContextProviderError(f"could not find CodeGraphContext writer.py under {venv_root}")
     if len(matches) > 1:
-        raise ContextProviderError(f"multiple CodeGraphContext writer.py files found under {venv_root}")
+        raise ContextProviderError(
+            f"multiple CodeGraphContext writer.py files found under {venv_root}"
+        )
     return matches[0]
 
 
@@ -1184,9 +1295,13 @@ def find_cgc_graph_builder_module(venv_root: Path) -> Path:
     ]
     matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
     if not matches:
-        raise ContextProviderError(f"could not find CodeGraphContext graph_builder.py under {venv_root}")
+        raise ContextProviderError(
+            f"could not find CodeGraphContext graph_builder.py under {venv_root}"
+        )
     if len(matches) > 1:
-        raise ContextProviderError(f"multiple CodeGraphContext graph_builder.py files found under {venv_root}")
+        raise ContextProviderError(
+            f"multiple CodeGraphContext graph_builder.py files found under {venv_root}"
+        )
     return matches[0]
 
 
@@ -1199,9 +1314,13 @@ def find_cgc_discovery_module(venv_root: Path) -> Path:
     ]
     matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
     if not matches:
-        raise ContextProviderError(f"could not find CodeGraphContext discovery.py under {venv_root}")
+        raise ContextProviderError(
+            f"could not find CodeGraphContext discovery.py under {venv_root}"
+        )
     if len(matches) > 1:
-        raise ContextProviderError(f"multiple CodeGraphContext discovery.py files found under {venv_root}")
+        raise ContextProviderError(
+            f"multiple CodeGraphContext discovery.py files found under {venv_root}"
+        )
     return matches[0]
 
 
@@ -1214,9 +1333,13 @@ def find_cgc_viz_server_module(venv_root: Path) -> Path:
     ]
     matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
     if not matches:
-        raise ContextProviderError(f"could not find CodeGraphContext viz/server.py under {venv_root}")
+        raise ContextProviderError(
+            f"could not find CodeGraphContext viz/server.py under {venv_root}"
+        )
     if len(matches) > 1:
-        raise ContextProviderError(f"multiple CodeGraphContext viz/server.py files found under {venv_root}")
+        raise ContextProviderError(
+            f"multiple CodeGraphContext viz/server.py files found under {venv_root}"
+        )
     return matches[0]
 
 
@@ -1229,9 +1352,13 @@ def find_cgc_cli_helpers_module(venv_root: Path) -> Path:
     ]
     matches = sorted({path.resolve() for pattern in patterns for path in venv_root.glob(pattern)})
     if not matches:
-        raise ContextProviderError(f"could not find CodeGraphContext cli/cli_helpers.py under {venv_root}")
+        raise ContextProviderError(
+            f"could not find CodeGraphContext cli/cli_helpers.py under {venv_root}"
+        )
     if len(matches) > 1:
-        raise ContextProviderError(f"multiple CodeGraphContext cli/cli_helpers.py files found under {venv_root}")
+        raise ContextProviderError(
+            f"multiple CodeGraphContext cli/cli_helpers.py files found under {venv_root}"
+        )
     return matches[0]
 
 
@@ -1251,7 +1378,9 @@ def apply_cgc_cgcignore_patch(path: Path) -> bool:
     if cgc_cgcignore_patch_applied(path):
         return False
     if CGC_OLD_PATCHED_SNIPPET in text:
-        path.write_text(text.replace(CGC_OLD_PATCHED_SNIPPET, CGC_PATCHED_SNIPPET), encoding="utf-8")
+        path.write_text(
+            text.replace(CGC_OLD_PATCHED_SNIPPET, CGC_PATCHED_SNIPPET), encoding="utf-8"
+        )
         return True
     if CGC_ORIGINAL_SNIPPET not in text:
         raise ContextProviderError("CGC cgcignore.py did not match the expected unpatched snippet")
@@ -1279,7 +1408,9 @@ def apply_cgc_delete_patch(path: Path) -> bool:
     ]
     for original, patched in replacements:
         if original not in text:
-            raise ContextProviderError("CGC writer.py did not match the expected unpatched delete snippet")
+            raise ContextProviderError(
+                "CGC writer.py did not match the expected unpatched delete snippet"
+            )
         text = text.replace(original, patched, 1)
 
     path.write_text(text, encoding="utf-8")
@@ -1311,7 +1442,9 @@ def apply_cgc_graph_builder_extensions_patch(path: Path) -> bool:
     ]
     for original, patched in replacements:
         if original not in text:
-            raise ContextProviderError("CGC graph_builder.py did not match the expected unpatched extension snippet")
+            raise ContextProviderError(
+                "CGC graph_builder.py did not match the expected unpatched extension snippet"
+            )
         text = text.replace(original, patched, 1)
 
     path.write_text(text, encoding="utf-8")
@@ -1330,9 +1463,13 @@ def apply_cgc_discovery_extensions_patch(path: Path) -> bool:
     if cgc_discovery_extensions_patch_applied(path):
         return False
     if CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET not in text:
-        raise ContextProviderError("CGC discovery.py did not match the expected unpatched generic extension snippet")
+        raise ContextProviderError(
+            "CGC discovery.py did not match the expected unpatched generic extension snippet"
+        )
     path.write_text(
-        text.replace(CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET, CGC_DISCOVERY_GENERIC_PATCHED_SNIPPET, 1),
+        text.replace(
+            CGC_DISCOVERY_GENERIC_ORIGINAL_SNIPPET, CGC_DISCOVERY_GENERIC_PATCHED_SNIPPET, 1
+        ),
         encoding="utf-8",
     )
     return True
@@ -1340,7 +1477,10 @@ def apply_cgc_discovery_extensions_patch(path: Path) -> bool:
 
 def cgc_viz_repo_query_patch_applied(path: Path) -> bool:
     text = path.read_text(encoding="utf-8")
-    return CGC_VIZ_REPO_QUERY_PATCH_MARKER in text and "WITH repo_path, repo_prefix, node LIMIT 3000" in text
+    return (
+        CGC_VIZ_REPO_QUERY_PATCH_MARKER in text
+        and "WITH repo_path, repo_prefix, node LIMIT 3000" in text
+    )
 
 
 def apply_cgc_viz_repo_query_patch(path: Path) -> bool:
@@ -1350,7 +1490,9 @@ def apply_cgc_viz_repo_query_patch(path: Path) -> bool:
     if cgc_viz_repo_query_patch_applied(path):
         return False
     if CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET not in text:
-        raise ContextProviderError("CGC viz/server.py did not match the expected unpatched repo query snippet")
+        raise ContextProviderError(
+            "CGC viz/server.py did not match the expected unpatched repo query snippet"
+        )
     path.write_text(
         text.replace(CGC_VIZ_REPO_QUERY_ORIGINAL_SNIPPET, CGC_VIZ_REPO_QUERY_PATCHED_SNIPPET, 1),
         encoding="utf-8",
@@ -1383,7 +1525,9 @@ def apply_cgc_viz_server_route_patch(path: Path) -> bool:
     ]
     for original, patched in replacements:
         if original not in text:
-            raise ContextProviderError("CGC viz/server.py did not match the expected unpatched route snippet")
+            raise ContextProviderError(
+                "CGC viz/server.py did not match the expected unpatched route snippet"
+            )
         text = text.replace(original, patched, 1)
 
     path.write_text(text, encoding="utf-8")
@@ -1412,7 +1556,9 @@ def apply_cgc_viz_cli_route_patch(path: Path) -> bool:
     ]
     for original, patched in replacements:
         if original not in text:
-            raise ContextProviderError("CGC cli/cli_helpers.py did not match the expected unpatched visualizer snippet")
+            raise ContextProviderError(
+                "CGC cli/cli_helpers.py did not match the expected unpatched visualizer snippet"
+            )
         text = text.replace(original, patched, 1)
 
     path.write_text(text, encoding="utf-8")

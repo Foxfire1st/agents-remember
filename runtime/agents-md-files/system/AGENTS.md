@@ -16,8 +16,7 @@ onboarding root, settings path, task root, docs root, system files, storage sema
 
 Gate 2: If the Agents Remember MCP server is configured, call its
 `context_packet` tool for the target repo with provider inspection enabled.
-Provider authority comes from the MCP settings file, not from coordinator
-`system/settings.json`.
+Provider authority comes from the MCP settings file.
 
 ```text
 context_packet(repo_id="<repo-id>", include_providers=true)
@@ -74,3 +73,10 @@ Gate 1: After implementing a plan phase, update or create the onboarding files f
 using the `C-05-create-or-update-onboarding-files` skill.
 
 ---
+
+## Code Quality Instructions
+
+After C-08 resolves context, use the resolved memory layer's `system/tools.md`
+for repository-specific test, lint, typecheck, build, smoke-check, branch, and
+local command guidance. Use `system/coding-guidelines.md` when present for
+repo-specific coding rules.

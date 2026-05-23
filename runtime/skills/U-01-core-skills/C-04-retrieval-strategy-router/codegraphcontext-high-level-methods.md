@@ -16,9 +16,8 @@ cgc_complexity(repo_id="<repoId>", function="<optional function>", dry_run=false
 cgc_visualize(repo_id="<repoId>", port=8000, dry_run=false)
 ```
 
-Provider authority comes from MCP settings. It does not come from coordinator
-`system/settings.json`. The MCP intentionally exposes typed CGC operations
-instead of a generic native CLI pass-through.
+Provider authority comes from MCP settings. The MCP intentionally exposes typed
+CGC operations instead of a generic native CLI pass-through.
 
 CGC is not just a locator. `cgc_symbol_search` is a useful smoke test, but the
 relationship tools expose call edges, reverse call edges, import neighborhoods,

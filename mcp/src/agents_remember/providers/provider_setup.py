@@ -39,7 +39,9 @@ def settings_path(coordination_root: Path, from_settings: Path | None = None) ->
     return from_settings or coordination_root / "system" / "settings.json"
 
 
-def load_settings(coordination_root: Path, from_settings: Path | None = None) -> dict[str, Any] | None:
+def load_settings(
+    coordination_root: Path, from_settings: Path | None = None
+) -> dict[str, Any] | None:
     path = settings_path(coordination_root, from_settings)
     if not path.exists():
         return None
@@ -59,16 +61,17 @@ def provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:
     return isinstance(provider, dict) and provider.get("enabled") is True
 
 
-def selected_provider_enabled(args: argparse.Namespace, settings: dict[str, Any], provider_id: str) -> bool:
+def selected_provider_enabled(
+    args: argparse.Namespace, settings: dict[str, Any], provider_id: str
+) -> bool:
     if provider_id == "grepai-memory" and args.skip_grepai:
         return False
     return provider_enabled(settings, provider_id)
 
 
 def expand_template(value: str, coordination_root: Path) -> str:
-    return (
-        value.replace("<coordination_root>", coordination_root.as_posix())
-        .replace("<workspace_root>", coordination_root.parent.as_posix())
+    return value.replace("<coordination_root>", coordination_root.as_posix()).replace(
+        "<workspace_root>", coordination_root.parent.as_posix()
     )
 
 
@@ -137,7 +140,9 @@ def cgc_seed_source_extra_args(
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
-def isolated_cgc_settings(args: argparse.Namespace, settings: dict[str, Any]) -> dict[str, Any] | None:
+def isolated_cgc_settings(
+    args: argparse.Namespace, settings: dict[str, Any]
+) -> dict[str, Any] | None:
     if args.cgc_isolated_runtime_root is None:
         return None
 
@@ -159,20 +164,31 @@ def isolated_cgc_settings(args: argparse.Namespace, settings: dict[str, Any]) ->
     ]
     cgc["runtimeRoot"] = (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix()
     cgc["instanceRootTemplate"] = "<runtimeRoot>/<repoId>"
-    cgc["venvRoot"] = (args.coordination_root / "providers" / "_venvs" / "codegraphcontext").as_posix()
-    cgc["requirementsFile"] = (args.coordination_root / "providers" / "requirements" / "codegraphcontext.txt").as_posix()
-    cgc["patchesRoot"] = (args.coordination_root / "providers" / "patches" / "codegraphcontext").as_posix()
+    cgc["venvRoot"] = (
+        args.coordination_root / "providers" / "_venvs" / "codegraphcontext"
+    ).as_posix()
+    cgc["requirementsFile"] = (
+        args.coordination_root / "providers" / "requirements" / "codegraphcontext.txt"
+    ).as_posix()
+    cgc["patchesRoot"] = (
+        args.coordination_root / "providers" / "patches" / "codegraphcontext"
+    ).as_posix()
     cgc["stateFileTemplate"] = "<instanceRoot>/provider-state.json"
 
     backend = cgc.get("backend")
     if not isinstance(backend, dict):
         backend = {}
-    backend["runtimeRoot"] = (isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb").as_posix()
+    backend["runtimeRoot"] = (
+        isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb"
+    ).as_posix()
     backend["dataRoot"] = "<backendRuntimeRoot>/data"
     backend["imageLockFile"] = (
         isolated_root / "providers" / "requirements" / "codegraphcontext-falkordb-docker.lock"
     ).as_posix()
-    backend["containerName"] = args.cgc_isolated_container_name or f"ar-cgc-falkordb-{repo_id}-{stable_provider_id(isolated_root.name)}"
+    backend["containerName"] = (
+        args.cgc_isolated_container_name
+        or f"ar-cgc-falkordb-{repo_id}-{stable_provider_id(isolated_root.name)}"
+    )
     cgc["backend"] = backend
 
     return {
@@ -190,14 +206,18 @@ def isolated_cgc_settings(args: argparse.Namespace, settings: dict[str, Any]) ->
     }
 
 
-def write_isolated_cgc_settings(args: argparse.Namespace, settings: dict[str, Any]) -> dict[str, Any] | None:
+def write_isolated_cgc_settings(
+    args: argparse.Namespace, settings: dict[str, Any]
+) -> dict[str, Any] | None:
     data = isolated_cgc_settings(args, settings)
     if data is None:
         args.cgc_from_settings = None
         return None
 
     path = args.cgc_isolated_settings_path or (
-        args.cgc_isolated_runtime_root.resolve() / "settings" / "codegraphcontext-provider-settings.json"
+        args.cgc_isolated_runtime_root.resolve()
+        / "settings"
+        / "codegraphcontext-provider-settings.json"
     )
     args.cgc_from_settings = path.resolve()
     if not args.dry_run:
@@ -244,8 +264,7 @@ def run_command(
         text=True,
         encoding="utf-8",
         errors="replace",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         stdin=subprocess.DEVNULL,
         timeout=timeout,
         check=False,
@@ -349,7 +368,10 @@ def path_replacements(source_root: Path, target_root: Path) -> list[tuple[str, s
         (str(source_resolved), str(target_resolved)),
         (source_resolved.as_posix(), target_resolved.as_posix()),
         (str(source_resolved).replace("/", "\\"), str(target_resolved).replace("/", "\\")),
-        (source_resolved.as_posix().replace("/", "\\"), target_resolved.as_posix().replace("/", "\\")),
+        (
+            source_resolved.as_posix().replace("/", "\\"),
+            target_resolved.as_posix().replace("/", "\\"),
+        ),
     ]
     unique: dict[str, str] = {}
     for source, target in pairs:
@@ -467,11 +489,17 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
     target_coordination_root = args.coordination_root
     source_coordination_root = args.cgc_seed_source_coordination_root
     if source_coordination_root is None:
-        return {"ok": False, "skipped": True, "reason": "no seed source coordination root configured"}
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "no seed source coordination root configured",
+        }
 
     target_repo_id = args.cgc_seed_repo_id
     source_repo_id = args.cgc_seed_source_repo_id or target_repo_id
-    source_settings_file = cgc_seed_source_settings_path(args, source_coordination_root, target_coordination_root)
+    source_settings_file = cgc_seed_source_settings_path(
+        args, source_coordination_root, target_coordination_root
+    )
     source_settings = load_settings(source_coordination_root, source_settings_file)
     if source_settings is None:
         return {
@@ -481,10 +509,14 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
         }
 
     target_root_info = configured_cgc_repo_root(target_coordination_root, settings, target_repo_id)
-    source_root_info = configured_cgc_repo_root(source_coordination_root, source_settings, source_repo_id)
+    source_root_info = configured_cgc_repo_root(
+        source_coordination_root, source_settings, source_repo_id
+    )
     if args.cgc_seed_target_repo_root is not None:
         target_repo_root = args.cgc_seed_target_repo_root.resolve()
-        selected_target_id = target_repo_id or (target_root_info[0] if target_root_info else target_repo_root.name)
+        selected_target_id = target_repo_id or (
+            target_root_info[0] if target_root_info else target_repo_root.name
+        )
         target_repo_id = stable_provider_id(selected_target_id)
     elif target_root_info is not None:
         target_repo_id, target_repo_root = target_root_info
@@ -493,7 +525,9 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
 
     if args.cgc_seed_source_repo_root is not None:
         source_repo_root = args.cgc_seed_source_repo_root.resolve()
-        selected_source_id = source_repo_id or (source_root_info[0] if source_root_info else source_repo_root.name)
+        selected_source_id = source_repo_id or (
+            source_root_info[0] if source_root_info else source_repo_root.name
+        )
         source_repo_id = stable_provider_id(selected_source_id)
     elif source_root_info is not None:
         source_repo_id, source_repo_root = source_root_info
@@ -502,7 +536,12 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
 
     source_head = git_head(source_repo_root)
     target_head = git_head(target_repo_root)
-    if not args.cgc_seed_allow_commit_mismatch and source_head and target_head and source_head != target_head:
+    if (
+        not args.cgc_seed_allow_commit_mismatch
+        and source_head
+        and target_head
+        and source_head != target_head
+    ):
         return {
             "ok": False,
             "skipped": True,
@@ -527,7 +566,9 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
             "targetRepoRoot": target_repo_root.as_posix(),
         }
 
-    bundle_root = (args.cgc_seed_bundle_dir or target_coordination_root / "temp" / "provider-seeds").resolve()
+    bundle_root = (
+        args.cgc_seed_bundle_dir or target_coordination_root / "temp" / "provider-seeds"
+    ).resolve()
     seed_id = stable_provider_id(str(target_repo_id or target_repo_root.name))
     source_bundle = bundle_root / f"{seed_id}.source.cgc"
     rewritten_bundle = bundle_root / f"{seed_id}.target.cgc"
@@ -540,7 +581,9 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
         "backend-start",
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=cgc_seed_source_extra_args(args, source_coordination_root, target_coordination_root),
+        extra_args=cgc_seed_source_extra_args(
+            args, source_coordination_root, target_coordination_root
+        ),
     )
     if not source_backend.get("ok"):
         return {"ok": False, "stage": "source-backend-start", "command": source_backend}
@@ -577,7 +620,9 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
             "dryRun": True,
         }
     else:
-        rewrite = rewrite_cgc_bundle_paths(source_bundle, rewritten_bundle, source_repo_root, target_repo_root)
+        rewrite = rewrite_cgc_bundle_paths(
+            source_bundle, rewritten_bundle, source_repo_root, target_repo_root
+        )
 
     load = run_lifecycle(
         target_coordination_root,
@@ -609,7 +654,9 @@ def cgc_seed_bundle(args: argparse.Namespace, settings: dict[str, Any]) -> dict[
     }
 
 
-def install_enabled_providers(args: argparse.Namespace, settings: dict[str, Any]) -> list[dict[str, Any]]:
+def install_enabled_providers(
+    args: argparse.Namespace, settings: dict[str, Any]
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     if selected_provider_enabled(args, settings, "grepai-memory"):
         results.append(
@@ -635,7 +682,9 @@ def install_enabled_providers(args: argparse.Namespace, settings: dict[str, Any]
     return results
 
 
-def prepare_enabled_providers(args: argparse.Namespace, settings: dict[str, Any]) -> list[dict[str, Any]]:
+def prepare_enabled_providers(
+    args: argparse.Namespace, settings: dict[str, Any]
+) -> list[dict[str, Any]]:
     results = install_enabled_providers(args, settings)
 
     if selected_provider_enabled(args, settings, "grepai-memory"):
@@ -749,7 +798,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--skip-watchers", action="store_true")
     parser.add_argument("--skip-grepai", action="store_true")
-    parser.add_argument("--no-cgc-refresh-fallback", dest="cgc_refresh_fallback", action="store_false")
+    parser.add_argument(
+        "--no-cgc-refresh-fallback", dest="cgc_refresh_fallback", action="store_false"
+    )
     parser.set_defaults(cgc_refresh_fallback=True)
     parser.add_argument("--cgc-seed-source-coordination-root", type=Path)
     parser.add_argument("--cgc-seed-source-from-settings", type=Path)
@@ -803,7 +854,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         payload = action_payload(args)
-    except (RuntimeError, OSError, subprocess.TimeoutExpired, zipfile.BadZipFile, json.JSONDecodeError) as error:
+    except (
+        RuntimeError,
+        OSError,
+        subprocess.TimeoutExpired,
+        zipfile.BadZipFile,
+        json.JSONDecodeError,
+    ) as error:
         payload = {
             "ok": False,
             "action": args.action,

@@ -12,15 +12,14 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
-from typing import Optional
 from unittest import mock
-
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel import coordination_context_resolver as resolver  # noqa: E402
-from agents_remember.kernel.memory_ledger import (  # noqa: E402
+from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
     ledger_to_text,
@@ -28,11 +27,15 @@ from agents_remember.kernel.memory_ledger import (  # noqa: E402
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.benchmarks import runner as benchmark_runner  # noqa: E402
-from agents_remember.memory import baseline as adopt_baseline  # noqa: E402
-from agents_remember.memory import carryover as memory_carryover  # noqa: E402
-from agents_remember.worktrees import git_worktree_manager as worktree_manager  # noqa: E402
-from agents_remember.worktrees.worktree_contract import default_contract, load_contract, task_root_candidates, write_contract  # noqa: E402
+from agents_remember.memory import baseline as adopt_baseline
+from agents_remember.memory import carryover as memory_carryover
+from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.worktree_contract import (
+    default_contract,
+    load_contract,
+    task_root_candidates,
+    write_contract,
+)
 
 drift = adopt_baseline.drift
 
@@ -42,8 +45,7 @@ def git(repo: Path, *args: str) -> str:
         ["git", *args],
         cwd=repo,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if result.returncode != 0:
@@ -53,7 +55,13 @@ def git(repo: Path, *args: str) -> str:
 
 def init_repo(repo: Path, branch: str = "main") -> str:
     repo.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(["git", "init", "-b", branch], cwd=repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    result = subprocess.run(
+        ["git", "init", "-b", branch],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     if result.returncode != 0:
         git(repo, "init")
         git(repo, "checkout", "-b", branch)
@@ -65,7 +73,9 @@ def init_repo(repo: Path, branch: str = "main") -> str:
     return git(repo, "rev-parse", "HEAD")
 
 
-def write_file_onboarding(onboarding_root: Path, repo_name: str, source_path: str, commit_hash: str) -> None:
+def write_file_onboarding(
+    onboarding_root: Path, repo_name: str, source_path: str, commit_hash: str
+) -> None:
     path = onboarding_root / f"{source_path}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -87,8 +97,14 @@ def write_file_onboarding(onboarding_root: Path, repo_name: str, source_path: st
     )
 
 
-def write_route_overview(onboarding_root: Path, repo_name: str, source_route: str, commit_hash: str) -> Path:
-    path = onboarding_root / source_route / "overview.md" if source_route != "." else onboarding_root / "overview.md"
+def write_route_overview(
+    onboarding_root: Path, repo_name: str, source_route: str, commit_hash: str
+) -> Path:
+    path = (
+        onboarding_root / source_route / "overview.md"
+        if source_route != "."
+        else onboarding_root / "overview.md"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "\n".join(
@@ -114,7 +130,7 @@ def write_entity_catalog(
     onboarding_root: Path,
     repo_name: str,
     rows: list[tuple[str, str, str, list[str]]],
-    inventory_entities: Optional[list[str]] = None,
+    inventory_entities: list[str] | None = None,
     include_fingerprints: bool = True,
 ) -> Path:
     path = onboarding_root / "entities.md"
@@ -168,7 +184,9 @@ def commit_file(repo: Path, path: str, content: str, message: str) -> str:
     return git(repo, "rev-parse", "HEAD")
 
 
-def commit_memory_ledger(memory_repo: Path, code_commit: str, memory_content_commit: str, message: str) -> str:
+def commit_memory_ledger(
+    memory_repo: Path, code_commit: str, memory_content_commit: str, message: str
+) -> str:
     ledger_path = memory_repo / "memory.md"
     ledger = parse_ledger_text(ledger_path.read_text(encoding="utf-8"))
     write_ledger(ledger_path, prepend_mapping(ledger, code_commit, memory_content_commit))
@@ -177,9 +195,13 @@ def commit_memory_ledger(memory_repo: Path, code_commit: str, memory_content_com
     return git(memory_repo, "rev-parse", "HEAD")
 
 
-def initialized_memory_repo(memory_repo: Path, repo_name: str, _code_branch: str, memory_branch: str, code_commit: str) -> str:
+def initialized_memory_repo(
+    memory_repo: Path, repo_name: str, _code_branch: str, memory_branch: str, code_commit: str
+) -> str:
     memory_content = init_repo(memory_repo, memory_branch)
-    write_ledger(memory_repo / "memory.md", create_initial_ledger(repo_name, code_commit, memory_content))
+    write_ledger(
+        memory_repo / "memory.md", create_initial_ledger(repo_name, code_commit, memory_content)
+    )
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     return git(memory_repo, "rev-parse", "HEAD")
@@ -210,8 +232,24 @@ def open_external_contract_fixture(root: Path):
         memory_work_branch="ar/commit-approval-thing",
         memory_base_commit=memory_base,
     )
-    git(code_repo, "worktree", "add", "-b", contract.code_work_branch, str(contract.code_worktree), "main")
-    git(memory_repo, "worktree", "add", "-b", contract.memory_work_branch, str(contract.memory_worktree), "main")
+    git(
+        code_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.code_work_branch,
+        str(contract.code_worktree),
+        "main",
+    )
+    git(
+        memory_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.memory_work_branch,
+        str(contract.memory_worktree),
+        "main",
+    )
     write_contract(contract.contract_path, contract)
     return contract
 
@@ -220,11 +258,18 @@ def dirty_open_external_contract_fixture(root: Path):
     contract = open_external_contract_fixture(root)
     (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
     assert contract.memory_worktree is not None
-    write_file_onboarding(contract.memory_worktree / "onboarding", contract.repo_name, "feature.txt", contract.code_base_commit)
+    write_file_onboarding(
+        contract.memory_worktree / "onboarding",
+        contract.repo_name,
+        "feature.txt",
+        contract.code_base_commit,
+    )
     return contract
 
 
-def direct_external_memory_fixture(root: Path, include_feature_onboarding: bool = True, include_entity_catalog: bool = False):
+def direct_external_memory_fixture(
+    root: Path, include_feature_onboarding: bool = True, include_entity_catalog: bool = False
+):
     code_repo = root / "repo-a"
     init_repo(code_repo, "main")
     code_base = commit_file(code_repo, "feature.txt", "old\n", "Add feature baseline")
@@ -242,17 +287,24 @@ def direct_external_memory_fixture(root: Path, include_feature_onboarding: bool 
         git(memory_repo, "add", "onboarding")
         git(memory_repo, "commit", "-m", "Document feature baseline")
     memory_content = git(memory_repo, "rev-parse", "HEAD")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_content))
+    write_ledger(
+        memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_content)
+    )
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     (code_repo / "feature.txt").write_text("new\n", encoding="utf-8")
     onboarding_file = memory_repo / "onboarding" / "feature.txt.md"
     if include_feature_onboarding:
-        onboarding_file.write_text(onboarding_file.read_text(encoding="utf-8") + "Updated behavior notes.\n", encoding="utf-8")
+        onboarding_file.write_text(
+            onboarding_file.read_text(encoding="utf-8") + "Updated behavior notes.\n",
+            encoding="utf-8",
+        )
     return code_repo, memory_repo, code_base
 
 
-def closed_external_contract_fixture(root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"):
+def closed_external_contract_fixture(
+    root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"
+):
     code_repo = root / "repo-a"
     code_base = init_repo(code_repo, "main")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
@@ -277,11 +329,31 @@ def closed_external_contract_fixture(root: Path, code_path: str = "feature.txt",
         memory_work_branch="ar/integrate-thing",
         memory_base_commit=memory_base,
     )
-    git(code_repo, "worktree", "add", "-b", contract.code_work_branch, str(contract.code_worktree), "main")
-    git(memory_repo, "worktree", "add", "-b", contract.memory_work_branch, str(contract.memory_worktree), "main")
+    git(
+        code_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.code_work_branch,
+        str(contract.code_worktree),
+        "main",
+    )
+    git(
+        memory_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.memory_work_branch,
+        str(contract.memory_worktree),
+        "main",
+    )
     code_commit = commit_file(contract.code_worktree, code_path, code_content, "Add feature")
-    memory_content_commit = commit_file(contract.memory_worktree, "onboarding/feature.txt.md", "# feature\n", "Document feature")
-    ledger_commit = commit_memory_ledger(contract.memory_worktree, code_commit, memory_content_commit, "Sync ledger")
+    memory_content_commit = commit_file(
+        contract.memory_worktree, "onboarding/feature.txt.md", "# feature\n", "Document feature"
+    )
+    ledger_commit = commit_memory_ledger(
+        contract.memory_worktree, code_commit, memory_content_commit, "Sync ledger"
+    )
     closed = replace(
         contract,
         human_review_status="approved",
@@ -418,7 +490,9 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_work_branch="ar/fix-thing",
                 memory_base_commit="m1",
             )
-            result = worktree_manager.prepare_memory_for_start(contract, Namespace(memory_choice=None, dry_run=True))
+            result = worktree_manager.prepare_memory_for_start(
+                contract, Namespace(memory_choice=None, dry_run=True)
+            )
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
 
@@ -427,7 +501,9 @@ class WorktreeSupportTests(unittest.TestCase):
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_seed = init_repo(memory_repo, "main")
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", memory_seed))
+            write_ledger(
+                memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", memory_seed)
+            )
             git(memory_repo, "add", "memory.md")
             git(memory_repo, "commit", "-m", "Add memory ledger")
             (memory_repo / "onboarding" / "fresh.md").parent.mkdir(parents=True, exist_ok=True)
@@ -448,7 +524,9 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_work_branch="ar/fix-thing",
                 memory_base_commit=memory_seed,
             )
-            result = worktree_manager.prepare_memory_for_start(contract, Namespace(memory_choice=None, dry_run=True))
+            result = worktree_manager.prepare_memory_for_start(
+                contract, Namespace(memory_choice=None, dry_run=True)
+            )
             self.assertEqual(result["state"], "blocked")
             self.assertIn("commit refreshed onboarding and ledger", result["reason"])
             self.assertIn("commit-memory-and-ledger-first", result["choices"])
@@ -475,7 +553,9 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_work_branch="ar/fix-thing",
                 memory_base_commit="m1",
             )
-            result = worktree_manager.prepare_memory_for_start(contract, Namespace(memory_choice=None, dry_run=True))
+            result = worktree_manager.prepare_memory_for_start(
+                contract, Namespace(memory_choice=None, dry_run=True)
+            )
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
 
@@ -494,7 +574,9 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_base_commit="c1",
                 worktree_name="fix-thing",
             )
-            result = worktree_manager.prepare_memory_for_start(contract, Namespace(memory_choice=None, dry_run=True))
+            result = worktree_manager.prepare_memory_for_start(
+                contract, Namespace(memory_choice=None, dry_run=True)
+            )
             self.assertEqual(result["state"], "internal")
 
     def test_worktree_contract_roundtrip(self) -> None:
@@ -518,22 +600,49 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             write_contract(contract.contract_path, contract)
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.task_root, root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status")
+            self.assertEqual(
+                loaded.task_root,
+                root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status",
+            )
             self.assertEqual(loaded.task_artifact, loaded.task_root / "task.md")
-            self.assertEqual(loaded.worktree_group, root / "ar-coordination" / "worktrees" / "device-management" / "fix-platform-status-ar")
+            self.assertEqual(
+                loaded.worktree_group,
+                root
+                / "ar-coordination"
+                / "worktrees"
+                / "device-management"
+                / "fix-platform-status-ar",
+            )
             self.assertEqual(loaded.memory_mode, "external")
             self.assertEqual(loaded.ledger_path, loaded.memory_worktree / "memory.md")
             self.assertEqual(
-                task_root_candidates(root / "ar-coordination", "device-management", "Fix Platform Status"),
+                task_root_candidates(
+                    root / "ar-coordination", "device-management", "Fix Platform Status"
+                ),
                 [
-                    root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status",
-                    root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status-ar",
+                    root
+                    / "ar-coordination"
+                    / "tasks"
+                    / "device-management"
+                    / "fix-platform-status",
+                    root
+                    / "ar-coordination"
+                    / "tasks"
+                    / "device-management"
+                    / "fix-platform-status-ar",
                 ],
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_status(Namespace(contract_path=contract.contract_path)), 0)
-            self.assertEqual(json.loads(output.getvalue())["contract_path"], contract.contract_path.as_posix())
+                self.assertEqual(
+                    worktree_manager.command_status(
+                        Namespace(contract_path=contract.contract_path)
+                    ),
+                    0,
+                )
+            self.assertEqual(
+                json.loads(output.getvalue())["contract_path"], contract.contract_path.as_posix()
+            )
 
     def test_closeout_dry_run_without_approval_reports_commit_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -556,15 +665,27 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(payload["phase"], "commit-approval-pending")
             self.assertEqual(payload["next_action"], "request-commit-approval")
             self.assertTrue(payload["commit_approval_required"])
-            self.assertIn("refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"])
+            self.assertIn(
+                "refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"]
+            )
             self.assertEqual(payload["changed_code_paths"], ["feature.txt"])
             self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
-            self.assertEqual(payload["onboarding_metadata_refresh"]["required"][0]["source_path"], "feature.txt")
+            self.assertEqual(
+                payload["onboarding_metadata_refresh"]["required"][0]["source_path"], "feature.txt"
+            )
             self.assertEqual(payload["entity_fingerprint_refresh"]["required"], [])
             self.assertTrue(payload["proposed_commits"]["code"]["would_commit"])
-            self.assertTrue(payload["proposed_commits"]["memory"]["metadata_refresh_after_code_commit"])
-            self.assertTrue(payload["proposed_commits"]["memory"]["entity_fingerprint_refresh_after_code_commit"])
-            self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit)
+            self.assertTrue(
+                payload["proposed_commits"]["memory"]["metadata_refresh_after_code_commit"]
+            )
+            self.assertTrue(
+                payload["proposed_commits"]["memory"][
+                    "entity_fingerprint_refresh_after_code_commit"
+                ]
+            )
+            self.assertEqual(
+                git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
+            )
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
     def test_closeout_requires_approval_note_for_real_commits(self) -> None:
@@ -624,12 +745,28 @@ class WorktreeSupportTests(unittest.TestCase):
                 self.assertEqual(worktree_manager.command_closeout(args), 0)
             payload = json.loads(output.getvalue())
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), loaded.code_commit)
-            self.assertEqual(read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), payload["code_commit"])
-            ledger = parse_ledger_text((contract.memory_worktree / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(
+                read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), loaded.code_commit
+            )
+            self.assertEqual(
+                read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"),
+                payload["code_commit"],
+            )
+            ledger = parse_ledger_text(
+                (contract.memory_worktree / "memory.md").read_text(encoding="utf-8")
+            )
             self.assertEqual(ledger.last_verified_code_commit, payload["code_commit"])
             self.assertEqual(ledger.last_memory_content_commit, payload["memory_content_commit"])
-            self.assertIn("feature.txt.md", git(contract.memory_worktree, "show", "--name-only", "--format=", payload["memory_content_commit"]))
+            self.assertIn(
+                "feature.txt.md",
+                git(
+                    contract.memory_worktree,
+                    "show",
+                    "--name-only",
+                    "--format=",
+                    payload["memory_content_commit"],
+                ),
+            )
 
     def test_closeout_blocks_missing_onboarding_for_changed_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -677,7 +814,9 @@ class WorktreeSupportTests(unittest.TestCase):
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["state"], "would-direct-closeout")
             self.assertEqual(payload["changed_code_paths"], ["feature.txt"])
-            self.assertIn("refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"])
+            self.assertIn(
+                "refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"]
+            )
             self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
             self.assertEqual(payload["entity_fingerprint_refresh"]["required"], [])
             self.assertTrue(payload["proposed_commits"]["code"]["would_commit"])
@@ -687,7 +826,9 @@ class WorktreeSupportTests(unittest.TestCase):
     def test_direct_closeout_dry_run_reports_entity_fingerprint_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code_repo, memory_repo, code_base = direct_external_memory_fixture(root, include_entity_catalog=True)
+            code_repo, memory_repo, code_base = direct_external_memory_fixture(
+                root, include_entity_catalog=True
+            )
             memory_head = git(memory_repo, "rev-parse", "HEAD")
             args = Namespace(
                 code_repository_name="repo-a",
@@ -742,15 +883,29 @@ class WorktreeSupportTests(unittest.TestCase):
             onboarding_file = memory_repo / "onboarding" / "feature.txt.md"
             ledger = parse_ledger_text((memory_repo / "memory.md").read_text(encoding="utf-8"))
             self.assertEqual(payload["state"], "direct-closed")
-            self.assertEqual(read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"), payload["code_commit"])
+            self.assertEqual(
+                read_onboarding_field(onboarding_file, "lastVerifiedCommitHash"),
+                payload["code_commit"],
+            )
             self.assertEqual(ledger.rows[0].code_commit, payload["code_commit"])
             self.assertEqual(ledger.rows[0].memory_commit, payload["memory_content_commit"])
-            self.assertIn("feature.txt.md", git(memory_repo, "show", "--name-only", "--format=", payload["memory_content_commit"]))
+            self.assertIn(
+                "feature.txt.md",
+                git(
+                    memory_repo,
+                    "show",
+                    "--name-only",
+                    "--format=",
+                    payload["memory_content_commit"],
+                ),
+            )
 
     def test_direct_closeout_refreshes_entity_fingerprint_after_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code_repo, memory_repo, _code_base = direct_external_memory_fixture(root, include_entity_catalog=True)
+            code_repo, memory_repo, _code_base = direct_external_memory_fixture(
+                root, include_entity_catalog=True
+            )
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=root,
@@ -775,12 +930,23 @@ class WorktreeSupportTests(unittest.TestCase):
             expected = drift.compute_git_blob_set_fingerprint(code_repo, ["feature.txt"])
             self.assertEqual(payload["refreshed_entities"][0]["entity"], "Feature")
             self.assertIn(expected, catalog.read_text(encoding="utf-8"))
-            self.assertIn("entities.md", git(memory_repo, "show", "--name-only", "--format=", payload["memory_content_commit"]))
+            self.assertIn(
+                "entities.md",
+                git(
+                    memory_repo,
+                    "show",
+                    "--name-only",
+                    "--format=",
+                    payload["memory_content_commit"],
+                ),
+            )
 
     def test_direct_closeout_blocks_missing_onboarding_before_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code_repo, _memory_repo, code_base = direct_external_memory_fixture(root, include_feature_onboarding=False)
+            code_repo, _memory_repo, code_base = direct_external_memory_fixture(
+                root, include_feature_onboarding=False
+            )
             args = Namespace(
                 code_repository_name="repo-a",
                 workspace_root=root,
@@ -824,16 +990,24 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(worktree_manager.command_integrate(args), 0)
-            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), contract.code_commit)
-            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), contract.ledger_commit)
+            self.assertEqual(
+                git(contract.code_repo_path, "rev-parse", "main"), contract.code_commit
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", "main"), contract.ledger_commit
+            )
             loaded = load_contract(contract.contract_path)
             self.assertEqual(loaded.integration_status, "completed")
             self.assertEqual(loaded.integrated_code_commit, contract.code_commit)
-            self.assertEqual(loaded.integrated_memory_content_commit, contract.memory_content_commit)
+            self.assertEqual(
+                loaded.integrated_memory_content_commit, contract.memory_content_commit
+            )
             self.assertEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
             self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "cleanup-pending")
 
-            cleanup_args = Namespace(contract_path=contract.contract_path, approved=True, dry_run=False)
+            cleanup_args = Namespace(
+                contract_path=contract.contract_path, approved=True, dry_run=False
+            )
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(worktree_manager.command_cleanup(cleanup_args), 0)
@@ -842,8 +1016,12 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(cleanup_payload["next_action"], "done")
             self.assertFalse(contract.code_worktree.exists())
             self.assertFalse(contract.memory_worktree.exists())
-            self.assertFalse(git(contract.code_repo_path, "branch", "--list", contract.code_work_branch))
-            self.assertFalse(git(contract.memory_repo_path, "branch", "--list", contract.memory_work_branch))
+            self.assertFalse(
+                git(contract.code_repo_path, "branch", "--list", contract.code_work_branch)
+            )
+            self.assertFalse(
+                git(contract.memory_repo_path, "branch", "--list", contract.memory_work_branch)
+            )
             loaded = load_contract(contract.contract_path)
             self.assertEqual(loaded.cleanup, "completed")
             self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "cleanup-completed")
@@ -865,9 +1043,21 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
-            parallel_code = commit_file(contract.code_repo_path, "parallel.txt", "parallel\n", "Parallel code change")
-            parallel_memory_content = commit_file(contract.memory_repo_path, "onboarding/parallel.txt.md", "# parallel\n", "Document parallel change")
-            commit_memory_ledger(contract.memory_repo_path, parallel_code, parallel_memory_content, "Sync parallel ledger")
+            parallel_code = commit_file(
+                contract.code_repo_path, "parallel.txt", "parallel\n", "Parallel code change"
+            )
+            parallel_memory_content = commit_file(
+                contract.memory_repo_path,
+                "onboarding/parallel.txt.md",
+                "# parallel\n",
+                "Document parallel change",
+            )
+            commit_memory_ledger(
+                contract.memory_repo_path,
+                parallel_code,
+                parallel_memory_content,
+                "Sync parallel ledger",
+            )
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -881,19 +1071,29 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(loaded.integration_status, "completed")
             self.assertNotEqual(loaded.integrated_code_commit, contract.code_commit)
             self.assertNotEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
-            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), loaded.integrated_code_commit)
-            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), loaded.integrated_ledger_commit)
+            self.assertEqual(
+                git(contract.code_repo_path, "rev-parse", "main"), loaded.integrated_code_commit
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", "main"), loaded.integrated_ledger_commit
+            )
             self.assertTrue((contract.code_repo_path / "feature.txt").exists())
             self.assertTrue((contract.code_repo_path / "parallel.txt").exists())
-            ledger = parse_ledger_text((contract.memory_repo_path / "memory.md").read_text(encoding="utf-8"))
+            ledger = parse_ledger_text(
+                (contract.memory_repo_path / "memory.md").read_text(encoding="utf-8")
+            )
             self.assertEqual(ledger.rows[0].code_commit, loaded.integrated_code_commit)
             self.assertEqual(ledger.rows[0].memory_commit, loaded.integrated_memory_content_commit)
 
     def test_integrate_replay_blocks_code_conflicts_before_main_moves(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            contract = closed_external_contract_fixture(root, code_path="README.md", code_content="# Task\n")
-            parallel_code = commit_file(contract.code_repo_path, "README.md", "# Parallel\n", "Parallel conflicting change")
+            contract = closed_external_contract_fixture(
+                root, code_path="README.md", code_content="# Task\n"
+            )
+            parallel_code = commit_file(
+                contract.code_repo_path, "README.md", "# Parallel\n", "Parallel conflicting change"
+            )
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -908,10 +1108,14 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(payload["state"], "blocked-code-conflict")
             self.assertTrue(payload["developer_decision_required"])
             self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), parallel_code)
-            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), contract.memory_base_commit)
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", "main"), contract.memory_base_commit
+            )
             loaded = load_contract(contract.contract_path)
             self.assertEqual(loaded.integration_status, "blocked")
-            self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "integration-blocked")
+            self.assertEqual(
+                worktree_manager.status_payload(loaded)["phase"], "integration-blocked"
+            )
 
     def test_resolver_explicit_internal_uses_existing_ar_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -974,7 +1178,9 @@ class WorktreeSupportTests(unittest.TestCase):
             repo.mkdir()
             agents_repo = workspace / "agents-remember-md"
             agents_repo.mkdir()
-            (agents_repo / ".env").write_text("AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8")
+            (agents_repo / ".env").write_text(
+                "AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8"
+            )
             external_memory = agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a"
             external_memory.mkdir(parents=True)
             context = resolver.resolve_coordination_context(
@@ -1013,8 +1219,12 @@ class WorktreeSupportTests(unittest.TestCase):
             repo.mkdir()
             agents_repo = workspace / "agents-remember-md"
             agents_repo.mkdir()
-            (agents_repo / ".env.example").write_text("AR_COORDINATION_ROOT=example-coordination\n", encoding="utf-8")
-            (agents_repo / "example-coordination" / "memory-repos" / "ar-repo-a").mkdir(parents=True)
+            (agents_repo / ".env.example").write_text(
+                "AR_COORDINATION_ROOT=example-coordination\n", encoding="utf-8"
+            )
+            (agents_repo / "example-coordination" / "memory-repos" / "ar-repo-a").mkdir(
+                parents=True
+            )
             with self.assertRaises(resolver.MissingMemoryError) as raised:
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
@@ -1070,8 +1280,13 @@ class WorktreeSupportTests(unittest.TestCase):
                     agents_repo=agents_repo,
                 )
             self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
-            self.assertEqual(raised.exception.external_memory, workspace / "ar-coordination" / "memory-repos" / "ar-repo-a")
-            self.assertIn("initialize memory with C-00-initialize-memory-repo", str(raised.exception))
+            self.assertEqual(
+                raised.exception.external_memory,
+                workspace / "ar-coordination" / "memory-repos" / "ar-repo-a",
+            )
+            self.assertIn(
+                "initialize memory with C-00-initialize-memory-repo", str(raised.exception)
+            )
 
     def test_drift_report_paths_use_temp_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1083,13 +1298,20 @@ class WorktreeSupportTests(unittest.TestCase):
             memory_root = coordination_root / "memory-repos" / "ar-repo-a"
             drift = adopt_baseline.drift
             default_report = drift.resolve_report_path(None, coordination_root, temp_root, repo)
-            self.assertEqual(default_report, temp_root / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
             self.assertEqual(
-                drift.resolve_report_path(Path("custom/report.md"), coordination_root, temp_root, repo),
+                default_report,
+                temp_root / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md",
+            )
+            self.assertEqual(
+                drift.resolve_report_path(
+                    Path("custom/report.md"), coordination_root, temp_root, repo
+                ),
                 temp_root / "custom" / "report.md",
             )
             self.assertEqual(
-                drift.resolve_report_path(Path("../tasks/leak.md"), coordination_root, temp_root, repo),
+                drift.resolve_report_path(
+                    Path("../tasks/leak.md"), coordination_root, temp_root, repo
+                ),
                 temp_root / "drift-reports" / "repo-a" / "leak.md",
             )
             inside_coordination = coordination_root / "tasks" / "manual.md"
@@ -1099,11 +1321,15 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             memory_report = memory_root / "reports" / "manual-drift-report.md"
             self.assertEqual(
-                drift.resolve_report_path(memory_report, coordination_root, temp_root, repo, memory_root),
+                drift.resolve_report_path(
+                    memory_report, coordination_root, temp_root, repo, memory_root
+                ),
                 temp_root / "drift-reports" / "repo-a" / "manual-drift-report.md",
             )
             self.assertEqual(
-                drift.resolve_report_path(workspace / "outside.md", coordination_root, temp_root, repo),
+                drift.resolve_report_path(
+                    workspace / "outside.md", coordination_root, temp_root, repo
+                ),
                 temp_root / "drift-reports" / "repo-a" / "outside.md",
             )
 
@@ -1185,7 +1411,9 @@ class WorktreeSupportTests(unittest.TestCase):
                 "repo-a",
                 [("Entity", drift.GIT_BLOB_SET_ALGORITHM, fingerprint, ["src/entity.py"])],
             )
-            commit_file(repo, "src/entity.py", "class Entity:\n    name = 'changed'\n", "Change entity")
+            commit_file(
+                repo, "src/entity.py", "class Entity:\n    name = 'changed'\n", "Change entity"
+            )
 
             rows = drift.classify_sidecar_onboarding_units(
                 catalog,
@@ -1321,9 +1549,18 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             init_repo(workspace / "repo-b", "main")
             settings = resolver.CrossRepoSettings(
-                allow=[resolver.CrossRepoAllowEntry(repo="repo-b", expected_branch="main", include_code=True, include_memory=False)]
+                allow=[
+                    resolver.CrossRepoAllowEntry(
+                        repo="repo-b",
+                        expected_branch="main",
+                        include_code=True,
+                        include_memory=False,
+                    )
+                ]
             )
-            resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-coordination")
+            resolved = resolver.resolve_cross_repo_settings(
+                settings, workspace, workspace / "ar-coordination"
+            )
             self.assertEqual(resolved.allow[0].state, "included-code-only")
 
     def test_cross_repo_v2_memory_include(self) -> None:
@@ -1332,13 +1569,24 @@ class WorktreeSupportTests(unittest.TestCase):
             code_head = init_repo(workspace / "repo-b", "main")
             memory_repo = workspace / "ar-coordination" / "memory-repos" / "ar-repo-b"
             memory_head = init_repo(memory_repo, "main")
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-b", code_head, memory_head))
+            write_ledger(
+                memory_repo / "memory.md", create_initial_ledger("repo-b", code_head, memory_head)
+            )
             git(memory_repo, "add", "memory.md")
             git(memory_repo, "commit", "-m", "Add memory ledger")
             settings = resolver.CrossRepoSettings(
-                allow=[resolver.CrossRepoAllowEntry(repo="repo-b", expected_branch="main", include_code=True, include_memory=True)]
+                allow=[
+                    resolver.CrossRepoAllowEntry(
+                        repo="repo-b",
+                        expected_branch="main",
+                        include_code=True,
+                        include_memory=True,
+                    )
+                ]
             )
-            resolved = resolver.resolve_cross_repo_settings(settings, workspace, workspace / "ar-coordination")
+            resolved = resolver.resolve_cross_repo_settings(
+                settings, workspace, workspace / "ar-coordination"
+            )
             self.assertEqual(resolved.allow[0].state, "included")
 
     def test_adopt_memory_baseline_status_ready_without_ledger(self) -> None:
@@ -1363,9 +1611,25 @@ class WorktreeSupportTests(unittest.TestCase):
             context = adopt_baseline.resolve_context(args)
             rows, report = adopt_baseline.run_drift(context, None)
             payload = adopt_baseline.base_payload(context, rows, report)
-            self.assertEqual(report, workspace / "ar-coordination" / "temp" / "drift-reports" / "repo-a" / "repo-a_main_drift-report.md")
+            self.assertEqual(
+                report,
+                workspace
+                / "ar-coordination"
+                / "temp"
+                / "drift-reports"
+                / "repo-a"
+                / "repo-a_main_drift-report.md",
+            )
             self.assertTrue(report.exists())
-            self.assertFalse((workspace / "ar-coordination" / "tasks" / "repo-a" / "repo-a_main_drift-report.md").exists())
+            self.assertFalse(
+                (
+                    workspace
+                    / "ar-coordination"
+                    / "tasks"
+                    / "repo-a"
+                    / "repo-a_main_drift-report.md"
+                ).exists()
+            )
             self.assertEqual(payload["state"], "ready")
             self.assertEqual(payload["drift"]["actionable"], 0)
             self.assertFalse(payload["ledger"]["exists"])
@@ -1433,7 +1697,9 @@ class WorktreeSupportTests(unittest.TestCase):
             code_repo = workspace / "repo-a"
             old_base = init_repo(code_repo, "main")
             git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
-            source_head = commit_file(code_repo, "feature.py", "def feature():\n    return 'landed'\n", "Add feature")
+            source_head = commit_file(
+                code_repo, "feature.py", "def feature():\n    return 'landed'\n", "Add feature"
+            )
             git(code_repo, "checkout", "main")
             git(code_repo, "merge", "--ff-only", "workbench/reado/v1.2")
             official_head = git(code_repo, "rev-parse", "main")
@@ -1444,7 +1710,10 @@ class WorktreeSupportTests(unittest.TestCase):
             source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
             onboarding_file = source_memory / "onboarding" / "feature.py.md"
-            onboarding_file.write_text(onboarding_file.read_text(encoding="utf-8") + "Branch-learned behavior.\n", encoding="utf-8")
+            onboarding_file.write_text(
+                onboarding_file.read_text(encoding="utf-8") + "Branch-learned behavior.\n",
+                encoding="utf-8",
+            )
 
             args = Namespace(
                 code_repository_root=code_repo,
@@ -1469,8 +1738,12 @@ class WorktreeSupportTests(unittest.TestCase):
             ledger = parse_ledger_text((official_memory / "memory.md").read_text(encoding="utf-8"))
             self.assertEqual(payload["state"], "carried-over")
             self.assertEqual(payload["carried"][0]["source_path"], "feature.py")
-            self.assertIn("Branch-learned behavior.", official_onboarding.read_text(encoding="utf-8"))
-            self.assertEqual(read_onboarding_field(official_onboarding, "lastVerifiedCommitHash"), official_head)
+            self.assertIn(
+                "Branch-learned behavior.", official_onboarding.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                read_onboarding_field(official_onboarding, "lastVerifiedCommitHash"), official_head
+            )
             self.assertEqual(ledger.rows[0].code_commit, official_head)
             self.assertEqual(ledger.rows[0].memory_commit, payload["memory_content_commit"])
 
@@ -1481,9 +1754,16 @@ class WorktreeSupportTests(unittest.TestCase):
             init_repo(code_repo, "main")
             old_base = commit_file(code_repo, "feature.py", "value = 'base'\n", "Add feature base")
             git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
-            source_head = commit_file(code_repo, "feature.py", "value = 'source branch'\n", "Update feature on source branch")
+            source_head = commit_file(
+                code_repo,
+                "feature.py",
+                "value = 'source branch'\n",
+                "Update feature on source branch",
+            )
             git(code_repo, "checkout", "main")
-            commit_file(code_repo, "feature.py", "value = 'official'\n", "Update feature differently")
+            commit_file(
+                code_repo, "feature.py", "value = 'official'\n", "Update feature differently"
+            )
 
             official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
@@ -1518,7 +1798,9 @@ class WorktreeSupportTests(unittest.TestCase):
             code_repo = workspace / "repo-a"
             old_base = init_repo(code_repo, "main")
             git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
-            source_head = commit_file(code_repo, "feature.py", "value = 'pending'\n", "Add pending feature")
+            source_head = commit_file(
+                code_repo, "feature.py", "value = 'pending'\n", "Add pending feature"
+            )
             git(code_repo, "checkout", "main")
 
             official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
@@ -1547,10 +1829,16 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             benchmark_runner.manifest_relative_path("workspaces/case-a", "fixturePath"),
             Path("workspaces") / "case-a",
         )
-        for value in ("../outside", "workspaces/../outside", "/tmp/outside", "C:/outside", "C:outside", r"..\outside"):
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    benchmark_runner.manifest_relative_path(value, "fixturePath")
+        for value in (
+            "../outside",
+            "workspaces/../outside",
+            "/tmp/outside",
+            "C:/outside",
+            "C:outside",
+            r"..\outside",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                benchmark_runner.manifest_relative_path(value, "fixturePath")
         with self.assertRaises(ValueError):
             benchmark_runner.manifest_relative_path(None, "fixturePath")
 
@@ -1617,7 +1905,9 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             repository = {"url": str(upstream), "commit": commit}
             benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
 
-            with mock.patch.object(benchmark_runner, "run_command", wraps=benchmark_runner.run_command) as run_command:
+            with mock.patch.object(
+                benchmark_runner, "run_command", wraps=benchmark_runner.run_command
+            ) as run_command:
                 benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
 
             commands = [call.args[0] for call in run_command.call_args_list]
@@ -1634,11 +1924,17 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             upstream = root / "upstream"
             first_commit = init_repo(upstream)
             repo_root = root / "workspace" / "repo-a"
-            benchmark_runner.prepare_repo({"url": str(upstream), "commit": first_commit}, repo_root, dry_run=False)
+            benchmark_runner.prepare_repo(
+                {"url": str(upstream), "commit": first_commit}, repo_root, dry_run=False
+            )
             second_commit = commit_file(upstream, "feature.txt", "feature\n", "Add feature")
 
-            with mock.patch.object(benchmark_runner, "run_command", wraps=benchmark_runner.run_command) as run_command:
-                benchmark_runner.prepare_repo({"url": str(upstream), "commit": second_commit}, repo_root, dry_run=False)
+            with mock.patch.object(
+                benchmark_runner, "run_command", wraps=benchmark_runner.run_command
+            ) as run_command:
+                benchmark_runner.prepare_repo(
+                    {"url": str(upstream), "commit": second_commit}, repo_root, dry_run=False
+                )
 
             commands = [call.args[0] for call in run_command.call_args_list]
             command_text = [" ".join(command) for command in commands]
@@ -1655,9 +1951,17 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             repository = {"url": str(upstream), "commit": commit}
             benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
 
-            with mock.patch.object(benchmark_runner, "remove_path", wraps=benchmark_runner.remove_path) as remove_path:
-                with mock.patch.object(benchmark_runner, "run_command", wraps=benchmark_runner.run_command) as run_command:
-                    benchmark_runner.prepare_repo(repository, repo_root, dry_run=False, force_clone=True)
+            with (
+                mock.patch.object(
+                    benchmark_runner, "remove_path", wraps=benchmark_runner.remove_path
+                ) as remove_path,
+                mock.patch.object(
+                    benchmark_runner, "run_command", wraps=benchmark_runner.run_command
+                ) as run_command,
+            ):
+                benchmark_runner.prepare_repo(
+                    repository, repo_root, dry_run=False, force_clone=True
+                )
 
             commands = [call.args[0] for call in run_command.call_args_list]
             command_text = [" ".join(command) for command in commands]
@@ -1671,7 +1975,9 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             coordination_root = workspace / "ar-coordination"
             skill_dir = coordination_root / "skills" / "U-01-core-skills" / "C-00-test-skill"
             skill_dir.mkdir(parents=True)
-            (skill_dir / "SKILL.md").write_text("---\nname: c-00-test-skill\n---\n", encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: c-00-test-skill\n---\n", encoding="utf-8"
+            )
 
             benchmark_runner.sync_workspace_skill_exposure(
                 workspace,
@@ -1681,7 +1987,9 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
 
             exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
-            self.assertTrue((exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file())
+            self.assertTrue(
+                (exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file()
+            )
 
     def test_skill_exposure_default_copies_skill_tree_without_script(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1689,7 +1997,9 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             coordination_root = workspace / "ar-coordination"
             skill_dir = coordination_root / "skills" / "U-01-core-skills" / "C-00-test-skill"
             skill_dir.mkdir(parents=True)
-            (skill_dir / "SKILL.md").write_text("---\nname: c-00-test-skill\n---\n", encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: c-00-test-skill\n---\n", encoding="utf-8"
+            )
 
             benchmark_runner.sync_workspace_skill_exposure(
                 workspace,
@@ -1698,7 +2008,9 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
 
             exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
-            self.assertTrue((exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file())
+            self.assertTrue(
+                (exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file()
+            )
 
 
 if __name__ == "__main__":

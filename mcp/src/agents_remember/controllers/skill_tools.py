@@ -42,7 +42,9 @@ def resolve_context_tool(
         code_repository_root=repo.path,
         task_name=task_name,
         worktree_name=worktree_name,
-        contract_path=_coord_path(config, contract_path, "contract_path") if contract_path else repo.contract_path,
+        contract_path=_coord_path(config, contract_path, "contract_path")
+        if contract_path
+        else repo.contract_path,
     )
     return {
         "ok": True,
@@ -144,7 +146,9 @@ def provider_status_tool(
     return {
         "ok": True,
         "operation": "provider_status",
-        "providers": provider_status_packet(config, include_providers=True, detail_limit=detail_limit),
+        "providers": provider_status_packet(
+            config, include_providers=True, detail_limit=detail_limit
+        ),
     }
 
 
@@ -424,7 +428,9 @@ def worktree_attach_tool(
     repo = _repo(config, repo_id)
     argv = ["attach", *_repo_common_argv(config, repo)]
     _append_option(argv, "--task-name", task_name)
-    _append_option(argv, "--contract-path", _coord_path_text(config, contract_path, "contract_path"))
+    _append_option(
+        argv, "--contract-path", _coord_path_text(config, contract_path, "contract_path")
+    )
     return _worktree_main("worktree_attach", argv)
 
 
@@ -438,7 +444,9 @@ def worktree_status_tool(
     repo = _repo(config, repo_id)
     argv = ["status", *_repo_common_argv(config, repo)]
     _append_option(argv, "--task-name", task_name)
-    _append_option(argv, "--contract-path", _coord_path_text(config, contract_path, "contract_path"))
+    _append_option(
+        argv, "--contract-path", _coord_path_text(config, contract_path, "contract_path")
+    )
     return _worktree_main("worktree_status", argv)
 
 
@@ -563,7 +571,11 @@ def worktree_cleanup_tool(
     contract_path: str,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    argv = ["cleanup", "--contract-path", _coord_path(config, contract_path, "contract_path").as_posix()]
+    argv = [
+        "cleanup",
+        "--contract-path",
+        _coord_path(config, contract_path, "contract_path").as_posix(),
+    ]
     if not dry_run:
         argv.append("--approved")
     if dry_run:
@@ -616,7 +628,9 @@ def memory_carryover_plan_tool(
         old_base=old_base,
         replace_existing=replace_existing,
     )
-    return run_package_main(operation="memory_carryover_plan", main=carryover.main, argv=["plan", *argv])
+    return run_package_main(
+        operation="memory_carryover_plan", main=carryover.main, argv=["plan", *argv]
+    )
 
 
 def memory_carryover_apply_tool(
@@ -720,8 +734,7 @@ def codex_benchmark_run_tool(
             "executable": "codex",
             "resolution": "PATH",
             "recoveryAction": (
-                "Install the Codex CLI or ensure `codex` is on the MCP server "
-                "process PATH."
+                "Install the Codex CLI or ensure `codex` is on the MCP server process PATH."
             ),
         }
 
@@ -767,7 +780,9 @@ def _repo(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:
         return config.repositories[repo_id]
     except KeyError as error:
         allowed = ", ".join(config.allowed_repo_ids) or "<none>"
-        raise ValueError(f"repo_id {repo_id!r} is not allowed by MCP settings; allowed: {allowed}") from error
+        raise ValueError(
+            f"repo_id {repo_id!r} is not allowed by MCP settings; allowed: {allowed}"
+        ) from error
 
 
 def _coord_path(config: McpRuntimeConfig, value: str, label: str) -> Path:
@@ -814,7 +829,9 @@ def _baseline_common_argv(config: McpRuntimeConfig, repo: RepositoryScope) -> li
     ]
 
 
-def _provider_watchers_once(config: McpRuntimeConfig, action: str, *, dry_run: bool) -> dict[str, Any]:
+def _provider_watchers_once(
+    config: McpRuntimeConfig, action: str, *, dry_run: bool
+) -> dict[str, Any]:
     return _provider_lifecycle_result(
         config,
         operation="provider_watchers",

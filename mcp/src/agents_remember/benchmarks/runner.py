@@ -19,7 +19,6 @@ from typing import Any
 
 from agents_remember.providers import provider_setup
 
-
 AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/coordinator/AGENTS.md"): Path("AGENTS.md"),
     Path("runtime/agents-md-files/system/AGENTS.md"): Path("system/AGENTS.md"),
@@ -81,20 +80,31 @@ def manifest_path_component(value: object, label: str) -> str:
     return path.parts[0]
 
 
-def validate_case_manifest(case: "BenchmarkCase") -> None:
+def validate_case_manifest(case: BenchmarkCase) -> None:
     workspace = case.workspace
     manifest_relative_path(workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath")
-    for key in ("sourceOnlyRoot", "withMemoryRoot", "withOnboardingRoot", "repoRelativePath", "coordinationRoot", "withOnboardingCoordinationRoot"):
+    for key in (
+        "sourceOnlyRoot",
+        "withMemoryRoot",
+        "withOnboardingRoot",
+        "repoRelativePath",
+        "coordinationRoot",
+        "withOnboardingCoordinationRoot",
+    ):
         if key in workspace:
             manifest_relative_path(workspace[key], f"{case.case_id}.workspace.{key}")
     manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
     if case.memory_repository.get("name"):
-        manifest_path_component(case.memory_repository["name"], f"{case.case_id}.memoryRepository.name")
+        manifest_path_component(
+            case.memory_repository["name"], f"{case.case_id}.memoryRepository.name"
+        )
     for prompt in case.prompts:
         prompt_id = prompt.get("id", "<unknown>")
         for variant in prompt.get("variants", []):
             variant_id = variant.get("id", "<unknown>")
-            manifest_relative_path(variant["promptPath"], f"{case.case_id}.{prompt_id}.{variant_id}.promptPath")
+            manifest_relative_path(
+                variant["promptPath"], f"{case.case_id}.{prompt_id}.{variant_id}.promptPath"
+            )
             manifest_relative_path(variant["cwd"], f"{case.case_id}.{prompt_id}.{variant_id}.cwd")
 
 
@@ -163,7 +173,10 @@ def any_provider_enabled(settings: dict[str, Any]) -> bool:
     providers = context.get("providers")
     if not isinstance(providers, dict):
         return False
-    return any(isinstance(provider, dict) and provider.get("enabled") is True for provider in providers.values())
+    return any(
+        isinstance(provider, dict) and provider.get("enabled") is True
+        for provider in providers.values()
+    )
 
 
 def load_cases(benchmarks_root: Path) -> list[BenchmarkCase]:
@@ -181,7 +194,9 @@ def load_cases(benchmarks_root: Path) -> list[BenchmarkCase]:
     return cases
 
 
-def select_cases(cases: list[BenchmarkCase], target: str, case_id: str | None) -> list[BenchmarkCase]:
+def select_cases(
+    cases: list[BenchmarkCase], target: str, case_id: str | None
+) -> list[BenchmarkCase]:
     if target == "all":
         return cases
     if not case_id:
@@ -236,7 +251,9 @@ def render_template(template: str, values: dict[str, str]) -> str:
 def find_runtime_source() -> tuple[str, Path]:
     script_path = Path(__file__).resolve()
     for parent in script_path.parents:
-        if (parent / "runtime" / "skills").is_dir() and (parent / "runtime" / "agents-md-files").is_dir():
+        if (parent / "runtime" / "skills").is_dir() and (
+            parent / "runtime" / "agents-md-files"
+        ).is_dir():
             return "source", parent
     raise RuntimeError("could not locate Agents Remember runtime source")
 
@@ -347,7 +364,9 @@ def sync_provider_assets(root: Path, coordination_root: Path, dry_run: bool) -> 
             copy_tree(source, providers_target / relative, dry_run)
 
 
-def copy_workspace_skill_exposure(workspace_root: Path, coordination_root: Path, dry_run: bool) -> None:
+def copy_workspace_skill_exposure(
+    workspace_root: Path, coordination_root: Path, dry_run: bool
+) -> None:
     install_root = workspace_root / ".agents" / "skills"
     exposure_path = install_root / SKILLS_EXPOSURE_NAMESPACE
     skills_source = coordination_root / "skills"
@@ -385,7 +404,9 @@ def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> N
     subprocess.run(command, cwd=cwd, check=True)
 
 
-def default_cgc_seed_source_coordination_root(benchmarks_root: Path, target_coordination_root: Path) -> Path | None:
+def default_cgc_seed_source_coordination_root(
+    benchmarks_root: Path, target_coordination_root: Path
+) -> Path | None:
     candidates: list[Path] = [benchmarks_root.parent]
     try:
         _mode, root = find_runtime_source()
@@ -434,7 +455,7 @@ def prepare_configured_providers(
         "--json",
     ]
     if cgc_seed_source_coordination_root is not None:
-        command.extend(
+        argv.extend(
             [
                 "--cgc-seed-source-coordination-root",
                 cgc_seed_source_coordination_root.as_posix(),
@@ -468,7 +489,9 @@ def repo_has_commit(repo_root: Path, commit: str) -> bool:
     return result.returncode == 0
 
 
-def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool, force_clone: bool = False) -> None:
+def prepare_repo(
+    repository: dict[str, Any], repo_root: Path, dry_run: bool, force_clone: bool = False
+) -> None:
     url = str(repository["url"])
     commit = str(repository["commit"])
     if dry_run:
@@ -494,7 +517,9 @@ def prepare_repo(repository: dict[str, Any], repo_root: Path, dry_run: bool, for
 
 
 def workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
-    return benchmarks_root / manifest_relative_path(case.workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath")
+    return benchmarks_root / manifest_relative_path(
+        case.workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath"
+    )
 
 
 def source_only_workspace_path(case: BenchmarkCase) -> Path:
@@ -528,7 +553,9 @@ def repository_path(case: BenchmarkCase) -> Path:
 
 
 def coordination_path(case: BenchmarkCase) -> Path:
-    configured = case.workspace.get("coordinationRoot") or case.workspace.get("withOnboardingCoordinationRoot")
+    configured = case.workspace.get("coordinationRoot") or case.workspace.get(
+        "withOnboardingCoordinationRoot"
+    )
     if configured:
         return manifest_relative_path(configured, f"{case.case_id}.workspace.coordinationRoot")
     return Path("ar-coordination")
@@ -602,7 +629,9 @@ def write_benchmark_root_marker(root: Path, dry_run: bool) -> Path:
 
 def benchmark_stable_id(value: str) -> str:
     lowered = value.strip().lower()
-    return "".join(character if character.isalnum() or character in "._-" else "-" for character in lowered).strip(".-_")
+    return "".join(
+        character if character.isalnum() or character in "._-" else "-" for character in lowered
+    ).strip(".-_")
 
 
 def adapt_benchmark_settings(case: BenchmarkCase, coordination_root: Path, dry_run: bool) -> None:
@@ -614,7 +643,9 @@ def adapt_benchmark_settings(case: BenchmarkCase, coordination_root: Path, dry_r
         return
 
     data = load_json(settings_path)
-    repository_name = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    repository_name = manifest_path_component(
+        case.repository["name"], f"{case.case_id}.repository.name"
+    )
     memory_repo = memory_repo_name(case)
 
     memory_repos = data.setdefault("memoryRepos", {})
@@ -637,7 +668,10 @@ def adapt_benchmark_settings(case: BenchmarkCase, coordination_root: Path, dry_r
         target_id = benchmark_stable_id(repository_name)
         if isinstance(roots, list):
             for root in roots:
-                if isinstance(root, dict) and benchmark_stable_id(str(root.get("repoId", ""))) == target_id:
+                if (
+                    isinstance(root, dict)
+                    and benchmark_stable_id(str(root.get("repoId", ""))) == target_id
+                ):
                     selected = dict(root)
                     break
         selected["repoId"] = repository_name
@@ -661,7 +695,9 @@ def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
         remove_path(path)
 
 
-def prepare_memory_repo(case: BenchmarkCase, coordination_root: Path, dry_run: bool, force_clone: bool = False) -> Path:
+def prepare_memory_repo(
+    case: BenchmarkCase, coordination_root: Path, dry_run: bool, force_clone: bool = False
+) -> Path:
     memory_repo = coordination_root / "memory-repos" / memory_repo_name(case)
     memory_repository = case.memory_repository
     if memory_repository:
@@ -704,8 +740,12 @@ def prepare_case(
         coordination_root,
         dry_run,
         provider_timeout,
-        cgc_seed_source_coordination_root=default_cgc_seed_source_coordination_root(benchmarks_root, coordination_root),
-        cgc_seed_repo_id=manifest_path_component(repository["name"], f"{case.case_id}.repository.name"),
+        cgc_seed_source_coordination_root=default_cgc_seed_source_coordination_root(
+            benchmarks_root, coordination_root
+        ),
+        cgc_seed_repo_id=manifest_path_component(
+            repository["name"], f"{case.case_id}.repository.name"
+        ),
     )
 
     if dry_run:
@@ -825,7 +865,10 @@ def run_one(
 
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    with jsonl_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
+    with (
+        jsonl_path.open("w", encoding="utf-8") as stdout,
+        stderr_path.open("w", encoding="utf-8") as stderr,
+    ):
         completed = subprocess.run(
             command,
             input=prompt_text,
@@ -843,7 +886,7 @@ def run_one(
             "variant": variant_id,
             "repetition": repetition,
             "cwd": str(cwd),
-            "command": command + ["<prompt via stdin>"],
+            "command": [*command, "<prompt via stdin>"],
             "durationSeconds": round(duration, 3),
             "exitCode": completed.returncode,
             "finalMessagePath": str(final_message_path),
@@ -1084,7 +1127,9 @@ def summary_markdown(run_root: Path, rows: list[dict[str, Any]]) -> str:
         lines.extend([f"## {prompt} / {variant}", "", "| Metric | Range |", "| --- | --- |"])
         for key in numeric_keys:
             lines.append(f"| {key} | {range_text([row.get(key) for row in group_rows])} |")
-        exit_codes = sorted({str(row.get("exit_code")) for row in group_rows if row.get("exit_code") is not None})
+        exit_codes = sorted(
+            {str(row.get("exit_code")) for row in group_rows if row.get("exit_code") is not None}
+        )
         lines.append(f"| exit_code | {', '.join(exit_codes) if exit_codes else 'n/a'} |")
         lines.append("")
         lines.extend(["| Run | Duration | JSONL Size | Errors |", "| --- | ---: | ---: | --- |"])
@@ -1177,12 +1222,25 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser("list", help="List benchmark cases.")
     list_parser.set_defaults(func=command_list)
 
-    prepare_parser = subparsers.add_parser("prepare", help="Prepare resettable benchmark workspaces.")
+    prepare_parser = subparsers.add_parser(
+        "prepare", help="Prepare resettable benchmark workspaces."
+    )
     prepare_parser.add_argument("target", choices=("all", "case"))
     prepare_parser.add_argument("case_id", nargs="?")
-    prepare_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy")
-    prepare_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts before cloning.")
-    prepare_parser.add_argument("--provider-timeout", type=int, default=1800, help="Seconds allowed for each benchmark provider install/index command.")
+    prepare_parser.add_argument(
+        "--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy"
+    )
+    prepare_parser.add_argument(
+        "--force-clone",
+        action="store_true",
+        help="Discard existing benchmark repository checkouts before cloning.",
+    )
+    prepare_parser.add_argument(
+        "--provider-timeout",
+        type=int,
+        default=1800,
+        help="Seconds allowed for each benchmark provider install/index command.",
+    )
     prepare_parser.add_argument("--dry-run", action="store_true")
     prepare_parser.set_defaults(func=command_prepare)
 
@@ -1191,7 +1249,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("case_id", nargs="?")
     run_parser.add_argument("--prompt", help="Run only one prompt id.")
     run_parser.add_argument("--variant", help="Run only one variant id.")
-    run_parser.add_argument("--repetitions", type=int, help="Override repetitions per prompt variant.")
+    run_parser.add_argument(
+        "--repetitions", type=int, help="Override repetitions per prompt variant."
+    )
     run_parser.add_argument(
         "--jobs",
         type=int,
@@ -1199,13 +1259,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum concurrent Codex runs. Defaults to the number of selected variants.",
     )
     run_parser.add_argument("--dry-run", action="store_true")
-    run_parser.add_argument("--skip-prepare", action="store_true", help="Use the existing workspace fixture state.")
+    run_parser.add_argument(
+        "--skip-prepare", action="store_true", help="Use the existing workspace fixture state."
+    )
     run_parser.add_argument("--skill-exposure-mode", choices=SKILL_EXPOSURE_MODES, default="copy")
-    run_parser.add_argument("--force-clone", action="store_true", help="Discard existing benchmark repository checkouts during preparation.")
-    run_parser.add_argument("--provider-timeout", type=int, default=1800, help="Seconds allowed for each benchmark provider install/index command during preparation.")
+    run_parser.add_argument(
+        "--force-clone",
+        action="store_true",
+        help="Discard existing benchmark repository checkouts during preparation.",
+    )
+    run_parser.add_argument(
+        "--provider-timeout",
+        type=int,
+        default=1800,
+        help="Seconds allowed for each benchmark provider install/index command during preparation.",
+    )
     run_parser.set_defaults(func=command_run)
 
-    analyze_parser = subparsers.add_parser("analyze", help="Analyze an existing user-runs directory.")
+    analyze_parser = subparsers.add_parser(
+        "analyze", help="Analyze an existing user-runs directory."
+    )
     analyze_parser.add_argument("run_root", type=Path)
     analyze_parser.add_argument("--write-summary", action="store_true")
     analyze_parser.set_defaults(func=command_analyze)

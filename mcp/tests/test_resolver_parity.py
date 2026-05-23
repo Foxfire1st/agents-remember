@@ -12,7 +12,7 @@ MCP_ROOT = Path(__file__).resolve().parents[1]
 MCP_SRC = MCP_ROOT / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.worktrees.worktree_contract import (  # noqa: E402
+from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )

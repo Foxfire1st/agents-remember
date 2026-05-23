@@ -13,7 +13,6 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-
 LEDGER_SCHEMA = "ar-memory-ledger/v1"
 LEGACY_LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
 LEDGER_FENCE_RE = re.compile(r"```json\s+ar-memory-ledger\s*\n(.*?)\n```", re.DOTALL)
@@ -64,8 +63,12 @@ def parse_ledger_text(text: str) -> MemoryLedger:
     repo_name = _metadata_get(metadata, "repoName", "repo_name")
     base_code_commit = _metadata_get(metadata, "baseCodeCommit", "base_code_commit")
     base_memory_commit = _metadata_get(metadata, "baseMemoryCommit", "base_memory_commit")
-    last_verified_code_commit = _metadata_get(metadata, "lastVerifiedCodeCommit", "last_verified_code_commit")
-    last_memory_content_commit = _metadata_get(metadata, "lastMemoryContentCommit", "last_memory_content_commit")
+    last_verified_code_commit = _metadata_get(
+        metadata, "lastVerifiedCodeCommit", "last_verified_code_commit"
+    )
+    last_memory_content_commit = _metadata_get(
+        metadata, "lastMemoryContentCommit", "last_memory_content_commit"
+    )
     sort_order = _metadata_get(metadata, "sortOrder", "sort_order")
 
     required = {
@@ -79,7 +82,9 @@ def parse_ledger_text(text: str) -> MemoryLedger:
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
-        raise LedgerError(f"memory.md ledger metadata is missing required fields: {', '.join(missing)}")
+        raise LedgerError(
+            f"memory.md ledger metadata is missing required fields: {', '.join(missing)}"
+        )
     if schema not in {LEDGER_SCHEMA, LEGACY_LEDGER_SCHEMA}:
         raise LedgerError(f"unsupported memory ledger schema: {schema}")
 
@@ -220,14 +225,15 @@ def create_initial_ledger(
     )
 
 
-def find_ledger_anchor_commit(memory_repo: Path, code_commit: str, memory_commit: str) -> str | None:
+def find_ledger_anchor_commit(
+    memory_repo: Path, code_commit: str, memory_commit: str
+) -> str | None:
     row_text = f"| {code_commit} | {memory_commit} |"
     result = subprocess.run(
         ["git", "-C", str(memory_repo), "log", "--format=%H", "-S", row_text, "--", "memory.md"],
         text=True,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if result.returncode != 0:

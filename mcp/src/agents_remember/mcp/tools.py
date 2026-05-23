@@ -10,8 +10,8 @@ from agents_remember.controllers.runtime_install import (
     run_runtime_install,
 )
 from agents_remember.controllers.skill_tools import (
-    cgc_callers_tool,
     cgc_callees_tool,
+    cgc_callers_tool,
     cgc_complexity_tool,
     cgc_dependencies_tool,
     cgc_symbol_search_tool,
@@ -105,9 +105,7 @@ def server_info_payload(config: McpRuntimeConfig) -> dict[str, Any]:
         "workspaceRoot": config.workspace_root.as_posix(),
         "transcriptRoot": config.transcript_root.as_posix(),
         "harnessSkillRoot": (
-            config.harness_skill_root.as_posix()
-            if config.harness_skill_root
-            else None
+            config.harness_skill_root.as_posix() if config.harness_skill_root else None
         ),
         "allowedRepoIds": list(config.allowed_repo_ids),
         "allowedProviderIds": list(config.allowed_provider_ids),
