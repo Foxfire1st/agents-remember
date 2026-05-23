@@ -19,7 +19,11 @@ from agents_remember.mcp.config import load_config  # noqa: E402
 from agents_remember.mcp.server import create_server  # noqa: E402
 from agents_remember.mcp.tools import (  # noqa: E402
     PUBLIC_TOOLS,
-    cgc_query_payload,
+    cgc_callers_payload,
+    cgc_callees_payload,
+    cgc_complexity_payload,
+    cgc_dependencies_payload,
+    cgc_symbol_search_payload,
     context_packet_payload,
     codex_benchmark_run_payload,
     memory_init_payload,
@@ -139,7 +143,11 @@ class McpToolTests(unittest.TestCase):
             "provider_status",
             "grepai_search",
             "grepai_trace",
-            "cgc_query",
+            "cgc_symbol_search",
+            "cgc_callers",
+            "cgc_callees",
+            "cgc_dependencies",
+            "cgc_complexity",
             "provider_watchers",
             "cgc_visualize",
             "worktree_start",
@@ -159,6 +167,7 @@ class McpToolTests(unittest.TestCase):
             "codex_benchmark_run",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
+        self.assertNotIn("cgc_query", PUBLIC_TOOLS)
         self.assertNotIn("benchmark_prepare", PUBLIC_TOOLS)
         self.assertNotIn("benchmark_run", PUBLIC_TOOLS)
 
@@ -276,7 +285,82 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["dryRun"])
             self.assertEqual(payload["routes"], 0)
 
-    def test_cgc_query_payload_rejects_unknown_repo_before_provider_execution(self) -> None:
+    def test_typed_cgc_payloads_build_fixed_native_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with patch(
+                "agents_remember.providers.lifecycle_service.provider_lifecycle.main",
+                side_effect=AssertionError("MCP provider tools must use lifecycle services"),
+            ):
+                cases = [
+                    (
+                        cgc_symbol_search_payload(
+                            config,
+                            "agents-remember-md",
+                            "resolve_context",
+                        ),
+                        ["find", "name", "resolve_context"],
+                    ),
+                    (
+                        cgc_callers_payload(
+                            config,
+                            "agents-remember-md",
+                            "resolve_context",
+                            file="mcp/src/agents_remember/mcp/tools.py",
+                        ),
+                        [
+                            "analyze",
+                            "callers",
+                            "resolve_context",
+                            "--file",
+                            "mcp/src/agents_remember/mcp/tools.py",
+                        ],
+                    ),
+                    (
+                        cgc_callees_payload(
+                            config,
+                            "agents-remember-md",
+                            "resolve_context",
+                        ),
+                        ["analyze", "calls", "resolve_context"],
+                    ),
+                    (
+                        cgc_dependencies_payload(
+                            config,
+                            "agents-remember-md",
+                            "agents_remember.mcp",
+                        ),
+                        ["analyze", "dependencies", "agents_remember.mcp"],
+                    ),
+                    (
+                        cgc_complexity_payload(
+                            config,
+                            "agents-remember-md",
+                            function="resolve_context",
+                        ),
+                        ["analyze", "complexity", "resolve_context"],
+                    ),
+                    (
+                        cgc_complexity_payload(config, "agents-remember-md"),
+                        ["analyze", "complexity"],
+                    ),
+                ]
+
+            for payload, expected_native_args in cases:
+                with self.subTest(expected_native_args=expected_native_args):
+                    self.assertTrue(payload["ok"])
+                    self.assertEqual(
+                        payload["command"][-len(expected_native_args) :],
+                        expected_native_args,
+                    )
+                    self.assertNotIn("argv", payload)
+
+    def test_typed_cgc_payloads_reject_invalid_inputs_before_provider_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             path = root / "mcp-settings.json"
@@ -284,7 +368,9 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with self.assertRaisesRegex(ValueError, "not allowed"):
-                cgc_query_payload(config, "other-repo", "deps")
+                cgc_callers_payload(config, "other-repo", "resolve_context")
+            with self.assertRaisesRegex(ValueError, "function"):
+                cgc_callees_payload(config, "agents-remember-md", "")
 
 
 def initialize_context_fixture(root: Path) -> None:

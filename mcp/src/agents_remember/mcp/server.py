@@ -7,7 +7,11 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import ConfigError, McpRuntimeConfig, load_config
 from .tools import (
-    cgc_query_payload,
+    cgc_callers_payload,
+    cgc_callees_payload,
+    cgc_complexity_payload,
+    cgc_dependencies_payload,
+    cgc_symbol_search_payload,
     cgc_visualize_payload,
     codex_benchmark_prepare_payload,
     codex_benchmark_run_payload,
@@ -155,18 +159,78 @@ def create_server(config: McpRuntimeConfig) -> Any:
         return grepai_trace_payload(config, query, dry_run=dry_run, timeout=timeout)
 
     @server.tool()
-    def cgc_query(
+    def cgc_symbol_search(
         repo_id: str,
-        query_type: str,
-        arguments: list[str] | None = None,
+        name: str,
         dry_run: bool = True,
         timeout: int | None = None,
     ) -> dict[str, Any]:
-        return cgc_query_payload(
+        return cgc_symbol_search_payload(
             config,
             repo_id,
-            query_type,
-            arguments=arguments,
+            name,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
+
+    @server.tool()
+    def cgc_callers(
+        repo_id: str,
+        function: str,
+        file: str | None = None,
+        dry_run: bool = True,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        return cgc_callers_payload(
+            config,
+            repo_id,
+            function,
+            file=file,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
+
+    @server.tool()
+    def cgc_callees(
+        repo_id: str,
+        function: str,
+        dry_run: bool = True,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        return cgc_callees_payload(
+            config,
+            repo_id,
+            function,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
+
+    @server.tool()
+    def cgc_dependencies(
+        repo_id: str,
+        module: str,
+        dry_run: bool = True,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        return cgc_dependencies_payload(
+            config,
+            repo_id,
+            module,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
+
+    @server.tool()
+    def cgc_complexity(
+        repo_id: str,
+        function: str | None = None,
+        dry_run: bool = True,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        return cgc_complexity_payload(
+            config,
+            repo_id,
+            function=function,
             dry_run=dry_run,
             timeout=timeout,
         )

@@ -10,7 +10,11 @@ from agents_remember.controllers.runtime_install import (
     run_runtime_install,
 )
 from agents_remember.controllers.skill_tools import (
-    cgc_query_tool,
+    cgc_callers_tool,
+    cgc_callees_tool,
+    cgc_complexity_tool,
+    cgc_dependencies_tool,
+    cgc_symbol_search_tool,
     cgc_visualize_tool,
     codex_benchmark_prepare_tool,
     codex_benchmark_run_tool,
@@ -55,7 +59,11 @@ PUBLIC_TOOLS = (
     "provider_status",
     "grepai_search",
     "grepai_trace",
-    "cgc_query",
+    "cgc_symbol_search",
+    "cgc_callers",
+    "cgc_callees",
+    "cgc_dependencies",
+    "cgc_complexity",
     "provider_watchers",
     "cgc_visualize",
     "worktree_start",
@@ -244,20 +252,88 @@ def grepai_trace_payload(
     return grepai_trace_tool(config, query=query, dry_run=dry_run, timeout=timeout)
 
 
-def cgc_query_payload(
+def cgc_symbol_search_payload(
     config: McpRuntimeConfig,
     repo_id: str,
-    query_type: str,
+    name: str,
     *,
-    arguments: list[str] | None = None,
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_query_tool(
+    return cgc_symbol_search_tool(
         config,
         repo_id=repo_id,
-        query_type=query_type,
-        arguments=arguments,
+        name=name,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_callers_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    function: str,
+    *,
+    file: str | None = None,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    return cgc_callers_tool(
+        config,
+        repo_id=repo_id,
+        function=function,
+        file=file,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_callees_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    function: str,
+    *,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    return cgc_callees_tool(
+        config,
+        repo_id=repo_id,
+        function=function,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_dependencies_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    module: str,
+    *,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    return cgc_dependencies_tool(
+        config,
+        repo_id=repo_id,
+        module=module,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_complexity_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    *,
+    function: str | None = None,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    return cgc_complexity_tool(
+        config,
+        repo_id=repo_id,
+        function=function,
         dry_run=dry_run,
         timeout=timeout,
     )

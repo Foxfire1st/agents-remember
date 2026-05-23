@@ -13,6 +13,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import provider_lifecycle  # noqa: E402
+from agents_remember.providers import lifecycle_service  # noqa: E402
 
 
 class ProviderLifecycleRenderTests(unittest.TestCase):
@@ -108,6 +109,48 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             args.runtime_root = args.runtime_root.resolve()
         return args
 
+    def service_config(self, root: Path) -> lifecycle_service.ProviderLifecycleServiceConfig:
+        coordination_root = root / "coordination"
+        repo = root / "workspace" / "repo-a"
+        memory = coordination_root / "memory-repos" / "memory-a"
+        repo.mkdir(parents=True)
+        memory.mkdir(parents=True)
+        settings_path = root / "lifecycle-settings.json"
+        provider_lifecycle.write_json(
+            settings_path,
+            {
+                "contextProviders": {
+                    "enabled": True,
+                    "providers": {
+                        "codegraphcontext-code": {
+                            "enabled": True,
+                            "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
+                            "instanceRootTemplate": "<runtimeRoot>/<repoId>",
+                            "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
+                            "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
+                            "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
+                            "roots": [{"repoId": "repo-a", "path": repo.as_posix()}],
+                            "backend": {
+                                "runtimeRoot": "<coordination_root>/providers/data/codegraphcontext/falkordb",
+                                "dataRoot": "<backendRuntimeRoot>/data",
+                            },
+                        },
+                        "grepai-memory": {
+                            "enabled": True,
+                            "runtimeRoot": "<coordination_root>/providers/runners/grepai",
+                            "roots": [{"projectId": "memory-a", "path": memory.as_posix()}],
+                        },
+                    },
+                }
+            },
+        )
+        return lifecycle_service.ProviderLifecycleServiceConfig(
+            coordination_root=coordination_root,
+            settings_path=settings_path,
+            dry_run=True,
+            timeout=1,
+        )
+
     def test_visualize_accepts_named_options_after_subcommand(self) -> None:
         args = self.parse_cgc(
             [
@@ -201,6 +244,36 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertEqual(result["command"][1:4], ["search", "provider lifecycle", "--workspace"])
         self.assertEqual(result["cwd"], runtime_root.resolve().as_posix())
         self.assertIn("HOME", result["env"])
+
+    def test_cgc_service_run_builds_command_without_cli_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+
+            result = lifecycle_service.run_cgc_lifecycle(
+                service_config,
+                action="run",
+                repo_id="repo-a",
+                native_args=["find", "name", "Token"],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], "codegraphcontext")
+        self.assertEqual(result["action"], "run")
+        self.assertEqual(result["command"][-3:], ["find", "name", "Token"])
+
+    def test_watchers_service_reads_settings_without_cli_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+
+            result = lifecycle_service.run_watchers_lifecycle(
+                service_config,
+                action="status",
+            )
+
+        self.assertEqual(result["provider"], "watchers")
+        self.assertEqual(result["action"], "status")
+        self.assertTrue(result["enabled"]["codegraphcontext-code"])
+        self.assertTrue(result["enabled"]["grepai-memory"])
 
     def test_grepai_run_rejects_watcher_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

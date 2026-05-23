@@ -18,7 +18,7 @@ from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.mcp.command_capture import run_package_main
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope, path_is_relative_to
 from agents_remember.memory import baseline, carryover
-from agents_remember.providers import provider_lifecycle
+from agents_remember.providers import lifecycle_service
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.providers.status import provider_status_packet
 from agents_remember.worktrees import git_worktree_manager
@@ -178,14 +178,16 @@ def grepai_search_tool(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return _provider_main(
+    return _provider_lifecycle_result(
         config,
         operation="grepai_search",
-        provider="grepai",
-        action="run",
         dry_run=dry_run,
         timeout=timeout,
-        extra=["--lifecycle-json", "--", "search", query],
+        run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
+            service_config,
+            action="run",
+            native_args=["search", query],
+        ),
     )
 
 
@@ -196,37 +198,113 @@ def grepai_trace_tool(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return _provider_main(
+    return _provider_lifecycle_result(
         config,
         operation="grepai_trace",
-        provider="grepai",
-        action="run",
         dry_run=dry_run,
         timeout=timeout,
-        extra=["--lifecycle-json", "--", "trace", query],
+        run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
+            service_config,
+            action="run",
+            native_args=["trace", query],
+        ),
     )
 
 
-def cgc_query_tool(
+def cgc_symbol_search_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
-    query_type: str,
-    arguments: list[str] | None = None,
+    name: str,
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    _repo(config, repo_id)
-    native_args = [query_type, *(arguments or [])]
-    return _provider_main(
+    return _cgc_run_tool(
         config,
-        operation="cgc_query",
-        provider="cgc",
-        action="run",
+        operation="cgc_symbol_search",
         repo_id=repo_id,
+        native_args=["find", "name", _required_text(name, "name")],
         dry_run=dry_run,
         timeout=timeout,
-        extra=["--lifecycle-json", "--", *native_args],
+    )
+
+
+def cgc_callers_tool(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    function: str,
+    file: str | None = None,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    native_args = ["analyze", "callers", _required_text(function, "function")]
+    if file:
+        native_args.extend(["--file", _required_text(file, "file")])
+    return _cgc_run_tool(
+        config,
+        operation="cgc_callers",
+        repo_id=repo_id,
+        native_args=native_args,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_callees_tool(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    function: str,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    return _cgc_run_tool(
+        config,
+        operation="cgc_callees",
+        repo_id=repo_id,
+        native_args=["analyze", "calls", _required_text(function, "function")],
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_dependencies_tool(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    module: str,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    return _cgc_run_tool(
+        config,
+        operation="cgc_dependencies",
+        repo_id=repo_id,
+        native_args=["analyze", "dependencies", _required_text(module, "module")],
+        dry_run=dry_run,
+        timeout=timeout,
+    )
+
+
+def cgc_complexity_tool(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    function: str | None = None,
+    dry_run: bool = True,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    native_args = ["analyze", "complexity"]
+    if function:
+        native_args.append(_required_text(function, "function"))
+    return _cgc_run_tool(
+        config,
+        operation="cgc_complexity",
+        repo_id=repo_id,
+        native_args=native_args,
+        dry_run=dry_run,
+        timeout=timeout,
     )
 
 
@@ -240,19 +318,49 @@ def cgc_visualize_tool(
     timeout: int | None = None,
 ) -> dict[str, Any]:
     _repo(config, repo_id)
-    extra = ["--port", str(port)]
-    if context:
-        extra.extend(["--context", context])
-    return _provider_main(
+    return _provider_lifecycle_result(
         config,
         operation="cgc_visualize",
-        provider="cgc",
-        action="visualize",
-        repo_id=repo_id,
         dry_run=dry_run,
         timeout=timeout,
-        extra=extra,
+        run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
+            service_config,
+            action="visualize",
+            repo_id=repo_id,
+            port=port,
+            context=context,
+        ),
     )
+
+
+def _cgc_run_tool(
+    config: McpRuntimeConfig,
+    *,
+    operation: str,
+    repo_id: str,
+    native_args: list[str],
+    dry_run: bool,
+    timeout: int | None,
+) -> dict[str, Any]:
+    _repo(config, repo_id)
+    return _provider_lifecycle_result(
+        config,
+        operation=operation,
+        dry_run=dry_run,
+        timeout=timeout,
+        run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
+            service_config,
+            action="run",
+            repo_id=repo_id,
+            native_args=native_args,
+        ),
+    )
+
+
+def _required_text(value: str, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty string")
+    return value
 
 
 def worktree_start_tool(
@@ -707,50 +815,44 @@ def _baseline_common_argv(config: McpRuntimeConfig, repo: RepositoryScope) -> li
 
 
 def _provider_watchers_once(config: McpRuntimeConfig, action: str, *, dry_run: bool) -> dict[str, Any]:
-    settings_path = write_lifecycle_settings(config)
-    try:
-        argv = [
-            "watchers",
-            action,
-            "--coordination-root",
-            config.coordination_root.as_posix(),
-            "--from-settings",
-            settings_path.as_posix(),
-            "--timeout",
-            str(config.timeout_caps.get("providerSeconds", 120)),
-            "--json",
-        ]
-        if dry_run:
-            argv.append("--dry-run")
-        return run_package_main(
-            operation="provider_watchers",
-            main=provider_lifecycle.main,
-            argv=argv,
-        )
-    finally:
-        settings_path.unlink(missing_ok=True)
+    return _provider_lifecycle_result(
+        config,
+        operation="provider_watchers",
+        dry_run=dry_run,
+        timeout=None,
+        run=lambda service_config: lifecycle_service.run_watchers_lifecycle(
+            service_config,
+            action=action,
+        ),
+    )
 
 
 def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     if "grepai-memory" in config.providers:
         steps.append(
-            _provider_main(
+            _provider_lifecycle_result(
                 config,
                 operation="provider_watchers",
-                provider="grepai",
-                action="refresh",
                 dry_run=dry_run,
+                timeout=None,
+                run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
+                    service_config,
+                    action="refresh",
+                ),
             )
         )
     if "codegraphcontext-code" in config.providers:
         steps.append(
-            _provider_main(
+            _provider_lifecycle_result(
                 config,
                 operation="provider_watchers",
-                provider="cgc",
-                action="refresh-all",
                 dry_run=dry_run,
+                timeout=None,
+                run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
+                    service_config,
+                    action="refresh-all",
+                ),
             )
         )
     return {
@@ -761,36 +863,24 @@ def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, A
     }
 
 
-def _provider_main(
+def _provider_lifecycle_result(
     config: McpRuntimeConfig,
     *,
     operation: str,
-    provider: str,
-    action: str,
-    repo_id: str | None = None,
     dry_run: bool = True,
     timeout: int | None = None,
-    extra: list[str] | None = None,
+    run: Any,
 ) -> dict[str, Any]:
     settings_path = write_lifecycle_settings(config)
     try:
-        argv = [
-            provider,
-            action,
-            "--coordination-root",
-            config.coordination_root.as_posix(),
-            "--from-settings",
-            settings_path.as_posix(),
-            "--timeout",
-            str(timeout or config.timeout_caps.get("providerSeconds", 120)),
-            "--json",
-        ]
-        if repo_id:
-            argv.extend(["--repo-id", repo_id])
-        if dry_run:
-            argv.append("--dry-run")
-        argv.extend(extra or [])
-        return run_package_main(operation=operation, main=provider_lifecycle.main, argv=argv)
+        service_config = lifecycle_service.ProviderLifecycleServiceConfig(
+            coordination_root=config.coordination_root,
+            settings_path=settings_path,
+            dry_run=dry_run,
+            timeout=timeout or config.timeout_caps.get("providerSeconds", 120),
+        )
+        data = run(service_config)
+        return {"operation": operation, "ok": bool(data.get("ok")), **data}
     finally:
         settings_path.unlink(missing_ok=True)
 

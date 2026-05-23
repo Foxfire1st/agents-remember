@@ -1,49 +1,78 @@
 # CodeGraphContext High-Level Methods
 
-This reference explains the high-level `cgc analyze ...` commands an agent can
-use after the `Relationship` substrate is selected. Examples are synthetic and
-show response shapes only. Do not copy private repository names, symbols, or
-paths into training-style examples.
+This reference explains the typed CodeGraphContext tools an agent can request
+after the `Relationship` substrate is selected. Examples are synthetic and show
+response shapes only. Do not copy private repository names, symbols, or paths
+into training-style examples.
 
 Request CGC through the Agents Remember MCP provider tools:
 
 ```text
-cgc_query(repo_id="<repoId>", query_type="<cgc command>", arguments=[...], dry_run=false)
+cgc_symbol_search(repo_id="<repoId>", name="<symbol>", dry_run=false)
+cgc_callers(repo_id="<repoId>", function="<function>", file="<optional path>", dry_run=false)
+cgc_callees(repo_id="<repoId>", function="<function>", dry_run=false)
+cgc_dependencies(repo_id="<repoId>", module="<module>", dry_run=false)
+cgc_complexity(repo_id="<repoId>", function="<optional function>", dry_run=false)
+cgc_visualize(repo_id="<repoId>", port=8000, dry_run=false)
 ```
 
 Provider authority comes from MCP settings. It does not come from coordinator
-`system/settings.json`.
+`system/settings.json`. The MCP intentionally exposes typed CGC operations
+instead of a generic native CLI pass-through.
 
-CGC is not just a locator. `find name <anchor>` is a useful smoke test, but the
-high-level methods below expose call edges, reverse call edges, import
-neighborhoods, inheritance, complexity, unused-code candidates, method
-implementations, and variable occurrences.
+CGC is not just a locator. `cgc_symbol_search` is a useful smoke test, but the
+relationship tools expose call edges, reverse call edges, import neighborhoods,
+and complexity signals.
 
 ## Choosing A Method
 
-| Question | Method |
-| --- | --- |
-| What does this function/method call? | `analyze calls <function> --file <path>` |
-| Who calls this function/method? | `analyze callers <function> --file <path>` |
-| Is there a path from one function to another? | `analyze chain <from> <to> --from-file <path> --to-file <path> --depth <n>` |
-| Which files import this module string? | `analyze deps <module-name> --no-external` |
-| What does this class inherit from, and what methods are attached to it? | `analyze tree <class> --file <path>` |
-| Which functions are most complex? | `analyze complexity --limit <n>` |
-| Which functions look unused? | `analyze dead-code` |
-| Which classes implement this method name? | `analyze overrides <method>` |
-| Where does this variable name appear? | `analyze variable <name> --file <path>` |
-| Are Kotlin call edges ambiguous? | `analyze kotlin-call-audit --limit <n>` |
+| Question | MCP Tool | Native CGC Operation |
+| --- | --- | --- |
+| Where is this symbol? | `cgc_symbol_search` | `find name <name>` |
+| What does this function/method call? | `cgc_callees` | `analyze calls <function>` |
+| Who calls this function/method? | `cgc_callers` | `analyze callers <function>` |
+| Which files import this module string? | `cgc_dependencies` | `analyze dependencies <module>` |
+| Which functions are most complex? | `cgc_complexity` | `analyze complexity [function]` |
+| Do I need the interactive graph view? | `cgc_visualize` | `visualize` |
 
-## Calls
+CGC has additional native operations, but they are not public MCP tools right
+now. Do not ask for removed generic `cgc_query` behavior or arbitrary native
+argument lists. If an uncovered CGC operation is needed for real work, ask the
+developer to add a typed MCP tool for that operation.
 
-Use `calls` when the anchor function is known and the missing packet is what it
-invokes next.
+## Symbol Search
+
+Use `cgc_symbol_search` when the anchor name is known and the missing packet is
+where the symbol exists.
 
 ```text
-cgc_query(
+cgc_symbol_search(
   repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["calls", "handleRequest", "--file", "<repo>/src/http/request-handler.ts"],
+  name="dispatchCommand",
+  dry_run=false,
+)
+```
+
+Synthetic output shape:
+
+```text
+Found 2 result(s) for name 'dispatchCommand':
+Function dispatchCommand <repo>/src/app/command-router.ts:77
+Function dispatchCommand <repo>/src/tests/command-router.test.ts:14
+```
+
+Use this to locate candidate anchors, then use a relationship tool or source
+read before editing.
+
+## Callees
+
+Use `cgc_callees` when the anchor function is known and the missing packet is
+what it invokes next.
+
+```text
+cgc_callees(
+  repo_id="<repoId>",
+  function="handleRequest",
   dry_run=false,
 )
 ```
@@ -61,19 +90,20 @@ serializeResponse    <repo>/src/http/response.ts:31            Project
 Total: 4 function(s)
 ```
 
-Use this to jump from an entry point into the immediate downstream behavior.
+Use this to jump from an entry point into immediate downstream behavior.
 Confirm any selected target with source before editing.
 
 ## Callers
 
-Use `callers` when the anchor function is known and the missing packet is who
-can reach it.
+Use `cgc_callers` when the anchor function is known and the missing packet is
+who can reach it. Pass `file` when the function name is common, overloaded, or
+implemented in many places.
 
 ```text
-cgc_query(
+cgc_callers(
   repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["callers", "dispatchCommand", "--file", "<repo>/src/app/command-router.ts"],
+  function="dispatchCommand",
+  file="<repo>/src/app/command-router.ts",
   dry_run=false,
 )
 ```
@@ -93,56 +123,17 @@ Total: 3 caller(s)
 Use this for blast-radius checks, entry-point discovery, and regression-risk
 triage.
 
-## Chain
-
-Use `chain` to prove whether one known function can reach another through call
-edges.
-
-```text
-cgc_query(
-  repo_id="<repoId>",
-  query_type="analyze",
-  arguments=[
-    "chain",
-    "handleRequest",
-    "saveAuditEvent",
-    "--from-file",
-    "<repo>/src/http/request-handler.ts",
-    "--to-file",
-    "<repo>/src/audit/audit-store.ts",
-    "--depth",
-    "3",
-  ],
-  dry_run=false,
-)
-```
-
-Synthetic output shape:
-
-```text
-Call Chain #1 (length: 2):
-handleRequest (<repo>/src/http/request-handler.ts:20)
-  calls at line 27
-  dispatchCommand (<repo>/src/app/command-router.ts:77)
-    calls at line 83
-    saveAuditEvent (<repo>/src/audit/audit-store.ts:14)
-```
-
-Use this when a fix might affect an indirect path or when a bug report names
-two separate symbols.
-
 ## Dependencies
 
-Use `deps` to ask which files import a module string. It expects the import name
-recorded by CGC, not necessarily a file path. If a file-path query returns no
-data, inspect a few `IMPORTS` edges or source imports and retry with the module
+Use `cgc_dependencies` to ask which files import a module string. It expects
+the import name recorded by CGC, not necessarily a file path. If a file-path
+query returns no data, inspect a few source imports and retry with the module
 string.
 
 ```text
-cgc_query(
+cgc_dependencies(
   repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["deps", "../shared/validation", "--no-external"],
+  module="../shared/validation",
   dry_run=false,
 )
 ```
@@ -159,49 +150,16 @@ Files that import '../shared/validation':
 
 Use this for module impact checks and import-neighborhood discovery.
 
-## Tree
-
-Use `tree` for class inheritance and attached methods.
-
-```text
-cgc_query(
-  repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["tree", "CachedRepository", "--file", "<repo>/src/storage/cached-repository.ts"],
-  dry_run=false,
-)
-```
-
-Synthetic output shape:
-
-```text
-Class Hierarchy for 'CachedRepository':
-
-Parents (inherits from):
-  BaseRepository (<repo>/src/storage/base-repository.ts:12)
-
-Children (classes that inherit from this):
-  UserRepository (<repo>/src/users/user-repository.ts:18)
-
-Methods (4):
-  get(None)
-  set(None)
-  invalidate(None)
-  refresh(None)
-```
-
-Use this before modifying class contracts, inherited behavior, or polymorphic
-call sites.
-
 ## Complexity
 
-Use `complexity` to identify large or risky functions before changing a route.
+Use `cgc_complexity` to identify large or risky functions before changing a
+route. Pass `function` for a specific function or omit it for the broader
+complexity report.
 
 ```text
-cgc_query(
+cgc_complexity(
   repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["complexity", "--limit", "5"],
+  function="renderDashboard",
   dry_run=false,
 )
 ```
@@ -209,134 +167,20 @@ cgc_query(
 Synthetic output shape:
 
 ```text
-Most Complex Functions (threshold: 10):
 Function             Complexity  Location
 renderDashboard              42  <repo>/src/ui/dashboard.tsx:88
-buildReport                  37  <repo>/src/reports/report-builder.ts:114
-syncExternalState            31  <repo>/src/sync/state-sync.ts:57
-applyPolicyRules             24  <repo>/src/policy/rule-engine.ts:33
-normalizePayload             18  <repo>/src/http/payload.ts:21
-
-5 function(s) exceed threshold
 ```
 
 Use this to decide where source confirmation needs extra care.
 
-## Dead Code
-
-Use `dead-code` for candidates that have no incoming CGC call edges. Treat the
-result as a prompt for source confirmation, because dynamic callbacks,
-framework entry points, event handlers, and reflection can look unused.
-
-```text
-cgc_query(repo_id="<repoId>", query_type="analyze", arguments=["dead-code"], dry_run=false)
-```
-
-Synthetic output shape:
-
-```text
-Potentially Unused Functions:
-legacyTransform       <repo>/src/legacy/transform.ts:19
-debugRender           <repo>/src/ui/debug-panel.ts:44
-handleResize          <repo>/src/ui/layout.ts:72
-cleanupTempFiles      <repo>/src/jobs/cleanup.ts:28
-
-Total: 4 function(s)
-Note: These functions might be unused, but could be entry points, callbacks, or called dynamically
-```
-
-Use this for cleanup investigation, not as deletion proof.
-
-## Overrides
-
-Use `overrides` to find all class implementations of a method name.
-
-```text
-cgc_query(repo_id="<repoId>", query_type="analyze", arguments=["overrides", "serialize"], dry_run=false)
-```
-
-Synthetic output shape:
-
-```text
-Found 4 implementation(s) of 'serialize':
-Class                 Function    Location
-JsonSerializer        serialize   <repo>/src/serialization/json.ts:15
-XmlSerializer         serialize   <repo>/src/serialization/xml.ts:18
-EventSerializer       serialize   <repo>/src/events/event-serializer.ts:22
-ReportSerializer      serialize   <repo>/src/reports/report-serializer.ts:41
-```
-
-Use this before changing method contracts or shared serialization behavior.
-
-## Variable
-
-Use `variable` to find occurrences of a variable name, optionally limited to a
-file.
-
-```text
-cgc_query(
-  repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["variable", "requestId", "--file", "<repo>/src/http/request-handler.ts"],
-  dry_run=false,
-)
-```
-
-Synthetic output shape:
-
-```text
-Variable 'requestId' Usage Analysis:
-
-MODULE Scope (3 instance(s)):
-Location
-<repo>/src/http/request-handler.ts:12
-<repo>/src/http/request-handler.ts:26
-<repo>/src/http/request-handler.ts:41
-
-Total: 3 instance(s) across 1 scope type(s)
-```
-
-Use this for local data-flow orientation, then read the source around each
-selected occurrence.
-
-## Kotlin Call Audit
-
-Use `kotlin-call-audit` only for repositories with Kotlin code. It reports
-multi-target callsite ambiguity in Kotlin call edges.
-
-```text
-cgc_query(
-  repo_id="<repoId>",
-  query_type="analyze",
-  arguments=["kotlin-call-audit", "--limit", "10"],
-  dry_run=false,
-)
-```
-
-Synthetic output shape for a non-Kotlin repo:
-
-```text
-Kotlin CALLS ambiguity audit
-Metric                    Value
-Kotlin fn->fn CALLS edges 0
-Ambiguous groups          0
-Ambiguous edges           0
-
-No ambiguous Kotlin call groups found.
-```
-
-If the repository has no Kotlin nodes, this method is a coverage check rather
-than a relationship-retrieval tool.
-
 ## Practical Rules
 
-- Use `find name <anchor>` only to locate a candidate symbol. Use `analyze ...`
-  to understand relationships.
-- Pass `--file` when a symbol name is common, overloaded, or implemented in many
-  places.
-- For impact and regression checks, prefer `calls`, `callers`, `chain`, and
-  `deps`.
-- For risk triage, prefer `complexity`.
-- For object contracts, prefer `tree` and `overrides`.
+- Use `cgc_symbol_search` only to locate candidate symbols. Use typed
+  relationship tools to understand connections.
+- Pass `file` to `cgc_callers` when a symbol name is common, overloaded, or
+  implemented in many places.
+- For impact and regression checks, prefer `cgc_callees`, `cgc_callers`, and
+  `cgc_dependencies`.
+- For risk triage, prefer `cgc_complexity`.
 - Treat CGC output as discovery, not proof. Use bounded source reads to confirm
   any contract or edit direction before changing code.
