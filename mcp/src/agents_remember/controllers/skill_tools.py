@@ -736,6 +736,7 @@ def codex_benchmark_run_tool(
     force_clone: bool = False,
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
+    codex_sandbox: str = benchmark_runner.CODEX_BENCHMARK_SANDBOX,
 ) -> dict[str, Any]:
     try:
         codex_executable = benchmark_runner.resolve_codex_executable()
@@ -744,8 +745,11 @@ def codex_benchmark_run_tool(
             "ok": False,
             "operation": "codex_benchmark_run",
             "error": str(error),
-            "executable": "codex",
-            "resolution": "PATH",
+            "codexExecutionPolicy": benchmark_runner.codex_execution_policy(
+                codex_sandbox=codex_sandbox,
+            ),
+            "executable": benchmark_runner.CODEX_EXECUTABLE_NAME,
+            "resolution": benchmark_runner.CODEX_EXECUTABLE_RESOLUTION,
             "recoveryAction": (
                 "Install the Codex CLI or ensure `codex` is on the MCP server process PATH."
             ),
@@ -765,6 +769,7 @@ def codex_benchmark_run_tool(
             skill_exposure_mode=skill_exposure_mode,
             force_clone=force_clone,
             provider_timeout=provider_timeout,
+            codex_sandbox=codex_sandbox,
         )
     )
     result["codexExecutable"] = codex_executable

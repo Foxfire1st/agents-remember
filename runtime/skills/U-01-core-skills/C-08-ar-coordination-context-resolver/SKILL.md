@@ -14,7 +14,7 @@ In the normal workflow, pass the code repository name. C-08 decides whether that
 - `code_repository_name`: name of the code repository being worked on. This is the normal input.
 - `workspace_root`: optional workspace root used to find `code_repository_name` when the caller is not already in the workspace root.
 - `requested_topology`: optional `internal` or `external` override for repair or explicit external-memory operations.
-- `coordination_root`: optional coordination-root hint. Normal resolution uses explicit input first, then `agents-remember-md/.env`, then the built-in default `../ar-coordination`. `.env.example` is documentation only and is not runtime input.
+- `coordination_root`: optional coordination-root hint. Normal installed resolution uses MCP settings. Package-local resolver calls use explicit input first, then the installed runtime root when invoked from an installed coordinator, then the built-in source-development default `../ar-coordination`.
 - `settings_path`: optional override for repair cases.
 - `onboarding_root`: optional override when a caller has already resolved the repository onboarding root.
 - `code_repository_root`: optional root directory of the code repository for callers that already have the path. This does not replace `code_repository_name` as the normal agent-facing contract.
@@ -56,7 +56,7 @@ The resolver returns one coordination context for the target repository:
 
 1. If `onboarding_root` is supplied, treat it as an explicit override only when it points under a supported memory location: `<code-repository-root>/ar-memory/onboarding` or `<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding`.
 2. If a worktree contract path is supplied, use the contract's `coordination_root` before validating memory so task worktrees resolve against their own coordinator.
-3. Resolve the coordinator from explicit `coordination_root`, `agents-remember-md/.env`, or the built-in default `../ar-coordination`.
+3. Resolve the coordinator from explicit `coordination_root`, the installed runtime root when invoked from an installed coordinator, or the built-in source-development default `../ar-coordination`.
 4. If `requested_topology` is `internal`, require `<code-repository-root>/ar-memory/` to exist and use it as `memory_root`.
 5. If `requested_topology` is `external`, require `<coordination-root>/memory-repos/ar-<code-repository-name>/` to exist and use it as `memory_root`.
 6. If no topology override is supplied, check `<code-repository-root>/ar-memory/` first, then `<coordination-root>/memory-repos/ar-<code-repository-name>/`.

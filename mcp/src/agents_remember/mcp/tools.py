@@ -653,6 +653,7 @@ def codex_benchmark_run_payload(
     force_clone: bool = False,
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
+    codex_sandbox: str = "danger-full-access",
 ) -> dict[str, Any]:
     return codex_benchmark_run_tool(
         config,
@@ -668,4 +669,5 @@ def codex_benchmark_run_payload(
         force_clone=force_clone,
         skill_exposure_mode=skill_exposure_mode,
         provider_timeout=provider_timeout,
+        codex_sandbox=codex_sandbox,
     )

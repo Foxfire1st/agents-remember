@@ -61,7 +61,7 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
 3. Expose the packaged skills to your agent harness.
 
    When the MCP settings file lives under a harness registration folder such as
-   `.agents/mcp/`, the install target is inferred as the sibling `skills/`
+   `.codex/mcp/`, the install target is inferred as the sibling `skills/`
    folder. Then request:
 
    ```text

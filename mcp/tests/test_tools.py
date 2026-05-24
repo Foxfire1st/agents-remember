@@ -59,7 +59,7 @@ class McpToolTests(unittest.TestCase):
     def test_server_info_payload_reports_safe_config_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -71,7 +71,7 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["configPath"], path.resolve().as_posix())
             self.assertEqual(
                 payload["harnessSkillRoot"],
-                (root / ".agents" / "skills").as_posix(),
+                (root / ".codex" / "skills").as_posix(),
             )
             self.assertEqual(payload["allowedRepoIds"], ["agents-remember-md"])
             self.assertEqual(
@@ -87,7 +87,7 @@ class McpToolTests(unittest.TestCase):
     def test_server_constructs_with_context_packet_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -115,7 +115,7 @@ class McpToolTests(unittest.TestCase):
     def test_runtime_install_tool_uses_configured_coordination_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -194,6 +194,30 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["operation"], "codex_benchmark_run")
             self.assertEqual(payload["executable"], "codex")
             self.assertEqual(payload["resolution"], "PATH")
+            self.assertEqual(payload["codexExecutionPolicy"]["resolution"], "PATH")
+            self.assertEqual(
+                payload["codexExecutionPolicy"]["sandbox"], "danger-full-access"
+            )
+            self.assertEqual(
+                payload["codexExecutionPolicy"]["sandboxArgument"], "danger-full-access"
+            )
+            self.assertTrue(payload["codexExecutionPolicy"]["benchmarkOnly"])
+
+            with patch(
+                "agents_remember.controllers.skill_tools.benchmark_runner.resolve_codex_executable",
+                side_effect=benchmark_runner.CodexExecutableNotFound(
+                    "codex executable was not found on PATH"
+                ),
+            ):
+                default_payload = codex_benchmark_run_payload(
+                    config,
+                    codex_sandbox="default",
+                )
+
+            self.assertEqual(default_payload["codexExecutionPolicy"]["sandbox"], "default")
+            self.assertEqual(
+                default_payload["codexExecutionPolicy"]["sandboxArgument"], "omitted"
+            )
 
     def test_command_style_artifacts_are_not_exposed_for_service_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -244,7 +268,7 @@ class McpToolTests(unittest.TestCase):
     def test_skills_install_payload_is_copy_only_and_dry_run_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
 
@@ -256,17 +280,17 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["layout"], "tree")
             self.assertEqual(
                 payload["installRoot"],
-                (root / ".agents" / "skills").as_posix(),
+                (root / ".codex" / "skills").as_posix(),
             )
             self.assertTrue(payload["planned"])
 
     def test_skills_install_payload_replaces_legacy_symlink_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
-            install_root = root / ".agents" / "skills"
+            install_root = root / ".codex" / "skills"
             install_root.mkdir(parents=True)
             old_target = root / "old-symlink-target"
             old_target.mkdir()

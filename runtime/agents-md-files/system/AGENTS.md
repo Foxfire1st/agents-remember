@@ -28,11 +28,18 @@ settings report no providers.
 Gate 3: Run `C-02-memory-quality-control` for the relevant repository and then read its task-start drift report.
 Do not for any reason skip execution of the drift detection skill.
 
-Gate 4: If the drift report indicates any drifted, missing-verification, or orphaned onboarding, tell the developer what
-the report says briefly and then ask if they want to update the onboarding before proceeding.
+Gate 4: If the drift report indicates any drifted, missing-verification, or orphaned onboarding, classify the findings before proceeding.
 
-Gate 5: If they say yes, then orchestrate the update process and split the work to up to 5 sub agents who each handle at max 15 files.
+- Drifted onboarding whose corresponding source file is not dirty in the worktree is an onboarding update candidate.
+- Drifted onboarding whose corresponding source file is dirty in the worktree is active work-in-progress. Leave it alone.
+- Do not infer task relevance as a reason to skip this classification.
+
+Tell the developer what the drift report says briefly, explicitly list the update candidates and the dirty-source findings that will be left alone, and ask whether to update the candidates before proceeding.
+Do not silently drop, ignore, or stop using onboarding after drift detection.
+
+Gate 5: If they say yes, then orchestrate the update process for the update candidates and split the work to up to 5 sub agents who each handle at max 15 files.
 All sub agents shall use this skill: `C-05-create-or-update-onboarding-files` and you pass it the instructions it needs to perform the job.
+Do not update dirty-source drift findings unless the developer explicitly takes ownership of that active work-in-progress.
 If the developer says no, tell them that reasoning over drifted onboardings may introduce risk of regressions.
 
 Gate 6: Run `C-02-memory-quality-control` again to confirm that all onboarding is now verified and up to date.

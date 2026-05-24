@@ -116,11 +116,15 @@ Creation does not turn that intake into canonical architecture.
 
 ### 5. Refresh onboarding
 
-Creation refreshes relevant onboarding before Research begins.
+Creation refreshes onboarding before Research begins according to C-02's drift
+classification. Clean-source drift findings are update candidates. Dirty-source
+drift findings are active work-in-progress and must be left alone unless the
+developer explicitly takes ownership of them in this task.
 
 The purpose is not to do deep research. The purpose is to make sure Research starts from a minimally trustworthy onboarding baseline.
 
-If onboarding is stale or missing for relevant surfaces, Creation uses the onboarding refresh path to repair it before Research.
+If onboarding is stale or missing for clean-source surfaces, Creation uses the
+onboarding refresh path to repair it before Research.
 
 ### 6. Confirm Research readiness
 

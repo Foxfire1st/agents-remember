@@ -34,7 +34,7 @@ ar-coordination/
   temp/
 ```
 
-The installer copies package-owned assets from `runtime/` into this tree. Installed skills default to this runtime as their coordination root, so normal users do not need to set `AR_COORDINATION_ROOT`.
+The installer copies package-owned assets from `runtime/` into this tree. The MCP settings own the coordination root, so normal users configure that path in the MCP settings JSON rather than through source-checkout environment files.
 
 ## Target Code Repository
 

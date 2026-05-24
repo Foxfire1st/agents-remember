@@ -206,41 +206,14 @@ def memory_roots_from_settings(
     return settings_root, internal_memory_root(code_repository_root)
 
 
-def parse_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.exists():
-        return values
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = clean_scalar(value.split("#", 1)[0])
-    return values
-
-
-def resolve_path_from_declaring_file(value: str, declaring_file: Path) -> Path:
-    candidate = Path(value).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve()
-    return (declaring_file.parent / candidate).resolve()
-
-
-def resolve_coordination_root_hint(
-    coordination_root: Path | None, agents_repo: Path | None = None
-) -> Path:
+def resolve_coordination_root_hint(coordination_root: Path | None) -> Path:
     if coordination_root is not None:
         return coordination_root.resolve()
 
-    resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
-    env_path = resolved_agents_repo / ".env"
-    values = parse_env_file(env_path)
-    if "AR_COORDINATION_ROOT" not in values and looks_like_installed_coordination_root(
-        resolved_agents_repo
-    ):
-        return resolved_agents_repo
-    root = values.get("AR_COORDINATION_ROOT", DEFAULT_AR_COORDINATION_ROOT)
-    return resolve_path_from_declaring_file(root, env_path)
+    runtime_root = agents_repo_from_script().resolve()
+    if looks_like_installed_coordination_root(runtime_root):
+        return runtime_root
+    return (runtime_root / DEFAULT_AR_COORDINATION_ROOT).resolve()
 
 
 def find_code_repository_root(workspace_root: Path, code_repository_name: str) -> Path:
@@ -1061,11 +1034,10 @@ def detect_coordination_selection(
     requested_topology: Literal["internal", "external"] | None = None,
     coordination_root_hint: Path | None = None,
     settings_path: Path | None = None,
-    agents_repo: Path | None = None,
 ) -> CoordinationSelection:
     internal_coordination = internal_coordination_root(code_repository_root)
     internal_root = internal_memory_root(code_repository_root)
-    coordination_root = resolve_coordination_root_hint(coordination_root_hint, agents_repo)
+    coordination_root = resolve_coordination_root_hint(coordination_root_hint)
     external_root_for_repo = external_memory_root(coordination_root, code_repository_name)
 
     if settings_path is not None:
@@ -1130,13 +1102,11 @@ def resolve_coordination_context(
     settings_path: Path | None = None,
     onboarding_root: Path | None = None,
     code_repository_root: Path | None = None,
-    agents_repo: Path | None = None,
     contract_path: Path | None = None,
     task_name: str | None = None,
     worktree_name: str | None = None,
 ) -> CoordinationContext:
     resolved_workspace_root = (workspace_root or Path.cwd()).resolve()
-    resolved_agents_repo = (agents_repo or agents_repo_from_script()).resolve()
 
     if code_repository_root is not None:
         resolved_code_repository_root = code_repository_root.resolve()
@@ -1200,7 +1170,6 @@ def resolve_coordination_context(
         requested_topology=requested_topology,
         coordination_root_hint=contract_coordination_root,
         settings_path=settings_path,
-        agents_repo=resolved_agents_repo,
     )
     resolved_settings_path = settings_path.resolve() if settings_path else selection.settings_path
     resolved_onboarding_root = selection.memory_root / "onboarding"
@@ -1485,11 +1454,6 @@ def main(argv: list[str] | None = None) -> int:
         "--worktree-name",
         help="Optional worktree name used to compute the worktree group when no contract exists.",
     )
-    parser.add_argument(
-        "--agents-repo",
-        type=Path,
-        help="Optional agents-remember-md checkout path for .env discovery.",
-    )
     parser.add_argument("--format", choices=("json", "text"), default="json", help="Output format.")
     args = parser.parse_args(argv)
 
@@ -1502,7 +1466,6 @@ def main(argv: list[str] | None = None) -> int:
             settings_path=args.settings_path,
             onboarding_root=args.onboarding_root,
             code_repository_root=args.code_repository_root,
-            agents_repo=args.agents_repo,
             contract_path=args.contract_path,
             task_name=args.task_name,
             worktree_name=args.worktree_name,

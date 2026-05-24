@@ -80,10 +80,17 @@ By default the MCP drift tool writes the Markdown report to
 That keeps temporary drift artifacts out of task contract folders while still
 keeping them under the local coordination root.
 
-If actionable drift exists, do not plan against the stale onboarding as trusted
-current state. Hand the worklist to `C-05-create-or-update-onboarding-files`.
-If no actionable drift exists, the existing memory is clean for task-start
-planning.
+If actionable drift exists, first classify the affected findings by source
+worktree state. Drifted onboarding whose corresponding source file is not dirty
+is an onboarding update candidate. Drifted onboarding whose corresponding
+source file is dirty is active work-in-progress and should be left alone unless
+the developer explicitly takes ownership of that active work.
+
+Do not plan against stale onboarding as trusted current state. Do not silently
+drop or ignore onboarding after drift detection. Report update candidates and
+dirty-source findings separately, then ask the developer whether to refresh the
+update candidates before proceeding. If no actionable drift exists, the existing
+memory is clean for task-start planning.
 
 Default repo-wide drift control deliberately does not classify every source file
 without onboarding as missing. That gradual-adoption boundary prevents old,
@@ -124,19 +131,22 @@ Supported classifications are:
 
 ### 4. Hand Off Drift Maintenance
 
-If actionable files exist, hand the drift worklist to
-`C-05-create-or-update-onboarding-files`.
+If actionable files exist, hand only the approved update candidates to
+`C-05-create-or-update-onboarding-files`. Dirty-source drift findings remain
+active work-in-progress and are not maintenance targets unless the developer
+explicitly says to take them over.
 
 The handoff should identify:
 
-1. which onboarding files need refresh
-2. which files are orphaned and may need deletion
-3. which overview source routes changed
-4. which entity fingerprints changed
-5. which inventory entries are missing fingerprint rows
-6. which fingerprint rows are orphaned
-7. which evidence paths caused the stale signal
-8. which stale onboarding can still be used directionally until maintenance
+1. which onboarding files have clean source files and are update candidates
+2. which drifted onboarding files have dirty source files and must be left alone
+3. which files are orphaned and may need deletion
+4. which overview source routes changed
+5. which entity fingerprints changed
+6. which inventory entries are missing fingerprint rows
+7. which fingerprint rows are orphaned
+8. which evidence paths caused the stale signal
+9. which stale onboarding can still be used directionally until maintenance
    finishes
 
 Treat the drift report as a maintenance artifact, not as a long-lived research

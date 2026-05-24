@@ -27,6 +27,7 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.mcp.config import load_config
 from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
@@ -1149,12 +1150,10 @@ class WorktreeSupportTests(unittest.TestCase):
             (repo / "ar-memory").mkdir()
             external_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             external_memory.mkdir(parents=True)
-            agents_repo = workspace / "agents-remember-md"
-            agents_repo.mkdir()
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                agents_repo=agents_repo,
+                coordination_root=workspace / "ar-coordination",
             )
             self.assertEqual(context.topology, "internal")
             self.assertEqual(context.memory_root, repo / "ar-memory")
@@ -1167,19 +1166,17 @@ class WorktreeSupportTests(unittest.TestCase):
             repo.mkdir()
             external_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             external_memory.mkdir(parents=True)
-            agents_repo = workspace / "agents-remember-md"
-            agents_repo.mkdir()
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                agents_repo=agents_repo,
+                coordination_root=workspace / "ar-coordination",
             )
             self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, workspace / "ar-coordination")
             self.assertEqual(context.memory_root, external_memory)
             self.assertEqual(context.onboarding_root, external_memory / "onboarding")
 
-    def test_resolver_uses_dot_env_override_for_coordination_root(self) -> None:
+    def test_resolver_ignores_dot_env_override_for_coordination_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             repo = workspace / "repo-a"
@@ -1189,15 +1186,18 @@ class WorktreeSupportTests(unittest.TestCase):
             (agents_repo / ".env").write_text(
                 "AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8"
             )
-            external_memory = agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a"
-            external_memory.mkdir(parents=True)
-            context = resolver.resolve_coordination_context(
-                code_repository_name="repo-a",
-                workspace_root=workspace,
-                agents_repo=agents_repo,
+            (agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a").mkdir(
+                parents=True
             )
+            external_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            external_memory.mkdir(parents=True)
+            with mock.patch.object(resolver, "agents_repo_from_script", return_value=agents_repo):
+                context = resolver.resolve_coordination_context(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                )
             self.assertEqual(context.topology, "external")
-            self.assertEqual(context.coordination_root, agents_repo / "custom-coordination")
+            self.assertEqual(context.coordination_root, workspace / "ar-coordination")
             self.assertEqual(context.memory_root, external_memory)
 
     def test_resolver_uses_installed_runtime_root_as_coordination_root(self) -> None:
@@ -1211,11 +1211,13 @@ class WorktreeSupportTests(unittest.TestCase):
             (coordination_root / "tasks").mkdir()
             external_memory = coordination_root / "memory-repos" / "ar-repo-a"
             external_memory.mkdir(parents=True)
-            context = resolver.resolve_coordination_context(
-                code_repository_name="repo-a",
-                workspace_root=workspace,
-                agents_repo=coordination_root,
-            )
+            with mock.patch.object(
+                resolver, "agents_repo_from_script", return_value=coordination_root
+            ):
+                context = resolver.resolve_coordination_context(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                )
             self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, coordination_root)
             self.assertEqual(context.memory_root, external_memory)
@@ -1233,11 +1235,13 @@ class WorktreeSupportTests(unittest.TestCase):
             (agents_repo / "example-coordination" / "memory-repos" / "ar-repo-a").mkdir(
                 parents=True
             )
-            with self.assertRaises(resolver.MissingMemoryError) as raised:
+            with (
+                mock.patch.object(resolver, "agents_repo_from_script", return_value=agents_repo),
+                self.assertRaises(resolver.MissingMemoryError) as raised,
+            ):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    agents_repo=agents_repo,
                 )
             self.assertEqual(raised.exception.coordination_root, workspace / "ar-coordination")
 
@@ -1285,7 +1289,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    agents_repo=agents_repo,
+                    coordination_root=workspace / "ar-coordination",
                 )
             self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
             self.assertEqual(
@@ -2063,6 +2067,157 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
             self.assertEqual(captured["cgc_seed_repo_id"], "repo-a")
 
+    def test_benchmark_prepare_writes_workspace_mcp_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace_root = root / "with-memory"
+            coordination_root = workspace_root / "ar-coordination"
+            source_repo = workspace_root / "repos" / "repo-a"
+            memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+            source_repo.mkdir(parents=True)
+            memory_repo.mkdir(parents=True)
+            case = benchmark_runner.BenchmarkCase(
+                Path("case.json"),
+                {
+                    "id": "case-a",
+                    "repository": {"name": "repo-a"},
+                    "workspace": {"fixturePath": "workspaces/case-a"},
+                },
+            )
+
+            settings_path, config_path = benchmark_runner.write_benchmark_mcp_registration(
+                case=case,
+                workspace_root=workspace_root,
+                coordination_root=coordination_root,
+                source_repo_root=source_repo,
+                memory_repo=memory_repo,
+                provider_ids=("grepai-memory", "codegraphcontext-code"),
+                provider_timeout=123,
+                dry_run=False,
+            )
+
+            self.assertEqual(settings_path.parent, workspace_root / ".codex" / "mcp")
+            self.assertEqual(config_path, workspace_root / ".codex" / "config.toml")
+            config = load_config(settings_path)
+            self.assertEqual(config.coordination_root, coordination_root.resolve())
+            self.assertEqual(config.workspace_root, source_repo.parent.resolve())
+            self.assertEqual(config.repositories["repo-a"].path, source_repo.resolve())
+            self.assertEqual(config.repositories["repo-a"].memory_root, memory_repo.resolve())
+            self.assertEqual(
+                config.harness_skill_root,
+                (workspace_root / ".codex" / "skills").resolve(),
+            )
+            self.assertEqual(
+                config.allowed_provider_ids,
+                ("codegraphcontext-code", "grepai-memory"),
+            )
+            self.assertEqual(config.timeout_caps["providerSeconds"], 123)
+            config_text = config_path.read_text(encoding="utf-8")
+            self.assertIn("[mcp_servers.agents_remember_benchmark]", config_text)
+            self.assertIn("agents_remember.mcp", config_text)
+            self.assertIn(str(settings_path.resolve()).replace("\\", "\\\\"), config_text)
+
+    def test_codex_command_resolves_from_path_and_declares_benchmark_policy(self) -> None:
+        with mock.patch.object(
+            benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
+        ):
+            command = benchmark_runner.codex_command(Path("workspace"), Path("final.md"))
+
+        self.assertEqual(command[0], "C:/tools/codex.exe")
+        self.assertEqual(command[1], "exec")
+        self.assertEqual(
+            command[command.index("--sandbox") + 1],
+            benchmark_runner.CODEX_BENCHMARK_SANDBOX,
+        )
+        policy = benchmark_runner.codex_execution_policy(command[0])
+        self.assertEqual(policy["scope"], "codex-benchmark-only")
+        self.assertEqual(policy["resolution"], "PATH")
+        self.assertEqual(policy["pathVariable"], "PATH")
+        self.assertEqual(policy["resolvedExecutable"], "C:/tools/codex.exe")
+        self.assertTrue(policy["benchmarkOnly"])
+        self.assertFalse(policy["genericExecutableOverride"])
+        self.assertFalse(policy["arbitraryShell"])
+
+    def test_codex_command_default_sandbox_omits_sandbox_argument(self) -> None:
+        with mock.patch.object(
+            benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
+        ):
+            command = benchmark_runner.codex_command(
+                Path("workspace"),
+                Path("final.md"),
+                codex_sandbox=benchmark_runner.CODEX_SANDBOX_DEFAULT,
+            )
+
+        self.assertNotIn("--sandbox", command)
+        policy = benchmark_runner.codex_execution_policy(
+            command[0],
+            codex_sandbox=benchmark_runner.CODEX_SANDBOX_DEFAULT,
+        )
+        self.assertEqual(policy["sandbox"], "default")
+        self.assertEqual(policy["sandboxArgument"], "omitted")
+
+    def test_codex_run_metadata_records_benchmark_host_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            case_root = root / "case"
+            case_root.mkdir()
+            (case_root / "prompt.md").write_text("benchmark prompt\n", encoding="utf-8")
+            (case_root / "workspace").mkdir()
+            case = benchmark_runner.BenchmarkCase(
+                case_root / "case.json",
+                {
+                    "id": "case-a",
+                    "repository": {"name": "repo-a"},
+                    "workspace": {"fixturePath": "workspaces/case-a"},
+                },
+            )
+            prompt = {"id": "triage"}
+            variant = {"id": "with-onboarding", "promptPath": "prompt.md", "cwd": "workspace"}
+            output_root = root / "runs"
+
+            def fake_run(
+                command: list[str],
+                *,
+                input: str,
+                stdout: object,
+                stderr: object,
+                text: bool,
+                check: bool,
+            ) -> subprocess.CompletedProcess[str]:
+                stdout.write("{}\n")
+                return subprocess.CompletedProcess(command, 0)
+
+            with (
+                mock.patch.object(
+                    benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
+                ),
+                mock.patch.object(benchmark_runner.subprocess, "run", side_effect=fake_run),
+            ):
+                benchmark_runner.run_one(
+                    benchmarks_root=root,
+                    case=case,
+                    prompt=prompt,
+                    variant=variant,
+                    repetition=1,
+                    output_root=output_root,
+                    dry_run=False,
+                )
+
+            metadata = json.loads(
+                (
+                    output_root
+                    / "triage"
+                    / "with-onboarding"
+                    / "run-001.metadata.json"
+                ).read_text(encoding="utf-8")
+            )
+            policy = metadata["codexExecutionPolicy"]
+            self.assertEqual(policy["scope"], "codex-benchmark-only")
+            self.assertEqual(policy["resolution"], "PATH")
+            self.assertEqual(policy["resolvedExecutable"], "C:/tools/codex.exe")
+            self.assertEqual(policy["sandbox"], "danger-full-access")
+            self.assertTrue(policy["benchmarkOnly"])
+
     def test_prepare_repo_reuses_cached_commit_without_fetch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2153,7 +2308,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 mode="copy",
             )
 
-            exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
+            exposed = workspace / ".codex" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
             self.assertTrue(
                 (exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file()
             )
@@ -2174,7 +2329,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 dry_run=False,
             )
 
-            exposed = workspace / ".agents" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
+            exposed = workspace / ".codex" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
             self.assertTrue(
                 (exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file()
             )

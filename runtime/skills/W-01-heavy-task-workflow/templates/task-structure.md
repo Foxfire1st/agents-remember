@@ -4,7 +4,7 @@ This template defines the canonical runtime layout for heavy-task-workflow task 
 
 Read it during task creation and use it as the authoritative placement guide for root artifacts, phase folders, and checkpoint outputs.
 
-`<task-root>` is the task root derived from `AR_COORDINATION_ROOT`, documented in `<AR_COORDINATION_ROOT>/system/settings.md`.
+`<task-root>` is the task root under the resolved coordination root, documented in `<coordination-root>/system/settings.md`.
 
 ## Canonical Runtime Layout
 

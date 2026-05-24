@@ -57,8 +57,19 @@ WORKSPACE_AGENTS_TEMPLATE = Path("templates/workspace-AGENTS.md")
 SOURCE_ONLY_AGENTS_TEMPLATE = Path("templates/source-only-AGENTS.md")
 BENCHMARK_ROOT_MARKER = ".benchmark-root"
 SKILLS_EXPOSURE_NAMESPACE = "agents-remember-md"
+CODEX_HARNESS_DIR = ".codex"
 COPYTREE_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
 SKILL_EXPOSURE_MODES = ("copy", "none")
+CODEX_EXECUTABLE_NAME = "codex"
+CODEX_EXECUTABLE_RESOLUTION = "PATH"
+CODEX_SANDBOX_DANGER_FULL_ACCESS = "danger-full-access"
+CODEX_SANDBOX_DEFAULT = "default"
+CODEX_BENCHMARK_SANDBOX = CODEX_SANDBOX_DANGER_FULL_ACCESS
+CODEX_BENCHMARK_SANDBOX_MODES = (CODEX_SANDBOX_DANGER_FULL_ACCESS, CODEX_SANDBOX_DEFAULT)
+CODEX_BENCHMARK_SCOPE = "codex-benchmark-only"
+BENCHMARK_MCP_SERVER_NAME = "agents_remember_benchmark"
+BENCHMARK_MCP_SETTINGS_NAME = "agents-remember-benchmark.settings.json"
+BENCHMARK_MCP_STARTUP_TIMEOUT_SECONDS = 120
 
 
 def is_ignored_package_path(relative: Path) -> bool:
@@ -253,6 +264,7 @@ class BenchmarkRunRequest:
     skill_exposure_mode: str = "copy"
     force_clone: bool = False
     provider_timeout: int = 1800
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX
 
 
 def default_benchmarks_root() -> Path:
@@ -460,7 +472,7 @@ def sync_provider_assets(root: Path, coordination_root: Path, dry_run: bool) -> 
 def copy_workspace_skill_exposure(
     workspace_root: Path, coordination_root: Path, dry_run: bool
 ) -> None:
-    install_root = workspace_root / ".agents" / "skills"
+    install_root = workspace_root / CODEX_HARNESS_DIR / "skills"
     exposure_path = install_root / SKILLS_EXPOSURE_NAMESPACE
     skills_source = coordination_root / "skills"
     if dry_run:
@@ -486,6 +498,124 @@ def sync_workspace_skill_exposure(
         print(f"Skipping benchmark skill exposure for {workspace_root}")
         return
     copy_workspace_skill_exposure(workspace_root, coordination_root, dry_run)
+
+
+def benchmark_mcp_settings_path(workspace_root: Path) -> Path:
+    return workspace_root / CODEX_HARNESS_DIR / "mcp" / BENCHMARK_MCP_SETTINGS_NAME
+
+
+def benchmark_agents_config_path(workspace_root: Path) -> Path:
+    return workspace_root / CODEX_HARNESS_DIR / "config.toml"
+
+
+def benchmark_mcp_source_path() -> Path | None:
+    try:
+        _mode, root = find_runtime_source()
+    except RuntimeError:
+        return None
+    source_path = root / "mcp" / "src"
+    if source_path.is_dir():
+        return source_path.resolve()
+    return None
+
+
+def toml_string(value: object) -> str:
+    return json.dumps(str(value))
+
+
+def benchmark_mcp_settings_payload(
+    *,
+    repo_id: str,
+    coordination_root: Path,
+    workspace_root: Path,
+    provider_ids: tuple[str, ...],
+    provider_timeout: int,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "coordinationRoot": coordination_root.resolve().as_posix(),
+        "workspaceRoot": workspace_root.resolve().as_posix(),
+        "repositories": {repo_id: {}},
+        "providers": {provider_id: {} for provider_id in provider_ids},
+        "timeoutCaps": {
+            "toolSeconds": 30,
+            "providerSeconds": provider_timeout,
+        },
+    }
+
+
+def benchmark_agents_config_text(settings_path: Path) -> str:
+    lines = [
+        f"[mcp_servers.{BENCHMARK_MCP_SERVER_NAME}]",
+        f"command = {toml_string(Path(sys.executable).resolve())}",
+        "args = [",
+        '  "-m",',
+        '  "agents_remember.mcp",',
+        '  "--config",',
+        f"  {toml_string(settings_path.resolve())},",
+        "]",
+        f"startup_timeout_sec = {BENCHMARK_MCP_STARTUP_TIMEOUT_SECONDS}",
+        "",
+        f"[mcp_servers.{BENCHMARK_MCP_SERVER_NAME}.env]",
+        'PYTHONIOENCODING = "utf-8"',
+        'PYTHONUTF8 = "1"',
+    ]
+    source_path = benchmark_mcp_source_path()
+    if source_path is not None:
+        lines.append(f"PYTHONPATH = {toml_string(source_path)}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_benchmark_mcp_registration(
+    *,
+    case: BenchmarkCase,
+    workspace_root: Path,
+    coordination_root: Path,
+    source_repo_root: Path,
+    memory_repo: Path,
+    provider_ids: tuple[str, ...],
+    provider_timeout: int,
+    dry_run: bool,
+) -> tuple[Path, Path]:
+    repo_id = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    expected_memory_repo = coordination_root / "memory-repos" / f"ar-{repo_id}"
+    if source_repo_root.name != repo_id:
+        raise RuntimeError(
+            "benchmark MCP registration requires the source repository directory "
+            f"to match the repository id {repo_id!r}: {source_repo_root}"
+        )
+    if memory_repo.resolve() != expected_memory_repo.resolve():
+        raise RuntimeError(
+            "benchmark MCP registration requires memory repository "
+            f"{expected_memory_repo}; got {memory_repo}"
+        )
+
+    mcp_settings_path = benchmark_mcp_settings_path(workspace_root)
+    agents_config_path = benchmark_agents_config_path(workspace_root)
+    settings_payload = benchmark_mcp_settings_payload(
+        repo_id=repo_id,
+        coordination_root=coordination_root,
+        workspace_root=source_repo_root.parent,
+        provider_ids=provider_ids,
+        provider_timeout=provider_timeout,
+    )
+    if dry_run:
+        print(f"Would write benchmark MCP settings {mcp_settings_path}")
+        print(f"Would write benchmark Codex MCP registration {agents_config_path}")
+        return mcp_settings_path, agents_config_path
+
+    mcp_settings_path.parent.mkdir(parents=True, exist_ok=True)
+    mcp_settings_path.write_text(
+        json.dumps(settings_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    agents_config_path.parent.mkdir(parents=True, exist_ok=True)
+    agents_config_path.write_text(
+        benchmark_agents_config_text(mcp_settings_path),
+        encoding="utf-8",
+    )
+    return mcp_settings_path, agents_config_path
 
 
 def run_command(command: list[str], dry_run: bool, cwd: Path | None = None) -> None:
@@ -864,6 +994,16 @@ def prepare_case(
     sync_runtime_assets(coordination_root, dry_run)
     sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
+    write_benchmark_mcp_registration(
+        case=case,
+        workspace_root=with_memory_root,
+        coordination_root=coordination_root,
+        source_repo_root=with_memory_repo_root,
+        memory_repo=memory_repo,
+        provider_ids=provider_ids,
+        provider_timeout=provider_timeout,
+        dry_run=dry_run,
+    )
     prepare_configured_providers(
         case,
         coordination_root,
@@ -913,23 +1053,70 @@ class CodexExecutableNotFound(RuntimeError):
 
 
 def resolve_codex_executable() -> str:
-    resolved = shutil.which("codex")
+    resolved = shutil.which(CODEX_EXECUTABLE_NAME)
     if resolved:
         return resolved
-    raise CodexExecutableNotFound("codex executable was not found on PATH")
+    raise CodexExecutableNotFound(
+        "codex executable was not found on PATH; benchmark execution resolves "
+        "Codex only from the MCP server process PATH"
+    )
 
 
-def codex_command(cwd: Path, final_message_path: Path) -> list[str]:
-    return [
-        resolve_codex_executable(),
+def validate_codex_sandbox(codex_sandbox: str) -> str:
+    if codex_sandbox not in CODEX_BENCHMARK_SANDBOX_MODES:
+        allowed = ", ".join(CODEX_BENCHMARK_SANDBOX_MODES)
+        raise ValueError(f"unsupported Codex benchmark sandbox {codex_sandbox!r}; expected {allowed}")
+    return codex_sandbox
+
+
+def codex_sandbox_argument(codex_sandbox: str) -> str | None:
+    sandbox = validate_codex_sandbox(codex_sandbox)
+    if sandbox == CODEX_SANDBOX_DEFAULT:
+        return None
+    return sandbox
+
+
+def codex_execution_policy(
+    resolved_executable: str | None = None,
+    *,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+) -> dict[str, Any]:
+    sandbox = validate_codex_sandbox(codex_sandbox)
+    sandbox_argument = codex_sandbox_argument(sandbox)
+    policy: dict[str, Any] = {
+        "scope": CODEX_BENCHMARK_SCOPE,
+        "benchmarkOnly": True,
+        "hostProcess": True,
+        "executable": CODEX_EXECUTABLE_NAME,
+        "resolution": CODEX_EXECUTABLE_RESOLUTION,
+        "pathVariable": CODEX_EXECUTABLE_RESOLUTION,
+        "sandbox": sandbox,
+        "sandboxArgument": sandbox_argument or "omitted",
+        "sandboxModes": list(CODEX_BENCHMARK_SANDBOX_MODES),
+        "approvalPolicy": "never",
+        "genericExecutableOverride": False,
+        "arbitraryShell": False,
+    }
+    if resolved_executable:
+        policy["resolvedExecutable"] = resolved_executable
+    return policy
+
+
+def codex_command(
+    cwd: Path,
+    final_message_path: Path,
+    *,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+) -> list[str]:
+    resolved_executable = resolve_codex_executable()
+    command = [
+        resolved_executable,
         "exec",
         "--json",
         "--ephemeral",
         "--cd",
         str(cwd),
         "--skip-git-repo-check",
-        "--sandbox",
-        "danger-full-access",
         "--output-last-message",
         str(final_message_path),
         "-c",
@@ -937,6 +1124,10 @@ def codex_command(cwd: Path, final_message_path: Path) -> list[str]:
         "-c",
         f"project_root_markers=['{BENCHMARK_ROOT_MARKER}']",
     ]
+    sandbox_argument = codex_sandbox_argument(codex_sandbox)
+    if sandbox_argument is not None:
+        command[7:7] = ["--sandbox", sandbox_argument]
+    return command
 
 
 def write_metadata(path: Path, metadata: dict[str, Any], dry_run: bool) -> None:
@@ -956,6 +1147,7 @@ def run_one(
     repetition: int,
     output_root: Path,
     dry_run: bool,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
 ) -> None:
     prompt_id = str(prompt["id"])
     variant_id = str(variant["id"])
@@ -973,12 +1165,19 @@ def run_one(
     stderr_path = run_prefix.with_suffix(".stderr")
     metadata_path = run_prefix.with_suffix(".metadata.json")
     final_message_path = run_prefix.with_suffix(".final.md")
-    command = codex_command(cwd, final_message_path)
+    command = codex_command(cwd, final_message_path, codex_sandbox=codex_sandbox)
+    execution_policy = codex_execution_policy(command[0], codex_sandbox=codex_sandbox)
 
     if dry_run:
         print(f"Would write JSONL to {jsonl_path}")
         print(f"Would write stderr to {stderr_path}")
         print(f"Would write final message to {final_message_path}")
+        print(
+            "Benchmark host execution: "
+            f"{CODEX_BENCHMARK_SCOPE}; {CODEX_EXECUTABLE_NAME} resolved from "
+            f"{CODEX_EXECUTABLE_RESOLUTION} to {command[0]}"
+        )
+        print(f"Benchmark sandbox: {execution_policy['sandbox']}")
         print("Would run: " + " ".join(command) + " <prompt via stdin>")
         write_metadata(
             metadata_path,
@@ -990,6 +1189,7 @@ def run_one(
                 "cwd": str(cwd),
                 "finalMessagePath": str(final_message_path),
                 "dryRun": True,
+                "codexExecutionPolicy": execution_policy,
             },
             dry_run=True,
         )
@@ -1019,6 +1219,7 @@ def run_one(
             "repetition": repetition,
             "cwd": str(cwd),
             "command": [*command, "<prompt via stdin>"],
+            "codexExecutionPolicy": execution_policy,
             "durationSeconds": round(duration, 3),
             "exitCode": completed.returncode,
             "finalMessagePath": str(final_message_path),
@@ -1042,6 +1243,7 @@ def run_case(
     skill_exposure_mode: str,
     force_clone: bool,
     provider_timeout: int,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
 ) -> Path:
     provider_ids = selected_provider_ids(case, prompt_id=prompt_id, variant_id=variant_id)
     if not skip_prepare:
@@ -1082,6 +1284,7 @@ def run_case(
                     repetition=repetition,
                     output_root=output_root,
                     dry_run=True,
+                    codex_sandbox=codex_sandbox,
                 )
         return output_root
 
@@ -1102,6 +1305,7 @@ def run_case(
                     repetition=repetition,
                     output_root=output_root,
                     dry_run=False,
+                    codex_sandbox=codex_sandbox,
                 ): (prompt, variant, repetition)
                 for prompt, variant, repetition in task_batch
             }
@@ -1324,6 +1528,8 @@ def prepare_benchmarks(request: BenchmarkPrepareRequest) -> dict[str, Any]:
 def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
     benchmarks_root = request.benchmarks_root.resolve()
     cases = select_cases(load_cases(benchmarks_root), request.target, request.case_id)
+    validate_codex_sandbox(request.codex_sandbox)
+    resolved_codex_executable = resolve_codex_executable()
 
     def run_selected_cases() -> list[Path]:
         output_roots: list[Path] = []
@@ -1341,6 +1547,7 @@ def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
                     skill_exposure_mode=request.skill_exposure_mode,
                     force_clone=request.force_clone,
                     provider_timeout=request.provider_timeout,
+                    codex_sandbox=request.codex_sandbox,
                 )
             )
         return output_roots
@@ -1355,6 +1562,10 @@ def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
         "prompt": request.prompt or "",
         "variant": request.variant or "",
         "dryRun": request.dry_run,
+        "codexExecutionPolicy": codex_execution_policy(
+            resolved_codex_executable,
+            codex_sandbox=request.codex_sandbox,
+        ),
         "cases": [case.case_id for case in cases],
         "runOutputRoots": [path.as_posix() for path in output_roots],
         "messages": messages,
@@ -1404,6 +1615,7 @@ def command_run(args: argparse.Namespace) -> int:
             skill_exposure_mode=args.skill_exposure_mode,
             force_clone=args.force_clone,
             provider_timeout=args.provider_timeout,
+            codex_sandbox=args.codex_sandbox,
         )
     )
     for message in payload["messages"]:
@@ -1489,6 +1701,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1800,
         help="Seconds allowed for each benchmark provider install/index command during preparation.",
+    )
+    run_parser.add_argument(
+        "--codex-sandbox",
+        choices=CODEX_BENCHMARK_SANDBOX_MODES,
+        default=CODEX_BENCHMARK_SANDBOX,
+        help=(
+            "Codex benchmark sandbox mode. Use 'default' to omit --sandbox and "
+            "let the Codex CLI use its configured default."
+        ),
     )
     run_parser.set_defaults(func=command_run)
 

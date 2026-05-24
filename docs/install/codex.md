@@ -3,7 +3,7 @@
 Codex needs two things:
 
 1. workspace instructions through `AGENTS.md`
-2. skills exposed in a Codex-visible skills folder such as `.agents/skills` or `~/.agents/skills`
+2. skills exposed in a Codex-visible skills folder such as `.codex/skills` or `~/.codex/skills`
 
 ## Workspace Instructions
 
@@ -29,7 +29,7 @@ runtime_install(dry_run=false)
 ```
 
 Place the MCP settings under the Codex registration folder, such as
-`.agents/mcp/`. The skill target is inferred as the sibling `.agents/skills/`
+`.codex/mcp/`. The skill target is inferred as the sibling `.codex/skills/`
 folder. Then expose the packaged skill tree:
 
 ```text

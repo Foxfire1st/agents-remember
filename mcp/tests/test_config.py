@@ -70,7 +70,7 @@ class McpConfigTests(unittest.TestCase):
     def test_loads_authority_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, settings_payload(root))
 
             config = load_config(path)
@@ -85,7 +85,7 @@ class McpConfigTests(unittest.TestCase):
                 config.transcript_root,
                 root / "ar-coordination" / "providers" / "logs" / "mcp",
             )
-            self.assertEqual(config.harness_skill_root, root / ".agents" / "skills")
+            self.assertEqual(config.harness_skill_root, root / ".codex" / "skills")
             self.assertEqual(
                 config.repositories["agents-remember-md"].path,
                 root / "workspace" / "agents-remember-md",
@@ -139,7 +139,7 @@ class McpConfigTests(unittest.TestCase):
             root = Path(tmp_dir)
             payload = settings_payload(root)
             payload["harnessSkillRoot"] = str(root / "custom" / "skills")
-            path = root / ".agents" / "mcp" / "settings.json"
+            path = root / ".codex" / "mcp" / "settings.json"
             write_json(path, payload)
 
             config = load_config(path)
@@ -188,7 +188,7 @@ class McpConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             payload = settings_payload(root)
-            payload["harnessSkillRoot"] = ".agents/skills"
+            payload["harnessSkillRoot"] = ".codex/skills"
             path = root / "mcp-settings.json"
             write_json(path, payload)
 

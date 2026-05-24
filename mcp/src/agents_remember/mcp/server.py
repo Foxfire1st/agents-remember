@@ -516,6 +516,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         force_clone: bool = False,
         skill_exposure_mode: str = "copy",
         provider_timeout: int = 1800,
+        codex_sandbox: str = "danger-full-access",
     ) -> dict[str, Any]:
         return codex_benchmark_run_payload(
             config,
@@ -531,6 +532,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             force_clone=force_clone,
             skill_exposure_mode=skill_exposure_mode,
             provider_timeout=provider_timeout,
+            codex_sandbox=codex_sandbox,
         )
 
     return server

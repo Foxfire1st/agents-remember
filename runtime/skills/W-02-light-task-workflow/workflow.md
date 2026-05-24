@@ -48,9 +48,11 @@ The task document inside the wrapper is always `task.md`.
 If the task plan relies on onboarding files:
 
 1. invoke `C-02-memory-quality-control` before planning against those files
-2. do not plan against drifted or missing-verification pre-existing onboarding until the drift report has been handed off to `C-05-create-or-update-onboarding-files` or the developer has explicitly accepted directional-only trust
-3. treat files created or modified during the current task as task-local working state after that initial gate passes; they remain pending verification, but they do not by themselves re-block planning for the same task
-4. before any C-09 worktree starts, commit refreshed external-memory onboarding and the ledger so the worktree starts from a clean, mapped memory baseline
+2. apply C-02's clean-source versus dirty-source drift classification before planning against pre-existing onboarding
+3. do not plan against clean-source drifted or missing-verification pre-existing onboarding until the update candidates have been handed off to `C-05-create-or-update-onboarding-files` or the developer has explicitly accepted directional-only trust
+4. leave dirty-source drift findings alone as active work-in-progress unless the developer explicitly takes ownership of them in this task
+5. treat files created or modified during the current task as task-local working state after that initial gate passes; they remain pending verification, but they do not by themselves re-block planning for the same task
+6. before any C-09 worktree starts, commit refreshed external-memory onboarding and the ledger so the worktree starts from a clean, mapped memory baseline
 
 ### 5. Gather context before writing the plan
 

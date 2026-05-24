@@ -19,7 +19,6 @@ CANDIDATE_HINT_LIMIT = 24
 ANCHOR_HINT_LIMIT = 48
 
 IGNORED_SOURCE_DIRS = {
-    ".agents",
     ".codex",
     ".git",
     ".hg",
