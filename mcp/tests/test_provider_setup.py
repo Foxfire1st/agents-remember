@@ -53,6 +53,50 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertEqual(payload["enabled"]["codegraphcontext-code"], False)
             self.assertEqual(payload["results"], [])
 
+    def test_cgc_prepare_is_ok_when_seed_falls_back_to_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings_path = root / "provider-settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "codegraphcontext-code": {
+                                    "enabled": True,
+                                    "runtimeRoot": (root / "providers" / "runners").as_posix(),
+                                    "venvRoot": (root / "providers" / "_venvs").as_posix(),
+                                    "roots": [
+                                        {
+                                            "repoId": "repo-a",
+                                            "path": (root / "repo-a").as_posix(),
+                                        }
+                                    ],
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            payload = provider_setup.run_provider_setup(
+                provider_setup.ProviderSetupRequest(
+                    action="prepare",
+                    coordination_root=root,
+                    settings_path=settings_path,
+                    dry_run=True,
+                )
+            )
+
+            self.assertTrue(payload["ok"])
+            seed = next(result for result in payload["results"] if result["action"] == "seed")
+            self.assertFalse(seed["ok"])
+            self.assertTrue(
+                any(result["action"] == "refresh-all" for result in payload["results"])
+            )
+
     def test_rewrite_cgc_bundle_paths_rewrites_json_jsonl_and_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

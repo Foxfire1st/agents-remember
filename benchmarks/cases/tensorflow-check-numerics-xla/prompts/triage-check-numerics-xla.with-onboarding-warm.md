@@ -10,7 +10,7 @@ onboarding and memory files as trusted current-state context.
 
 Provider setup:
 The benchmark-local context providers are already installed, indexed, and
-running. Use `ar-coordination/system/settings.json` as the provider authority.
+running from benchmark harness provider settings.
 GrepAI is available for semantic discovery over `ar-coordination/memory-repos`,
 and CodeGraphContext is available for relationship discovery over
 `repos/tensorflow`.

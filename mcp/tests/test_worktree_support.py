@@ -1904,6 +1904,165 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             with mock.patch.object(benchmark_runner.shutil, "which", side_effect=fake_which):
                 self.assertEqual(benchmark_runner.resolve_codex_executable(), str(cmd))
 
+    def test_benchmark_provider_ids_follow_selected_variants(self) -> None:
+        case = benchmark_runner.BenchmarkCase(
+            Path("case.json"),
+            {
+                "id": "case-a",
+                "repository": {"name": "repo-a"},
+                "workspace": {"fixturePath": "workspaces/case-a"},
+                "prompts": [
+                    {
+                        "id": "prompt-a",
+                        "variants": [
+                            {
+                                "id": "no-onboarding",
+                                "promptPath": "prompts/no.md",
+                                "cwd": "workspaces/case-a/source-only",
+                                "allowMemory": False,
+                            },
+                            {
+                                "id": "with-onboarding",
+                                "promptPath": "prompts/memory.md",
+                                "cwd": "workspaces/case-a/with-memory",
+                                "allowMemory": True,
+                            },
+                            {
+                                "id": "with-onboarding-warm",
+                                "promptPath": "prompts/warm.md",
+                                "cwd": "workspaces/case-a/with-memory",
+                                "allowMemory": True,
+                                "providers": [
+                                    "grepai-memory",
+                                    "codegraphcontext-code",
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(
+            benchmark_runner.selected_provider_ids(
+                case,
+                prompt_id="prompt-a",
+                variant_id="with-onboarding",
+            ),
+            (),
+        )
+        self.assertEqual(
+            benchmark_runner.selected_provider_ids(
+                case,
+                prompt_id="prompt-a",
+                variant_id="with-onboarding-warm",
+            ),
+            ("grepai-memory", "codegraphcontext-code"),
+        )
+        self.assertEqual(
+            benchmark_runner.selected_provider_ids(case),
+            ("grepai-memory", "codegraphcontext-code"),
+        )
+
+    def test_benchmark_provider_settings_are_generated_without_system_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination_root = root / "ar-coordination"
+            source_repo = root / "repos" / "repo-a"
+            memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+            source_repo.mkdir(parents=True)
+            memory_repo.mkdir(parents=True)
+            case = benchmark_runner.BenchmarkCase(
+                Path("case.json"),
+                {
+                    "id": "case-a",
+                    "repository": {"name": "repo-a"},
+                    "workspace": {"fixturePath": "workspaces/case-a"},
+                },
+            )
+
+            settings = benchmark_runner.benchmark_lifecycle_settings(
+                case=case,
+                coordination_root=coordination_root,
+                source_repo_root=source_repo,
+                memory_repo=memory_repo,
+                provider_ids=("grepai-memory", "codegraphcontext-code"),
+            )
+
+            self.assertFalse((coordination_root / "system" / "settings.json").exists())
+            providers = settings["contextProviders"]["providers"]
+            self.assertEqual(
+                providers["grepai-memory"]["roots"],
+                [{"projectId": "repo-a", "path": memory_repo.resolve().as_posix()}],
+            )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["roots"],
+                [{"repoId": "repo-a", "path": source_repo.resolve().as_posix()}],
+            )
+            self.assertEqual(
+                providers["grepai-memory"]["backend"]["containerName"],
+                "ar-grepai-postgres-bench-case-a",
+            )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["backend"]["containerName"],
+                "ar-cgc-falkordb-bench-case-a",
+            )
+
+    def test_benchmark_provider_setup_uses_generated_settings_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination_root = root / "ar-coordination"
+            source_repo = root / "repos" / "repo-a"
+            memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+            source_repo.mkdir(parents=True)
+            memory_repo.mkdir(parents=True)
+            case = benchmark_runner.BenchmarkCase(
+                Path("case.json"),
+                {
+                    "id": "case-a",
+                    "repository": {"name": "repo-a"},
+                    "workspace": {"fixturePath": "workspaces/case-a"},
+                },
+            )
+            captured: dict[str, object] = {}
+
+            def fake_run_provider_setup(
+                request: benchmark_runner.provider_setup.ProviderSetupRequest,
+            ) -> dict[str, object]:
+                captured["settings_path"] = request.settings_path
+                captured["settings"] = json.loads(request.settings_path.read_text(encoding="utf-8"))
+                captured["cgc_seed_repo_id"] = request.cgc_seed.repo_id
+                return {"ok": True}
+
+            with mock.patch.object(
+                benchmark_runner.provider_setup,
+                "run_provider_setup",
+                side_effect=fake_run_provider_setup,
+            ) as run_provider_setup:
+                benchmark_runner.prepare_configured_providers(
+                    case,
+                    coordination_root,
+                    source_repo,
+                    memory_repo,
+                    dry_run=False,
+                    provider_timeout=1,
+                    provider_ids=("codegraphcontext-code",),
+                    cgc_seed_source_coordination_root=root / "source-coordination",
+                    cgc_seed_repo_id="repo-a",
+                )
+
+            self.assertEqual(run_provider_setup.call_count, 1)
+            settings_path = captured["settings_path"]
+            self.assertIsInstance(settings_path, Path)
+            self.assertFalse(settings_path.exists())
+            settings = captured["settings"]
+            self.assertIsInstance(settings, dict)
+            self.assertIn(
+                "codegraphcontext-code",
+                settings["contextProviders"]["providers"],
+            )
+            self.assertEqual(captured["cgc_seed_repo_id"], "repo-a")
+
     def test_prepare_repo_reuses_cached_commit_without_fetch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

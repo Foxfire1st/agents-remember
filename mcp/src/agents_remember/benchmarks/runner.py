@@ -13,13 +13,21 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from agents_remember.mcp.config import (
+    McpRuntimeConfig,
+    ProviderScope,
+    RepositoryScope,
+    provider_runtime_name,
+)
 from agents_remember.providers import provider_setup
+from agents_remember.providers.settings import lifecycle_settings_from_config
 
 AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/coordinator/AGENTS.md"): Path("AGENTS.md"),
@@ -28,6 +36,7 @@ AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/tasks/AGENTS.md"): Path("tasks/AGENTS.md"),
 }
 PROVIDER_ASSET_DIRS = (Path("requirements"), Path("patches"))
+BENCHMARK_PROVIDER_IDS = ("grepai-memory", "codegraphcontext-code")
 
 TOKEN_KEYS = {
     "input_tokens": "input_tokens",
@@ -82,6 +91,83 @@ def manifest_path_component(value: object, label: str) -> str:
     return path.parts[0]
 
 
+def parse_benchmark_provider_ids(
+    raw: object,
+    label: str,
+    *,
+    default: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    if raw is None:
+        return default
+    if raw is False:
+        return ()
+    if isinstance(raw, str) and raw == "all":
+        return BENCHMARK_PROVIDER_IDS
+    if isinstance(raw, list):
+        return unique_benchmark_provider_ids(raw, label)
+    raise ValueError(f"{label} must be an array of provider ids, false, or 'all'")
+
+
+def unique_benchmark_provider_ids(raw: list[object], label: str) -> tuple[str, ...]:
+    provider_ids: list[str] = []
+    for value in raw:
+        provider_id = require_benchmark_provider_id(value, label)
+        if provider_id not in provider_ids:
+            provider_ids.append(provider_id)
+    return tuple(provider_ids)
+
+
+def require_benchmark_provider_id(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} entries must be non-empty provider ids")
+    if value not in BENCHMARK_PROVIDER_IDS:
+        raise ValueError(
+            f"{label} contains unsupported provider id {value!r}; "
+            f"supported ids: {', '.join(BENCHMARK_PROVIDER_IDS)}"
+        )
+    return value
+
+
+def case_default_provider_ids(case: BenchmarkCase) -> tuple[str, ...]:
+    return parse_benchmark_provider_ids(
+        case.data.get("providers"),
+        f"{case.case_id}.providers",
+    )
+
+
+def variant_provider_ids(
+    case: BenchmarkCase,
+    variant: dict[str, Any],
+    *,
+    default: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    variant_id = str(variant.get("id", "<unknown>"))
+    if "providers" in variant:
+        return parse_benchmark_provider_ids(
+            variant.get("providers"),
+            f"{case.case_id}.{variant_id}.providers",
+        )
+    if variant.get("allowMemory") is True:
+        return default
+    return ()
+
+
+def selected_provider_ids(
+    case: BenchmarkCase,
+    *,
+    prompt_id: str | None = None,
+    variant_id: str | None = None,
+) -> tuple[str, ...]:
+    case_default = case_default_provider_ids(case)
+    provider_ids: list[str] = []
+    for prompt in case_prompt(case, prompt_id):
+        for variant in prompt_variant(prompt, variant_id):
+            for provider_id in variant_provider_ids(case, variant, default=case_default):
+                if provider_id not in provider_ids:
+                    provider_ids.append(provider_id)
+    return tuple(provider_ids)
+
+
 def validate_case_manifest(case: BenchmarkCase) -> None:
     workspace = case.workspace
     manifest_relative_path(workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath")
@@ -100,6 +186,7 @@ def validate_case_manifest(case: BenchmarkCase) -> None:
         manifest_path_component(
             case.memory_repository["name"], f"{case.case_id}.memoryRepository.name"
         )
+    default_providers = case_default_provider_ids(case)
     for prompt in case.prompts:
         prompt_id = prompt.get("id", "<unknown>")
         for variant in prompt.get("variants", []):
@@ -108,6 +195,7 @@ def validate_case_manifest(case: BenchmarkCase) -> None:
                 variant["promptPath"], f"{case.case_id}.{prompt_id}.{variant_id}.promptPath"
             )
             manifest_relative_path(variant["cwd"], f"{case.case_id}.{prompt_id}.{variant_id}.cwd")
+            variant_provider_ids(case, variant, default=default_providers)
 
 
 @dataclass(frozen=True)
@@ -182,30 +270,6 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"expected JSON object in {path}")
     return data
-
-
-def provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:
-    context = settings.get("contextProviders")
-    if not isinstance(context, dict) or context.get("enabled") is not True:
-        return False
-    providers = context.get("providers")
-    if not isinstance(providers, dict):
-        return False
-    provider = providers.get(provider_id)
-    return isinstance(provider, dict) and provider.get("enabled") is True
-
-
-def any_provider_enabled(settings: dict[str, Any]) -> bool:
-    context = settings.get("contextProviders")
-    if not isinstance(context, dict) or context.get("enabled") is not True:
-        return False
-    providers = context.get("providers")
-    if not isinstance(providers, dict):
-        return False
-    return any(
-        isinstance(provider, dict) and provider.get("enabled") is True
-        for provider in providers.values()
-    )
 
 
 def load_cases(benchmarks_root: Path) -> list[BenchmarkCase]:
@@ -455,42 +519,136 @@ def default_cgc_seed_source_coordination_root(
     return None
 
 
-def prepare_configured_providers(
+def benchmark_mcp_config(
+    *,
+    case: BenchmarkCase,
     coordination_root: Path,
+    source_repo_root: Path,
+    memory_repo: Path,
+    provider_ids: tuple[str, ...],
+) -> McpRuntimeConfig:
+    repo_id = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    providers = {
+        provider_id: ProviderScope(
+            provider_id=provider_id,
+            runtime_root=coordination_root
+            / "providers"
+            / "runners"
+            / provider_runtime_name(provider_id),
+            log_root=coordination_root / "providers" / "logs" / provider_runtime_name(provider_id),
+        )
+        for provider_id in provider_ids
+    }
+    return McpRuntimeConfig(
+        config_path=coordination_root / ".benchmark-mcp-settings.generated.json",
+        coordination_root=coordination_root.resolve(),
+        workspace_root=coordination_root.parent.resolve(),
+        transcript_root=coordination_root / "providers" / "logs" / "mcp",
+        repositories={
+            repo_id: RepositoryScope(
+                repo_id=repo_id,
+                path=source_repo_root.resolve(),
+                memory_root=memory_repo.resolve(),
+            )
+        },
+        providers=providers,
+        timeout_caps={},
+    )
+
+
+def benchmark_lifecycle_settings(
+    *,
+    case: BenchmarkCase,
+    coordination_root: Path,
+    source_repo_root: Path,
+    memory_repo: Path,
+    provider_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    config = benchmark_mcp_config(
+        case=case,
+        coordination_root=coordination_root,
+        source_repo_root=source_repo_root,
+        memory_repo=memory_repo,
+        provider_ids=provider_ids,
+    )
+    settings = lifecycle_settings_from_config(config)
+    providers = settings["contextProviders"]["providers"]
+    case_id = benchmark_stable_id(case.case_id)
+    grepai = providers.get("grepai-memory")
+    if isinstance(grepai, dict) and isinstance(grepai.get("backend"), dict):
+        grepai["backend"]["containerName"] = f"ar-grepai-postgres-bench-{case_id}"
+    cgc = providers.get("codegraphcontext-code")
+    if isinstance(cgc, dict) and isinstance(cgc.get("backend"), dict):
+        cgc["backend"]["containerName"] = f"ar-cgc-falkordb-bench-{case_id}"
+    return settings
+
+
+def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        delete=False,
+        suffix="-agents-remember-benchmark-provider-settings.json",
+    ) as handle:
+        path = Path(handle.name)
+        json.dump(settings, handle, indent=2)
+        handle.write("\n")
+    return path
+
+
+def prepare_configured_providers(
+    case: BenchmarkCase,
+    coordination_root: Path,
+    source_repo_root: Path,
+    memory_repo: Path,
     dry_run: bool,
     provider_timeout: int,
     *,
+    provider_ids: tuple[str, ...],
     cgc_seed_source_coordination_root: Path | None,
     cgc_seed_repo_id: str,
 ) -> None:
-    settings_path = coordination_root / "system" / "settings.json"
-    if not settings_path.exists():
+    if not provider_ids:
         if dry_run:
-            print(f"Would skip benchmark provider setup; settings file is missing: {settings_path}")
-        return
-    if not any_provider_enabled(load_json(settings_path)):
-        if dry_run:
-            print(f"Would skip benchmark provider setup; no providers enabled in {settings_path}")
+            print(f"Would skip benchmark provider setup for {case.case_id}; no variants request providers")
         return
 
+    settings = benchmark_lifecycle_settings(
+        case=case,
+        coordination_root=coordination_root,
+        source_repo_root=source_repo_root,
+        memory_repo=memory_repo,
+        provider_ids=provider_ids,
+    )
+    settings_path = write_temp_provider_settings(settings)
     if dry_run:
         print(
             "Would run provider setup service for "
-            f"{coordination_root} with settings {settings_path}"
+            f"{coordination_root} with generated settings {settings_path}"
         )
-    payload = provider_setup.run_provider_setup(
-        provider_setup.ProviderSetupRequest(
-            action="prepare",
-            coordination_root=coordination_root,
-            settings_path=settings_path,
-            timeout=provider_timeout,
-            dry_run=dry_run,
-            cgc_seed=provider_setup.CgcSeedOptions(
+    try:
+        cgc_seed = provider_setup.CgcSeedOptions()
+        if (
+            "codegraphcontext-code" in provider_ids
+            and cgc_seed_source_coordination_root is not None
+        ):
+            cgc_seed = provider_setup.CgcSeedOptions(
                 source_coordination_root=cgc_seed_source_coordination_root,
                 repo_id=cgc_seed_repo_id,
-            ),
+            )
+        payload = provider_setup.run_provider_setup(
+            provider_setup.ProviderSetupRequest(
+                action="prepare",
+                coordination_root=coordination_root,
+                settings_path=settings_path,
+                timeout=provider_timeout,
+                dry_run=dry_run,
+                cgc_seed=cgc_seed,
+            )
         )
-    )
+    finally:
+        with contextlib.suppress(OSError):
+            settings_path.unlink()
     if not payload.get("ok"):
         raise RuntimeError(json.dumps(payload, indent=2))
 
@@ -654,56 +812,6 @@ def benchmark_stable_id(value: str) -> str:
     ).strip(".-_")
 
 
-def adapt_benchmark_settings(case: BenchmarkCase, coordination_root: Path, dry_run: bool) -> None:
-    settings_path = coordination_root / "system" / "settings.json"
-    if not settings_path.exists():
-        return
-    if dry_run:
-        print(f"Would adapt benchmark settings {settings_path}")
-        return
-
-    data = load_json(settings_path)
-    repository_name = manifest_path_component(
-        case.repository["name"], f"{case.case_id}.repository.name"
-    )
-    memory_repo = memory_repo_name(case)
-
-    memory_repos = data.setdefault("memoryRepos", {})
-    if isinstance(memory_repos, dict):
-        memory_repos["repositories"] = [
-            {
-                "name": repository_name,
-                "path": f"memory-repos/{memory_repo}",
-            }
-        ]
-
-    cgc = None
-    if provider_enabled(data, "codegraphcontext-code"):
-        context = data.get("contextProviders")
-        providers = context.get("providers") if isinstance(context, dict) else None
-        cgc = providers.get("codegraphcontext-code") if isinstance(providers, dict) else None
-    if isinstance(cgc, dict):
-        roots = cgc.get("roots")
-        selected: dict[str, Any] = {}
-        target_id = benchmark_stable_id(repository_name)
-        if isinstance(roots, list):
-            for root in roots:
-                if (
-                    isinstance(root, dict)
-                    and benchmark_stable_id(str(root.get("repoId", ""))) == target_id
-                ):
-                    selected = dict(root)
-                    break
-        selected["repoId"] = repository_name
-        selected["path"] = f"<workspace_root>/{repository_path(case).as_posix()}"
-        cgc["roots"] = [selected]
-        backend = cgc.get("backend")
-        if isinstance(backend, dict):
-            backend["containerName"] = f"ar-cgc-falkordb-bench-{benchmark_stable_id(case.case_id)}"
-
-    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
 def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
     for relative in (Path("AGENTS.md"), Path("repos"), Path("ar-coordination")):
         path = root / relative
@@ -734,6 +842,7 @@ def prepare_case(
     skill_exposure_mode: str = "copy",
     force_clone: bool = False,
     provider_timeout: int = 1800,
+    provider_ids: tuple[str, ...] = (),
 ) -> None:
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
@@ -753,13 +862,16 @@ def prepare_case(
 
     coordination_root = with_memory_root / coordination_path(case)
     sync_runtime_assets(coordination_root, dry_run)
-    adapt_benchmark_settings(case, coordination_root, dry_run)
     sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
     prepare_configured_providers(
+        case,
         coordination_root,
+        with_memory_repo_root,
+        memory_repo,
         dry_run,
         provider_timeout,
+        provider_ids=provider_ids,
         cgc_seed_source_coordination_root=default_cgc_seed_source_coordination_root(
             benchmarks_root, coordination_root
         ),
@@ -931,6 +1043,7 @@ def run_case(
     force_clone: bool,
     provider_timeout: int,
 ) -> Path:
+    provider_ids = selected_provider_ids(case, prompt_id=prompt_id, variant_id=variant_id)
     if not skip_prepare:
         prepare_case(
             benchmarks_root,
@@ -939,6 +1052,7 @@ def run_case(
             skill_exposure_mode=skill_exposure_mode,
             force_clone=force_clone,
             provider_timeout=provider_timeout,
+            provider_ids=provider_ids,
         )
 
     current_run_id = run_id()
@@ -1191,6 +1305,7 @@ def prepare_benchmarks(request: BenchmarkPrepareRequest) -> dict[str, Any]:
                 skill_exposure_mode=request.skill_exposure_mode,
                 force_clone=request.force_clone,
                 provider_timeout=request.provider_timeout,
+                provider_ids=selected_provider_ids(case),
             )
 
     _, messages = _capture_messages(run_prepare)

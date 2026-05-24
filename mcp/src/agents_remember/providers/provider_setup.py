@@ -920,7 +920,7 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"unsupported action: {args.action}")
 
     return {
-        "ok": all(result.get("ok") for result in results),
+        "ok": all(result_ok_for_prepare(result, args) for result in results),
         "action": args.action,
         "dryRun": args.dry_run,
         "coordinationRoot": args.coordination_root.as_posix(),
@@ -929,6 +929,17 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "enabled": enabled,
         "results": results,
     }
+
+
+def result_ok_for_prepare(result: dict[str, Any], args: argparse.Namespace) -> bool:
+    if result.get("ok"):
+        return True
+    return bool(
+        args.action == "prepare"
+        and args.cgc_refresh_fallback
+        and result.get("provider") == "codegraphcontext"
+        and result.get("action") == "seed"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

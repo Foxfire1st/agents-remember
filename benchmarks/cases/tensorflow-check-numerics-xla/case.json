@@ -54,7 +54,11 @@
           "id": "with-onboarding-warm",
           "promptPath": "prompts/triage-check-numerics-xla.with-onboarding-warm.md",
           "cwd": "workspaces/tensorflow-check-numerics-xla/with-memory",
-          "allowMemory": true
+          "allowMemory": true,
+          "providers": [
+            "grepai-memory",
+            "codegraphcontext-code"
+          ]
         }
       ]
     }

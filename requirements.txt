@@ -1,4 +1,7 @@
-# Code Quality Tools For Agents Remember Developement
+# Code Quality Tools For Agents Remember Development
 
 ruff==0.15.13
 Radon==6.0.1
+coverage==7.14.0
+pytest==9.0.3
+pytest-cov==7.1.0

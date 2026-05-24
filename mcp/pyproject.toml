@@ -11,6 +11,15 @@ dependencies = [
   "mcp>=1.12.4,<2",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "coverage>=7.14,<8",
+  "pytest>=9,<10",
+  "pytest-cov>=7,<8",
+  "radon>=6,<7",
+  "ruff>=0.15,<1",
+]
+
 [project.scripts]
 agents-remember-mcp = "agents_remember.mcp.__main__:main"
 
