@@ -40,6 +40,34 @@ class WorktreeCommandResult:
     payload: dict[str, object]
 
 
+@dataclass(frozen=True)
+class WorktreeProviderSetupConfig:
+    coordination_root: Path
+    settings_path: Path
+    seed_source_coordination_root: Path | None = None
+
+
+def next_guidance(
+    operation: str,
+    *,
+    tool: str | None = None,
+    args: dict[str, object] | None = None,
+    required_args: list[str] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"nextOperation": operation}
+    if tool:
+        payload["nextTool"] = tool
+    if args is not None:
+        payload["nextArgs"] = args
+    if required_args:
+        payload["nextRequiredArgs"] = required_args
+    return payload
+
+
+def contract_next_args(contract: WorktreeContract, **extra: object) -> dict[str, object]:
+    return {"contract_path": contract.contract_path.as_posix(), **extra}
+
+
 def run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
@@ -137,54 +165,73 @@ def contract_payload(contract: WorktreeContract) -> dict[str, object]:
     return data
 
 
-def lifecycle_guidance(contract: WorktreeContract) -> dict[str, str]:
+def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
     if contract.cleanup == "completed":
         return {
             "phase": "cleanup-completed",
             "summary": "Worktree task lifecycle is complete and cleanup has already run.",
-            "next_action": "done",
-            "next_command": "",
+            **next_guidance("done"),
         }
     if contract.integration_status == "blocked":
         return {
             "phase": "integration-blocked",
             "summary": "Integration is blocked; review the conflict or non-fast-forward state with the developer before retrying.",
-            "next_action": "developer-decision",
-            "next_command": f"integrate --contract-path {contract.contract_path.as_posix()} --approved --strategy replay",
+            **next_guidance(
+                "developer_decision",
+                tool="worktree_integrate",
+                args=contract_next_args(contract, strategy="replay", dry_run=True),
+            ),
         }
     if contract.integration_status == "completed":
         return {
             "phase": "cleanup-pending",
             "summary": "Integration completed; cleanup is still pending.",
-            "next_action": "cleanup",
-            "next_command": f"cleanup --contract-path {contract.contract_path.as_posix()} --approved",
+            **next_guidance(
+                "request_cleanup_decision",
+                tool="worktree_cleanup",
+                args=contract_next_args(contract, dry_run=True),
+            ),
         }
     if contract_has_worktree_changes(contract):
         return {
             "phase": "commit-approval-pending",
             "summary": "Worktree changes are present; prepare a closeout preview and ask for explicit commit approval before creating commits.",
-            "next_action": "request-commit-approval",
-            "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --dry-run --code-commit-message <message>",
+            **next_guidance(
+                "request_commit_approval",
+                tool="worktree_closeout_preview",
+                args=contract_next_args(contract),
+                required_args=["code_commit_message"],
+            ),
         }
     if contract.closeout_status == "completed":
         return {
             "phase": "integration-pending",
             "summary": "Closeout completed; integrate the task branches back into their source branches.",
-            "next_action": "integrate",
-            "next_command": f"integrate --contract-path {contract.contract_path.as_posix()} --approved --strategy ff-only",
+            **next_guidance(
+                "request_integration_decision",
+                tool="worktree_integrate",
+                args=contract_next_args(contract, strategy="ff-only", dry_run=True),
+            ),
         }
     if contract.approved_for_commit:
         return {
             "phase": "closeout-pending",
             "summary": "Closeout approval is recorded, but closeout has not completed.",
-            "next_action": "closeout",
-            "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved",
+            **next_guidance(
+                "closeout",
+                tool="worktree_closeout_apply",
+                args=contract_next_args(contract),
+                required_args=["intent_note", "code_commit_message"],
+            ),
         }
     return {
         "phase": "worktree-started",
         "summary": "Worktrees are ready; continue the wrapped workflow and close out after review.",
-        "next_action": "work",
-        "next_command": f"status --contract-path {contract.contract_path.as_posix()}",
+        **next_guidance(
+            "continue_work",
+            tool="worktree_status",
+            args=contract_next_args(contract),
+        ),
     }
 
 
@@ -305,7 +352,17 @@ def start_result(args: argparse.Namespace) -> WorktreeCommandResult:
             {
                 "state": "blocked",
                 "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-                "next_action": "choose-memory-recovery",
+                **next_guidance(
+                    "choose_memory_recovery",
+                    tool="worktree_start",
+                    args={
+                        "repo_id": context.code_repository_name,
+                        "task_name": args.task_name,
+                        "worktree_name": args.worktree_name,
+                        "workflow_kind": args.workflow_kind,
+                    },
+                    required_args=["memory_choice"],
+                ),
                 "code_worktree": code_state,
                 "memory": memory_state,
             },
@@ -329,7 +386,17 @@ def start_result(args: argparse.Namespace) -> WorktreeCommandResult:
             {
                 "state": "blocked",
                 "summary": "Worktree provider setup could not be prepared safely.",
-                "next_action": "choose-provider-setup-recovery",
+                **next_guidance(
+                    "choose_provider_setup_recovery",
+                    tool="worktree_start",
+                    args={
+                        "repo_id": context.code_repository_name,
+                        "task_name": args.task_name,
+                        "worktree_name": args.worktree_name,
+                        "workflow_kind": args.workflow_kind,
+                        "skip_provider_setup": True,
+                    },
+                ),
                 "code_worktree": code_state,
                 "memory": memory_state,
                 "providers": provider_state,
@@ -342,7 +409,11 @@ def start_result(args: argparse.Namespace) -> WorktreeCommandResult:
         {
             "state": "started",
             "summary": "Worktree task started; continue the wrapped workflow before closeout.",
-            "next_action": "work",
+            **next_guidance(
+                "continue_work",
+                tool="worktree_status",
+                args=contract_next_args(contract),
+            ),
             "code_worktree": code_state,
             "memory": memory_state,
             "providers": provider_state,
@@ -374,21 +445,21 @@ def prepare_providers_for_start(
 ) -> dict[str, object]:
     if args.skip_provider_setup:
         return {"state": "skipped", "reason": "provider setup was skipped"}
+    setup_config = getattr(args, "provider_setup_config", None)
+    if setup_config is None:
+        return {
+            "state": "skipped",
+            "reason": "provider setup requires MCP-derived provider settings",
+        }
 
-    target_coordination_root = (
-        args.provider_coordination_root or context.coordination_root
-    ).resolve()
+    target_coordination_root = setup_config.coordination_root.resolve()
     source_coordination_root = (
-        args.provider_seed_source_coordination_root or context.coordination_root
+        setup_config.seed_source_coordination_root or context.coordination_root
     ).resolve()
     source_repo_root = context.code_repository_root.resolve()
     target_repo_root = contract.code_worktree.resolve()
-    provider_runtime_root = (
-        args.provider_runtime_root or contract.worktree_group / "provider-runtime"
-    ).resolve()
-    provider_settings_path = (
-        args.provider_from_settings.resolve() if args.provider_from_settings else None
-    )
+    provider_runtime_root = (contract.worktree_group / "provider-runtime").resolve()
+    provider_settings_path = setup_config.settings_path.resolve()
 
     try:
         settings = provider_setup.load_settings(target_coordination_root, provider_settings_path)
@@ -416,7 +487,7 @@ def prepare_providers_for_start(
         settings_path=provider_setup.settings_path(
             target_coordination_root, provider_settings_path
         ),
-        timeout=args.provider_timeout,
+        timeout=getattr(args, "provider_timeout", 1800),
         dry_run=args.dry_run,
         skip_grepai=True,
         cgc_seed=provider_setup.CgcSeedOptions(
@@ -835,8 +906,17 @@ def closeout_preview_payload(
         **status_payload(contract),
         "phase": "commit-approval-pending",
         "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata and affected entity fingerprints to that code commit, then commit memory and ledger.",
-        "next_action": "request-commit-approval",
-        "next_command": f"closeout --contract-path {contract.contract_path.as_posix()} --approved --approval-note <note>",
+        **next_guidance(
+            "request_commit_approval",
+            tool="worktree_closeout_apply",
+            args=contract_next_args(
+                contract,
+                code_commit_message=args.code_commit_message,
+                memory_commit_message=args.memory_commit_message,
+                ledger_commit_message=args.ledger_commit_message,
+            ),
+            required_args=["intent_note"],
+        ),
         "commit_approval_required": True,
         "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
         "closeout_order": [
@@ -946,7 +1026,6 @@ def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
             "state": "closed",
             **status_payload(updated),
             "summary": "Closeout completed; integrate the task branches back into their source branches.",
-            "next_action": "integrate",
             "code_commit": code_commit,
             "memory_content_commit": memory_commit,
             "ledger_commit": ledger_commit,
@@ -1001,8 +1080,19 @@ def direct_closeout_preview_payload(
         "memory_repo": context.memory_root.as_posix(),
         "source_branch": source_branch,
         "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata and affected entity fingerprints to that code commit, then commit memory and ledger.",
-        "next_action": "request-commit-approval",
-        "next_command": "direct-closeout --approved --approval-note <note> --code-commit-message <message>",
+        **next_guidance(
+            "request_commit_approval",
+            tool="direct_closeout_apply",
+            args={
+                "repo_id": context.code_repository_name,
+                "task_name": args.task_name,
+                "source_branch": source_branch,
+                "code_commit_message": args.code_commit_message,
+                "memory_commit_message": args.memory_commit_message,
+                "ledger_commit_message": args.ledger_commit_message,
+            },
+            required_args=["intent_note"],
+        ),
         "commit_approval_required": True,
         "approval_question": "Approve creating the direct code, memory, and ledger commits with these messages?",
         "closeout_order": [
@@ -1122,7 +1212,6 @@ def blocked_integration_payload(
         **status_payload(blocked),
         "reason": reason,
         "summary": reason,
-        "next_action": "developer-decision",
         "developer_decision_required": True,
         **extra,
     }
@@ -1299,7 +1388,16 @@ def integrate_result(args: argparse.Namespace) -> WorktreeCommandResult:
                 "state": "would-integrate",
                 **status_payload(contract),
                 "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
-                "next_action": "integrate",
+                **next_guidance(
+                    "request_integration_decision",
+                    tool="worktree_integrate",
+                    args=contract_next_args(
+                        contract,
+                        strategy=args.strategy,
+                        ledger_commit_message=args.ledger_commit_message,
+                        dry_run=False,
+                    ),
+                ),
                 "strategy": args.strategy,
                 "code_replay_required": code_replay_required,
                 "memory_replay_required": memory_replay_required,
@@ -1373,7 +1471,6 @@ def integrate_result(args: argparse.Namespace) -> WorktreeCommandResult:
             "state": "integrated",
             **status_payload(updated),
             "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
-            "next_action": "cleanup",
             "strategy": args.strategy,
             "integrated_code_commit": integrated_code_commit,
             "integrated_memory_content_commit": integrated_memory_content_commit,
@@ -1509,7 +1606,6 @@ def cleanup_result(args: argparse.Namespace) -> WorktreeCommandResult:
             "state": state,
             **status_payload(updated),
             "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
-            "next_action": "done",
             "removed_worktrees": removed_worktrees,
             "branches": branches,
             "directories": directories,
@@ -1559,10 +1655,6 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--memory-choice", choices=("reconciliation", "disabled-memory", "custom"))
     start.add_argument("--custom-instruction")
     start.add_argument("--skip-provider-setup", action="store_true")
-    start.add_argument("--provider-coordination-root", type=Path)
-    start.add_argument("--provider-seed-source-coordination-root", type=Path)
-    start.add_argument("--provider-runtime-root", type=Path)
-    start.add_argument("--provider-from-settings", type=Path)
     start.add_argument("--provider-timeout", type=int, default=1800)
     start.add_argument("--dry-run", action="store_true")
     start.set_defaults(func=command_start)

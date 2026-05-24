@@ -663,7 +663,12 @@ class WorktreeSupportTests(unittest.TestCase):
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["state"], "would-closeout")
             self.assertEqual(payload["phase"], "commit-approval-pending")
-            self.assertEqual(payload["next_action"], "request-commit-approval")
+            self.assertEqual(payload["nextOperation"], "request_commit_approval")
+            self.assertEqual(payload["nextTool"], "worktree_closeout_apply")
+            self.assertEqual(
+                payload["nextArgs"]["contract_path"], contract.contract_path.as_posix()
+            )
+            self.assertNotIn("next_command", payload)
             self.assertTrue(payload["commit_approval_required"])
             self.assertIn(
                 "refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"]
@@ -975,7 +980,9 @@ class WorktreeSupportTests(unittest.TestCase):
             (contract.code_worktree / "followup.txt").write_text("follow-up\n", encoding="utf-8")
             payload = worktree_manager.status_payload(contract)
             self.assertEqual(payload["phase"], "commit-approval-pending")
-            self.assertEqual(payload["next_action"], "request-commit-approval")
+            self.assertEqual(payload["nextOperation"], "request_commit_approval")
+            self.assertEqual(payload["nextTool"], "worktree_closeout_preview")
+            self.assertNotIn("next_command", payload)
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1013,7 +1020,8 @@ class WorktreeSupportTests(unittest.TestCase):
                 self.assertEqual(worktree_manager.command_cleanup(cleanup_args), 0)
             cleanup_payload = json.loads(output.getvalue())
             self.assertEqual(cleanup_payload["state"], "cleanup-completed")
-            self.assertEqual(cleanup_payload["next_action"], "done")
+            self.assertEqual(cleanup_payload["nextOperation"], "done")
+            self.assertNotIn("next_command", cleanup_payload)
             self.assertFalse(contract.code_worktree.exists())
             self.assertFalse(contract.memory_worktree.exists())
             self.assertFalse(

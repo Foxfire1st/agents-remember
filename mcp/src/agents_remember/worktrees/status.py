@@ -50,7 +50,9 @@ def _packet_from_status_payload(payload: dict[str, object]) -> dict[str, Any]:
         "integrationStatus": payload["integration_status"],
         "cleanup": payload["cleanup"],
         "phase": payload["phase"],
-        "nextAction": payload["next_action"],
-        "nextCommand": payload["next_command"],
+        "nextOperation": payload["nextOperation"],
+        "nextTool": payload.get("nextTool", ""),
+        "nextArgs": payload.get("nextArgs", {}),
+        "nextRequiredArgs": payload.get("nextRequiredArgs", []),
         "rawStatus": payload,
     }

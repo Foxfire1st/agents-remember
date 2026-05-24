@@ -422,6 +422,15 @@ def worktree_start_tool(
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
     settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
+    provider_setup_config = (
+        None
+        if settings_path is None
+        else git_worktree_manager.WorktreeProviderSetupConfig(
+            coordination_root=config.coordination_root,
+            settings_path=settings_path,
+            seed_source_coordination_root=config.coordination_root,
+        )
+    )
     args = _worktree_namespace(
         config,
         repo,
@@ -434,10 +443,7 @@ def worktree_start_tool(
         memory_choice=memory_choice,
         custom_instruction=None,
         skip_provider_setup=skip_provider_setup,
-        provider_coordination_root=None,
-        provider_seed_source_coordination_root=None,
-        provider_runtime_root=None,
-        provider_from_settings=settings_path,
+        provider_setup_config=provider_setup_config,
         provider_timeout=config.timeout_caps.get("providerSeconds", 120),
         dry_run=dry_run,
     )
