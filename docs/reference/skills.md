@@ -26,7 +26,7 @@ agents-remember-md/runtime/skills/
 | --- | --- |
 | `C-00-initialize-memory-repo` | Create or repair a target repository memory root. |
 | `C-01-findings-capture` | Route durable findings to the right artifact. |
-| `C-02-onboarding-drift-detection` | Classify onboarding freshness before planning. |
+| `C-02-memory-quality-control` | Control memory quality with task-start drift checks, pre-code-commit missing-onboarding checks, and closeout quality gates. |
 | `C-03-repo-bootstrap` | Bootstrap repo overviews, route-local overviews, and onboarding coverage. |
 | `C-04-retrieval-strategy-router` | Choose Semantics, Relationship, or Intent retrieval, using providers for discovery and onboarding/source as proof. |
 | `C-05-create-or-update-onboarding-files` | Create and maintain file-level onboarding and entity catalogs. |

@@ -122,7 +122,7 @@ Ask the agent to run `C-03-repo-bootstrap` for the target repository. A thin `ov
 Normal tasks start in chat mode. The agent should:
 
 1. resolve the repository context with `C-08-ar-coordination-context-resolver`
-2. run `C-02-onboarding-drift-detection` before planning against onboarding
+2. run `C-02-memory-quality-control` before planning against onboarding
 3. read the relevant onboarding beside the code
 4. propose changes and wait for approval
 5. implement approved work

@@ -51,7 +51,7 @@ When an onboarding unit grows too large, that is often a signal that the source 
 
 ### How does the agent know memory is not stale?
 
-File-level sidecar onboarding records verification metadata. `C-02-onboarding-drift-detection` compares the source file against that verification point before the agent plans against onboarding.
+File-level sidecar onboarding records verification metadata. `C-02-memory-quality-control` compares the source file against that verification point before the agent plans against onboarding.
 
 Typical outcomes are `up to date`, `drifted`, `missing verification`, `missing`, `orphaned`, `disabled`, or `unsupported`.
 

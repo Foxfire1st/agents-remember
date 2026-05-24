@@ -4,11 +4,10 @@ Stale onboarding is expected. The important rule is that agents should detect it
 
 ## Detect Drift
 
-Run C-02 for the target repository:
+Run C-02 memory quality control for the target repository:
 
-```bash
-python3 ar-coordination/skills/U-01-core-skills/C-02-onboarding-drift-detection/scripts/check_onboarding_drift.py \
-  --code-repository-root /path/to/repo
+```text
+drift_check(repo_id="<repo-id>", detail_limit=50)
 ```
 
 The helper writes drift reports under the resolved coordination root, usually:

@@ -36,5 +36,5 @@ Use this directory when the README is not enough. The root README explains the p
 - [Path Rules](reference/path-rules.md)
 - [Skills](reference/skills.md)
 - [C-08 Resolver](reference/resolver-c08.md)
-- [C-02 Drift Detection](reference/drift-c02.md)
+- [C-02 Memory Quality Control](reference/drift-c02.md)
 - [C-09 Worktrees And Closeout](reference/worktrees-c09.md)

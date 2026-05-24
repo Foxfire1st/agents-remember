@@ -38,7 +38,7 @@ C-09 starts after the normal task intake and onboarding gate, not before them.
 The intended order is:
 
 1. run the C-08 resolver for the target repository
-2. run C-02 drift detection and follow the existing AGENTS Gate 3/4 choice point
+2. run C-02 memory quality control's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
 4. decide whether the work is chat-only, W-02 light task, heavy task, or external workflow
 5. choose or review the task slug and workflow variables
@@ -65,11 +65,12 @@ Closeout is explicitly human-gated. Implementation approval is not commit approv
 
 Real closeout creates commits and therefore uses `worktree_closeout_apply` with an `intent_note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
 
-After the code commit is created, run `C-02-onboarding-drift-detection` to get
-the concrete onboarding and entity-fingerprint update worklist. Refresh
-onboarding and entity fingerprints from that worklist, then run MCP
-`memory_quality_check` before the memory-content commit. The memory commit is
-allowed only when that full validation passes.
+After the code commit is created, use `C-02-memory-quality-control` to run the
+post-code-commit drift check and get the concrete onboarding and
+entity-fingerprint update worklist. Refresh onboarding and entity fingerprints
+from that worklist, then run MCP `memory_quality_check` before the
+memory-content commit. The memory commit is allowed only when that full
+validation passes.
 
 Before the code commit, run the package-local missing-onboarding check against
 the current code worktree additions:
@@ -91,7 +92,7 @@ External-memory closeout order is:
 1. run `check_missing_onboarding` against current worktree additions
 2. create missing onboarding for newly added eligible source files before committing code
 3. commit code worktree changes and capture `C2` plus its commit date
-4. run C-02 drift detection against `C2` to produce the full memory update worklist
+4. run C-02 memory quality control's drift check against `C2` to produce the full memory update worklist
 5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
 6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
 7. run MCP `memory_quality_check`; fix reported memory findings before continuing
@@ -110,11 +111,12 @@ Use `direct_closeout_preview` / `direct_closeout_apply` only for small approved 
 
 Direct closeout is still explicitly human-gated. Agents must request `direct_closeout_preview` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout uses `direct_closeout_apply` with an `intent_note`.
 
-After the code commit is created, run `C-02-onboarding-drift-detection` to get
-the concrete onboarding and entity-fingerprint update worklist. Refresh
-onboarding and entity fingerprints from that worklist, then run MCP
-`memory_quality_check` before the memory-content commit. The memory commit is
-allowed only when that full validation passes.
+After the code commit is created, use `C-02-memory-quality-control` to run the
+post-code-commit drift check and get the concrete onboarding and
+entity-fingerprint update worklist. Refresh onboarding and entity fingerprints
+from that worklist, then run MCP `memory_quality_check` before the
+memory-content commit. The memory commit is allowed only when that full
+validation passes.
 
 Before committing code in direct closeout, run the same package-local
 `check_missing_onboarding` pass against current-checkout additions and create
@@ -128,7 +130,7 @@ External-memory direct closeout order is:
 1. run `check_missing_onboarding` against current-checkout additions
 2. create missing onboarding for newly added eligible source files before committing code
 3. commit code checkout changes and capture `C2` plus its commit date
-4. run C-02 drift detection against `C2` to produce the full memory update worklist
+4. run C-02 memory quality control's drift check against `C2` to produce the full memory update worklist
 5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
 6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
 7. run MCP `memory_quality_check`; fix reported memory findings before continuing

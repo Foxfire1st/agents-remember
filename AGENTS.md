@@ -49,7 +49,7 @@ context_packet(repo_id="agents-remember-md", include_providers=true)
 Skip this provider check when no MCP server is configured or the MCP settings
 report no providers.
 
-Then run `C-02-onboarding-drift-detection` for the resolved context before
+Then run `C-02-memory-quality-control` for the resolved context before
 reasoning from onboarding or source files.
 
 After C-08 resolves `memory_root`, read that memory layer's repository-specific
@@ -85,6 +85,9 @@ runtime settings live under the selected `ar-coordination/` or memory root.
   memory layer, not in package-owned installed `AGENTS.md` templates.
 - Do not create, close out, integrate, push, or clean up worktrees without the
   approval gates required by the selected workflow.
+- Implementation approval is not commit approval. After checks or closeout
+  dry-runs, stop and ask for explicit commit approval before running any real
+  commit, closeout apply, integration, push, or cleanup command.
 - Do not move protected branches unless the developer explicitly asks.
 
 ## Code Quality Instructions

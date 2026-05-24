@@ -125,6 +125,9 @@ the more specific authority for its code repository.
 - Do not move protected branches unless the developer explicitly asks.
 - Do not create, close out, integrate, push, or clean up worktrees without the
   approval gates required by the selected workflow.
+- Implementation approval is not commit approval. After checks or closeout
+  dry-runs, stop and ask for explicit commit approval before running any real
+  commit, closeout apply, integration, push, or cleanup command.
 - When coordinator-wide guidance and memory-layer guidance conflict, prefer the
   memory-layer rule for that repository.
 

@@ -25,7 +25,7 @@ context_packet(repo_id="<repo-id>", include_providers=true)
 Skip this gate only when no Agents Remember MCP server is configured or the MCP
 settings report no providers.
 
-Gate 3: Run `C-02-onboarding-drift-detection` for the relevant repository and then read its drift report.
+Gate 3: Run `C-02-memory-quality-control` for the relevant repository and then read its task-start drift report.
 Do not for any reason skip execution of the drift detection skill.
 
 Gate 4: If the drift report indicates any drifted, missing-verification, or orphaned onboarding, tell the developer what
@@ -35,7 +35,7 @@ Gate 5: If they say yes, then orchestrate the update process and split the work 
 All sub agents shall use this skill: `C-05-create-or-update-onboarding-files` and you pass it the instructions it needs to perform the job.
 If the developer says no, tell them that reasoning over drifted onboardings may introduce risk of regressions.
 
-Gate 6: Run `C-02-onboarding-drift-detection` again to confirm that all onboarding is now verified and up to date.
+Gate 6: Run `C-02-memory-quality-control` again to confirm that all onboarding is now verified and up to date.
 Do not for any reason skip execution of the drift detection skill.
 
 Gate 7: Only after steps 1 - 6 are completed, report to the developer. Then delete the drift report file.

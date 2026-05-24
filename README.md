@@ -24,7 +24,7 @@ Agents Remember makes that missing context local and verifiable. Instead of aski
 Agents Remember has three moving pieces:
 
 - **Onboarding units:** Markdown notes derived from source paths. A file such as `src/foo/bar.ts` maps to `ar-memory/onboarding/src/foo/bar.ts.md` in the default repo-local mode.
-- **Drift detection:** Before an agent trusts onboarding, `C-02-onboarding-drift-detection` checks whether the source changed since the onboarding was verified.
+- **Memory quality control:** Before an agent trusts onboarding, `C-02-memory-quality-control` checks whether the source changed since the onboarding was verified. During closeout it also covers new-file onboarding and final memory quality checks.
 - **Approval-gated updates:** Onboarding records approved current state, not guesses or plans. Task-local notes stay task-local until the developer approves implementation.
 
 The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`.
@@ -85,7 +85,7 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
 
 5. Ask the agent to initialize memory for a target repository with `C-00-initialize-memory-repo`, then bootstrap initial onboarding with `C-03-repo-bootstrap`.
 
-After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks drift with `C-02-onboarding-drift-detection`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Choose Your Agent
 

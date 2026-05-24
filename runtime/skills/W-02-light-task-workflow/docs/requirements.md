@@ -209,7 +209,7 @@ That includes changes to requirements that were already approved earlier. Those 
 
 Placement: Creation, after raw intake is recorded.
 
-Purpose: detect onboarding drift and refresh relevant onboarding before Research begins. Skills `C-02-onboarding-drift-detection` and `C-05-create-or-update-onboarding-files` are used here.
+Purpose: detect onboarding drift and refresh relevant onboarding before Research begins. Skills `C-02-memory-quality-control` and `C-05-create-or-update-onboarding-files` are used here.
 
 Rule: onboarding refresh sharpens the requirement picture, but it does not overwrite the developer's original ask. Raw intake stays preserved in `requirement_change_candidates.md`.
 

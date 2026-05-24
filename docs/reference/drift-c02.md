@@ -1,6 +1,6 @@
-# C-02 Drift Detection
+# C-02 Memory Quality Control
 
-`C-02-onboarding-drift-detection` classifies whether onboarding can be trusted before planning.
+`C-02-memory-quality-control` controls whether onboarding can be trusted before planning and whether refreshed memory is clean enough to commit during closeout.
 
 ## What It Checks
 

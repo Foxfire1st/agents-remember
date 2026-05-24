@@ -45,7 +45,7 @@ The agent should:
 4. keep requirements, implementation steps, and decisions aligned with the latest approved intent
 5. treat the task file's checkboxes as the live implementation tracker
 6. include proposed code examples for each distinct implementation change when code changes are in scope
-7. run `C-02-onboarding-drift-detection` before planning against onboarding files
+7. run `C-02-memory-quality-control` before planning against onboarding files
 8. stop for approval before implementation
 9. after approval, treat code changes, onboarding propagation through `C-05-create-or-update-onboarding-files`, and the checks listed in the C-08 resolved `system/tools.md` as one implementation cycle
 10. for worktree-backed tasks, present a commit/closeout preview and stop for explicit commit approval before any C-09 closeout commits are created
@@ -65,7 +65,7 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 
 1. Every light-task change gets a task wrapper folder and `task.md`.
 2. The task file is the living contract for requirements, checklist state, decisions, and proposed code examples.
-3. When onboarding files are part of planning context, drift is checked before planning using `C-02-onboarding-drift-detection`.
+3. When onboarding files are part of planning context, drift is checked before planning using `C-02-memory-quality-control`.
 4. No implementation begins before explicit developer approval.
 5. Refreshed external-memory onboarding and ledger changes are committed before C-09 starts worktrees.
 6. Implementation approval is separate from commit approval; worktree-backed closeout commits require a later explicit developer approval after a closeout preview.
