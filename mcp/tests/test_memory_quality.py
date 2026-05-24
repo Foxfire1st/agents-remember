@@ -15,6 +15,7 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.mcp.config import load_config
 from agents_remember.mcp.tools import memory_quality_check_payload
 from agents_remember.memory_quality.check import run_memory_quality_check
+from agents_remember.memory_quality.style.update_history import history_order_fix
 from agents_remember.memory_quality.style.update_history.history_order import (
     check_onboarding_root,
 )
@@ -136,6 +137,57 @@ class MemoryQualityTests(unittest.TestCase):
 
             self.assertFalse(result["ok"])
             self.assertEqual(result["findings"][0]["code"], "update_history_timestamp_missing")
+
+    def test_history_order_fix_reorders_update_history_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "onboarding" / "example.md"
+            write_onboarding(
+                path,
+                "\n".join(
+                    [
+                        "- 2026-05-23T22:10+02:00: Older entry.",
+                        "  Older continuation.",
+                        "- 2026-05-24T00:37+02:00: Newer entry.",
+                    ]
+                ),
+            )
+
+            result = history_order_fix.fix_onboarding_root(root / "onboarding")
+            check_result = run_memory_quality_check(root / "onboarding")
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["changedFiles"], ["example.md"])
+            self.assertEqual(result["skippedFiles"], [])
+            self.assertTrue(check_result["ok"])
+            text = path.read_text(encoding="utf-8")
+            self.assertLess(text.index("Newer entry"), text.index("Older entry"))
+            self.assertLess(text.index("Older entry"), text.index("Older continuation"))
+
+    def test_history_order_fix_skips_missing_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "onboarding" / "example.md"
+            write_onboarding(
+                path,
+                "\n".join(
+                    [
+                        "- Missing timestamp.",
+                        "- 2026-05-24T00:37+02:00: Timestamped entry.",
+                    ]
+                ),
+            )
+
+            result = history_order_fix.fix_onboarding_root(root / "onboarding")
+            check_result = run_memory_quality_check(root / "onboarding")
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["changedFiles"], [])
+            self.assertEqual(result["skippedFiles"], ["example.md"])
+            self.assertFalse(check_result["ok"])
+            self.assertEqual(
+                check_result["findings"][0]["code"], "update_history_timestamp_missing"
+            )
 
     def test_memory_quality_check_wrapper_defaults_to_update_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
