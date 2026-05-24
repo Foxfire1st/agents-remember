@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.providers import provider_lifecycle
 from agents_remember.providers.integrity import write_provider_runner_manifest
@@ -75,17 +76,6 @@ class InstallSummary:
         )
 
 
-def source_root_from_package() -> Path:
-    for parent in Path(__file__).resolve().parents:
-        if (
-            (parent / "runtime").is_dir()
-            and (parent / "runtime" / "skills").is_dir()
-            and (parent / "runtime" / "providers").is_dir()
-        ):
-            return parent
-    raise RuntimeError("cannot locate packaged runtime assets")
-
-
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
     if path.is_symlink():
         if not dry_run:
@@ -111,12 +101,17 @@ def copy_file(source: Path, destination: Path, summary: InstallSummary, dry_run:
         raise RuntimeError(f"cannot replace directory with file: {destination}")
 
     ensure_dir(destination.parent, summary, dry_run)
-    if destination.exists() and filecmp.cmp(source, destination, shallow=False):
+    same_file = destination.exists() and filecmp.cmp(
+        long_path(source),
+        long_path(destination),
+        shallow=False,
+    )
+    if same_file:
         summary.unchanged_files += 1
         return
 
     if not dry_run:
-        shutil.copy2(source, destination)
+        shutil.copy2(long_path(source), long_path(destination))
     summary.copied_files += 1
 
 
@@ -234,8 +229,9 @@ def copy_tree(
 ) -> None:
     ensure_dir(destination_root, summary, dry_run)
     ignore = ignore or set()
-    for source in sorted(source_root.rglob("*")):
-        relative = source.relative_to(source_root)
+    scan_root = long_path(source_root)
+    for source in sorted(scan_root.rglob("*")):
+        relative = source.relative_to(scan_root)
         if is_path_match(relative, ignore) or is_ignored_package_path(relative):
             continue
         destination = destination_root / relative
@@ -516,15 +512,27 @@ def install_runtime_from_config(
 ) -> dict[str, Any]:
     timeout = provider_deps_timeout or config.timeout_caps.get("providerSeconds", 1800)
     provider_settings = lifecycle_settings_from_config(config)
-    summary = install_runtime(
-        (source_root or source_root_from_package()).resolve(),
-        config.coordination_root,
-        dry_run,
-        include_benchmarks=include_benchmarks,
-        install_provider_deps=install_provider_deps,
-        provider_deps_timeout=timeout,
-        provider_settings=provider_settings,
-    )
+    if source_root is not None:
+        summary = install_runtime(
+            source_root.resolve(),
+            config.coordination_root,
+            dry_run,
+            include_benchmarks=include_benchmarks,
+            install_provider_deps=install_provider_deps,
+            provider_deps_timeout=timeout,
+            provider_settings=provider_settings,
+        )
+    else:
+        with packaged_source_root() as packaged_root:
+            summary = install_runtime(
+                packaged_root.resolve(),
+                config.coordination_root,
+                dry_run,
+                include_benchmarks=include_benchmarks,
+                install_provider_deps=install_provider_deps,
+                provider_deps_timeout=timeout,
+                provider_settings=provider_settings,
+            )
     integrity = None
     if not dry_run:
         integrity = write_provider_runner_manifest(config)

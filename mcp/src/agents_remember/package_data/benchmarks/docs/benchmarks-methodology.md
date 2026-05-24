@@ -28,6 +28,8 @@ The source package does not commit case workspaces. It commits manifests, prompt
 
 Agents Remember path rules should exclude resettable benchmark workspaces from onboarding. In particular, workspace-local cloned repos, workspace-local `ar-coordination/` trees, cloned benchmark memory snapshots, and `benchmarks/user-runs/` are benchmark state, not source files that should receive onboarding companions. This prevents benchmark memory from recursively producing more onboarding for itself.
 
+Benchmark assets are package data. When developing from a source checkout without installing the MCP package into the child benchmark environment, set `AGENTS_REMEMBER_BENCHMARK_MCP_SRC` to the checkout's `mcp/src` path so the generated child `.codex/config.toml` uses that explicit development source.
+
 ## Task Selection
 
 Prefer tasks with stable completion criteria:

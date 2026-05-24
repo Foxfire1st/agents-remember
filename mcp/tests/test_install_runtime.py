@@ -9,6 +9,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.install import runtime as install_runtime
+from agents_remember.install.assets import packaged_source_root
 
 
 def write_file(path: Path, content: str = "x\n") -> None:
@@ -31,6 +32,12 @@ def create_runtime_source(root: Path) -> Path:
 
 
 class InstallRuntimeTests(unittest.TestCase):
+    def test_packaged_source_root_contains_runtime_and_benchmarks(self) -> None:
+        with packaged_source_root() as source_root:
+            self.assertTrue((source_root / "runtime" / "skills").is_dir())
+            self.assertTrue((source_root / "runtime" / "providers").is_dir())
+            self.assertTrue((source_root / "benchmarks" / "cases").is_dir())
+
     def test_runtime_install_preserves_installed_provider_runtimes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

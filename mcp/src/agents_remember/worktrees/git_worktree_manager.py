@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel import filesystem
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     find_mapping,
@@ -589,17 +590,51 @@ def changed_worktree_paths(repo: Path) -> list[str]:
     paths = {
         path.strip().replace("\\", "/")
         for path in [*tracked, *untracked]
-        if path.strip() and (repo / path.strip()).is_file()
+        if path.strip() and filesystem.is_file(repo / path.strip())
     }
     return sorted(paths)
 
 
 def contract_context(contract: WorktreeContract):
-    return resolver.resolve_coordination_context(
+    context = resolver.resolve_coordination_context(
         code_repository_name=contract.repo_name,
         workspace_root=contract.coordination_root.parent,
         code_repository_root=contract.code_repo_path,
         contract_path=contract.contract_path,
+    )
+    if contract.memory_mode != "external" or contract.memory_worktree is None:
+        return context
+
+    worktree_settings_path = contract.memory_worktree / "system" / "settings.md"
+    worktree_path_settings_path = resolver.path_settings_path_for(worktree_settings_path)
+    if not filesystem.exists(worktree_settings_path) and not filesystem.exists(
+        worktree_path_settings_path
+    ):
+        return context
+
+    storage, cross_repo = resolver.parse_coordination_settings(
+        worktree_settings_path, context.topology
+    )
+    system_root = worktree_settings_path.parent
+    resolved_cross_repo = resolver.resolve_cross_repo_settings(
+        cross_repo,
+        contract.code_repo_path.parent,
+        context.coordination_root,
+    )
+    return replace(
+        context,
+        settings_path=worktree_settings_path,
+        path_settings_path=(
+            worktree_path_settings_path
+            if filesystem.exists(worktree_path_settings_path)
+            else None
+        ),
+        system_root=system_root,
+        sources_path=system_root / "sources.md",
+        tools_path=system_root / "tools.md",
+        storage=storage,
+        path_rules=storage.path_rules,
+        cross_repo=resolved_cross_repo,
     )
 
 
@@ -630,7 +665,7 @@ def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> di
             unsupported.append(source_path)
             continue
         onboarding_path = sidecar_onboarding_path(context.onboarding_root, source_path)
-        if not onboarding_path.exists():
+        if not filesystem.exists(onboarding_path):
             missing.append(source_path)
             continue
         required.append(
@@ -655,9 +690,9 @@ def normalized_table_cell(cell: str) -> str:
 
 
 def parse_entity_fingerprint_rows(catalog_path: Path) -> list[dict[str, object]]:
-    if not catalog_path.exists():
+    if not filesystem.exists(catalog_path):
         return []
-    lines = catalog_path.read_text(encoding="utf-8").splitlines()
+    lines = filesystem.read_text(catalog_path, encoding="utf-8").splitlines()
     header: dict[str, int] | None = None
     start_index = 0
     for index, line in enumerate(lines):
@@ -757,7 +792,7 @@ def refresh_entity_fingerprints_for_context(
         return []
 
     catalog_path = Path(required[0]["onboarding_file"])
-    lines = catalog_path.read_text(encoding="utf-8").splitlines()
+    lines = filesystem.read_text(catalog_path, encoding="utf-8").splitlines()
     refreshed: list[dict[str, object]] = []
     rows_by_entity = {
         str(row["entity"]): row for row in parse_entity_fingerprint_rows(catalog_path)
@@ -786,7 +821,7 @@ def refresh_entity_fingerprints_for_context(
                 "affected_paths": item["affected_paths"],
             }
         )
-    catalog_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    filesystem.write_text(catalog_path, "\n".join(lines) + "\n", encoding="utf-8")
     return refreshed
 
 
@@ -821,7 +856,7 @@ def validate_onboarding_refresh_plan_for_context(
         )
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
-        text = onboarding_path.read_text(encoding="utf-8")
+        text = filesystem.read_text(onboarding_path, encoding="utf-8")
         if "lastVerifiedCommitHash" not in text or "lastVerifiedCommitDate" not in text:
             raise RuntimeError(
                 "external-memory closeout requires onboarding verification metadata before memory commit; "
@@ -847,7 +882,7 @@ def refresh_onboarding_metadata_for_context(
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
-        text = onboarding_path.read_text(encoding="utf-8")
+        text = filesystem.read_text(onboarding_path, encoding="utf-8")
         text, hash_found = onboarding_metadata_row(
             text, "lastVerifiedCommitHash", verified_commit, code=True
         )
@@ -858,7 +893,7 @@ def refresh_onboarding_metadata_for_context(
                 f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
                 "Run C-05 create-or-update-onboarding-files, then rerun closeout."
             )
-        onboarding_path.write_text(text, encoding="utf-8")
+        filesystem.write_text(onboarding_path, text, encoding="utf-8")
         refreshed.append(item)
     return refreshed
 

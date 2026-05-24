@@ -9,7 +9,7 @@ ar-coordination/skills/
 The source copies live under:
 
 ```text
-agents-remember-md/runtime/skills/
+agents-remember-md/mcp/src/agents_remember/package_data/runtime/skills/
 ```
 
 ## Workflow Skills

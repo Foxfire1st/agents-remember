@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.install.runtime import source_root_from_package
+from agents_remember.install.assets import packaged_source_root
 from agents_remember.install.skills import install_skills
 from agents_remember.kernel.coordination_context_resolver import (
     context_to_dict,
@@ -22,6 +24,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     run_drift_summary,
 )
 from agents_remember.providers import lifecycle_service
+from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.providers.status import provider_status_packet
 from agents_remember.worktrees import git_worktree_manager
@@ -708,17 +711,18 @@ def codex_benchmark_prepare_tool(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
-    return benchmark_runner.prepare_benchmarks(
-        benchmark_runner.BenchmarkPrepareRequest(
-            benchmarks_root=_benchmark_root(config, benchmarks_root),
-            target=target,
-            case_id=case_id,
-            dry_run=dry_run,
-            skill_exposure_mode=skill_exposure_mode,
-            force_clone=force_clone,
-            provider_timeout=provider_timeout,
+    with _benchmark_root_context(config, benchmarks_root) as resolved_benchmarks_root:
+        return benchmark_runner.prepare_benchmarks(
+            benchmark_runner.BenchmarkPrepareRequest(
+                benchmarks_root=resolved_benchmarks_root,
+                target=target,
+                case_id=case_id,
+                dry_run=dry_run,
+                skill_exposure_mode=skill_exposure_mode,
+                force_clone=force_clone,
+                provider_timeout=provider_timeout,
+            )
         )
-    )
 
 
 def codex_benchmark_run_tool(
@@ -755,23 +759,24 @@ def codex_benchmark_run_tool(
             ),
         }
 
-    result = benchmark_runner.run_codex_benchmark(
-        benchmark_runner.BenchmarkRunRequest(
-            benchmarks_root=_benchmark_root(config, benchmarks_root),
-            target=target,
-            case_id=case_id,
-            prompt=prompt,
-            variant=variant,
-            repetitions=repetitions,
-            jobs=jobs,
-            dry_run=dry_run,
-            skip_prepare=skip_prepare,
-            skill_exposure_mode=skill_exposure_mode,
-            force_clone=force_clone,
-            provider_timeout=provider_timeout,
-            codex_sandbox=codex_sandbox,
+    with _benchmark_root_context(config, benchmarks_root) as resolved_benchmarks_root:
+        result = benchmark_runner.run_codex_benchmark(
+            benchmark_runner.BenchmarkRunRequest(
+                benchmarks_root=resolved_benchmarks_root,
+                target=target,
+                case_id=case_id,
+                prompt=prompt,
+                variant=variant,
+                repetitions=repetitions,
+                jobs=jobs,
+                dry_run=dry_run,
+                skip_prepare=skip_prepare,
+                skill_exposure_mode=skill_exposure_mode,
+                force_clone=force_clone,
+                provider_timeout=provider_timeout,
+                codex_sandbox=codex_sandbox,
+            )
         )
-    )
     result["codexExecutable"] = codex_executable
     result["codexResolution"] = "PATH"
     return result
@@ -890,6 +895,10 @@ def _provider_lifecycle_result(
     timeout: int | None = None,
     run: Any,
 ) -> dict[str, Any]:
+    integrity = check_provider_runner_integrity(config)
+    if integrity.get("ok") is False:
+        return _provider_integrity_block_payload(operation, integrity)
+
     settings_path = write_lifecycle_settings(config)
     try:
         service_config = lifecycle_service.ProviderLifecycleServiceConfig(
@@ -902,6 +911,24 @@ def _provider_lifecycle_result(
         return {"operation": operation, "ok": bool(data.get("ok")), **data}
     finally:
         settings_path.unlink(missing_ok=True)
+
+
+def _provider_integrity_block_payload(
+    operation: str, integrity: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "operation": operation,
+        "ok": False,
+        "state": "runnerIntegrityFailed",
+        "error": "provider runner integrity check failed; run runtime_install before provider operations",
+        "integrity": integrity,
+        "recoveryActions": [
+            {
+                "action": "runtime_install",
+                "reason": "provider runner files changed or were not recorded since install",
+            }
+        ],
+    }
 
 
 def _worktree_closeout(
@@ -982,10 +1009,16 @@ def _carryover_request(
     )
 
 
-def _benchmark_root(config: McpRuntimeConfig, value: str | None) -> Path:
+@contextmanager
+def _benchmark_root_context(config: McpRuntimeConfig, value: str | None) -> Iterator[Path]:
     if value:
-        return _coord_path(config, value, "benchmarks_root")
+        yield _coord_path(config, value, "benchmarks_root")
+        return
+
     coordinator_benchmarks = config.coordination_root / "benchmarks"
     if (coordinator_benchmarks / "cases").is_dir():
-        return coordinator_benchmarks
-    return source_root_from_package() / "benchmarks"
+        yield coordinator_benchmarks
+        return
+
+    with packaged_source_root() as source_root:
+        yield source_root / "benchmarks"

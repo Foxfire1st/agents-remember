@@ -367,8 +367,8 @@ class CgcRuntimeLayout:
             "HOME": (self.run_root / "home").as_posix(),
             "CGC_RUNTIME_DB_TYPE": "falkordb-remote",
             "DEFAULT_DATABASE": "falkordb-remote",
-            "FALKORDB_HOST": os.environ.get("FALKORDB_HOST", CGC_FALKORDB_DEFAULT_HOST),
-            "FALKORDB_PORT": os.environ.get("FALKORDB_PORT", CGC_FALKORDB_DEFAULT_PORT),
+            "FALKORDB_HOST": CGC_FALKORDB_DEFAULT_HOST,
+            "FALKORDB_PORT": CGC_FALKORDB_DEFAULT_PORT,
             "FALKORDB_GRAPH_NAME": f"cgc_{self.repo_id.replace('-', '_')}",
             "LOG_FILE_PATH": (self.logs_root / "cgc.log").as_posix(),
             "DEBUG_LOG_PATH": (self.logs_root / "debug.log").as_posix(),
@@ -991,7 +991,7 @@ def cgc_runtime_layout_from_provider_settings(
         )
     )
     if backend_host_port == "auto":
-        backend_host_port = os.environ.get("FALKORDB_PORT", CGC_FALKORDB_DEFAULT_PORT)
+        backend_host_port = CGC_FALKORDB_DEFAULT_PORT
     process_env_template = None
     if isinstance(provider_settings.get("processEnvTemplate"), dict):
         process_env_variables = {

@@ -122,11 +122,12 @@ agents-remember-md/
   AGENTS.md                         # source checkout instructions
   README.md                         # public front door
   mcp/                              # package-local MCP server and services
-  runtime/
-    agents-md-files/                # installed AGENTS.md templates
-    skills/                         # installed skill source tree
-    system/defaults/examples/       # scaffold examples used by initialization
-  benchmarks/                       # optional benchmark package source
+    src/agents_remember/package_data/
+      runtime/
+        agents-md-files/            # installed AGENTS.md templates
+        skills/                     # installed skill source tree
+        system/defaults/examples/   # scaffold examples used by initialization
+      benchmarks/                   # optional benchmark package source
   docs/                             # user-facing documentation
   roadmap/                          # design notes and historical planning
 ```

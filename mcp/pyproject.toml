@@ -25,3 +25,9 @@ agents-remember-mcp = "agents_remember.mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agents_remember = [
+  "package_data/**/*",
+  "package_data/benchmarks/.gitignore",
+]

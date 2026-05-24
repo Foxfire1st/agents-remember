@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context_resolver import (
     StorageSettings,
     normalize_rel_path,
@@ -45,14 +46,16 @@ def check_missing_onboarding(
     code_repository_root: Path,
     onboarding_root: Path,
     settings: StorageSettings,
+    code_repository_name: str | None = None,
 ) -> dict[str, Any]:
     candidates = worktree_added_sources(code_repository_root)
+    scoped_repo_path = code_repository_name or code_repository_root.name
     missing = [
         row
         for source_file in candidates
         if (
             row := missing_onboarding_for_source(
-                code_repository_root, onboarding_root, settings, source_file
+                code_repository_root, onboarding_root, settings, scoped_repo_path, source_file
             )
         )
         is not None
@@ -84,14 +87,15 @@ def missing_onboarding_for_source(
     code_repository_root: Path,
     onboarding_root: Path,
     settings: StorageSettings,
+    scoped_repo_path: str,
     source_file: str,
 ) -> MissingOnboarding | None:
-    storage_mode = resolve_storage_for_source(source_file, settings, code_repository_root.name)
+    storage_mode = resolve_storage_for_source(source_file, settings, scoped_repo_path)
     if storage_mode == "disabled":
         return None
     if sidecar_storage_label(storage_mode):
         expected = mirror_onboarding_path(onboarding_root, source_file)
-        if expected.exists():
+        if filesystem.exists(expected):
             return None
         return MissingOnboarding(
             source_file=source_file,
@@ -103,7 +107,7 @@ def missing_onboarding_for_source(
     if storage_mode == "inline":
         source_path = code_repository_root / source_file
         try:
-            text = source_path.read_text(encoding="utf-8")
+            text = filesystem.read_text(source_path, encoding="utf-8")
         except UnicodeDecodeError:
             return MissingOnboarding(
                 source_file=source_file,
@@ -167,6 +171,17 @@ def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str
     return result
 
 
+def code_repository_name_from_git(repo_root: Path) -> str:
+    common_dir = run_git(
+        repo_root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+    ).stdout.strip()
+    if common_dir:
+        common_path = Path(common_dir)
+        if common_path.name == ".git":
+            return common_path.parent.name
+    return repo_root.name
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -204,8 +219,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     code_repository_root = args.code_repository_root.resolve()
+    code_repository_name = code_repository_name_from_git(code_repository_root)
     context = resolve_coordination_context(
-        code_repository_name=code_repository_root.name,
+        code_repository_name=code_repository_name,
         workspace_root=code_repository_root.parent,
         requested_topology=args.topology,
         coordination_root=args.coordination_root,
@@ -213,12 +229,13 @@ def main(argv: list[str] | None = None) -> int:
         onboarding_root=args.onboarding_root,
         code_repository_root=code_repository_root,
     )
-    if not context.onboarding_root.exists():
+    if not filesystem.exists(context.onboarding_root):
         parser.error(f"onboarding root does not exist: {context.onboarding_root}")
     result = check_missing_onboarding(
         code_repository_root=code_repository_root,
         onboarding_root=context.onboarding_root,
         settings=context.storage,
+        code_repository_name=code_repository_name,
     )
     if args.format == "json":
         print(json.dumps(result, indent=2))

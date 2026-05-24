@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import io
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -12,6 +15,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.kernel.coordination_context_resolver import StorageSettings
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     check_missing_onboarding,
+    main,
 )
 
 
@@ -92,9 +96,66 @@ class MissingOnboardingTests(unittest.TestCase):
             self.assertEqual(result["missingCount"], 1)
             self.assertEqual(result["missing"][0]["sourceFile"], "src/new.py")
 
+    def test_cli_uses_git_common_dir_name_for_renamed_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo, _unused_onboarding = initialize_repo(root, repo_name="agents-remember-md")
+            worktree = root / "worktrees" / "mcp_and_refactor"
+            run_git(repo, ["worktree", "add", "-b", "feature/mcp-and-refactor", str(worktree)])
+            write_source(worktree / "mcp" / "src" / "new.py")
 
-def initialize_repo(root: Path) -> tuple[Path, Path]:
-    repo = root / "workspace" / "repo-a"
+            coordination_root = root / "ar-coordination"
+            memory_root = coordination_root / "memory-repos" / "ar-agents-remember-md"
+            onboarding = memory_root / "onboarding"
+            write_sidecar(
+                onboarding / "mcp" / "src" / "new.py.md",
+                "mcp/src/new.py",
+                repo_name="agents-remember-md",
+            )
+            system_root = memory_root / "system"
+            system_root.mkdir(parents=True, exist_ok=True)
+            (system_root / "settings.md").write_text("# Settings\n", encoding="utf-8")
+            (system_root / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "onboarding": {
+                            "storage": {"mode": "memory-repo"},
+                            "pathRules": {
+                                "include": {"paths": ["mcp/**"], "fileTypes": [".py"]},
+                                "exclude": {"paths": [], "fileTypes": []},
+                            },
+                        },
+                        "crossRepo": {"allow": []},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "--code-repository-root",
+                        str(worktree),
+                        "--topology",
+                        "external",
+                        "--coordination-root",
+                        str(coordination_root),
+                        "--format",
+                        "json",
+                    ]
+                )
+
+            payload = json.loads(output.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["sourceCount"], 1)
+            self.assertEqual(payload["missingCount"], 0)
+
+
+def initialize_repo(root: Path, repo_name: str = "repo-a") -> tuple[Path, Path]:
+    repo = root / "workspace" / repo_name
     onboarding = root / "memory" / "onboarding"
     repo.mkdir(parents=True)
     onboarding.mkdir(parents=True)
@@ -112,7 +173,7 @@ def write_source(path: Path) -> None:
     path.write_text("print('hello')\n", encoding="utf-8")
 
 
-def write_sidecar(path: Path, source_path: str) -> None:
+def write_sidecar(path: Path, source_path: str, repo_name: str = "repo-a") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "\n".join(
@@ -121,7 +182,7 @@ def write_sidecar(path: Path, source_path: str) -> None:
                 "",
                 "| Field | Value |",
                 "| --- | --- |",
-                "| repository | repo-a |",
+                f"| repository | {repo_name} |",
                 f"| path | `{source_path}` |",
                 "| doc_type | `file-level-onboarding` |",
                 "",

@@ -31,6 +31,7 @@ from agents_remember.mcp.tools import (
     memory_carryover_plan_payload,
     memory_init_payload,
     ping_payload,
+    provider_watchers_payload,
     route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
@@ -135,6 +136,24 @@ class McpToolTests(unittest.TestCase):
             )
             self.assertFalse(payload["includeBenchmarks"])
             self.assertFalse(payload["installProviderDeps"])
+
+    def test_runtime_install_can_dry_run_packaged_benchmarks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            payload = runtime_install_payload(
+                config,
+                dry_run=True,
+                include_benchmarks=True,
+                install_provider_deps=False,
+            )
+
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["includeBenchmarks"])
+            self.assertGreater(payload["summary"]["copiedFiles"], 0)
 
     def test_phase_04_tools_are_reported(self) -> None:
         expected = {
@@ -264,6 +283,28 @@ class McpToolTests(unittest.TestCase):
                 self.assertNotIn("stdout", payload)
                 self.assertNotIn("stderr", payload)
                 self.assertNotIn("payload", payload)
+
+    def test_codex_benchmark_prepare_uses_packaged_cases_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with patch(
+                "agents_remember.controllers.skill_tools.benchmark_runner.prepare_benchmarks",
+                return_value={
+                    "ok": True,
+                    "operation": "codex_benchmark_prepare",
+                    "messages": [],
+                },
+            ) as prepare_benchmarks:
+                payload = codex_benchmark_prepare_payload(config)
+
+            self.assertTrue(payload["ok"])
+            request = prepare_benchmarks.call_args.args[0]
+            self.assertTrue((request.benchmarks_root / "cases").is_dir())
+            self.assertIn("package_data", request.benchmarks_root.as_posix())
 
     def test_skills_install_payload_is_copy_only_and_dry_run_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -448,6 +489,47 @@ class McpToolTests(unittest.TestCase):
                 cgc_callers_payload(config, "other-repo", "resolve_context")
             with self.assertRaisesRegex(ValueError, "function"):
                 cgc_callees_payload(config, "agents-remember-md", "")
+
+    def test_provider_operations_block_when_runner_integrity_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            provider_bin = root / "ar-coordination" / "providers" / "_bin"
+            provider_bin.mkdir(parents=True)
+            (provider_bin / "grepai.exe").write_text("changed", encoding="utf-8")
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with (
+                patch(
+                    "agents_remember.controllers.skill_tools.write_lifecycle_settings",
+                    side_effect=AssertionError("integrity failure must block before settings write"),
+                ),
+                patch(
+                    "agents_remember.controllers.skill_tools.lifecycle_service.run_cgc_lifecycle",
+                    side_effect=AssertionError("integrity failure must block CGC execution"),
+                ),
+                patch(
+                    "agents_remember.controllers.skill_tools.lifecycle_service.run_watchers_lifecycle",
+                    side_effect=AssertionError("integrity failure must block watcher execution"),
+                ),
+            ):
+                cgc_payload = cgc_symbol_search_payload(
+                    config,
+                    "agents-remember-md",
+                    "resolve_context",
+                )
+                watcher_payload = provider_watchers_payload(
+                    config,
+                    action="start",
+                )
+
+            for payload in (cgc_payload, watcher_payload):
+                with self.subTest(operation=payload["operation"]):
+                    self.assertFalse(payload["ok"])
+                    self.assertEqual(payload["state"], "runnerIntegrityFailed")
+                    self.assertEqual(payload["integrity"]["state"], "manifestMissing")
+                    self.assertEqual(payload["recoveryActions"][0]["action"], "runtime_install")
 
 
 def initialize_context_fixture(root: Path) -> None:

@@ -3,13 +3,14 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from argparse import Namespace
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
@@ -19,6 +20,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel import filesystem
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
@@ -266,6 +268,20 @@ def dirty_open_external_contract_fixture(root: Path):
         contract.code_base_commit,
     )
     return contract
+
+
+def long_source_path() -> str:
+    segments = [f"segment-{index:02d}" for index in range(30)]
+    return "/".join(["mcp", "src", *segments, "deep_file.py"])
+
+
+@contextmanager
+def long_path_tempdir():
+    path = Path(tempfile.mkdtemp())
+    try:
+        yield path
+    finally:
+        shutil.rmtree(filesystem.extended_path(path), ignore_errors=True)
 
 
 def direct_external_memory_fixture(
@@ -693,6 +709,75 @@ class WorktreeSupportTests(unittest.TestCase):
                 git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
             )
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_plan_uses_memory_worktree_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = dirty_open_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            (contract.memory_worktree / "onboarding" / "feature.txt.md").unlink()
+            system_root = contract.memory_worktree / "system"
+            system_root.mkdir(parents=True)
+            (system_root / "settings.md").write_text("# Settings\n", encoding="utf-8")
+            (system_root / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "onboarding": {
+                            "storage": {"mode": "memory-repo"},
+                            "pathRules": {
+                                "include": {"paths": ["feature.txt"], "fileTypes": [".txt"]},
+                                "exclude": {"paths": ["feature.txt"], "fileTypes": []},
+                            },
+                        },
+                        "crossRepo": {"allow": []},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            plan = worktree_manager.onboarding_refresh_plan(contract, ["feature.txt"])
+
+            self.assertEqual(plan["required"], [])
+            self.assertEqual(plan["missing"], [])
+            self.assertEqual(plan["unsupported"], [])
+
+    def test_changed_worktree_paths_includes_long_files(self) -> None:
+        with long_path_tempdir() as root:
+            repo = root / "repo-a"
+            init_repo(repo, "main")
+            git(repo, "config", "core.longpaths", "true")
+            source_path = long_source_path()
+            source_file = repo / source_path
+            filesystem.mkdir(source_file.parent, parents=True, exist_ok=True)
+            filesystem.write_text(source_file, "value = 1\n", encoding="utf-8")
+            self.assertGreater(len(str(source_file)), 260)
+
+            paths = worktree_manager.changed_worktree_paths(repo)
+
+            self.assertIn(source_path, paths)
+
+    def test_onboarding_refresh_plan_detects_long_sidecar_paths(self) -> None:
+        with long_path_tempdir() as root:
+            source_path = long_source_path()
+            onboarding_root = root / "memory" / "onboarding"
+            onboarding_file = onboarding_root / f"{source_path}.md"
+            filesystem.mkdir(onboarding_file.parent, parents=True, exist_ok=True)
+            filesystem.write_text(onboarding_file, "# Long path\n", encoding="utf-8")
+            self.assertGreater(len(str(onboarding_file)), 260)
+            context = Namespace(
+                storage=resolver.StorageSettings(mode="memory-repo", default="memory-repo"),
+                code_repository_name="repo-a",
+                onboarding_root=onboarding_root,
+            )
+
+            plan = worktree_manager.onboarding_refresh_plan_for_context(
+                context, [source_path]
+            )
+
+            self.assertEqual(plan["required"][0]["source_path"], source_path)
+            self.assertEqual(plan["missing"], [])
+            self.assertEqual(plan["unsupported"], [])
 
     def test_closeout_requires_approval_note_for_real_commits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

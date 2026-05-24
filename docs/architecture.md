@@ -11,20 +11,31 @@ Agents Remember separates four surfaces that are easy to confuse:
 
 ```text
 agents-remember-md/
-  installer/
-  runtime/
+  mcp/
+    src/agents_remember/
+      install/
+      package_data/
+        runtime/
+        benchmarks/
   docs/
   roadmap/
 ```
 
-The source checkout packages the runtime assets and public documentation. Agents working on this repository itself follow the root `AGENTS.md` in the checkout. Users of the runtime normally point their agent at the installed `ar-coordination/AGENTS.md`.
+The source checkout packages runtime and benchmark assets as Python package data, alongside the MCP server and public documentation. Agents working on this repository itself follow the root `AGENTS.md` in the checkout. Users of the runtime normally point their agent at the installed `ar-coordination/AGENTS.md`.
 
 ## Installed Runtime
 
 ```text
 ar-coordination/
   AGENTS.md
-  scripts/
+  providers/
+    requirements/
+    patches/
+    _venvs/
+    _bin/
+    runners/
+    data/
+    logs/
   skills/
   system/
   memory-repos/
@@ -34,7 +45,8 @@ ar-coordination/
   temp/
 ```
 
-The installer copies package-owned assets from `runtime/` into this tree. The MCP settings own the coordination root, so normal users configure that path in the MCP settings JSON rather than through source-checkout environment files.
+The installer copies package-owned assets from `agents_remember/package_data/runtime/` into this tree. The MCP settings own the coordination root, so normal users configure that path in the MCP settings JSON rather than through source-checkout environment files.
+The installed runtime does not keep a parallel `scripts/` execution route; MCP tools and package-local modules own runtime install, provider lifecycle, worktree, memory, and benchmark operations.
 
 ## Target Code Repository
 

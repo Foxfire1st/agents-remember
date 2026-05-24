@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -135,6 +137,25 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 self.assertEqual(env["USERPROFILE"], str(layout.run_root / "home"))
             self.assertTrue(env["LOG_FILE_PATH"].endswith("/.codegraphcontext/logs/cgc.log"))
 
+    def test_cgc_layout_ignores_host_falkordb_environment_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_root = root / "repos" / "My App"
+            layout = cgc_runtime_layout(
+                coordination_root=root / "ar-coordination",
+                repo_id="My App",
+                code_repo_root=code_root,
+            )
+
+            with patch.dict(
+                os.environ,
+                {"FALKORDB_HOST": "192.0.2.10", "FALKORDB_PORT": "26379"},
+            ):
+                env = layout.env()
+
+            self.assertEqual(env["FALKORDB_HOST"], "127.0.0.1")
+            self.assertEqual(env["FALKORDB_PORT"], "6379")
+
     def test_ensure_cgc_runtime_layout_writes_pinned_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -261,6 +282,43 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
             self.assertEqual(layout.state_file, layout.runtime_root / "provider-state.json")
             self.assertEqual(layout.cgcignore_patterns, ("vendor/generated/",))
+
+    def test_cgc_provider_settings_auto_port_ignores_host_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "my-app").mkdir()
+            provider = {
+                "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
+                "instanceRootTemplate": "<runtimeRoot>/<repoId>",
+                "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
+                "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
+                "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
+                "stateFileTemplate": "<instanceRoot>/provider-state.json",
+                "backend": {
+                    "runtimeRoot": "<coordination_root>/providers/data/codegraphcontext/falkordb",
+                    "dataRoot": "<backendRuntimeRoot>/data",
+                    "ports": {
+                        "falkordb": {
+                            "bindHost": "127.0.0.1",
+                            "hostPort": "auto",
+                        }
+                    },
+                },
+                "processEnvTemplate": {
+                    "FALKORDB_HOST": "<backend.ports.falkordb.bindHost>",
+                    "FALKORDB_PORT": "<backend.ports.falkordb.hostPort>",
+                },
+            }
+
+            with patch.dict(os.environ, {"FALKORDB_PORT": "26379"}):
+                layout = cgc_runtime_layout_from_provider_settings(
+                    coordination_root=root / "ar-coordination",
+                    provider_settings=provider,
+                    root_settings={"repoId": "My App", "path": str(root / "my-app")},
+                )
+
+            self.assertEqual(layout.env()["FALKORDB_HOST"], "127.0.0.1")
+            self.assertEqual(layout.env()["FALKORDB_PORT"], "6379")
 
     def test_cgc_layout_rejects_missing_provider_settings_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

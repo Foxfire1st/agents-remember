@@ -15,11 +15,13 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.mcp.config import (
     McpRuntimeConfig,
     ProviderScope,
@@ -70,6 +72,7 @@ CODEX_BENCHMARK_SCOPE = "codex-benchmark-only"
 BENCHMARK_MCP_SERVER_NAME = "agents_remember_benchmark"
 BENCHMARK_MCP_SETTINGS_NAME = "agents-remember-benchmark.settings.json"
 BENCHMARK_MCP_STARTUP_TIMEOUT_SECONDS = 120
+BENCHMARK_MCP_SOURCE_ENV = "AGENTS_REMEMBER_BENCHMARK_MCP_SRC"
 
 
 def is_ignored_package_path(relative: Path) -> bool:
@@ -267,13 +270,14 @@ class BenchmarkRunRequest:
     codex_sandbox: str = CODEX_BENCHMARK_SANDBOX
 
 
-def default_benchmarks_root() -> Path:
-    script_path = Path(__file__).resolve()
-    for parent in script_path.parents:
-        candidate = parent / "benchmarks"
-        if (candidate / "cases").is_dir():
-            return candidate
-    return Path.cwd() / "benchmarks"
+@contextlib.contextmanager
+def benchmark_root_context(benchmarks_root: Path | None) -> Iterator[Path]:
+    if benchmarks_root is not None:
+        yield benchmarks_root
+        return
+
+    with packaged_source_root() as source_root:
+        yield source_root / "benchmarks"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -317,7 +321,7 @@ def copy_file(source: Path, destination: Path, dry_run: bool) -> None:
         print(f"Would copy {source} -> {destination}")
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
+    shutil.copy2(long_path(source), long_path(destination))
 
 
 def replace_tree(source: Path, destination: Path, dry_run: bool) -> None:
@@ -326,7 +330,7 @@ def replace_tree(source: Path, destination: Path, dry_run: bool) -> None:
         return
     if destination.exists() or destination.is_symlink():
         remove_path(destination)
-    shutil.copytree(source, destination, ignore=COPYTREE_IGNORE)
+    shutil.copytree(long_path(source), long_path(destination), ignore=COPYTREE_IGNORE)
 
 
 def copy_tree(source: Path, destination: Path, dry_run: bool) -> None:
@@ -334,8 +338,9 @@ def copy_tree(source: Path, destination: Path, dry_run: bool) -> None:
         print(f"Would copy tree {source} -> {destination}")
         return
     destination.mkdir(parents=True, exist_ok=True)
-    for child in sorted(source.rglob("*")):
-        relative = child.relative_to(source)
+    scan_root = long_path(source)
+    for child in sorted(scan_root.rglob("*")):
+        relative = child.relative_to(scan_root)
         if is_ignored_package_path(relative):
             continue
         target = destination / relative
@@ -343,7 +348,7 @@ def copy_tree(source: Path, destination: Path, dry_run: bool) -> None:
             target.mkdir(parents=True, exist_ok=True)
         elif child.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(child, target)
+            shutil.copy2(long_path(child), long_path(target))
 
 
 def render_template(template: str, values: dict[str, str]) -> str:
@@ -351,16 +356,6 @@ def render_template(template: str, values: dict[str, str]) -> str:
     for key, value in values.items():
         rendered = rendered.replace("{" + key + "}", value)
     return rendered
-
-
-def find_runtime_source() -> tuple[str, Path]:
-    script_path = Path(__file__).resolve()
-    for parent in script_path.parents:
-        if (parent / "runtime" / "skills").is_dir() and (
-            parent / "runtime" / "agents-md-files"
-        ).is_dir():
-            return "source", parent
-    raise RuntimeError("could not locate Agents Remember runtime source")
 
 
 def is_windows_directory_link(path: Path) -> bool:
@@ -425,17 +420,17 @@ def remove_path(path: Path) -> None:
 
 
 def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
-    _mode, root = find_runtime_source()
-    if dry_run:
-        print(f"Would ensure directory {coordination_root}")
-    else:
-        coordination_root.mkdir(parents=True, exist_ok=True)
-    runtime_root = root / "runtime"
-    replace_tree(runtime_root / "skills", coordination_root / "skills", dry_run)
-    for source_rel, target_rel in AGENTS_MD_TARGETS.items():
-        copy_file(root / source_rel, coordination_root / target_rel, dry_run)
+    with packaged_source_root() as source_root:
+        if dry_run:
+            print(f"Would ensure directory {coordination_root}")
+        else:
+            coordination_root.mkdir(parents=True, exist_ok=True)
+        runtime_root = source_root / "runtime"
+        replace_tree(runtime_root / "skills", coordination_root / "skills", dry_run)
+        for source_rel, target_rel in AGENTS_MD_TARGETS.items():
+            copy_file(source_root / source_rel, coordination_root / target_rel, dry_run)
 
-    sync_provider_assets(root, coordination_root, dry_run)
+        sync_provider_assets(source_root, coordination_root, dry_run)
 
     for folder in (
         "memory-repos",
@@ -509,14 +504,17 @@ def benchmark_agents_config_path(workspace_root: Path) -> Path:
 
 
 def benchmark_mcp_source_path() -> Path | None:
-    try:
-        _mode, root = find_runtime_source()
-    except RuntimeError:
+    value = os.environ.get(BENCHMARK_MCP_SOURCE_ENV)
+    if not value:
         return None
-    source_path = root / "mcp" / "src"
-    if source_path.is_dir():
-        return source_path.resolve()
-    return None
+
+    source_path = Path(value).expanduser().resolve()
+    if not source_path.is_dir():
+        raise RuntimeError(
+            f"{BENCHMARK_MCP_SOURCE_ENV} must point to an existing mcp/src directory: "
+            f"{source_path}"
+        )
+    return source_path
 
 
 def toml_string(value: object) -> str:
@@ -631,12 +629,6 @@ def default_cgc_seed_source_coordination_root(
     benchmarks_root: Path, target_coordination_root: Path
 ) -> Path | None:
     candidates: list[Path] = [benchmarks_root.parent]
-    try:
-        _mode, root = find_runtime_source()
-    except RuntimeError:
-        root = Path()
-    if root:
-        candidates.append(root.parent / "ar-coordination")
 
     seen: set[Path] = set()
     for candidate in candidates:
@@ -1573,51 +1565,56 @@ def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
 
 
 def command_list(args: argparse.Namespace) -> int:
-    benchmarks_root = args.benchmarks_root.resolve()
-    for case in load_cases(benchmarks_root):
-        repository = case.repository
-        print(
-            f"{case.case_id}\t{case.data.get('status', 'unknown')}\t"
-            f"{case.data.get('sizeBand', 'unknown')}\t{repository.get('name')}@{repository.get('commit')}"
-        )
+    with benchmark_root_context(args.benchmarks_root) as benchmarks_root:
+        benchmarks_root = benchmarks_root.resolve()
+        for case in load_cases(benchmarks_root):
+            repository = case.repository
+            repo_name = repository.get("name")
+            repo_commit = repository.get("commit")
+            print(
+                f"{case.case_id}\t{case.data.get('status', 'unknown')}\t"
+                f"{case.data.get('sizeBand', 'unknown')}\t{repo_name}@{repo_commit}"
+            )
     return 0
 
 
 def command_prepare(args: argparse.Namespace) -> int:
-    payload = prepare_benchmarks(
-        BenchmarkPrepareRequest(
-            benchmarks_root=args.benchmarks_root,
-            target=args.target,
-            case_id=args.case_id,
-            dry_run=args.dry_run,
-            skill_exposure_mode=args.skill_exposure_mode,
-            force_clone=args.force_clone,
-            provider_timeout=args.provider_timeout,
+    with benchmark_root_context(args.benchmarks_root) as benchmarks_root:
+        payload = prepare_benchmarks(
+            BenchmarkPrepareRequest(
+                benchmarks_root=benchmarks_root,
+                target=args.target,
+                case_id=args.case_id,
+                dry_run=args.dry_run,
+                skill_exposure_mode=args.skill_exposure_mode,
+                force_clone=args.force_clone,
+                provider_timeout=args.provider_timeout,
+            )
         )
-    )
     for message in payload["messages"]:
         print(message)
     return 0
 
 
 def command_run(args: argparse.Namespace) -> int:
-    payload = run_codex_benchmark(
-        BenchmarkRunRequest(
-            benchmarks_root=args.benchmarks_root,
-            target=args.target,
-            case_id=args.case_id,
-            prompt=args.prompt,
-            variant=args.variant,
-            repetitions=args.repetitions,
-            jobs=args.jobs,
-            dry_run=args.dry_run,
-            skip_prepare=args.skip_prepare,
-            skill_exposure_mode=args.skill_exposure_mode,
-            force_clone=args.force_clone,
-            provider_timeout=args.provider_timeout,
-            codex_sandbox=args.codex_sandbox,
+    with benchmark_root_context(args.benchmarks_root) as benchmarks_root:
+        payload = run_codex_benchmark(
+            BenchmarkRunRequest(
+                benchmarks_root=benchmarks_root,
+                target=args.target,
+                case_id=args.case_id,
+                prompt=args.prompt,
+                variant=args.variant,
+                repetitions=args.repetitions,
+                jobs=args.jobs,
+                dry_run=args.dry_run,
+                skip_prepare=args.skip_prepare,
+                skill_exposure_mode=args.skill_exposure_mode,
+                force_clone=args.force_clone,
+                provider_timeout=args.provider_timeout,
+                codex_sandbox=args.codex_sandbox,
+            )
         )
-    )
     for message in payload["messages"]:
         print(message)
     for output_root in payload["runOutputRoots"]:
@@ -1642,8 +1639,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--benchmarks-root",
         type=Path,
-        default=default_benchmarks_root(),
-        help="Benchmark root. Defaults to the installed or source benchmarks directory.",
+        default=None,
+        help="Benchmark root. Defaults to packaged benchmark cases.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
