@@ -71,12 +71,25 @@ onboarding and entity fingerprints from that worklist, then run MCP
 `memory_quality_check` before the memory-content commit. The memory commit is
 allowed only when that full validation passes.
 
+Before the code commit, run the package-local missing-onboarding check against
+the current code worktree additions:
+
+```text
+python -m agents_remember.memory_quality.integrity.check_missing_onboarding --code-repository-root "<code-root>" --onboarding-root "<resolved-onboarding-root>"
+```
+
+The check only evaluates files that are new in the current worktree, not the
+whole historical repository. If it reports missing onboarding, create those
+sidecars through C-05 before committing code. After the code commit exists,
+refresh the new sidecars' verification metadata to that commit during the normal
+post-code-commit memory refresh.
+
 Closeout stops if the recorded code or external-memory source branch moved since task start.
 
 External-memory closeout order is:
 
-1. identify changed code worktree paths and their required sidecar onboarding files
-2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
+1. run `check_missing_onboarding` against current worktree additions
+2. create missing onboarding for newly added eligible source files before committing code
 3. commit code worktree changes and capture `C2` plus its commit date
 4. run C-02 drift detection against `C2` to produce the full memory update worklist
 5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
@@ -103,12 +116,17 @@ onboarding and entity fingerprints from that worklist, then run MCP
 `memory_quality_check` before the memory-content commit. The memory commit is
 allowed only when that full validation passes.
 
+Before committing code in direct closeout, run the same package-local
+`check_missing_onboarding` pass against current-checkout additions and create
+missing sidecars through C-05. This prevents newly added source files from
+escaping the drift report's gradual-adoption boundary.
+
 Direct closeout resolves the current C-08 context, requires external memory mode, and requires the code checkout and memory repo to be on the same selected branch. Ledger compatibility is based on code-to-memory commit mappings, not branch metadata.
 
 External-memory direct closeout order is:
 
-1. identify changed current-checkout code paths and their required sidecar onboarding files
-2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
+1. run `check_missing_onboarding` against current-checkout additions
+2. create missing onboarding for newly added eligible source files before committing code
 3. commit code checkout changes and capture `C2` plus its commit date
 4. run C-02 drift detection against `C2` to produce the full memory update worklist
 5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
