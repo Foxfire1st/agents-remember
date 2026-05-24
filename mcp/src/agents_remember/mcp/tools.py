@@ -28,6 +28,7 @@ from agents_remember.controllers.skill_tools import (
     memory_carryover_apply_tool,
     memory_carryover_plan_tool,
     memory_init_tool,
+    memory_quality_check_tool,
     provider_status_tool,
     provider_watchers_tool,
     resolve_context_tool,
@@ -53,6 +54,7 @@ PUBLIC_TOOLS = (
     "runtime_install",
     "resolve_context",
     "drift_check",
+    "memory_quality_check",
     "route_index_refresh",
     "memory_init",
     "skills_install",
@@ -174,6 +176,21 @@ def drift_check_payload(
     detail_limit: int = 50,
 ) -> dict[str, Any]:
     return drift_check_tool(config, repo_id=repo_id, detail_limit=detail_limit)
+
+
+def memory_quality_check_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    *,
+    checks: list[str] | None = None,
+    detail_limit: int = 50,
+) -> dict[str, Any]:
+    return memory_quality_check_tool(
+        config,
+        repo_id=repo_id,
+        checks=checks,
+        detail_limit=detail_limit,
+    )
 
 
 def route_index_refresh_payload(

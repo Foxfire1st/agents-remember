@@ -11,7 +11,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.drift import onboarding_drift as drift
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -19,6 +18,7 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
     write_ledger,
 )
+from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 
 

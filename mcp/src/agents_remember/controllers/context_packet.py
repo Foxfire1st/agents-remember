@@ -5,13 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from agents_remember.drift.summary import not_checked, run_drift_summary
 from agents_remember.kernel.coordination_context_resolver import (
     context_to_dict,
     resolve_coordination_context,
 )
 from agents_remember.kernel.git_facts import git_facts_to_packet, read_git_facts
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
+    not_checked,
+    run_drift_summary,
+)
 from agents_remember.providers.status import provider_status_packet
 from agents_remember.worktrees.status import worktree_status_packet
 

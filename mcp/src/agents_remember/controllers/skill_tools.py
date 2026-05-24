@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.drift.summary import run_drift_summary
 from agents_remember.install.runtime import source_root_from_package
 from agents_remember.install.skills import install_skills
 from agents_remember.kernel.coordination_context_resolver import (
@@ -18,6 +17,10 @@ from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope, path_is_relative_to
 from agents_remember.memory import baseline, carryover
+from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
+from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
+    run_drift_summary,
+)
 from agents_remember.providers import lifecycle_service
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.providers.status import provider_status_packet
@@ -75,6 +78,42 @@ def drift_check_tool(
         detail_limit=detail_limit,
     )
     return {"ok": packet.get("status") == "checked", "operation": "drift_check", **packet}
+
+
+def memory_quality_check_tool(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    checks: list[str] | None = None,
+    detail_limit: int = 50,
+) -> dict[str, Any]:
+    repo = _repo(config, repo_id)
+    if repo.memory_root is None:
+        raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
+    onboarding_root = repo.memory_root / "onboarding"
+    context = resolve_coordination_context(
+        code_repository_name=repo.repo_id,
+        workspace_root=config.workspace_root,
+        coordination_root=config.coordination_root,
+        code_repository_root=repo.path,
+        onboarding_root=onboarding_root,
+        contract_path=repo.contract_path,
+    )
+    payload = run_memory_quality_check(
+        onboarding_root,
+        checks=checks,
+        drift_context=DriftCheckContext(
+            code_repository_root=repo.path,
+            context=context,
+            detail_limit=detail_limit,
+        ),
+    )
+    return {
+        "operation": "memory_quality_check",
+        "repoId": repo.repo_id,
+        "onboardingRoot": onboarding_root.as_posix(),
+        **payload,
+    }
 
 
 def route_index_refresh_tool(

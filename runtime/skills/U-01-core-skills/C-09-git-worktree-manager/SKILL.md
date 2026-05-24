@@ -65,6 +65,12 @@ Closeout is explicitly human-gated. Implementation approval is not commit approv
 
 Real closeout creates commits and therefore uses `worktree_closeout_apply` with an `intent_note`. The note records the developer's explicit commit approval in the contract. Agents must not self-grant this approval from their own judgment or from earlier implementation approval.
 
+After the code commit is created, run `C-02-onboarding-drift-detection` to get
+the concrete onboarding and entity-fingerprint update worklist. Refresh
+onboarding and entity fingerprints from that worklist, then run MCP
+`memory_quality_check` before the memory-content commit. The memory commit is
+allowed only when that full validation passes.
+
 Closeout stops if the recorded code or external-memory source branch moved since task start.
 
 External-memory closeout order is:
@@ -72,12 +78,14 @@ External-memory closeout order is:
 1. identify changed code worktree paths and their required sidecar onboarding files
 2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
 3. commit code worktree changes and capture `C2` plus its commit date
-4. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
-5. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
-6. commit memory-content changes and capture `M2`
-7. prepend `C2 | M2` to `memory.md`
-8. commit the ledger update as `L2`
-9. update the task contract closeout state
+4. run C-02 drift detection against `C2` to produce the full memory update worklist
+5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
+6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
+7. run MCP `memory_quality_check`; fix reported memory findings before continuing
+8. commit memory-content changes and capture `M2`
+9. prepend `C2 | M2` to `memory.md`
+10. commit the ledger update as `L2`
+11. update the task contract closeout state
 
 Entity fingerprints must be refreshed after the code commit and before the memory-content commit because `git-blob-set-v1` uses `HEAD:<path>` Git blobs. Reviewing the entity prose can happen before closeout, but the final fingerprint values must be written in the code-commit-to-memory-commit window.
 
@@ -89,6 +97,12 @@ Use `direct_closeout_preview` / `direct_closeout_apply` only for small approved 
 
 Direct closeout is still explicitly human-gated. Agents must request `direct_closeout_preview` first, relay the proposed code, memory, and ledger commit messages to the developer, and ask for explicit commit approval. Real direct closeout uses `direct_closeout_apply` with an `intent_note`.
 
+After the code commit is created, run `C-02-onboarding-drift-detection` to get
+the concrete onboarding and entity-fingerprint update worklist. Refresh
+onboarding and entity fingerprints from that worklist, then run MCP
+`memory_quality_check` before the memory-content commit. The memory commit is
+allowed only when that full validation passes.
+
 Direct closeout resolves the current C-08 context, requires external memory mode, and requires the code checkout and memory repo to be on the same selected branch. Ledger compatibility is based on code-to-memory commit mappings, not branch metadata.
 
 External-memory direct closeout order is:
@@ -96,11 +110,13 @@ External-memory direct closeout order is:
 1. identify changed current-checkout code paths and their required sidecar onboarding files
 2. fail before committing when a changed onboarding-eligible source file is missing current sidecar onboarding or verification metadata
 3. commit code checkout changes and capture `C2` plus its commit date
-4. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
-5. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
-6. commit memory-content changes and capture `M2`
-7. prepend `C2 | M2` to `memory.md`
-8. commit the ledger update as `L2`
+4. run C-02 drift detection against `C2` to produce the full memory update worklist
+5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
+6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
+7. run MCP `memory_quality_check`; fix reported memory findings before continuing
+8. commit memory-content changes and capture `M2`
+9. prepend `C2 | M2` to `memory.md`
+10. commit the ledger update as `L2`
 
 Direct closeout fails without mutation when required onboarding is missing, verification metadata is missing, external memory is not resolved, the code and memory checkouts are on different selected branches, or no code or memory changes exist. Missing onboarding is the expected hard failure when the implementation/update pass somehow did not produce a required onboarding file; the next step is to run C-05 for that source file, then rerun the direct closeout preview.
 

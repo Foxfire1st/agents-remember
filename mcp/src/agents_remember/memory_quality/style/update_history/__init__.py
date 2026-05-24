@@ -1,0 +1,1 @@
+"""Update History style checks."""

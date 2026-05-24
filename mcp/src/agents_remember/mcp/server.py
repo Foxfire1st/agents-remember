@@ -26,6 +26,7 @@ from .tools import (
     memory_carryover_apply_payload,
     memory_carryover_plan_payload,
     memory_init_payload,
+    memory_quality_check_payload,
     ping_payload,
     provider_status_payload,
     provider_watchers_payload,
@@ -101,6 +102,19 @@ def create_server(config: McpRuntimeConfig) -> Any:
     @server.tool()
     def drift_check(repo_id: str, detail_limit: int = 50) -> dict[str, Any]:
         return drift_check_payload(config, repo_id, detail_limit=detail_limit)
+
+    @server.tool()
+    def memory_quality_check(
+        repo_id: str,
+        checks: list[str] | None = None,
+        detail_limit: int = 50,
+    ) -> dict[str, Any]:
+        return memory_quality_check_payload(
+            config,
+            repo_id,
+            checks=checks,
+            detail_limit=detail_limit,
+        )
 
     @server.tool()
     def route_index_refresh(repo_id: str, dry_run: bool = True) -> dict[str, Any]:

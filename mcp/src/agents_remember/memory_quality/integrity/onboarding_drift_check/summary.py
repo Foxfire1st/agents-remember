@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agents_remember.drift import onboarding_drift
+from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 
 ACTIONABLE_CLASSIFICATIONS = {
     "drifted",
@@ -34,8 +34,8 @@ def run_drift_summary(
 
     rows = [
         row
-        for path in onboarding_drift.discover_onboarding_files(context.onboarding_root)
-        for row in onboarding_drift.classify_sidecar_onboarding_units(
+        for path in drift.discover_onboarding_files(context.onboarding_root)
+        for row in drift.classify_sidecar_onboarding_units(
             path,
             code_repository_root,
             context.onboarding_root,
@@ -43,21 +43,21 @@ def run_drift_summary(
         )
     ]
     rows.extend(
-        onboarding_drift.classify_inline_source(path, code_repository_root)
-        for path in onboarding_drift.discover_inline_onboarding_sources(
+        drift.classify_inline_source(path, code_repository_root)
+        for path in drift.discover_inline_onboarding_sources(
             code_repository_root,
             context.storage,
         )
     )
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    report_path = onboarding_drift.resolve_report_path(
+    report_path = drift.resolve_report_path(
         None,
         context.coordination_root,
         context.temp_root,
         code_repository_root,
         context.memory_root,
     )
-    onboarding_drift.write_markdown_report(
+    drift.write_markdown_report(
         rows,
         report_path,
         code_repository_root,
@@ -90,7 +90,7 @@ def summarize_rows(
 
 def _row_to_dict(row: Any, onboarding_root: Path) -> dict[str, Any]:
     return {
-        "onboarding_file": onboarding_drift.rel(row.onboarding_file, onboarding_root),
+        "onboarding_file": drift.rel(row.onboarding_file, onboarding_root),
         "storage_mode": row.storage_mode,
         "source_file": row.source_file,
         "repository": row.repository,

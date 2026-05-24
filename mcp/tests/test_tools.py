@@ -140,6 +140,7 @@ class McpToolTests(unittest.TestCase):
         expected = {
             "resolve_context",
             "drift_check",
+            "memory_quality_check",
             "route_index_refresh",
             "memory_init",
             "skills_install",
