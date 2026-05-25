@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers import provider_lifecycle
-from agents_remember.providers.context_providers import ContextProviderError, stable_provider_id
+from agents_remember.providers import lifecycle
+from agents_remember.providers.context import ContextProviderError, stable_provider_id
 
 
 @dataclass(frozen=True)
@@ -67,9 +67,9 @@ def run_cgc_lifecycle(
     )
     try:
         handlers = {
-            "run": provider_lifecycle.cgc_run,
-            "visualize": provider_lifecycle.cgc_visualize,
-            "refresh-all": provider_lifecycle.cgc_refresh_all,
+            "run": lifecycle.cgc_run,
+            "visualize": lifecycle.cgc_visualize,
+            "refresh-all": lifecycle.cgc_refresh_all,
         }
         return handlers[action](args)
     except (
@@ -114,7 +114,7 @@ def run_grepai_lifecycle(
         lifecycle_json=False,
     )
     try:
-        return provider_lifecycle.grepai_run(args, action)
+        return lifecycle.grepai_run(args, action)
     except (
         ContextProviderError,
         subprocess.TimeoutExpired,
@@ -150,7 +150,7 @@ def run_watchers_lifecycle(
         timeout=config.timeout,
     )
     try:
-        return provider_lifecycle.watchers_run(args, action)
+        return lifecycle.watchers_run(args, action)
     except (
         ContextProviderError,
         subprocess.TimeoutExpired,

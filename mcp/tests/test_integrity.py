@@ -35,28 +35,47 @@ class ProviderIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = write_and_load_config(root)
-            binary = root / "ar-coordination" / "providers" / "_bin" / "grepai.exe"
-            binary.parent.mkdir(parents=True)
-            binary.write_text("before\n", encoding="utf-8")
+            runner = (
+                root
+                / "ar-coordination"
+                / "providers"
+                / "_venvs"
+                / "codegraphcontext"
+                / "bin"
+                / "cgc"
+            )
+            runner.parent.mkdir(parents=True)
+            runner.write_text("before\n", encoding="utf-8")
 
             write_result = write_provider_runner_manifest(config)
             clean = check_provider_runner_integrity(config)
-            binary.write_text("after\n", encoding="utf-8")
+            runner.write_text("after\n", encoding="utf-8")
             changed = check_provider_runner_integrity(config)
 
             self.assertTrue(write_result["ok"])
             self.assertTrue(clean["ok"])
             self.assertFalse(changed["ok"])
-            self.assertEqual(changed["changed"], ["providers/_bin/grepai.exe"])
+            self.assertEqual(
+                changed["changed"],
+                ["providers/_venvs/codegraphcontext/bin/cgc"],
+            )
             self.assertTrue(manifest_path_for_config(config).exists())
 
     def test_provider_status_short_circuits_on_unrecorded_runner_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = write_and_load_config(root)
-            binary = root / "ar-coordination" / "providers" / "_bin" / "grepai.exe"
-            binary.parent.mkdir(parents=True)
-            binary.write_text("unrecorded\n", encoding="utf-8")
+            runner = (
+                root
+                / "ar-coordination"
+                / "providers"
+                / "_venvs"
+                / "codegraphcontext"
+                / "bin"
+                / "cgc"
+            )
+            runner.parent.mkdir(parents=True)
+            runner.write_text("unrecorded\n", encoding="utf-8")
 
             packet = provider_status_packet(config)
 

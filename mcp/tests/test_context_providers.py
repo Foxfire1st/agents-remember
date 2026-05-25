@@ -10,7 +10,7 @@ from unittest.mock import patch
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.providers.context_providers import (
+from agents_remember.providers.context import (
     CGC_CGCIGNORE_PATCH_ID,
     CGC_DELETE_CONTAINS_ORIGINAL_SNIPPET,
     CGC_DELETE_NODE_ORIGINAL_SNIPPET,

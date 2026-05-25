@@ -102,15 +102,29 @@ class McpConfigTests(unittest.TestCase):
 
             lifecycle_settings = lifecycle_settings_from_config(config)
             providers = lifecycle_settings["contextProviders"]["providers"]
+            grepai = providers["grepai-memory"]
             self.assertEqual(
-                providers["grepai-memory"]["runtimeRoot"],
+                grepai["runtimeRoot"],
                 (root / "ar-coordination" / "providers" / "runners" / "grepai").as_posix(),
             )
+            self.assertEqual(grepai["runtime"]["mode"], "docker")
+            self.assertEqual(grepai["runtime"]["network"]["name"], "ar-grepai-memory")
+            self.assertEqual(grepai["runtime"]["runner"]["image"], "agents-remember/grepai:0.35.0")
             self.assertEqual(
-                providers["grepai-memory"]["backend"]["runtimeRoot"],
+                grepai["runtime"]["runner"]["containerName"],
+                "ar-grepai-watcher",
+            )
+            self.assertEqual(
+                grepai["backend"]["runtimeRoot"],
                 (
                     root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres"
                 ).as_posix(),
+            )
+            self.assertEqual(grepai["embedder"]["provider"], "ollama")
+            self.assertEqual(grepai["embedder"]["backend"]["image"], "ollama/ollama:latest")
+            self.assertEqual(
+                grepai["embedder"]["backend"]["containerName"],
+                "ar-grepai-ollama",
             )
             self.assertEqual(
                 providers["codegraphcontext-code"]["backend"]["runtimeRoot"],

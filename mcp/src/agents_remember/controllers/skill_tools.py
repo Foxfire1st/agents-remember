@@ -224,7 +224,7 @@ def grepai_search_tool(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return _provider_lifecycle_result(
+    return _provider_operation_result(
         config,
         operation="grepai_search",
         dry_run=dry_run,
@@ -244,7 +244,7 @@ def grepai_trace_tool(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return _provider_lifecycle_result(
+    return _provider_operation_result(
         config,
         operation="grepai_trace",
         dry_run=dry_run,
@@ -364,7 +364,7 @@ def cgc_visualize_tool(
     timeout: int | None = None,
 ) -> dict[str, Any]:
     _repo(config, repo_id)
-    return _provider_lifecycle_result(
+    return _provider_operation_result(
         config,
         operation="cgc_visualize",
         dry_run=dry_run,
@@ -389,7 +389,7 @@ def _cgc_run_tool(
     timeout: int | None,
 ) -> dict[str, Any]:
     _repo(config, repo_id)
-    return _provider_lifecycle_result(
+    return _provider_operation_result(
         config,
         operation=operation,
         dry_run=dry_run,
@@ -839,7 +839,7 @@ def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseli
 def _provider_watchers_once(
     config: McpRuntimeConfig, action: str, *, dry_run: bool
 ) -> dict[str, Any]:
-    return _provider_lifecycle_result(
+    return _provider_operation_result(
         config,
         operation="provider_watchers",
         dry_run=dry_run,
@@ -855,7 +855,7 @@ def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, A
     steps: list[dict[str, Any]] = []
     if "grepai-memory" in config.providers:
         steps.append(
-            _provider_lifecycle_result(
+            _provider_operation_result(
                 config,
                 operation="provider_watchers",
                 dry_run=dry_run,
@@ -868,7 +868,7 @@ def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, A
         )
     if "codegraphcontext-code" in config.providers:
         steps.append(
-            _provider_lifecycle_result(
+            _provider_operation_result(
                 config,
                 operation="provider_watchers",
                 dry_run=dry_run,
@@ -887,7 +887,7 @@ def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, A
     }
 
 
-def _provider_lifecycle_result(
+def _provider_operation_result(
     config: McpRuntimeConfig,
     *,
     operation: str,

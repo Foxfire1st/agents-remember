@@ -44,7 +44,6 @@ class InstallRuntimeTests(unittest.TestCase):
             source_root = create_runtime_source(root)
             coordination_root = root / "ar-coordination"
             providers_root = coordination_root / "providers"
-            grepai_exe = providers_root / "_bin" / "grepai.exe"
             cgc_exe = providers_root / "_venvs" / "codegraphcontext" / "Scripts" / "cgc.exe"
             cgc_state = (
                 providers_root
@@ -61,7 +60,7 @@ class InstallRuntimeTests(unittest.TestCase):
             cgc_log = providers_root / "logs" / "codegraphcontext" / "watch.log"
             old_script = coordination_root / "scripts" / "install-skills.sh"
 
-            write_file(grepai_exe, "live grepai\n")
+            write_file(providers_root / "_bin" / "grepai.exe", "legacy grepai\n")
             write_file(cgc_exe, "live cgc\n")
             write_file(cgc_state)
             write_file(grepai_watch_log)
@@ -79,7 +78,7 @@ class InstallRuntimeTests(unittest.TestCase):
             )
 
             self.assertEqual(summary.dependency_runs, 0)
-            self.assertTrue(grepai_exe.exists())
+            self.assertFalse((providers_root / "_bin" / "grepai.exe").exists())
             self.assertTrue(cgc_exe.exists())
             self.assertTrue(cgc_state.exists())
             self.assertTrue(grepai_watch_log.exists())

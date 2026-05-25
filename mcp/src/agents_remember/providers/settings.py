@@ -8,6 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
+from agents_remember.providers.context import (
+    GREPAI_NETWORK_NAME,
+    GREPAI_OLLAMA_CONTAINER_NAME,
+    GREPAI_OLLAMA_IMAGE,
+    GREPAI_PIN,
+    GREPAI_RUNNER_CONTAINER_NAME,
+    GREPAI_RUNNER_IMAGE_REPOSITORY,
+)
 
 
 def lifecycle_settings_from_config(config: McpRuntimeConfig) -> dict[str, Any]:
@@ -47,6 +55,7 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
     ]
     if not roots:
         roots = [config.coordination_root.joinpath("memory-repos").as_posix()]
+    version = GREPAI_PIN.split("==", 1)[1]
     return {
         "type": "semantic",
         "scope": "memory",
@@ -59,6 +68,22 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
             "grepai.txt",
         ).as_posix(),
         "stateFile": provider.runtime_root.joinpath("state", "provider-state.json").as_posix(),
+        "runtime": {
+            "mode": "docker",
+            "network": {"name": GREPAI_NETWORK_NAME},
+            "runner": {
+                "image": f"{GREPAI_RUNNER_IMAGE_REPOSITORY}:{version}",
+                "containerName": GREPAI_RUNNER_CONTAINER_NAME,
+                "imageLockFile": config.coordination_root.joinpath(
+                    "providers",
+                    "requirements",
+                    "grepai-runner-docker.lock",
+                ).as_posix(),
+                "buildRoot": provider.runtime_root.joinpath("image").as_posix(),
+                "runtimeMount": "/grepai/runtime",
+                "logsMount": "/grepai/logs",
+            },
+        },
         "backend": {
             "id": "grepai-postgres",
             "type": "postgres",
@@ -88,6 +113,37 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
                     "hostPort": "auto",
                     "containerPort": 5432,
                 }
+            },
+        },
+        "embedder": {
+            "provider": "ollama",
+            "model": "nomic-embed-text",
+            "endpoint": f"http://{GREPAI_OLLAMA_CONTAINER_NAME}:11434",
+            "dimensions": 768,
+            "backend": {
+                "mode": "docker",
+                "image": GREPAI_OLLAMA_IMAGE,
+                "imageLockFile": config.coordination_root.joinpath(
+                    "providers",
+                    "requirements",
+                    "grepai-ollama-docker.lock",
+                ).as_posix(),
+                "runtimeRoot": config.coordination_root.joinpath(
+                    "providers",
+                    "data",
+                    "grepai",
+                    "ollama",
+                ).as_posix(),
+                "dataRoot": "<embedderRuntimeRoot>/data",
+                "dataDestination": "/root/.ollama",
+                "containerName": GREPAI_OLLAMA_CONTAINER_NAME,
+                "ports": {
+                    "http": {
+                        "bindHost": "127.0.0.1",
+                        "hostPort": "auto",
+                        "containerPort": 11434,
+                    }
+                },
             },
         },
         "watch": {

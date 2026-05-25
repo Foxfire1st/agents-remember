@@ -17,7 +17,7 @@ from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.providers import provider_lifecycle
+from agents_remember.providers import lifecycle
 from agents_remember.providers.integrity import write_provider_runner_manifest
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
@@ -34,7 +34,6 @@ BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
 BENCHMARK_SOURCE_IGNORE_PATHS = {Path("workspaces"), Path("user-runs")}
 MAX_REMOVE_ATTEMPTS = 6
 PROVIDER_DEPENDENCY_PATHS = {
-    Path("_bin"),
     Path("_venvs"),
     Path("runners"),
 }
@@ -388,7 +387,7 @@ def install_provider_dependencies_from_settings(
                 root=None,
                 runtime_root=None,
             )
-            results.append(provider_lifecycle.grepai_install(grepai_args))
+            results.append(lifecycle.grepai_install(grepai_args))
         if configured_provider_enabled(settings, "codegraphcontext-code"):
             summary.dependency_runs += 1
             cgc_args = SimpleNamespace(
@@ -401,7 +400,7 @@ def install_provider_dependencies_from_settings(
                 code_repo_root=None,
                 python=sys.executable,
             )
-            results.append(provider_lifecycle.cgc_install_all(cgc_args))
+            results.append(lifecycle.cgc_install_all(cgc_args))
     finally:
         settings_path.unlink(missing_ok=True)
 
@@ -450,8 +449,10 @@ def install_runtime(
     remove_path(coordination_root / "scripts", summary, dry_run)
 
     # Provider runtime scaffolding is disposable during a full reinstall. A
-    # dependency-skipped copy must preserve installed binaries, venvs, and live
-    # provider instance roots so script/docs-only updates do not break watchers.
+    # dependency-skipped copy must preserve provider venvs and live provider
+    # instance roots so script/docs-only updates do not break non-Dockerized
+    # watchers. Host provider binaries under providers/_bin are not a managed
+    # runtime contract.
     # Durable provider data and logs are user-owned coordinator state and must
     # not be removed by either install mode.
     if install_provider_deps:

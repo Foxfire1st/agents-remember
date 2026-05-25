@@ -26,9 +26,8 @@ Expected provider setup and lifecycle command shapes:
 runtime_install(dry_run=true, include_benchmarks=false, install_provider_deps=true)
 context_packet(repo_id="<repoId>", include_providers=true)
 
-# GrepAI memory provider native query after MCP install/status
-<coordination_root>/providers/_bin/grepai search "<query>" \
-  --workspace agents-remember-memory --json --compact --limit 5
+# GrepAI memory provider query after MCP install/status
+grepai_search(query="<query>", dry_run=false)
 ```
 
 Manual provider debugging should run through source/package-owned tooling with
@@ -36,13 +35,14 @@ explicit generated settings, not through coordinator-local Python scripts. The
 normal agent path is the MCP tool surface.
 
 The GrepAI lifecycle command reads `contextProviders.providers.grepai-memory`,
-expands its workspace roots into explicit projects, ensures the shared
-PostgreSQL/pgvector Docker backend is healthy, writes GrepAI workspace config
-under `providers/runners/grepai/home/.grepai/workspace.yaml`, mirrors indexed memory
-roots under `providers/runners/grepai/index-roots/` when `mirrorRoots` is enabled, and
-records runtime state under `providers/runners/grepai/state/`. GrepAI must be launched through the
-runtime-owned binary at `providers/_bin/grepai`; managed mode should not fall
-back to a globally installed `grepai`.
+expands its workspace roots into explicit projects, ensures the shared Docker
+network plus PostgreSQL/pgvector and Ollama containers are healthy, writes
+GrepAI workspace config under `providers/runners/grepai/home/.grepai/workspace.yaml`,
+mirrors indexed memory roots under `providers/runners/grepai/index-roots/` when
+`mirrorRoots` is enabled, and records runtime state under
+`providers/runners/grepai/state/`. GrepAI is Docker-only in managed mode:
+the runner container owns the GrepAI binary and managed mode must not install
+or invoke host binaries.
 
 The CGC lifecycle command reads `contextProviders.providers.codegraphcontext-code`,
 expands its `roots` array into per-repo runtime instances, ensures the shared

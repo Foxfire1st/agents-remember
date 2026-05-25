@@ -196,6 +196,5 @@ provider_status()
 - Use GrepAI output as semantic discovery, not proof. Confirm with onboarding
   and bounded source reads before answering or editing.
 - Do not use a global GrepAI binary/config path in reusable instructions; use
-  MCP provider tools so the runtime-owned binary and provider-owned environment
-  are selected by server settings.
-
+  MCP provider tools so the Docker runner container and provider-owned
+  environment are selected by server settings.

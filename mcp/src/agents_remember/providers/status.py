@@ -6,7 +6,7 @@ import argparse
 from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
-from agents_remember.providers import provider_lifecycle
+from agents_remember.providers import lifecycle
 from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import write_lifecycle_settings
 
@@ -86,7 +86,7 @@ def _watchers_status(config: McpRuntimeConfig) -> dict[str, Any]:
             timeout=config.timeout_caps.get("providerSeconds", 120),
             json=True,
         )
-        return provider_lifecycle.watchers_run(args, "status")
+        return lifecycle.watchers_run(args, "status")
     finally:
         settings_path.unlink(missing_ok=True)
 

@@ -1565,8 +1565,8 @@ def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
 
 
 def command_list(args: argparse.Namespace) -> int:
-    with benchmark_root_context(args.benchmarks_root) as benchmarks_root:
-        benchmarks_root = benchmarks_root.resolve()
+    with benchmark_root_context(args.benchmarks_root) as selected_benchmarks_root:
+        benchmarks_root = selected_benchmarks_root.resolve()
         for case in load_cases(benchmarks_root):
             repository = case.repository
             repo_name = repository.get("name")

@@ -221,7 +221,7 @@ class ProviderSetupTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 result = provider_setup.run_command(
-                    ["python", "-m", "agents_remember.providers.provider_lifecycle"],
+                    ["python", "-m", "agents_remember.providers.lifecycle"],
                     cwd=Path(tmp),
                     timeout=1,
                     dry_run=False,

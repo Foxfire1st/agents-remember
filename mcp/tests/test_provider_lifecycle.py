@@ -11,19 +11,13 @@ from types import SimpleNamespace
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.providers import (
-    lifecycle_service,
-    provider_lifecycle,
-)
-
-
-class FakeDetachedProcess:
-    def __init__(self, pid: int, returncode: int | None = None) -> None:
-        self.pid = pid
-        self.returncode = returncode
-
-    def poll(self) -> int | None:
-        return self.returncode
+from agents_remember.providers import lifecycle, lifecycle_service
+from agents_remember.providers.lifecycle_modules import common as lifecycle_common
+from agents_remember.providers.lifecycle_modules import watchers as watcher_lifecycle
+from agents_remember.providers.lifecycle_modules.cgc import process as cgc_process
+from agents_remember.providers.lifecycle_modules.grepai import actions as grepai_actions
+from agents_remember.providers.lifecycle_modules.grepai import backend as grepai_backend
+from agents_remember.providers.lifecycle_modules.grepai import core as grepai_core
 
 
 class ProviderLifecycleRenderTests(unittest.TestCase):
@@ -42,7 +36,7 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            rendered = provider_lifecycle.render_captured_command_output(data)
+            rendered = lifecycle.render_captured_command_output(data)
 
         self.assertTrue(rendered)
         self.assertEqual(stdout.getvalue(), "native stdout\n")
@@ -51,7 +45,7 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
 
     def test_captured_command_output_ignores_non_command_results(self) -> None:
         self.assertFalse(
-            provider_lifecycle.render_captured_command_output({"ok": False, "error": "missing"})
+            lifecycle.render_captured_command_output({"ok": False, "error": "missing"})
         )
 
     def test_cgc_run_json_streams_native_output_by_default(self) -> None:
@@ -65,7 +59,7 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
         stdout = io.StringIO()
 
         with contextlib.redirect_stdout(stdout):
-            rendered = provider_lifecycle.render_cgc_run_result(data, args)
+            rendered = lifecycle.render_cgc_run_result(data, args)
 
         self.assertTrue(rendered)
         self.assertEqual(stdout.getvalue(), "native stdout\n")
@@ -88,7 +82,7 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
         stdout = io.StringIO()
 
         with contextlib.redirect_stdout(stdout):
-            rendered = provider_lifecycle.render_cgc_run_result(data, args)
+            rendered = lifecycle.render_cgc_run_result(data, args)
 
         self.assertTrue(rendered)
         self.assertIn('"outputLines"', stdout.getvalue())
@@ -100,20 +94,20 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
 
 class ProviderLifecycleParserTests(unittest.TestCase):
     def parse_cgc(self, argv: list[str]):
-        parser = provider_lifecycle.build_parser()
+        parser = lifecycle.build_parser()
         args = parser.parse_args(["cgc", *argv])
-        provider_lifecycle.normalize_cgc_args(args)
+        lifecycle.normalize_cgc_args(args)
         args.coordination_root = args.coordination_root.resolve()
         if args.code_repo_root is not None:
             args.code_repo_root = args.code_repo_root.resolve()
         if args.repo_id is not None:
-            args.repo_id = provider_lifecycle.stable_provider_id(args.repo_id)
+            args.repo_id = lifecycle.stable_provider_id(args.repo_id)
         return args
 
     def parse_grepai(self, argv: list[str]):
-        parser = provider_lifecycle.build_parser()
+        parser = lifecycle.build_parser()
         args = parser.parse_args(["grepai", *argv])
-        provider_lifecycle.normalize_grepai_args(args)
+        lifecycle.normalize_grepai_args(args)
         args.coordination_root = args.coordination_root.resolve()
         if args.root is not None:
             args.root = args.root.resolve()
@@ -128,7 +122,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         repo.mkdir(parents=True)
         memory.mkdir(parents=True)
         settings_path = root / "lifecycle-settings.json"
-        provider_lifecycle.write_json(
+        lifecycle.write_json(
             settings_path,
             {
                 "contextProviders": {
@@ -210,29 +204,20 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            args.coordination_root, provider_lifecycle.default_coordination_root().resolve()
+            args.coordination_root, lifecycle.default_coordination_root().resolve()
         )
 
     def test_watchers_defaults_coordination_root_to_installed_runtime_root(self) -> None:
-        parser = provider_lifecycle.build_parser()
+        parser = lifecycle.build_parser()
         args = parser.parse_args(["watchers", "status"])
 
-        self.assertEqual(args.coordination_root, provider_lifecycle.default_coordination_root())
+        self.assertEqual(args.coordination_root, lifecycle.default_coordination_root())
 
-    def test_grepai_run_dry_run_builds_managed_workspace_command(self) -> None:
+    def test_grepai_direct_run_requires_settings_backed_docker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             coordination_root = root / "coordination"
             runtime_root = coordination_root / "providers" / "grepai"
-            binary_path = (
-                coordination_root
-                / "providers"
-                / "_bin"
-                / ("grepai.exe" if provider_lifecycle.os.name == "nt" else "grepai")
-            )
-            binary_path.parent.mkdir(parents=True)
-            binary_path.write_text("", encoding="utf-8")
-
             args = self.parse_grepai(
                 [
                     "run",
@@ -246,23 +231,90 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                     "provider lifecycle",
                     "--workspace",
                     "agents-remember-memory",
-                    "--project",
-                    "memory-repos",
-                    "--json",
-                    "--compact",
-                    "--limit",
-                    "5",
                 ]
             )
 
-            result = provider_lifecycle.grepai_run(args, "run")
+            result = lifecycle.grepai_run(args, "run")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["action"], "run")
+        self.assertEqual(result["mode"], "unsupported")
+        self.assertIn("Docker-only", result["message"])
+        self.assertNotIn("command", result)
+
+    def test_grepai_settings_backed_run_uses_docker_without_host_binary(self) -> None:
+        original = grepai_actions.docker_command
+        grepai_actions.docker_command = lambda: "docker"
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                service_config = self.service_config(Path(tmp_dir))
+
+                result = lifecycle_service.run_grepai_lifecycle(
+                    service_config,
+                    action="run",
+                    native_args=[
+                        "search",
+                        "provider lifecycle",
+                        "--workspace",
+                        "agents-remember-memory",
+                        "--project",
+                        "memory-a",
+                    ],
+                )
+        finally:
+            grepai_actions.docker_command = original
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["action"], "run")
-        self.assertEqual(result["workspace"], "agents-remember-memory")
-        self.assertEqual(result["command"][1:4], ["search", "provider lifecycle", "--workspace"])
-        self.assertEqual(result["cwd"], runtime_root.resolve().as_posix())
-        self.assertIn("HOME", result["env"])
+        self.assertEqual(result["mode"], "docker")
+        self.assertEqual(
+            result["command"][:4],
+            ["docker", "exec", "ar-grepai-watcher", "grepai"],
+        )
+        self.assertEqual(result["command"][4:7], ["search", "provider lifecycle", "--workspace"])
+        self.assertNotIn("_bin", " ".join(result["command"]))
+
+    def test_grepai_start_dry_run_builds_complete_docker_stack(self) -> None:
+        originals = {
+            "grepai_release_arch": grepai_core.grepai_release_arch,
+        }
+        grepai_core.grepai_release_arch = lambda: "amd64"
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                service_config = self.service_config(Path(tmp_dir))
+                args = self.parse_grepai(
+                    [
+                        "start",
+                        "--coordination-root",
+                        str(service_config.coordination_root),
+                        "--from-settings",
+                        str(service_config.settings_path),
+                        "--dry-run",
+                    ]
+                )
+
+                result = lifecycle.grepai_run(args, "start")
+        finally:
+            grepai_core.grepai_release_arch = originals["grepai_release_arch"]
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "docker")
+        self.assertEqual(result["backend"]["network"]["name"], "ar-grepai-memory")
+        self.assertIn("pgvector/pgvector:pg16", result["backend"]["commands"][2])
+        self.assertIn("ollama/ollama:latest", result["embedder"]["commands"][2])
+        self.assertEqual(result["watcher"]["containerName"], "ar-grepai-watcher")
+        self.assertEqual(result["watcher"]["image"]["image"], "agents-remember/grepai:0.35.0")
+        self.assertEqual(
+            result["workspaceState"]["dsn"],
+            "postgres://grepai:grepai@ar-grepai-postgres:5432/grepai?sslmode=disable",
+        )
+        self.assertEqual(
+            result["workspaceState"]["projectPaths"],
+            {"memory-a": "/grepai/runtime/index-roots/memory-a"},
+        )
+        self.assertEqual(
+            result["workspaceState"]["embedder"]["endpoint"],
+            "http://ar-grepai-ollama:11434",
+        )
 
     def test_cgc_service_run_builds_command_without_cli_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -294,19 +346,11 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertTrue(result["enabled"]["codegraphcontext-code"])
         self.assertTrue(result["enabled"]["grepai-memory"])
 
-    def test_grepai_run_rejects_watcher_commands(self) -> None:
+    def test_grepai_direct_run_does_not_special_case_native_watcher_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             coordination_root = root / "coordination"
             runtime_root = coordination_root / "providers" / "grepai"
-            binary_path = (
-                coordination_root
-                / "providers"
-                / "_bin"
-                / ("grepai.exe" if provider_lifecycle.os.name == "nt" else "grepai")
-            )
-            binary_path.parent.mkdir(parents=True)
-            binary_path.write_text("", encoding="utf-8")
             args = self.parse_grepai(
                 [
                     "run",
@@ -322,40 +366,41 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 ]
             )
 
-            with self.assertRaisesRegex(
-                provider_lifecycle.ContextProviderError, "use grepai start/stop/refresh"
-            ):
-                provider_lifecycle.grepai_run(args, "run")
+            result = lifecycle.grepai_run(args, "run")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["mode"], "unsupported")
+        self.assertIn("Docker-only", result["message"])
 
     def test_ephemeral_namespace_rejects_daemon_actions(self) -> None:
-        original = provider_lifecycle.process_namespace_warning
-        provider_lifecycle.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        original = lifecycle_common.process_namespace_warning
+        lifecycle_common.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
         try:
             with self.assertRaisesRegex(
-                provider_lifecycle.ContextProviderError,
+                lifecycle.ContextProviderError,
                 "must run outside this ephemeral process namespace",
             ):
-                provider_lifecycle.require_durable_process_namespace("watchers start")
+                lifecycle.require_durable_process_namespace("watchers start")
         finally:
-            provider_lifecycle.process_namespace_warning = original
+            lifecycle_common.process_namespace_warning = original
 
     def test_process_namespace_status_reports_warning(self) -> None:
-        original = provider_lifecycle.process_namespace_warning
-        provider_lifecycle.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        original = lifecycle_common.process_namespace_warning
+        lifecycle_common.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
         try:
             self.assertEqual(
-                provider_lifecycle.process_namespace_status(),
+                lifecycle.process_namespace_status(),
                 {
                     "durableForDaemons": False,
                     "warning": "sandbox init has --die-with-parent",
                 },
             )
         finally:
-            provider_lifecycle.process_namespace_warning = original
+            lifecycle_common.process_namespace_warning = original
 
     def test_visualize_rejects_ephemeral_process_namespace(self) -> None:
-        original = provider_lifecycle.process_namespace_warning
-        provider_lifecycle.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        original = lifecycle_common.process_namespace_warning
+        lifecycle_common.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 root = Path(tmp_dir)
@@ -376,12 +421,12 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 )
 
                 with self.assertRaisesRegex(
-                    provider_lifecycle.ContextProviderError,
+                    lifecycle.ContextProviderError,
                     "must run outside this ephemeral process namespace",
                 ):
-                    provider_lifecycle.cgc_visualize(args)
+                    lifecycle.cgc_visualize(args)
         finally:
-            provider_lifecycle.process_namespace_warning = original
+            lifecycle_common.process_namespace_warning = original
 
     def test_visualize_dry_run_builds_explicit_server_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -403,7 +448,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 ]
             )
 
-            result = provider_lifecycle.cgc_visualize(args)
+            result = lifecycle.cgc_visualize(args)
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["longRunning"])
@@ -437,22 +482,22 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(
-                provider_lifecycle.ContextProviderError,
+                lifecycle.ContextProviderError,
                 "use cgc visualize",
             ):
-                provider_lifecycle.cgc_run(args)
+                lifecycle.cgc_run(args)
 
     def test_run_allows_bounded_query_in_ephemeral_process_namespace(self) -> None:
         originals = {
-            "process_namespace_warning": provider_lifecycle.process_namespace_warning,
-            "ensure_cgc_runtime_layout": provider_lifecycle.ensure_cgc_runtime_layout,
-            "cgc_status": provider_lifecycle.cgc_status,
-            "run_command": provider_lifecycle.run_command,
+            "process_namespace_warning": lifecycle_common.process_namespace_warning,
+            "ensure_cgc_runtime_layout": cgc_process.ensure_cgc_runtime_layout,
+            "cgc_status": cgc_process.cgc_status,
+            "run_command": cgc_process.run_command,
         }
-        provider_lifecycle.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
-        provider_lifecycle.ensure_cgc_runtime_layout = lambda layout: None
-        provider_lifecycle.cgc_status = lambda args: {"ok": True}
-        provider_lifecycle.run_command = lambda command, **kwargs: {
+        lifecycle_common.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        cgc_process.ensure_cgc_runtime_layout = lambda layout: None
+        cgc_process.cgc_status = lambda args: {"ok": True}
+        cgc_process.run_command = lambda command, **kwargs: {
             "stdout": "hit\n",
             "stderr": "",
             "returncode": 0,
@@ -479,68 +524,16 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                     ]
                 )
 
-                result = provider_lifecycle.cgc_run(args)
+                result = lifecycle.cgc_run(args)
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["action"], "run")
             self.assertEqual(result["command"]["stdout"], "hit\n")
         finally:
-            provider_lifecycle.process_namespace_warning = originals["process_namespace_warning"]
-            provider_lifecycle.ensure_cgc_runtime_layout = originals["ensure_cgc_runtime_layout"]
-            provider_lifecycle.cgc_status = originals["cgc_status"]
-            provider_lifecycle.run_command = originals["run_command"]
-
-    def test_grepai_start_output_pid_is_parsed(self) -> None:
-        output = "\n".join(
-            [
-                "Workspace watcher agents-remember-memory started (PID 705881)",
-                "Logs: /tmp/grepai-workspace-agents-remember-memory.log",
-            ]
-        )
-
-        self.assertEqual(provider_lifecycle.grepai_watch_pid_from_output(output), 705881)
-        self.assertIsNone(provider_lifecycle.grepai_watch_pid_from_output("Status: not running"))
-
-    def test_grepai_probe_uses_managed_log_dir(self) -> None:
-        calls: list[list[str]] = []
-        originals = {
-            "run_command": provider_lifecycle.run_command,
-        }
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                root = Path(tmp_dir)
-                memory = root / "memory"
-                memory.mkdir()
-                layout = provider_lifecycle.grepai_runtime_layout(
-                    coordination_root=root / "coordination",
-                    workspace_name="agents-remember-memory",
-                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
-                )
-                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
-                layout.binary_path.write_text("binary\n", encoding="utf-8")
-
-                def fake_run_command(command, **kwargs):
-                    calls.append(command)
-                    return {
-                        "returncode": 0,
-                        "stdout": "Workspace agents-remember-memory: running\nPID: 1234\n",
-                        "stderr": "",
-                    }
-
-                provider_lifecycle.run_command = fake_run_command
-
-                result = provider_lifecycle.grepai_probe_watcher(
-                    layout.binary_path.as_posix(),
-                    layout,
-                    layout.state_file,
-                    timeout=1,
-                )
-        finally:
-            provider_lifecycle.run_command = originals["run_command"]
-
-        self.assertTrue(result["running"])
-        self.assertIn("--log-dir", calls[0])
-        self.assertIn(layout.logs_root.as_posix(), calls[0])
+            lifecycle_common.process_namespace_warning = originals["process_namespace_warning"]
+            cgc_process.ensure_cgc_runtime_layout = originals["ensure_cgc_runtime_layout"]
+            cgc_process.cgc_status = originals["cgc_status"]
+            cgc_process.run_command = originals["run_command"]
 
     def test_docker_wait_for_postgres_requires_database_query(self) -> None:
         backend = {
@@ -551,329 +544,53 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         }
         calls: list[list[str]] = []
         originals = {
-            "docker_command": provider_lifecycle.docker_command,
-            "run_command": provider_lifecycle.run_command,
+            "docker_command": grepai_backend.docker_command,
+            "run_command": grepai_backend.run_command,
         }
 
         def fake_run_command(command, **kwargs):
             calls.append(command)
             return {"returncode": 0, "stdout": "ok\n", "stderr": ""}
 
-        provider_lifecycle.docker_command = lambda: "docker"
-        provider_lifecycle.run_command = fake_run_command
+        grepai_backend.docker_command = lambda: "docker"
+        grepai_backend.run_command = fake_run_command
         try:
-            result = provider_lifecycle.docker_wait_for_postgres(
+            result = lifecycle.docker_wait_for_postgres(
                 backend, cwd=Path("/tmp"), timeout=1
             )
         finally:
-            provider_lifecycle.docker_command = originals["docker_command"]
-            provider_lifecycle.run_command = originals["run_command"]
+            grepai_backend.docker_command = originals["docker_command"]
+            grepai_backend.run_command = originals["run_command"]
 
         self.assertEqual(result["returncode"], 0)
         self.assertIn("pg_isready", calls[0])
         self.assertIn("psql", calls[1])
         self.assertIn("SELECT 1;", calls[1])
 
-    def test_grepai_start_adopts_already_running_watcher(self) -> None:
-        originals = {
-            "grepai_layout_from_args": provider_lifecycle.grepai_layout_from_args,
-            "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
-            "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
-            "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "popen_detached_command": provider_lifecycle.popen_detached_command,
-        }
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                root = Path(tmp_dir)
-                memory = root / "memory"
-                memory.mkdir()
-                layout = provider_lifecycle.grepai_runtime_layout(
-                    coordination_root=root / "coordination",
-                    workspace_name="agents-remember-memory",
-                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
-                )
-                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
-                layout.binary_path.write_text("binary\n", encoding="utf-8")
-                provider_lifecycle.grepai_layout_from_args = lambda args: (
-                    root / "settings.json",
-                    {},
-                    layout,
-                )
-                provider_lifecycle.require_durable_process_namespace = lambda action: None
-                provider_lifecycle.ensure_grepai_runtime_layout = lambda runtime_layout: (
-                    runtime_layout.state_file.parent.mkdir(parents=True, exist_ok=True)
-                )
-                provider_lifecycle.grepai_probe_watcher = (
-                    lambda command_name, runtime_layout, state_file, timeout: {
-                        "running": True,
-                        "pid": 1234,
-                        "managedAlive": True,
-                        "nativeRunning": False,
-                        "status": {"returncode": 0, "stdout": "Status: running\n", "stderr": ""},
-                    }
-                )
-                provider_lifecycle.popen_detached_command = lambda command, **kwargs: self.fail(
-                    "start command should not run"
-                )
-
-                args = SimpleNamespace(dry_run=False, timeout=1)
-                result = provider_lifecycle.grepai_run(args, "start")
-        finally:
-            provider_lifecycle.grepai_layout_from_args = originals["grepai_layout_from_args"]
-            provider_lifecycle.require_durable_process_namespace = originals[
-                "require_durable_process_namespace"
-            ]
-            provider_lifecycle.ensure_grepai_runtime_layout = originals[
-                "ensure_grepai_runtime_layout"
-            ]
-            provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
-
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["alreadyRunning"])
-        self.assertEqual(result["pid"], 1234)
-
-    def test_grepai_start_popen_adopts_running_watcher(self) -> None:
-        probes = [
-            {
-                "running": False,
-                "pid": None,
-                "managedAlive": False,
-                "nativeRunning": False,
-                "status": {"returncode": 1},
-            },
-            {
-                "running": True,
-                "pid": 4321,
-                "managedAlive": False,
-                "nativeRunning": True,
-                "status": {"returncode": 0},
-            },
-        ]
-        originals = {
-            "grepai_layout_from_args": provider_lifecycle.grepai_layout_from_args,
-            "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
-            "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
-            "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "popen_detached_command": provider_lifecycle.popen_detached_command,
-        }
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                root = Path(tmp_dir)
-                memory = root / "memory"
-                memory.mkdir()
-                layout = provider_lifecycle.grepai_runtime_layout(
-                    coordination_root=root / "coordination",
-                    workspace_name="agents-remember-memory",
-                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
-                )
-                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
-                layout.binary_path.write_text("binary\n", encoding="utf-8")
-                provider_lifecycle.grepai_layout_from_args = lambda args: (
-                    root / "settings.json",
-                    {},
-                    layout,
-                )
-                provider_lifecycle.require_durable_process_namespace = lambda action: None
-                provider_lifecycle.ensure_grepai_runtime_layout = lambda runtime_layout: (
-                    runtime_layout.state_file.parent.mkdir(parents=True, exist_ok=True)
-                )
-                provider_lifecycle.grepai_probe_watcher = (
-                    lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
-                )
-                provider_lifecycle.popen_detached_command = lambda command, **kwargs: (
-                    FakeDetachedProcess(9876)
-                )
-
-                args = SimpleNamespace(dry_run=False, timeout=1)
-                result = provider_lifecycle.grepai_run(args, "start")
-        finally:
-            provider_lifecycle.grepai_layout_from_args = originals["grepai_layout_from_args"]
-            provider_lifecycle.require_durable_process_namespace = originals[
-                "require_durable_process_namespace"
-            ]
-            provider_lifecycle.ensure_grepai_runtime_layout = originals[
-                "ensure_grepai_runtime_layout"
-            ]
-            provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
-
-        self.assertTrue(result["ok"])
-        self.assertFalse(result["startupTimedOut"])
-        self.assertEqual(result["pid"], 4321)
-
-    def test_grepai_start_leaves_detached_launcher_running_when_not_ready(self) -> None:
-        probes = [
-            {
-                "running": False,
-                "pid": None,
-                "managedAlive": False,
-                "nativeRunning": False,
-                "status": {"returncode": 1},
-            },
-            {
-                "running": False,
-                "pid": None,
-                "managedAlive": False,
-                "nativeRunning": False,
-                "status": {"returncode": 0},
-            },
-        ]
-        originals = {
-            "grepai_layout_from_args": provider_lifecycle.grepai_layout_from_args,
-            "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
-            "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
-            "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "grepai_startup_probe_timeout": provider_lifecycle.grepai_startup_probe_timeout,
-            "popen_detached_command": provider_lifecycle.popen_detached_command,
-            "process_alive": provider_lifecycle.process_alive,
-        }
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                root = Path(tmp_dir)
-                memory = root / "memory"
-                memory.mkdir()
-                layout = provider_lifecycle.grepai_runtime_layout(
-                    coordination_root=root / "coordination",
-                    workspace_name="agents-remember-memory",
-                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
-                )
-                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
-                layout.binary_path.write_text("binary\n", encoding="utf-8")
-                provider_lifecycle.grepai_layout_from_args = lambda args: (
-                    root / "settings.json",
-                    {},
-                    layout,
-                )
-                provider_lifecycle.require_durable_process_namespace = lambda action: None
-                provider_lifecycle.ensure_grepai_runtime_layout = lambda runtime_layout: (
-                    runtime_layout.state_file.parent.mkdir(parents=True, exist_ok=True)
-                )
-                provider_lifecycle.grepai_probe_watcher = (
-                    lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
-                )
-                provider_lifecycle.grepai_startup_probe_timeout = lambda timeout: 0
-                provider_lifecycle.popen_detached_command = lambda command, **kwargs: (
-                    FakeDetachedProcess(9876)
-                )
-                provider_lifecycle.process_alive = lambda pid: pid == 9876
-
-                args = SimpleNamespace(dry_run=False, timeout=0)
-                result = provider_lifecycle.grepai_run(args, "start")
-        finally:
-            provider_lifecycle.grepai_layout_from_args = originals["grepai_layout_from_args"]
-            provider_lifecycle.require_durable_process_namespace = originals[
-                "require_durable_process_namespace"
-            ]
-            provider_lifecycle.ensure_grepai_runtime_layout = originals[
-                "ensure_grepai_runtime_layout"
-            ]
-            provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.grepai_startup_probe_timeout = originals[
-                "grepai_startup_probe_timeout"
-            ]
-            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
-            provider_lifecycle.process_alive = originals["process_alive"]
-
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["startupPending"])
-        self.assertTrue(result["startupTimedOut"])
-        self.assertEqual(result["pid"], 9876)
-        self.assertEqual(result["launcher"]["pid"], 9876)
-
-    def test_grepai_start_fails_when_launcher_exits_but_watcher_is_not_running(self) -> None:
-        probes = [
-            {
-                "running": False,
-                "pid": None,
-                "managedAlive": False,
-                "nativeRunning": False,
-                "status": {"returncode": 0},
-            },
-            {
-                "running": False,
-                "pid": None,
-                "managedAlive": False,
-                "nativeRunning": False,
-                "status": {"returncode": 0},
-            },
-        ]
-        originals = {
-            "grepai_layout_from_args": provider_lifecycle.grepai_layout_from_args,
-            "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
-            "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
-            "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "popen_detached_command": provider_lifecycle.popen_detached_command,
-        }
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                root = Path(tmp_dir)
-                memory = root / "memory"
-                memory.mkdir()
-                layout = provider_lifecycle.grepai_runtime_layout(
-                    coordination_root=root / "coordination",
-                    workspace_name="agents-remember-memory",
-                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
-                )
-                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
-                layout.binary_path.write_text("binary\n", encoding="utf-8")
-                provider_lifecycle.grepai_layout_from_args = lambda args: (
-                    root / "settings.json",
-                    {},
-                    layout,
-                )
-                provider_lifecycle.require_durable_process_namespace = lambda action: None
-                provider_lifecycle.ensure_grepai_runtime_layout = lambda runtime_layout: (
-                    runtime_layout.state_file.parent.mkdir(parents=True, exist_ok=True)
-                )
-                provider_lifecycle.grepai_probe_watcher = (
-                    lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
-                )
-                provider_lifecycle.popen_detached_command = lambda command, **kwargs: (
-                    FakeDetachedProcess(1234, returncode=1)
-                )
-
-                args = SimpleNamespace(dry_run=False, timeout=1)
-                result = provider_lifecycle.grepai_run(args, "start")
-        finally:
-            provider_lifecycle.grepai_layout_from_args = originals["grepai_layout_from_args"]
-            provider_lifecycle.require_durable_process_namespace = originals[
-                "require_durable_process_namespace"
-            ]
-            provider_lifecycle.ensure_grepai_runtime_layout = originals[
-                "ensure_grepai_runtime_layout"
-            ]
-            provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
-
-        self.assertFalse(result["ok"])
-        self.assertIsNone(result["pid"])
-        self.assertIn("recoveryAction", result)
-
     def test_watchers_run_reports_partial_results_and_recovery_actions(self) -> None:
         originals = {
-            "context_provider_enabled": provider_lifecycle.context_provider_enabled,
-            "grepai_run": provider_lifecycle.grepai_run,
-            "cgc_start_all": provider_lifecycle.cgc_start_all,
-            "process_namespace_status": provider_lifecycle.process_namespace_status,
+            "context_provider_enabled": watcher_lifecycle.context_provider_enabled,
+            "grepai_run": watcher_lifecycle.grepai_run,
+            "cgc_start_all": watcher_lifecycle.cgc_start_all,
+            "process_namespace_status": watcher_lifecycle.process_namespace_status,
         }
 
         def fake_enabled(coordination_root, from_settings, provider):
             return Path("/tmp/settings.json"), True
 
-        provider_lifecycle.context_provider_enabled = fake_enabled
-        provider_lifecycle.grepai_run = lambda args, action: {
+        watcher_lifecycle.context_provider_enabled = fake_enabled
+        watcher_lifecycle.grepai_run = lambda args, action: {
             "provider": "grepai",
             "action": action,
             "ok": True,
         }
-        provider_lifecycle.cgc_start_all = lambda args: {
+        watcher_lifecycle.cgc_start_all = lambda args: {
             "provider": "codegraphcontext",
             "action": "start-all",
             "ok": False,
             "recoveryAction": "retry codegraphcontext start-all",
         }
-        provider_lifecycle.process_namespace_status = lambda: {
+        watcher_lifecycle.process_namespace_status = lambda: {
             "durableForDaemons": True,
             "warning": None,
         }
@@ -884,12 +601,12 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 dry_run=True,
                 timeout=1,
             )
-            result = provider_lifecycle.watchers_run(args, "start")
+            result = lifecycle.watchers_run(args, "start")
         finally:
-            provider_lifecycle.context_provider_enabled = originals["context_provider_enabled"]
-            provider_lifecycle.grepai_run = originals["grepai_run"]
-            provider_lifecycle.cgc_start_all = originals["cgc_start_all"]
-            provider_lifecycle.process_namespace_status = originals["process_namespace_status"]
+            watcher_lifecycle.context_provider_enabled = originals["context_provider_enabled"]
+            watcher_lifecycle.grepai_run = originals["grepai_run"]
+            watcher_lifecycle.cgc_start_all = originals["cgc_start_all"]
+            watcher_lifecycle.process_namespace_status = originals["process_namespace_status"]
 
         self.assertFalse(result["ok"])
         self.assertTrue(result["partial"])

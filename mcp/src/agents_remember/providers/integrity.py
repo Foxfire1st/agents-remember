@@ -12,10 +12,8 @@ from agents_remember.mcp.config import McpRuntimeConfig
 MANIFEST_VERSION = 1
 IGNORED_NAMES = {"__pycache__"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
-WATCHED_PROVIDER_PATHS = (
-    Path("providers") / "_bin",
-    Path("providers") / "_venvs",
-)
+WATCHED_PROVIDER_PATHS = (Path("providers") / "_venvs",)
+IGNORED_RECORDED_PROVIDER_PATHS = (Path("providers") / "_bin",)
 
 
 def manifest_path_for_config(config: McpRuntimeConfig) -> Path:
@@ -86,6 +84,11 @@ def check_provider_runner_integrity(config: McpRuntimeConfig) -> dict[str, Any]:
             "changed": [],
             "missing": [],
         }
+    recorded = {
+        relative: expected
+        for relative, expected in recorded.items()
+        if not _ignored_recorded_provider_path(relative)
+    }
 
     changed = sorted(
         relative
@@ -117,6 +120,13 @@ def _hash_provider_files(coordination_root: Path) -> dict[str, str]:
             relative = path.resolve().relative_to(root).as_posix()
             files[relative] = _sha256(path)
     return files
+
+
+def _ignored_recorded_provider_path(relative: str) -> bool:
+    path = Path(relative)
+    return any(
+        path == ignored or ignored in path.parents for ignored in IGNORED_RECORDED_PROVIDER_PATHS
+    )
 
 
 def _ignored(path: Path) -> bool:
