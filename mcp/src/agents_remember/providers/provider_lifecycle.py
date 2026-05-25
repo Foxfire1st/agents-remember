@@ -237,6 +237,36 @@ def run_foreground_command(
     }
 
 
+def popen_detached_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    stdout: Any = subprocess.DEVNULL,
+    stderr: Any = subprocess.DEVNULL,
+) -> subprocess.Popen[bytes]:
+    """Start a long-running command without owning its lifetime."""
+
+    merged_env = subprocess_env(env)
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        ) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        popen_kwargs["creationflags"] |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    else:
+        popen_kwargs["start_new_session"] = True
+    return subprocess.Popen(
+        command,
+        cwd=str(cwd),
+        env=merged_env,
+        stdin=subprocess.DEVNULL,
+        stdout=stdout,
+        stderr=stderr,
+        **popen_kwargs,
+    )
+
+
 def host_port_available(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1672,22 +1702,14 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
 
     watch_log = layout.watch_log_file
     watch_log.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = watch_log.open("ab")
-    popen_kwargs: dict[str, Any] = {}
-    if os.name == "nt":
-        popen_kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    with watch_log.open("ab") as log_handle:
+        process = popen_detached_command(
+            [layout.cgc_executable().as_posix(), "watch", layout.code_repo_root.as_posix()],
+            cwd=layout.watch_cwd,
+            env=layout.env(),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
         )
-    else:
-        popen_kwargs["start_new_session"] = True
-    process = subprocess.Popen(
-        [layout.cgc_executable().as_posix(), "watch", layout.code_repo_root.as_posix()],
-        cwd=str(layout.watch_cwd),
-        env={**os.environ, **layout.env()},
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        **popen_kwargs,
-    )
     write_provider_state(
         layout,
         {
@@ -2118,8 +2140,45 @@ def grepai_watch_running_from_output(output: str) -> bool:
     return (
         "watcher: running" in text
         or "status: running" in text
+        or bool(re.search(r"^workspace\s+.+:\s+running\b", text, re.MULTILINE))
         or grepai_watch_already_running_from_output(output)
     )
+
+
+def grepai_watch_status_command(command_name: str, layout: Any) -> list[str]:
+    return [
+        command_name,
+        "watch",
+        "--status",
+        "--workspace",
+        layout.workspace_name,
+        "--log-dir",
+        layout.logs_root.as_posix(),
+    ]
+
+
+def grepai_watch_stop_command(command_name: str, layout: Any) -> list[str]:
+    return [
+        command_name,
+        "watch",
+        "--stop",
+        "--workspace",
+        layout.workspace_name,
+        "--log-dir",
+        layout.logs_root.as_posix(),
+    ]
+
+
+def grepai_watch_start_command(command_name: str, layout: Any) -> list[str]:
+    return [
+        command_name,
+        "watch",
+        "--workspace",
+        layout.workspace_name,
+        "--background",
+        "--log-dir",
+        layout.logs_root.as_posix(),
+    ]
 
 
 def grepai_state_matches_layout(state: dict[str, Any], layout: Any) -> bool:
@@ -2138,6 +2197,8 @@ def grepai_watch_state(
     backend_result: dict[str, Any] | None,
     adopted: bool = False,
     startup_timed_out: bool = False,
+    startup_pending: bool = False,
+    launcher_pid: int | None = None,
 ) -> dict[str, Any]:
     return {
         "provider": "grepai",
@@ -2158,6 +2219,8 @@ def grepai_watch_state(
             "mode": "native-background-watch",
             "adopted": adopted,
             "startupTimedOut": startup_timed_out,
+            "startupPending": startup_pending,
+            "launcherPid": launcher_pid,
         },
         "lastAction": action,
         "backend": backend_result,
@@ -2175,7 +2238,7 @@ def grepai_probe_watcher(
         and isinstance(state_pid, int)
         and process_alive(state_pid)
     )
-    command = [command_name, "watch", "--status", "--workspace", layout.workspace_name]
+    command = grepai_watch_status_command(command_name, layout)
     status = run_command(
         command, cwd=layout.runtime_root, env=layout.env(), timeout=timeout, allow_timeout=True
     )
@@ -2190,6 +2253,41 @@ def grepai_probe_watcher(
         "nativeRunning": native_running,
         "status": status,
     }
+
+
+def grepai_startup_probe_timeout(timeout: int) -> int:
+    return max(1, min(timeout, 5))
+
+
+def grepai_wait_for_detached_start(
+    command_name: str,
+    layout: Any,
+    state_file: Path,
+    timeout: int,
+    process: subprocess.Popen[Any],
+) -> tuple[dict[str, Any], bool, int | None]:
+    probe_timeout = grepai_startup_probe_timeout(timeout)
+    deadline = time.monotonic() + probe_timeout
+    post_probe: dict[str, Any] = {
+        "running": False,
+        "pid": None,
+        "managedAlive": False,
+        "nativeRunning": False,
+        "status": None,
+    }
+    while True:
+        post_probe = grepai_probe_watcher(command_name, layout, state_file, probe_timeout)
+        if post_probe["running"]:
+            return post_probe, False, process.poll()
+
+        returncode = process.poll()
+        if returncode is not None:
+            return post_probe, False, returncode
+
+        if time.monotonic() >= deadline:
+            return post_probe, True, None
+
+        time.sleep(0.25)
 
 
 def prepare_grepai_workspace(
@@ -2814,7 +2912,7 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
         backend_status = grepai_backend_status(args) if provider_settings else None
         commands = [
             [command_name, "workspace", "status", layout.workspace_name],
-            [command_name, "watch", "--status", "--workspace", layout.workspace_name],
+            grepai_watch_status_command(command_name, layout),
         ]
         if args.dry_run:
             results = [
@@ -2832,8 +2930,9 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
         pid = state.get("process", {}).get("pid")
         managed_alive = process_alive(int(pid)) if isinstance(pid, int) else False
         native_watcher_running = any(
-            "Watcher: running" in result.get("stdout", "")
-            or "Status: running" in result.get("stdout", "")
+            grepai_watch_running_from_output(
+                f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            )
             for result in results
         )
         root_artifacts = [
@@ -2922,15 +3021,7 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             dsn = grepai_dsn(
                 backend, host=backend_result["ports"]["postgres"]["bindHost"], port=postgres_port
             )
-        command = [
-            command_name,
-            "watch",
-            "--workspace",
-            layout.workspace_name,
-            "--background",
-            "--log-dir",
-            layout.logs_root.as_posix(),
-        ]
+        command = grepai_watch_start_command(command_name, layout)
         if args.dry_run:
             return {
                 "provider": "grepai",
@@ -2950,7 +3041,8 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
         workspace = None
         if dsn is not None:
             workspace = prepare_grepai_workspace(layout, provider_settings, dsn=dsn)
-        pre_probe = grepai_probe_watcher(command_name, layout, state_file, args.timeout)
+        probe_timeout = grepai_startup_probe_timeout(args.timeout)
+        pre_probe = grepai_probe_watcher(command_name, layout, state_file, probe_timeout)
         if pre_probe["running"]:
             write_json(
                 state_file,
@@ -2975,25 +3067,23 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
                 "backend": backend_result,
                 "workspaceState": workspace,
             }
-        result = run_command(
-            command,
-            cwd=layout.runtime_root,
-            env=layout.env(),
-            timeout=args.timeout,
-            allow_timeout=True,
+        process = popen_detached_command(command, cwd=layout.runtime_root, env=layout.env())
+        post_probe, startup_timed_out, launcher_returncode = grepai_wait_for_detached_start(
+            command_name,
+            layout,
+            state_file,
+            args.timeout,
+            process,
         )
-        output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
-        watch_pid = grepai_watch_pid_from_output(output)
-        post_probe = grepai_probe_watcher(command_name, layout, state_file, args.timeout)
-        if watch_pid is None:
-            watch_pid = post_probe.get("pid")
-        startup_timed_out = bool(result.get("timedOut"))
-        already_running = grepai_watch_already_running_from_output(output) or bool(
-            post_probe["running"] and result.get("returncode") not in {0, None}
-        )
+        launcher_running = launcher_returncode is None and process_alive(process.pid)
+        watch_pid = post_probe.get("pid") or (process.pid if launcher_running else None)
+        already_running = bool(post_probe["running"] and launcher_returncode not in {0, None})
         watcher_running = bool(
-            post_probe["running"] or (isinstance(watch_pid, int) and process_alive(watch_pid))
+            post_probe["running"]
+            or launcher_running
+            or (isinstance(watch_pid, int) and process_alive(watch_pid))
         )
+        startup_pending = bool(not post_probe["running"] and launcher_running)
         ok = watcher_running
         write_json(
             state_file,
@@ -3004,8 +3094,18 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
                 backend_result=backend_result,
                 adopted=already_running,
                 startup_timed_out=startup_timed_out,
+                startup_pending=startup_pending,
+                launcher_pid=process.pid,
             ),
         )
+        launcher = {
+            "command": command,
+            "cwd": layout.runtime_root.as_posix(),
+            "pid": process.pid,
+            "returncode": launcher_returncode,
+            "detached": True,
+            "startupProbeTimeoutSeconds": probe_timeout,
+        }
         data = {
             "provider": "grepai",
             "action": action,
@@ -3014,9 +3114,11 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             "workspace": layout.workspace_name,
             "runtimeRoot": layout.runtime_root.as_posix(),
             "logDir": layout.logs_root.as_posix(),
-            "command": result,
+            "command": launcher,
+            "launcher": launcher,
             "watcher": post_probe,
             "alreadyRunning": already_running,
+            "startupPending": startup_pending,
             "startupTimedOut": startup_timed_out,
             "backend": backend_result,
             "workspaceState": workspace,
@@ -3037,7 +3139,7 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
             stopped_pid = pid
             if not args.dry_run:
                 os.kill(pid, signal.SIGTERM)
-        fallback_command = [command_name, "watch", "--stop", "--workspace", layout.workspace_name]
+        fallback_command = grepai_watch_stop_command(command_name, layout)
         fallback = (
             None
             if args.dry_run
@@ -3079,16 +3181,8 @@ def grepai_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
                 "workspace": layout.workspace_name,
                 "runtimeRoot": layout.runtime_root.as_posix(),
                 "commands": [
-                    [command_name, "watch", "--stop", "--workspace", layout.workspace_name],
-                    [
-                        command_name,
-                        "watch",
-                        "--workspace",
-                        layout.workspace_name,
-                        "--background",
-                        "--log-dir",
-                        layout.logs_root.as_posix(),
-                    ],
+                    grepai_watch_stop_command(command_name, layout),
+                    grepai_watch_start_command(command_name, layout),
                 ],
             }
         stop_result = grepai_run(args, "stop")

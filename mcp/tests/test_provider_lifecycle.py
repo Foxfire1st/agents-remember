@@ -17,6 +17,15 @@ from agents_remember.providers import (
 )
 
 
+class FakeDetachedProcess:
+    def __init__(self, pid: int, returncode: int | None = None) -> None:
+        self.pid = pid
+        self.returncode = returncode
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+
 class ProviderLifecycleRenderTests(unittest.TestCase):
     def test_captured_command_output_is_streamed_without_wrapper(self) -> None:
         data = {
@@ -492,6 +501,47 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertEqual(provider_lifecycle.grepai_watch_pid_from_output(output), 705881)
         self.assertIsNone(provider_lifecycle.grepai_watch_pid_from_output("Status: not running"))
 
+    def test_grepai_probe_uses_managed_log_dir(self) -> None:
+        calls: list[list[str]] = []
+        originals = {
+            "run_command": provider_lifecycle.run_command,
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                memory = root / "memory"
+                memory.mkdir()
+                layout = provider_lifecycle.grepai_runtime_layout(
+                    coordination_root=root / "coordination",
+                    workspace_name="agents-remember-memory",
+                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
+                )
+                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
+                layout.binary_path.write_text("binary\n", encoding="utf-8")
+
+                def fake_run_command(command, **kwargs):
+                    calls.append(command)
+                    return {
+                        "returncode": 0,
+                        "stdout": "Workspace agents-remember-memory: running\nPID: 1234\n",
+                        "stderr": "",
+                    }
+
+                provider_lifecycle.run_command = fake_run_command
+
+                result = provider_lifecycle.grepai_probe_watcher(
+                    layout.binary_path.as_posix(),
+                    layout,
+                    layout.state_file,
+                    timeout=1,
+                )
+        finally:
+            provider_lifecycle.run_command = originals["run_command"]
+
+        self.assertTrue(result["running"])
+        self.assertIn("--log-dir", calls[0])
+        self.assertIn(layout.logs_root.as_posix(), calls[0])
+
     def test_docker_wait_for_postgres_requires_database_query(self) -> None:
         backend = {
             "containerName": "grepai-postgres",
@@ -530,7 +580,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
             "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
             "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "run_command": provider_lifecycle.run_command,
+            "popen_detached_command": provider_lifecycle.popen_detached_command,
         }
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -562,7 +612,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                         "status": {"returncode": 0, "stdout": "Status: running\n", "stderr": ""},
                     }
                 )
-                provider_lifecycle.run_command = lambda command, **kwargs: self.fail(
+                provider_lifecycle.popen_detached_command = lambda command, **kwargs: self.fail(
                     "start command should not run"
                 )
 
@@ -577,13 +627,13 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 "ensure_grepai_runtime_layout"
             ]
             provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.run_command = originals["run_command"]
+            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["alreadyRunning"])
         self.assertEqual(result["pid"], 1234)
 
-    def test_grepai_start_timeout_can_adopt_running_watcher(self) -> None:
+    def test_grepai_start_popen_adopts_running_watcher(self) -> None:
         probes = [
             {
                 "running": False,
@@ -605,7 +655,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
             "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
             "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "run_command": provider_lifecycle.run_command,
+            "popen_detached_command": provider_lifecycle.popen_detached_command,
         }
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -631,13 +681,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 provider_lifecycle.grepai_probe_watcher = (
                     lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
                 )
-                provider_lifecycle.run_command = lambda command, **kwargs: {
-                    "command": command,
-                    "returncode": None,
-                    "stdout": "",
-                    "stderr": "",
-                    "timedOut": True,
-                }
+                provider_lifecycle.popen_detached_command = lambda command, **kwargs: (
+                    FakeDetachedProcess(9876)
+                )
 
                 args = SimpleNamespace(dry_run=False, timeout=1)
                 result = provider_lifecycle.grepai_run(args, "start")
@@ -650,11 +696,90 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 "ensure_grepai_runtime_layout"
             ]
             provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.run_command = originals["run_command"]
+            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
 
         self.assertTrue(result["ok"])
-        self.assertTrue(result["startupTimedOut"])
+        self.assertFalse(result["startupTimedOut"])
         self.assertEqual(result["pid"], 4321)
+
+    def test_grepai_start_leaves_detached_launcher_running_when_not_ready(self) -> None:
+        probes = [
+            {
+                "running": False,
+                "pid": None,
+                "managedAlive": False,
+                "nativeRunning": False,
+                "status": {"returncode": 1},
+            },
+            {
+                "running": False,
+                "pid": None,
+                "managedAlive": False,
+                "nativeRunning": False,
+                "status": {"returncode": 0},
+            },
+        ]
+        originals = {
+            "grepai_layout_from_args": provider_lifecycle.grepai_layout_from_args,
+            "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
+            "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
+            "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
+            "grepai_startup_probe_timeout": provider_lifecycle.grepai_startup_probe_timeout,
+            "popen_detached_command": provider_lifecycle.popen_detached_command,
+            "process_alive": provider_lifecycle.process_alive,
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                memory = root / "memory"
+                memory.mkdir()
+                layout = provider_lifecycle.grepai_runtime_layout(
+                    coordination_root=root / "coordination",
+                    workspace_name="agents-remember-memory",
+                    roots=(provider_lifecycle.GrepaiMemoryRoot(project_id="memory", path=memory),),
+                )
+                layout.binary_path.parent.mkdir(parents=True, exist_ok=True)
+                layout.binary_path.write_text("binary\n", encoding="utf-8")
+                provider_lifecycle.grepai_layout_from_args = lambda args: (
+                    root / "settings.json",
+                    {},
+                    layout,
+                )
+                provider_lifecycle.require_durable_process_namespace = lambda action: None
+                provider_lifecycle.ensure_grepai_runtime_layout = lambda runtime_layout: (
+                    runtime_layout.state_file.parent.mkdir(parents=True, exist_ok=True)
+                )
+                provider_lifecycle.grepai_probe_watcher = (
+                    lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
+                )
+                provider_lifecycle.grepai_startup_probe_timeout = lambda timeout: 0
+                provider_lifecycle.popen_detached_command = lambda command, **kwargs: (
+                    FakeDetachedProcess(9876)
+                )
+                provider_lifecycle.process_alive = lambda pid: pid == 9876
+
+                args = SimpleNamespace(dry_run=False, timeout=0)
+                result = provider_lifecycle.grepai_run(args, "start")
+        finally:
+            provider_lifecycle.grepai_layout_from_args = originals["grepai_layout_from_args"]
+            provider_lifecycle.require_durable_process_namespace = originals[
+                "require_durable_process_namespace"
+            ]
+            provider_lifecycle.ensure_grepai_runtime_layout = originals[
+                "ensure_grepai_runtime_layout"
+            ]
+            provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
+            provider_lifecycle.grepai_startup_probe_timeout = originals[
+                "grepai_startup_probe_timeout"
+            ]
+            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
+            provider_lifecycle.process_alive = originals["process_alive"]
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["startupPending"])
+        self.assertTrue(result["startupTimedOut"])
+        self.assertEqual(result["pid"], 9876)
+        self.assertEqual(result["launcher"]["pid"], 9876)
 
     def test_grepai_start_fails_when_launcher_exits_but_watcher_is_not_running(self) -> None:
         probes = [
@@ -678,7 +803,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "require_durable_process_namespace": provider_lifecycle.require_durable_process_namespace,
             "ensure_grepai_runtime_layout": provider_lifecycle.ensure_grepai_runtime_layout,
             "grepai_probe_watcher": provider_lifecycle.grepai_probe_watcher,
-            "run_command": provider_lifecycle.run_command,
+            "popen_detached_command": provider_lifecycle.popen_detached_command,
         }
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -704,13 +829,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 provider_lifecycle.grepai_probe_watcher = (
                     lambda command_name, runtime_layout, state_file, timeout: probes.pop(0)
                 )
-                provider_lifecycle.run_command = lambda command, **kwargs: {
-                    "command": command,
-                    "returncode": 0,
-                    "stdout": "Workspace watcher agents-remember-memory started (PID 1234)\n",
-                    "stderr": "",
-                    "timedOut": False,
-                }
+                provider_lifecycle.popen_detached_command = lambda command, **kwargs: (
+                    FakeDetachedProcess(1234, returncode=1)
+                )
 
                 args = SimpleNamespace(dry_run=False, timeout=1)
                 result = provider_lifecycle.grepai_run(args, "start")
@@ -723,10 +844,10 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                 "ensure_grepai_runtime_layout"
             ]
             provider_lifecycle.grepai_probe_watcher = originals["grepai_probe_watcher"]
-            provider_lifecycle.run_command = originals["run_command"]
+            provider_lifecycle.popen_detached_command = originals["popen_detached_command"]
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["pid"], 1234)
+        self.assertIsNone(result["pid"])
         self.assertIn("recoveryAction", result)
 
     def test_watchers_run_reports_partial_results_and_recovery_actions(self) -> None:
