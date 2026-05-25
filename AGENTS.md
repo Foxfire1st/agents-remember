@@ -24,6 +24,7 @@ Choose one work format before changing files:
    heavy task or the full phased workflow.
 
 Do not change code or documentation without following one of these workflows.
+Do not change task plan items without approval. Think before acting.
 
 ## Memory And Onboarding
 

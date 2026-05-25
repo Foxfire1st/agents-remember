@@ -22,6 +22,7 @@ heavy task workflow, a heavy task, or the full phased workflow.
 ---
 
 **IMPORTANT:** Do not change code without following one of the above workflows!
+Do not change task plan items without approval. 
 
 ---
 
@@ -34,8 +35,10 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- Read `tasks/AGENTS.md` before creating or updating task artifacts, or when
-  task framing, meta-questioning, or approval doctrine matters.
+- Do not rush on every dev statement to change the whole plan. Instead follow `tasks/AGENTS.md` doctrine 
+when designing and planning a task. Help the developer through back and forth discussion in chat, to reframe 
+their requests better, think through the problem, find deeper truths, and hidden variables. Do that until
+the developer beliefs that the design item is well enough defined to be written down.
 
 ### Onboarding Documentation
 
