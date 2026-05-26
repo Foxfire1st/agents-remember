@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle.backend import cgc_backend_start
+from agents_remember.providers.cgc.lifecycle.compose import (
+    cgc_compose_render,
+    cgc_compose_summary,
+)
 from agents_remember.providers.cgc.lifecycle.core import (
     cgc_all_layouts_from_settings,
     cgc_layout_from_args,
@@ -17,7 +21,6 @@ from agents_remember.providers.cgc.lifecycle.core import (
     cgc_uses_settings,
 )
 from agents_remember.providers.cgc.lifecycle.runner import (
-    cgc_docker_command,
     cgc_runner_image_build,
     cgc_runner_image_status,
     cgc_watcher_running,
@@ -56,8 +59,7 @@ from agents_remember.providers.context import (
     source_provider_artifacts,
     write_provider_state,
 )
-from agents_remember.providers.lifecycle.command_runner import run_command
-from agents_remember.providers.lifecycle.docker_runtime import docker_command
+from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
 from agents_remember.providers.lifecycle.process_status import (
     process_namespace_status,
 )
@@ -67,10 +69,12 @@ from agents_remember.providers.lifecycle.state_files import (
 )
 
 
-def cgc_install_commands(layout: Any) -> tuple[Path, list[list[str]]]:
+def cgc_install_commands(args: argparse.Namespace, layout: Any) -> tuple[Path, list[dict[str, Any]]]:
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
     return layout.image_build_root, [
-        [docker_command(), "build", "-t", layout.runner_image, layout.image_build_root.as_posix()],
-        cgc_docker_command(layout, ["doctor"]),
+        compose_plan(render, ["build", "runner"], cwd=layout.coordination_root),
+        compose_plan(render, ["run", "--rm", "runner", "doctor"], cwd=layout.coordination_root),
     ]
 
 
@@ -157,7 +161,7 @@ def cgc_install(args: argparse.Namespace) -> dict[str, Any]:
     if cgc_uses_settings(args) and args.repo_id is None:
         return cgc_install_all(args)
     layout = cgc_layout_from_args(args)
-    _, commands = cgc_install_commands(layout)
+    _, commands = cgc_install_commands(args, layout)
     results, early_result, backend_result = cgc_install_preflight(args, layout, commands)
     if early_result:
         return early_result
@@ -523,16 +527,25 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
     ]
     command_result = None
     if status["runnerImage"]["exists"] and not args.dry_run:
-        command_result = run_command(
-            cgc_docker_command(layout, ["doctor"]),
+        _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+        render = cgc_compose_render(provider_settings, layouts)
+        command_result = run_compose(
+            render,
+            ["run", "--rm", "runner", "doctor"],
             cwd=layout.coordination_root,
             timeout=args.timeout,
         )
         checks.append({"name": "cgc-doctor-command", "ok": command_result["returncode"] == 0})
     elif args.dry_run:
+        _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+        render = cgc_compose_render(provider_settings, layouts)
         command_result = {
-            "command": cgc_docker_command(layout, ["doctor"]),
-            "cwd": layout.coordination_root.as_posix(),
+            **compose_plan(
+                render,
+                ["run", "--rm", "runner", "doctor"],
+                cwd=layout.coordination_root,
+            ),
+            "compose": cgc_compose_summary(render),
         }
 
     ok = all(check["ok"] for check in checks)

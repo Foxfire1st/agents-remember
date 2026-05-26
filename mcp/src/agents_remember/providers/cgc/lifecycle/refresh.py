@@ -7,6 +7,10 @@ import time
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle.backend import cgc_backend_start
+from agents_remember.providers.cgc.lifecycle.compose import (
+    cgc_compose_render,
+    cgc_compose_summary,
+)
 from agents_remember.providers.cgc.lifecycle.core import (
     cgc_all_layouts_from_settings,
     cgc_layout_from_args,
@@ -18,16 +22,18 @@ from agents_remember.providers.cgc.lifecycle.process_control import (
     cgc_backend_all_error,
     cgc_layout_action_results,
 )
-from agents_remember.providers.cgc.lifecycle.runner import cgc_docker_command
-from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
-def cgc_refresh_command(layout: Any) -> list[str]:
-    return cgc_docker_command(layout, ["index", layout.code_repo_root.as_posix(), "--force"])
+def cgc_refresh_command(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    command_args = ["run", "--rm", "runner", "index", layout.code_repo_root.as_posix(), "--force"]
+    return compose_plan(render, command_args, cwd=layout.coordination_root)
 
 
-def cgc_refresh_dry_result(layout: Any, command: list[str]) -> dict[str, Any]:
+def cgc_refresh_dry_result(layout: Any, command: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "refresh",
@@ -82,11 +88,18 @@ def cgc_refresh(args: argparse.Namespace) -> dict[str, Any]:
     if cgc_uses_settings(args) and args.repo_id is None:
         return cgc_refresh_all(args)
     layout = cgc_layout_from_args(args)
-    command = cgc_refresh_command(layout)
+    command = cgc_refresh_command(args, layout)
     early_result, backend_result = cgc_refresh_preflight(args, layout, command)
     if early_result:
         return early_result
-    result = run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    result = run_compose(
+        render,
+        ["run", "--rm", "runner", "index", layout.code_repo_root.as_posix(), "--force"],
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
+    )
     cgc_write_refresh_state(layout, result)
     return {
         "provider": "codegraphcontext",
@@ -94,6 +107,7 @@ def cgc_refresh(args: argparse.Namespace) -> dict[str, Any]:
         "ok": result["returncode"] == 0,
         "repoId": layout.repo_id,
         "command": result,
+        "compose": cgc_compose_summary(render),
         "backend": backend_result,
     }
 

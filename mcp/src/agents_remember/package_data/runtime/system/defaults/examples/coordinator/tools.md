@@ -33,6 +33,11 @@ grepai_search(query="<query>", dry_run=false)
 Manual provider debugging should run through source/package-owned tooling with
 explicit generated settings, not through coordinator-local Python scripts. The
 normal agent path is the MCP tool surface.
+Managed provider Docker behavior comes from committed package Dockerfiles,
+Compose bases, and override templates. Lifecycle commands render the dynamic
+override from MCP authority settings and feed it to `docker compose` as trusted
+execution input; do not create or edit coordination-local Compose override files
+as provider authority.
 
 The GrepAI lifecycle command reads `contextProviders.providers.grepai-memory`,
 expands its workspace roots into explicit projects, ensures the shared Docker

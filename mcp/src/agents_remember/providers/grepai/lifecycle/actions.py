@@ -19,11 +19,14 @@ from agents_remember.providers.context import (
     read_provider_pin,
 )
 from agents_remember.providers.grepai.lifecycle.backend import *
+from agents_remember.providers.grepai.lifecycle.compose import (
+    grepai_compose_render,
+    grepai_compose_summary,
+)
 from agents_remember.providers.grepai.lifecycle.core import *
 from agents_remember.providers.grepai.lifecycle.embedder import *
 from agents_remember.providers.grepai.lifecycle.runner import *
-from agents_remember.providers.lifecycle.command_runner import run_command
-from agents_remember.providers.lifecycle.docker_runtime import docker_command
+from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
 from agents_remember.providers.lifecycle.process_status import process_namespace_status
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
@@ -115,10 +118,13 @@ def grepai_docker_run_command(
     args: argparse.Namespace,
     *,
     settings_path: Path,
+    provider_settings: dict[str, Any],
     layout: Any,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
-    command = [docker_command(), "exec", runner["containerName"], "grepai", *grepai_run_native_args(args)]
+    backend = grepai_backend_settings(provider_settings, layout)
+    render = grepai_compose_render(provider_settings, layout, runner, backend)
+    command_args = ["exec", "-T", "watcher", "grepai", *grepai_run_native_args(args)]
     if args.dry_run:
         return {
             "provider": "grepai",
@@ -127,7 +133,8 @@ def grepai_docker_run_command(
             "dryRun": True,
             "mode": "docker",
             "workspace": layout.workspace_name,
-            "command": command,
+            "command": compose_plan(render, command_args, cwd=layout.coordination_root),
+            "compose": grepai_compose_summary(render),
             "cwd": layout.coordination_root.as_posix(),
         }
     status = grepai_docker_status(
@@ -138,13 +145,14 @@ def grepai_docker_run_command(
     )
     if not status["ok"]:
         return {**status, "action": "run", "ok": False}
-    result = run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
+    result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
     return {
         "provider": "grepai",
         "action": "run",
         "ok": result["returncode"] == 0,
         "mode": "docker",
         "workspace": layout.workspace_name,
+        "compose": grepai_compose_summary(render),
         "command": result,
     }
 
@@ -297,6 +305,7 @@ def grepai_run_docker(
         "run": lambda: grepai_docker_run_command(
             args,
             settings_path=settings_path,
+            provider_settings=provider_settings,
             layout=layout,
             runner=runner,
         ),

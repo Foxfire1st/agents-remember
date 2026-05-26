@@ -79,6 +79,11 @@ providers and backend services when the provider needs native binaries, a
 database, or daemonized infrastructure. Do not require host-level PostgreSQL,
 FalkorDB, Ollama, OS services, launch agents, package-manager services, Python
 virtual environments, or global user daemons for normal managed provider mode.
+Stable provider Dockerfiles, base Compose files, and override templates are
+package-owned assets; MCP lifecycle code renders dynamic override YAML from
+authority settings at command time and feeds it to Compose through trusted
+execution input. Rendered overrides are not durable coordination or model
+workspace files.
 
 Semantic providers must keep generated config, index, logs, and state out of
 source repositories and durable memory roots. For GrepAI, configure one

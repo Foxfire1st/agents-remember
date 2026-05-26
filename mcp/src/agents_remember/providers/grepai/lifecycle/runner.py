@@ -7,14 +7,23 @@ import argparse
 import time
 from typing import Any
 
+from agents_remember.providers.grepai.lifecycle.compose import (
+    grepai_compose_render,
+    grepai_compose_summary,
+)
 from agents_remember.providers.grepai.lifecycle.core import *
 from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.compose_runtime import (
+    compose_plan,
+    provider_asset_path,
+    provider_asset_text,
+    remove_unmanaged_compose_container,
+    run_compose,
+)
 from agents_remember.providers.lifecycle.docker_runtime import (
     docker_command,
     docker_container_networks,
     docker_container_running,
-    docker_ensure_container_network,
-    docker_ensure_network,
     docker_image_exists,
     docker_inspect_container,
     docker_repo_digest,
@@ -25,20 +34,8 @@ from agents_remember.providers.lifecycle.state_files import (
 
 
 def grepai_runner_dockerfile(version: str, arch: str) -> str:
-    asset_name = f"grepai_{version}_linux_{arch}.tar.gz"
-    release_base = f"https://github.com/yoanbernabeu/grepai/releases/download/v{version}"
-    return f"""FROM debian:bookworm-slim
-RUN apt-get update \\
-    && apt-get install -y --no-install-recommends ca-certificates curl tar \\
-    && rm -rf /var/lib/apt/lists/*
-RUN set -eux; \\
-    curl -fsSL -o /tmp/grepai.tar.gz {release_base}/{asset_name}; \\
-    tar -xzf /tmp/grepai.tar.gz -C /tmp; \\
-    find /tmp -type f -name grepai -exec install -m 0755 {{}} /usr/local/bin/grepai \\; -quit; \\
-    test -x /usr/local/bin/grepai; \\
-    rm -rf /tmp/*
-ENTRYPOINT ["grepai"]
-"""
+    del version, arch
+    return provider_asset_text("docker", "grepai", "Dockerfile")
 
 
 def grepai_runner_image_build(
@@ -46,25 +43,24 @@ def grepai_runner_image_build(
     *,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
-    _, _, layout = grepai_layout_from_args(args)
-    dockerfile = runner["buildRoot"] / "Dockerfile"
-    command = [docker_command(), "build", "-t", runner["image"], runner["buildRoot"].as_posix()]
+    _, provider_settings, layout = grepai_layout_from_args(args)
+    backend = grepai_backend_settings(provider_settings, layout)
+    render = grepai_compose_render(provider_settings, layout, runner, backend)
+    command_args = ["build", "watcher"]
+    dockerfile = provider_asset_path("docker", "grepai", "Dockerfile")
     if args.dry_run:
         return {
             "ok": True,
             "dryRun": True,
             "image": runner["image"],
             "dockerfile": dockerfile.as_posix(),
-            "command": command,
+            "buildContext": dockerfile.parent.as_posix(),
+            "compose": grepai_compose_summary(render),
+            "command": compose_plan(render, command_args, cwd=layout.coordination_root),
         }
     if docker_image_exists(runner["image"], cwd=layout.coordination_root, timeout=args.timeout):
         return {"ok": True, "image": runner["image"], "alreadyExists": True}
-    runner["buildRoot"].mkdir(parents=True, exist_ok=True)
-    dockerfile.write_text(
-        grepai_runner_dockerfile(runner["version"], runner["releaseArch"]),
-        encoding="utf-8",
-    )
-    result = run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
+    result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
     image_digest = docker_repo_digest(
         runner["image"], cwd=layout.coordination_root, timeout=args.timeout
     )
@@ -73,43 +69,10 @@ def grepai_runner_image_build(
         "ok": result["returncode"] == 0,
         "image": runner["image"],
         "dockerfile": dockerfile.as_posix(),
+        "buildContext": dockerfile.parent.as_posix(),
+        "compose": grepai_compose_summary(render),
         "command": result,
     }
-
-
-def grepai_watcher_container_command(
-    layout: Any,
-    runner: dict[str, Any],
-    network_name: str,
-) -> list[str]:
-    command = [
-        docker_command(),
-        "run",
-        "-d",
-        "--name",
-        runner["containerName"],
-        "--restart",
-        "unless-stopped",
-        "--network",
-        network_name,
-    ]
-    for env_value in grepai_container_env(runner):
-        command.extend(["-e", env_value])
-    command.extend(
-        [
-            "-v",
-            f"{layout.runtime_root}:{runner['runtimeMount']}",
-            "-v",
-            f"{layout.logs_root}:{runner['logsMount']}",
-            runner["image"],
-            "watch",
-            "--workspace",
-            layout.workspace_name,
-            "--log-dir",
-            runner["logsMount"],
-        ]
-    )
-    return command
 
 
 def grepai_watcher_container_status(args: argparse.Namespace) -> dict[str, Any]:
@@ -193,12 +156,7 @@ def grepai_watcher_start_prerequisites(
     network_name: str,
 ) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
     _, _, layout = grepai_layout_from_args(args)
-    network_result = docker_ensure_network(
-        network_name,
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
+    network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
     image = grepai_runner_image_build(args, runner=runner)
     if network_result.get("ok") and image.get("ok"):
         return layout, network_result, image, None
@@ -209,48 +167,6 @@ def grepai_watcher_start_prerequisites(
         "network": network_result,
         "image": image,
     }
-
-
-def grepai_watcher_existing_start_result(
-    args: argparse.Namespace,
-    *,
-    runner: dict[str, Any],
-    network_name: str,
-    network_result: dict[str, Any],
-    image: dict[str, Any],
-    layout: Any,
-    inspect_data: dict[str, Any],
-) -> dict[str, Any]:
-    network_connect = docker_ensure_container_network(
-        runner["containerName"],
-        network_name,
-        inspect_data=inspect_data,
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
-    return {
-        "provider": "grepai",
-        "action": "watcher-start",
-        "ok": bool(network_connect.get("ok")),
-        "alreadyRunning": True,
-        "containerName": runner["containerName"],
-        "network": network_result,
-        "networkConnect": network_connect,
-        "image": image,
-    }
-
-
-def grepai_watcher_planned_commands(
-    runner: dict[str, Any],
-    run_command_line: list[str],
-    inspect_data: dict[str, Any] | None,
-) -> list[list[str]]:
-    commands = []
-    if inspect_data:
-        commands.append([docker_command(), "rm", runner["containerName"]])
-    commands.append(run_command_line)
-    return commands
 
 
 def grepai_watcher_dry_run_start_result(
@@ -272,41 +188,6 @@ def grepai_watcher_dry_run_start_result(
     }
 
 
-def grepai_watcher_new_start_result(
-    args: argparse.Namespace,
-    *,
-    layout: Any,
-    runner: dict[str, Any],
-    network_result: dict[str, Any],
-    image: dict[str, Any],
-    inspect_data: dict[str, Any] | None,
-    run_command_line: list[str],
-) -> dict[str, Any]:
-    rm_result = None
-    if inspect_data:
-        rm_result, error = grepai_run_checked_command(
-            [docker_command(), "rm", runner["containerName"]],
-            layout=layout,
-            timeout=args.timeout,
-            action="watcher-start",
-        )
-        if error:
-            return error
-    run_result = run_command(run_command_line, cwd=layout.coordination_root, timeout=args.timeout)
-    inspect_data = docker_inspect_container(
-        runner["containerName"], cwd=layout.coordination_root, timeout=args.timeout
-    )
-    return {
-        "provider": "grepai",
-        "action": "watcher-start",
-        "ok": run_result["returncode"] == 0 and docker_container_running(inspect_data),
-        "containerName": runner["containerName"],
-        "network": network_result,
-        "image": image,
-        "commands": {"remove": rm_result, "run": run_result},
-    }
-
-
 def grepai_watcher_container_start(
     args: argparse.Namespace,
     *,
@@ -318,66 +199,63 @@ def grepai_watcher_container_start(
     )
     if error:
         return error
-    inspect_data = grepai_watcher_inspect(args, layout, runner)
-    if grepai_watcher_already_running(inspect_data):
-        return grepai_watcher_existing_start_result(
-            args,
-            runner=runner,
-            network_name=network_name,
-            network_result=network_result,
-            image=image,
-            layout=layout,
-            inspect_data=inspect_data,
-        )
     return grepai_watcher_create_start_result(
         args,
         runner=runner,
-        network_name=network_name,
         network_result=network_result,
         image=image,
         layout=layout,
-        inspect_data=inspect_data,
     )
-
-
-def grepai_watcher_already_running(inspect_data: dict[str, Any] | None) -> bool:
-    return bool(inspect_data) and docker_container_running(inspect_data)
 
 
 def grepai_watcher_create_start_result(
     args: argparse.Namespace,
     *,
     runner: dict[str, Any],
-    network_name: str,
     network_result: dict[str, Any],
     image: dict[str, Any],
     layout: Any,
-    inspect_data: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    run_command_line = grepai_watcher_container_command(layout, runner, network_name)
-    commands = grepai_watcher_planned_commands(runner, run_command_line, inspect_data)
+    _, provider_settings, _ = grepai_layout_from_args(args)
+    backend = grepai_backend_settings(provider_settings, layout)
+    render = grepai_compose_render(provider_settings, layout, runner, backend)
+    command_args = ["up", "-d", "watcher"]
+    migration = remove_unmanaged_compose_container(
+        runner["containerName"],
+        project_name="agents-remember-grepai",
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+    )
     if args.dry_run:
         return grepai_watcher_dry_run_start_result(
             runner=runner,
             network_result=network_result,
             image=image,
-            commands=commands,
+            commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
         )
-    return grepai_watcher_new_start_result(
-        args,
-        layout=layout,
-        runner=runner,
-        network_result=network_result,
-        image=image,
-        inspect_data=inspect_data,
-        run_command_line=run_command_line,
+    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    inspect_data = docker_inspect_container(
+        runner["containerName"], cwd=layout.coordination_root, timeout=args.timeout
     )
+    return {
+        "provider": "grepai",
+        "action": "watcher-start",
+        "ok": up_result["returncode"] == 0 and docker_container_running(inspect_data),
+        "containerName": runner["containerName"],
+        "network": network_result,
+        "image": image,
+        "commands": {"migration": migration, "up": up_result},
+        "compose": grepai_compose_summary(render),
+    }
 
 
 def grepai_watcher_container_stop(args: argparse.Namespace) -> dict[str, Any]:
     _, provider_settings, layout = grepai_layout_from_args(args)
     runner = grepai_runner_settings(provider_settings, layout)
-    command = [docker_command(), "stop", runner["containerName"]]
+    backend = grepai_backend_settings(provider_settings, layout)
+    render = grepai_compose_render(provider_settings, layout, runner, backend)
+    command_args = ["rm", "-sf", "watcher"]
     if args.dry_run:
         return {
             "provider": "grepai",
@@ -385,7 +263,8 @@ def grepai_watcher_container_stop(args: argparse.Namespace) -> dict[str, Any]:
             "ok": True,
             "dryRun": True,
             "containerName": runner["containerName"],
-            "command": command,
+            "command": compose_plan(render, command_args, cwd=layout.coordination_root),
+            "compose": grepai_compose_summary(render),
         }
     inspect_data = docker_inspect_container(
         runner["containerName"], cwd=layout.coordination_root, timeout=args.timeout
@@ -398,12 +277,13 @@ def grepai_watcher_container_stop(args: argparse.Namespace) -> dict[str, Any]:
             "containerName": runner["containerName"],
             "alreadyStopped": True,
         }
-    result = run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
+    result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
     return {
         "provider": "grepai",
         "action": "watcher-stop",
         "ok": result["returncode"] == 0,
         "containerName": runner["containerName"],
+        "compose": grepai_compose_summary(render),
         "command": result,
     }
 

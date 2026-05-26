@@ -1,0 +1,14 @@
+  @WATCHER_SERVICE@:
+    image: @RUNNER_IMAGE@
+    container_name: @WATCHER_CONTAINER_NAME@
+    restart: unless-stopped
+    depends_on:
+      falkordb:
+        condition: service_healthy
+@WATCHER_USER_BLOCK@    working_dir: @WATCHER_WORKING_DIR@
+    volumes:
+      - @WATCHER_RUNTIME_VOLUME@
+      - @WATCHER_REPO_VOLUME@
+    environment:
+@WATCHER_ENVIRONMENT@
+    command: ["watch", @WATCHER_REPO_PATH@]

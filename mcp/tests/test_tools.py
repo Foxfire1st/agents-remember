@@ -55,6 +55,14 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def planned_command(payload: dict) -> list[str]:
+    return payload["command"]["command"]
+
+
+def command_after(command: list[str], token: str) -> list[str]:
+    return command[command.index(token) + 1 :]
+
+
 class McpToolTests(unittest.TestCase):
     def test_ping_payload(self) -> None:
         self.assertEqual(
@@ -479,7 +487,7 @@ class McpToolTests(unittest.TestCase):
                 with self.subTest(expected_native_args=expected_native_args):
                     self.assertTrue(payload["ok"])
                     self.assertEqual(
-                        payload["command"][-len(expected_native_args) :],
+                        command_after(planned_command(payload), "runner"),
                         expected_native_args,
                     )
                     self.assertNotIn("argv", payload)
@@ -524,7 +532,7 @@ class McpToolTests(unittest.TestCase):
 
         self.assertTrue(workspace_payload["ok"])
         self.assertEqual(
-            workspace_payload["command"][4:],
+            command_after(planned_command(workspace_payload), "grepai"),
             [
                 "search",
                 "provider lifecycle",
@@ -535,11 +543,11 @@ class McpToolTests(unittest.TestCase):
                 "--json",
             ],
         )
-        self.assertNotIn("--project", workspace_payload["command"])
+        self.assertNotIn("--project", planned_command(workspace_payload))
 
         self.assertTrue(scoped_payload["ok"])
         self.assertEqual(
-            scoped_payload["command"][4:],
+            command_after(planned_command(scoped_payload), "grepai"),
             [
                 "search",
                 "provider lifecycle",
@@ -591,7 +599,7 @@ class McpToolTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(
-            payload["command"][4:],
+            command_after(planned_command(payload), "grepai"),
             [
                 "trace",
                 "graph",
@@ -689,7 +697,7 @@ class RealMcpIntegrationTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"], payload)
         self.assertEqual(
-            payload["command"][4:],
+            command_after(planned_command(payload), "grepai"),
             [
                 "search",
                 "provider lifecycle",
@@ -700,7 +708,7 @@ class RealMcpIntegrationTests(unittest.TestCase):
                 "--json",
             ],
         )
-        self.assertNotIn("--project", payload["command"])
+        self.assertNotIn("--project", planned_command(payload))
 
     def test_real_mcp_grepai_search_runs_with_project_filter(self) -> None:
         payload = asyncio.run(

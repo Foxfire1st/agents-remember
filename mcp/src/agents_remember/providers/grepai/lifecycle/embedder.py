@@ -12,16 +12,23 @@ from typing import Any
 from agents_remember.providers.context import (
     ContextProviderError,
 )
+from agents_remember.providers.grepai.lifecycle.compose import (
+    grepai_compose_render,
+    grepai_compose_summary,
+)
 from agents_remember.providers.grepai.lifecycle.core import *
 from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.compose_runtime import (
+    compose_plan,
+    remove_unmanaged_compose_container,
+    run_compose,
+)
 from agents_remember.providers.lifecycle.docker_runtime import (
     docker_command,
     docker_container_networks,
     docker_container_port,
     docker_container_running,
     docker_data_mount_source,
-    docker_ensure_container_network,
-    docker_ensure_network,
     docker_host_path_matches,
     docker_inspect_container,
     docker_repo_digest,
@@ -262,96 +269,11 @@ def grepai_embedder_remove_mismatched_container(
     return None, result, None
 
 
-def grepai_embedder_existing_start_result(
-    args: argparse.Namespace,
-    *,
-    layout: Any,
-    embedder: dict[str, Any],
-    network_name: str,
-    network_result: dict[str, Any],
-    inspect_data: dict[str, Any],
-) -> dict[str, Any]:
-    network_connect = docker_ensure_container_network(
-        embedder["containerName"],
-        network_name,
-        inspect_data=inspect_data,
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
-    if not network_connect.get("ok"):
-        return {
-            "provider": "grepai",
-            "action": "embedder-start",
-            "ok": False,
-            "network": network_result,
-            "networkConnect": network_connect,
-        }
-    model = docker_ensure_ollama_model(embedder, cwd=layout.coordination_root, timeout=args.timeout)
-    write_json(
-        embedder["imageLockFile"],
-        {
-            "image": embedder["image"],
-            "repoDigest": docker_repo_digest(
-                embedder["image"], cwd=layout.coordination_root, timeout=args.timeout
-            ),
-        },
-    )
-    return {
-        "provider": "grepai",
-        "action": "embedder-start",
-        "ok": bool(model.get("ok")),
-        "alreadyRunning": True,
-        "containerName": embedder["containerName"],
-        "network": network_result,
-        "networkConnect": network_connect,
-        "model": model,
-    }
-
-
 def grepai_embedder_host_port(args: argparse.Namespace, embedder: dict[str, Any]) -> int:
     configured_port = embedder["httpHostPort"]
     if args.dry_run:
         return 11434 if str(configured_port) == "auto" else int(configured_port)
     return allocate_host_port(embedder["httpHost"], configured_port, 11434)
-
-
-def grepai_embedder_run_command_line(
-    embedder: dict[str, Any], network_name: str, http_port: int
-) -> list[str]:
-    return [
-        docker_command(),
-        "run",
-        "-d",
-        "--name",
-        embedder["containerName"],
-        "--restart",
-        "unless-stopped",
-        "--network",
-        network_name,
-        "-p",
-        f"{embedder['httpHost']}:{http_port}:{embedder['httpContainerPort']}",
-        "-v",
-        f"{embedder['dataRoot']}:{embedder['dataDestination']}",
-        embedder["image"],
-    ]
-
-
-def grepai_embedder_planned_commands(
-    embedder: dict[str, Any],
-    network_name: str,
-    run_command_line: list[str],
-    inspect_data: dict[str, Any] | None,
-) -> list[list[str]]:
-    commands = [
-        [docker_command(), "network", "inspect", network_name],
-        [docker_command(), "network", "create", network_name],
-        [docker_command(), "pull", embedder["image"]],
-    ]
-    if inspect_data:
-        commands.append([docker_command(), "rm", embedder["containerName"]])
-    commands.append(run_command_line)
-    return commands
 
 
 def grepai_embedder_dry_run_result(
@@ -361,6 +283,8 @@ def grepai_embedder_dry_run_result(
     network_result: dict[str, Any],
     commands: list[list[str]],
     http_port: int,
+    compose: dict[str, Any] | None = None,
+    migration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "provider": "grepai",
@@ -370,6 +294,8 @@ def grepai_embedder_dry_run_result(
         "settingsFile": settings_path.as_posix(),
         "network": network_result,
         "commands": commands,
+        "compose": compose,
+        "migration": migration,
         "ports": {
             "http": {
                 "bindHost": embedder["httpHost"],
@@ -380,43 +306,92 @@ def grepai_embedder_dry_run_result(
     }
 
 
-def grepai_embedder_new_start_result(
+def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
+    settings_path, provider_settings, layout, embedder, network_name = (
+        grepai_embedder_start_context(args)
+    )
+    external_result = grepai_embedder_external_start_result(settings_path, embedder)
+    if external_result:
+        return external_result
+    network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
+    grepai_embedder_prepare_storage(args, embedder)
+    migration = remove_unmanaged_compose_container(
+        embedder["containerName"],
+        project_name="agents-remember-grepai",
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+    )
+    inspect_data = grepai_embedder_inspect(args, layout, embedder)
+    inspect_data, forced_remove_result, error = grepai_embedder_remove_mismatched_container(
+        args, layout, embedder, inspect_data
+    )
+    if error:
+        return error
+    return grepai_embedder_create_start_result(
+        args,
+        settings_path=settings_path,
+        provider_settings=provider_settings,
+        embedder=embedder,
+        layout=layout,
+        network_result=network_result,
+        forced_remove_result=forced_remove_result,
+        migration=migration,
+    )
+
+
+def grepai_embedder_inspect(
+    args: argparse.Namespace, layout: Any, embedder: dict[str, Any]
+) -> dict[str, Any] | None:
+    if args.dry_run:
+        return None
+    return docker_inspect_container(
+        embedder["containerName"], cwd=layout.coordination_root, timeout=args.timeout
+    )
+
+
+def grepai_embedder_create_start_result(
     args: argparse.Namespace,
     *,
-    layout: Any,
+    settings_path: Path,
+    provider_settings: dict[str, Any],
     embedder: dict[str, Any],
+    layout: Any,
     network_result: dict[str, Any],
-    inspect_data: dict[str, Any] | None,
     forced_remove_result: dict[str, Any] | None,
-    run_command_line: list[str],
-    http_port: int,
+    migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    pull_result, error = grepai_run_checked_command(
-        [docker_command(), "pull", embedder["image"]],
-        layout=layout,
-        timeout=args.timeout,
-        action="embedder-start",
+    http_port = grepai_embedder_host_port(args, embedder)
+    backend = grepai_backend_settings(provider_settings, layout)
+    runner = grepai_runner_settings(provider_settings, layout)
+    render = grepai_compose_render(
+        provider_settings,
+        layout,
+        runner,
+        backend,
+        ollama_port=http_port,
     )
-    if error:
-        return error
-    rm_result = None
-    if inspect_data:
-        rm_result, error = grepai_run_checked_command(
-            [docker_command(), "rm", embedder["containerName"]],
-            layout=layout,
-            timeout=args.timeout,
-            action="embedder-start",
+    command_args = ["up", "-d", "ollama"]
+    if args.dry_run:
+        return grepai_embedder_dry_run_result(
+            settings_path=settings_path,
+            embedder=embedder,
+            network_result=network_result,
+            commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
+            http_port=http_port,
+            compose=grepai_compose_summary(render),
+            migration=migration,
         )
-        if error:
-            return error
-    run_result, error = grepai_run_checked_command(
-        run_command_line,
-        layout=layout,
-        timeout=args.timeout,
-        action="embedder-start",
-    )
-    if error:
-        return error
+    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    if up_result["returncode"] != 0:
+        return {
+            "provider": "grepai",
+            "action": "embedder-start",
+            "ok": False,
+            "command": up_result,
+            "compose": grepai_compose_summary(render),
+            "migration": migration,
+        }
     model = docker_ensure_ollama_model(embedder, cwd=layout.coordination_root, timeout=args.timeout)
     write_json(
         embedder["imageLockFile"],
@@ -441,116 +416,10 @@ def grepai_embedder_new_start_result(
             },
         },
         "commands": {
-            "pull": pull_result,
-            "remove": rm_result,
             "forcedRemove": forced_remove_result,
-            "run": run_result,
+            "migration": migration,
+            "up": up_result,
         },
+        "compose": grepai_compose_summary(render),
         "model": model,
     }
-
-
-def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
-    settings_path, _, layout, embedder, network_name = grepai_embedder_start_context(args)
-    external_result = grepai_embedder_external_start_result(settings_path, embedder)
-    if external_result:
-        return external_result
-    network_result = grepai_embedder_ensure_network(args, layout, network_name)
-    if not network_result.get("ok"):
-        return grepai_embedder_network_error(network_result)
-    grepai_embedder_prepare_storage(args, embedder)
-    inspect_data = grepai_embedder_inspect(args, layout, embedder)
-    inspect_data, forced_remove_result, error = grepai_embedder_remove_mismatched_container(
-        args, layout, embedder, inspect_data
-    )
-    if error:
-        return error
-    if grepai_embedder_already_running(inspect_data):
-        return grepai_embedder_existing_start_result(
-            args,
-            layout=layout,
-            embedder=embedder,
-            network_name=network_name,
-            network_result=network_result,
-            inspect_data=inspect_data,
-        )
-    return grepai_embedder_create_start_result(
-        args,
-        settings_path=settings_path,
-        embedder=embedder,
-        layout=layout,
-        network_name=network_name,
-        network_result=network_result,
-        inspect_data=inspect_data,
-        forced_remove_result=forced_remove_result,
-    )
-
-
-def grepai_embedder_ensure_network(
-    args: argparse.Namespace, layout: Any, network_name: str
-) -> dict[str, Any]:
-    return docker_ensure_network(
-        network_name,
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
-
-
-def grepai_embedder_network_error(network_result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "provider": "grepai",
-        "action": "embedder-start",
-        "ok": False,
-        "network": network_result,
-    }
-
-
-def grepai_embedder_inspect(
-    args: argparse.Namespace, layout: Any, embedder: dict[str, Any]
-) -> dict[str, Any] | None:
-    if args.dry_run:
-        return None
-    return docker_inspect_container(
-        embedder["containerName"], cwd=layout.coordination_root, timeout=args.timeout
-    )
-
-
-def grepai_embedder_already_running(inspect_data: dict[str, Any] | None) -> bool:
-    return bool(inspect_data) and docker_container_running(inspect_data)
-
-
-def grepai_embedder_create_start_result(
-    args: argparse.Namespace,
-    *,
-    settings_path: Path,
-    embedder: dict[str, Any],
-    layout: Any,
-    network_name: str,
-    network_result: dict[str, Any],
-    inspect_data: dict[str, Any] | None,
-    forced_remove_result: dict[str, Any] | None,
-) -> dict[str, Any]:
-    http_port = grepai_embedder_host_port(args, embedder)
-    run_command_line = grepai_embedder_run_command_line(embedder, network_name, http_port)
-    commands = grepai_embedder_planned_commands(
-        embedder, network_name, run_command_line, inspect_data
-    )
-    if args.dry_run:
-        return grepai_embedder_dry_run_result(
-            settings_path=settings_path,
-            embedder=embedder,
-            network_result=network_result,
-            commands=commands,
-            http_port=http_port,
-        )
-    return grepai_embedder_new_start_result(
-        args,
-        layout=layout,
-        embedder=embedder,
-        network_result=network_result,
-        inspect_data=inspect_data,
-        forced_remove_result=forced_remove_result,
-        run_command_line=run_command_line,
-        http_port=http_port,
-    )

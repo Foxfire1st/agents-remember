@@ -16,23 +16,27 @@ def run_command(
     *,
     cwd: Path,
     env: dict[str, str] | None = None,
+    stdin_text: str | None = None,
     timeout: int = 60,
     allow_timeout: bool = False,
 ) -> dict[str, Any]:
     merged_env = subprocess_env(env)
     started = time.monotonic()
+    stdin_kwargs: dict[str, Any] = (
+        {"input": stdin_text} if stdin_text is not None else {"stdin": subprocess.DEVNULL}
+    )
     try:
         completed = subprocess.run(
             command,
             cwd=str(cwd),
             env=merged_env,
-            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
             check=False,
+            **stdin_kwargs,
         )
     except subprocess.TimeoutExpired as error:
         if not allow_timeout:

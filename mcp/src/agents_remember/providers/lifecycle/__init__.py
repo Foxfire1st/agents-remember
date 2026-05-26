@@ -3,22 +3,36 @@
 
 from __future__ import annotations
 
-from agents_remember.providers.cgc.lifecycle import *  # noqa: F403
-from agents_remember.providers.context import (  # noqa: F401
-    ContextProviderError,
-    stable_provider_id,
-)
-from agents_remember.providers.grepai.lifecycle import *  # noqa: F403
-from agents_remember.providers.lifecycle.cli import *  # noqa: F403
-from agents_remember.providers.lifecycle.cli import main as main
-from agents_remember.providers.lifecycle.command_runner import *  # noqa: F403
-from agents_remember.providers.lifecycle.docker_runtime import *  # noqa: F403
-from agents_remember.providers.lifecycle.host_ports import *  # noqa: F403
-from agents_remember.providers.lifecycle.process_status import *  # noqa: F403
-from agents_remember.providers.lifecycle.provider_settings import *  # noqa: F403
-from agents_remember.providers.lifecycle.result_rendering import *  # noqa: F403
-from agents_remember.providers.lifecycle.runtime_environment import *  # noqa: F403
-from agents_remember.providers.lifecycle.state_files import *  # noqa: F403
-from agents_remember.providers.lifecycle.watchers import *  # noqa: F403
+from importlib import import_module
+from typing import Any
 
-__all__ = [name for name in globals() if not name.startswith("_")]
+_EXPORT_MODULES = (
+    "agents_remember.providers.context",
+    "agents_remember.providers.cgc.lifecycle",
+    "agents_remember.providers.grepai.lifecycle",
+    "agents_remember.providers.lifecycle.cli",
+    "agents_remember.providers.lifecycle.command_runner",
+    "agents_remember.providers.lifecycle.compose_runtime",
+    "agents_remember.providers.lifecycle.docker_runtime",
+    "agents_remember.providers.lifecycle.host_ports",
+    "agents_remember.providers.lifecycle.process_status",
+    "agents_remember.providers.lifecycle.provider_settings",
+    "agents_remember.providers.lifecycle.result_rendering",
+    "agents_remember.providers.lifecycle.runtime_environment",
+    "agents_remember.providers.lifecycle.state_files",
+    "agents_remember.providers.lifecycle.watchers",
+)
+
+
+def __getattr__(name: str) -> Any:
+    for module_name in _EXPORT_MODULES:
+        module = import_module(module_name)
+        if hasattr(module, name):
+            value = getattr(module, name)
+            globals()[name] = value
+            return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | {"main"})

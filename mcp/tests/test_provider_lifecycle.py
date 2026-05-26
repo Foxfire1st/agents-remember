@@ -138,6 +138,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                             "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                             "roots": [{"repoId": "repo-a", "path": repo.as_posix()}],
                             "backend": {
+                                "image": "falkordb/falkordb:v4.18.7",
                                 "runtimeRoot": "<coordination_root>/providers/data/codegraphcontext/falkordb",
                                 "dataRoot": "<backendRuntimeRoot>/data",
                             },
@@ -265,12 +266,14 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "docker")
-        self.assertEqual(
-            result["command"][:4],
-            ["docker", "exec", "ar-grepai-watcher", "grepai"],
-        )
-        self.assertEqual(result["command"][4:7], ["search", "provider lifecycle", "--workspace"])
-        self.assertNotIn("_bin", " ".join(result["command"]))
+        command = result["command"]["command"]
+        self.assertEqual(Path(command[0]).name, "docker")
+        self.assertIn("compose", command)
+        self.assertEqual(command[-10:-7], ["exec", "-T", "watcher"])
+        self.assertEqual(command[-7], "grepai")
+        self.assertEqual(command[-6:-3], ["search", "provider lifecycle", "--workspace"])
+        self.assertNotIn("_bin", " ".join(command))
+        self.assertEqual(result["command"]["overrideMode"], "stdin")
 
     def test_grepai_start_dry_run_builds_complete_docker_stack(self) -> None:
         originals = {
@@ -298,10 +301,13 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "docker")
         self.assertEqual(result["backend"]["network"]["name"], "ar-grepai-memory")
-        self.assertIn("pgvector/pgvector:pg16", result["backend"]["commands"][2])
-        self.assertIn("ollama/ollama:latest", result["embedder"]["commands"][2])
+        self.assertEqual(result["backend"]["commands"][0]["command"][-3:], ["up", "-d", "postgres"])
+        self.assertEqual(result["embedder"]["commands"][0]["command"][-3:], ["up", "-d", "ollama"])
+        self.assertEqual(result["backend"]["compose"]["overrideMode"], "stdin")
+        self.assertEqual(result["embedder"]["compose"]["overrideMode"], "stdin")
         self.assertEqual(result["watcher"]["containerName"], "ar-grepai-watcher")
         self.assertEqual(result["watcher"]["image"]["image"], "agents-remember/grepai:0.35.0")
+        self.assertEqual(result["watcher"]["commands"][0]["command"][-3:], ["up", "-d", "watcher"])
         self.assertEqual(
             result["workspaceState"]["dsn"],
             "postgres://grepai:grepai@ar-grepai-postgres:5432/grepai?sslmode=disable",
@@ -329,7 +335,64 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["provider"], "codegraphcontext")
         self.assertEqual(result["action"], "run")
-        self.assertEqual(result["command"][-3:], ["find", "name", "Token"])
+        self.assertEqual(result["command"]["command"][-3:], ["find", "name", "Token"])
+        self.assertEqual(result["command"]["overrideMode"], "stdin")
+
+    def test_grepai_compose_override_renders_dynamic_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_grepai(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--dry-run",
+                ]
+            )
+            _, provider_settings, layout = lifecycle.grepai_layout_from_args(args)
+            runner = lifecycle.grepai_runner_settings(provider_settings, layout)
+            backend = lifecycle.grepai_backend_settings(provider_settings, layout)
+
+            render = lifecycle.grepai_compose_render(provider_settings, layout, runner, backend)
+
+        self.assertEqual(render.project_name, "agents-remember-grepai")
+        self.assertNotIn("@", render.override_yaml)
+        self.assertIn('image: "pgvector/pgvector:pg16"', render.override_yaml)
+        self.assertIn('container_name: "ar-grepai-postgres"', render.override_yaml)
+        self.assertIn('image: "ollama/ollama:latest"', render.override_yaml)
+        self.assertIn('container_name: "ar-grepai-watcher"', render.override_yaml)
+        self.assertIn('name: "ar-grepai-memory"', render.override_yaml)
+        self.assertEqual(len(render.override_sha256), 64)
+
+    def test_cgc_compose_override_renders_repo_watchers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--repo-id",
+                    "repo-a",
+                    "--dry-run",
+                ]
+            )
+            _, provider_settings, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+
+            render = lifecycle.cgc_compose_render(provider_settings, layouts)
+
+        self.assertEqual(render.project_name, "agents-remember-cgc")
+        self.assertNotIn("@", render.override_yaml)
+        self.assertIn('image: "falkordb/falkordb:v4.18.7"', render.override_yaml)
+        self.assertIn("watcher-repo-a:", render.override_yaml)
+        self.assertIn('container_name: "ar-cgc-watcher-repo-a"', render.override_yaml)
+        self.assertIn('FALKORDB_HOST: "ar-cgc-falkordb"', render.override_yaml)
+        self.assertIn(':ro"', render.override_yaml)
+        self.assertEqual(len(render.override_sha256), 64)
 
     def test_watchers_service_reads_settings_without_cli_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -436,17 +499,17 @@ class ProviderLifecycleParserTests(unittest.TestCase):
     def test_visualize_dry_run_builds_explicit_server_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            repo = root / "repo"
-            repo.mkdir()
+            service_config = self.service_config(root)
+            repo = root / "workspace" / "repo-a"
             args = self.parse_cgc(
                 [
                     "visualize",
                     "--coordination-root",
-                    str(root / "coordination"),
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
                     "--repo-id",
-                    "repo",
-                    "--code-repo-root",
-                    str(repo),
+                    "repo-a",
                     "--dry-run",
                     "--port",
                     "8123",
@@ -459,15 +522,16 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertTrue(result["longRunning"])
         self.assertEqual(result["action"], "visualize")
         self.assertEqual(result["url"], "http://127.0.0.1:8123")
-        self.assertEqual(Path(result["command"][0]).name, "docker")
-        self.assertEqual(result["command"][1:4], ["run", "--rm", "--network"])
-        self.assertIn("ar-cgc-code", result["command"])
-        self.assertIn("agents-remember/codegraphcontext:0.4.10", result["command"])
+        command = result["command"]["command"]
+        self.assertEqual(Path(command[0]).name, "docker")
+        self.assertIn("compose", command)
+        self.assertEqual(command[-10:-5], ["run", "--rm", "-p", "127.0.0.1:8123:8123", "runner"])
         self.assertEqual(
-            result["command"][-5:-1],
+            command[-5:-1],
             ["visualize", "--repo", repo.resolve().as_posix(), "--port"],
         )
-        self.assertEqual(result["command"][-1], "8123")
+        self.assertEqual(command[-1], "8123")
+        self.assertEqual(result["command"]["overrideMode"], "stdin")
 
     def test_cgc_runner_patch_script_embeds_replacements_as_python_data(self) -> None:
         script = cgc_runner_patch_script()
@@ -509,14 +573,14 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "process_namespace_warning": lifecycle_process_status.process_namespace_warning,
             "ensure_cgc_runtime_layout": cgc_query.ensure_cgc_runtime_layout,
             "cgc_status": cgc_query.cgc_status,
-            "run_command": cgc_query.run_command,
+            "run_compose": cgc_query.run_compose,
         }
         lifecycle_process_status.process_namespace_warning = lambda: (
             "sandbox init has --die-with-parent"
         )
         cgc_query.ensure_cgc_runtime_layout = lambda layout: None
         cgc_query.cgc_status = lambda args: {"ok": True}
-        cgc_query.run_command = lambda command, **kwargs: {
+        cgc_query.run_compose = lambda render, command_args, **kwargs: {
             "stdout": "hit\n",
             "stderr": "",
             "returncode": 0,
@@ -525,17 +589,16 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 root = Path(tmp_dir)
-                repo = root / "repo"
-                repo.mkdir()
+                service_config = self.service_config(root)
                 args = self.parse_cgc(
                     [
                         "run",
                         "--coordination-root",
-                        str(root / "coordination"),
+                        str(service_config.coordination_root),
+                        "--from-settings",
+                        str(service_config.settings_path),
                         "--repo-id",
-                        "repo",
-                        "--code-repo-root",
-                        str(repo),
+                        "repo-a",
                         "--",
                         "find",
                         "name",
@@ -554,7 +617,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             ]
             cgc_query.ensure_cgc_runtime_layout = originals["ensure_cgc_runtime_layout"]
             cgc_query.cgc_status = originals["cgc_status"]
-            cgc_query.run_command = originals["run_command"]
+            cgc_query.run_compose = originals["run_compose"]
 
     def test_docker_wait_for_postgres_requires_database_query(self) -> None:
         backend = {

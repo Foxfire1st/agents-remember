@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle.backend import cgc_backend_start
+from agents_remember.providers.cgc.lifecycle.compose import (
+    cgc_compose_render,
+    cgc_compose_summary,
+    cgc_watcher_service_name,
+)
 from agents_remember.providers.cgc.lifecycle.core import (
     cgc_all_layouts_from_settings,
     cgc_layout_from_args,
@@ -18,7 +23,6 @@ from agents_remember.providers.cgc.lifecycle.core import (
 )
 from agents_remember.providers.cgc.lifecycle.installation import cgc_doctor
 from agents_remember.providers.cgc.lifecycle.runner import (
-    cgc_watcher_command,
     cgc_watcher_inspect,
     cgc_watcher_running,
 )
@@ -27,22 +31,29 @@ from agents_remember.providers.context import (
     ensure_cgc_runtime_layout,
     write_provider_state,
 )
-from agents_remember.providers.lifecycle.command_runner import run_command
-from agents_remember.providers.lifecycle.docker_runtime import docker_command
+from agents_remember.providers.lifecycle.compose_runtime import (
+    compose_plan,
+    remove_unmanaged_compose_container,
+    run_compose,
+)
 from agents_remember.providers.lifecycle.process_status import (
     require_durable_process_namespace,
 )
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
-def cgc_start_dry_run_result(layout: Any) -> dict[str, Any]:
+def cgc_start_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    command_args = ["up", "-d", cgc_watcher_service_name(layout)]
     return {
         "provider": "codegraphcontext",
         "action": "start",
         "ok": True,
         "repoId": layout.repo_id,
         "dryRun": True,
-        "command": cgc_watcher_command(layout),
+        "command": compose_plan(render, command_args, cwd=layout.coordination_root),
+        "compose": cgc_compose_summary(render),
         "cwd": layout.watch_cwd.as_posix(),
         "env": layout.env(),
     }
@@ -77,8 +88,13 @@ def cgc_running_process_result(
 def cgc_start_watch_process(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
     watch_log = layout.watch_log_file
     watch_log.parent.mkdir(parents=True, exist_ok=True)
-    return run_command(
-        cgc_watcher_command(layout), cwd=layout.coordination_root, timeout=args.timeout
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    return run_compose(
+        render,
+        ["up", "-d", cgc_watcher_service_name(layout)],
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
     )
 
 
@@ -107,13 +123,13 @@ def cgc_start_preflight(
     args: argparse.Namespace, layout: Any
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
-        return cgc_start_dry_run_result(layout), None
+        return cgc_start_dry_run_result(args, layout), None
     require_durable_process_namespace("cgc start")
     ensure_cgc_runtime_layout(layout)
     backend_result = cgc_start_backend(args, layout)
     if backend_result is not None and not backend_result.get("ok"):
         return backend_result, backend_result
-    return cgc_running_process_result(args, layout, backend_result), backend_result
+    return None, backend_result
 
 
 def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
@@ -126,6 +142,15 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
     doctor = cgc_doctor(args)
     if not doctor["ok"]:
         return {**doctor, "action": "start", "ok": False, "repoId": layout.repo_id}
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    migration = remove_unmanaged_compose_container(
+        layout.watcher_container_name,
+        project_name="agents-remember-cgc",
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+    )
     process = cgc_start_watch_process(args, layout)
     cgc_write_start_state(layout, process)
     return {
@@ -135,6 +160,8 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
         "repoId": layout.repo_id,
         "containerName": layout.watcher_container_name,
         "logFile": layout.watch_log_file.as_posix(),
+        "compose": cgc_compose_summary(render),
+        "migration": migration,
         "command": process,
         "backend": backend_result,
     }
@@ -229,14 +256,18 @@ def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def cgc_stop_dry_run_result(layout: Any) -> dict[str, Any]:
+def cgc_stop_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    command_args = ["rm", "-sf", cgc_watcher_service_name(layout)]
     return {
         "provider": "codegraphcontext",
         "action": "stop",
         "ok": True,
         "repoId": layout.repo_id,
         "dryRun": True,
-        "command": [docker_command(), "rm", "-f", layout.watcher_container_name],
+        "command": compose_plan(render, command_args, cwd=layout.coordination_root),
+        "compose": cgc_compose_summary(render),
     }
 
 
@@ -258,7 +289,7 @@ def cgc_stop_preflight(args: argparse.Namespace, layout: Any) -> dict[str, Any] 
     if not args.dry_run:
         require_durable_process_namespace("cgc stop")
     if args.dry_run:
-        return cgc_stop_dry_run_result(layout)
+        return cgc_stop_dry_run_result(args, layout)
     if not cgc_watcher_running(args, layout):
         return {
             "provider": "codegraphcontext",
@@ -278,8 +309,11 @@ def cgc_stop(args: argparse.Namespace) -> dict[str, Any]:
     result = cgc_stop_preflight(args, layout)
     if result:
         return result
-    command_result = run_command(
-        [docker_command(), "rm", "-f", layout.watcher_container_name],
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    render = cgc_compose_render(provider_settings, layouts)
+    command_result = run_compose(
+        render,
+        ["rm", "-sf", cgc_watcher_service_name(layout)],
         cwd=layout.coordination_root,
         timeout=args.timeout,
     )
@@ -290,6 +324,7 @@ def cgc_stop(args: argparse.Namespace) -> dict[str, Any]:
         "ok": command_result["returncode"] == 0,
         "repoId": layout.repo_id,
         "containerName": layout.watcher_container_name,
+        "compose": cgc_compose_summary(render),
         "command": command_result,
     }
 

@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: @POSTGRES_IMAGE@
+    container_name: @POSTGRES_CONTAINER_NAME@
+    ports:
+      - @POSTGRES_PORT@
+    volumes:
+      - @POSTGRES_DATA_VOLUME@
+
+  ollama:
+    image: @OLLAMA_IMAGE@
+    container_name: @OLLAMA_CONTAINER_NAME@
+    ports:
+      - @OLLAMA_PORT@
+    volumes:
+      - @OLLAMA_DATA_VOLUME@
+
+  watcher:
+    image: @RUNNER_IMAGE@
+    container_name: @WATCHER_CONTAINER_NAME@
+    build:
+      context: @RUNNER_BUILD_CONTEXT@
+      dockerfile: Dockerfile
+      args:
+        GREPAI_VERSION: @GREPAI_VERSION@
+        GREPAI_ARCH: @GREPAI_ARCH@
+    environment:
+@WATCHER_ENVIRONMENT@
+    volumes:
+      - @WATCHER_RUNTIME_VOLUME@
+      - @WATCHER_LOGS_VOLUME@
+    command: ["watch", "--workspace", @WORKSPACE_NAME@, "--log-dir", @LOGS_MOUNT@]
+
+networks:
+  default:
+    name: @NETWORK_NAME@
