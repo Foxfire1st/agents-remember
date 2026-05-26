@@ -6,6 +6,9 @@ from pathlib import Path
 
 CGC_PROVIDER = "codegraphcontext"
 CGC_PIN = "codegraphcontext==0.4.10"
+CGC_RUNNER_IMAGE_REPOSITORY = "agents-remember/codegraphcontext"
+CGC_WATCHER_CONTAINER_PREFIX = "ar-cgc-watcher"
+CGC_NETWORK_NAME = "ar-cgc-code"
 CGC_REQUIREMENTS = (
     CGC_PIN,
     "tree-sitter==0.25.2",

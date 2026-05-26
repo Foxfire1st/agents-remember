@@ -115,6 +115,7 @@ def cgc_all_layouts_from_settings(
 def cgc_backend_settings(provider_settings: dict[str, Any], layout: Any) -> dict[str, Any]:
     backend_settings = cgc_backend_settings_dict(provider_settings)
     ports = cgc_backend_ports_dict(backend_settings)
+    network = dict_value(backend_settings.get("network"))
     falkordb_port = dict_value(ports.get("falkordb"))
     browser_port = dict_value(ports.get("browser"))
     image = concrete_cgc_backend_image(backend_settings)
@@ -129,6 +130,7 @@ def cgc_backend_settings(provider_settings: dict[str, Any], layout: Any) -> dict
         "image": image,
         "imageLockFile": image_lock_path,
         "containerName": str(backend_settings.get("containerName", "ar-cgc-falkordb")),
+        "networkName": str(network.get("name", layout.network_name)),
         "falkordbHost": falkordb_host,
         "falkordbHostPort": falkordb_port.get("hostPort", "auto"),
         "falkordbContainerPort": int(falkordb_port.get("containerPort", 6379)),
@@ -250,6 +252,7 @@ def cgc_backend_configured_state(layout: Any, backend_settings: dict[str, Any]) 
         "image": backend_settings.get("image"),
         "imageLockFile": backend_settings.get("imageLockFile"),
         "containerName": backend_settings.get("containerName"),
+        "network": backend_settings.get("network"),
         "runtimeRoot": layout.backend_root.as_posix(),
         "dataRoot": layout.backend_data_root.as_posix(),
         "status": read_json(layout.backend_state_file).get("backend", {}).get(

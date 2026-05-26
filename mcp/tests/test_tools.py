@@ -31,7 +31,6 @@ from agents_remember.mcp.tools import (
     memory_carryover_plan_payload,
     memory_init_payload,
     ping_payload,
-    provider_watchers_payload,
     route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
@@ -490,7 +489,7 @@ class McpToolTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "function"):
                 cgc_callees_payload(config, "agents-remember-md", "")
 
-    def test_provider_operations_block_when_runner_integrity_fails(self) -> None:
+    def test_provider_integrity_ignores_legacy_cgc_venv_in_docker_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             provider_venv = (
@@ -502,38 +501,11 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            with (
-                patch(
-                    "agents_remember.controllers.skill_tools.write_lifecycle_settings",
-                    side_effect=AssertionError(
-                        "integrity failure must block before settings write"
-                    ),
-                ),
-                patch(
-                    "agents_remember.controllers.skill_tools.lifecycle_service.run_cgc_lifecycle",
-                    side_effect=AssertionError("integrity failure must block CGC execution"),
-                ),
-                patch(
-                    "agents_remember.controllers.skill_tools.lifecycle_service.run_watchers_lifecycle",
-                    side_effect=AssertionError("integrity failure must block watcher execution"),
-                ),
-            ):
-                cgc_payload = cgc_symbol_search_payload(
-                    config,
-                    "agents-remember-md",
-                    "resolve_context",
-                )
-                watcher_payload = provider_watchers_payload(
-                    config,
-                    action="start",
-                )
+            payload = check_provider_runner_integrity(config)
 
-            for payload in (cgc_payload, watcher_payload):
-                with self.subTest(operation=payload["operation"]):
-                    self.assertFalse(payload["ok"])
-                    self.assertEqual(payload["state"], "runnerIntegrityFailed")
-                    self.assertEqual(payload["integrity"]["state"], "manifestMissing")
-                    self.assertEqual(payload["recoveryActions"][0]["action"], "runtime_install")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["state"], "notInstalled")
+        self.assertEqual(payload["fileCount"], 0)
 
     def test_provider_integrity_ignores_legacy_grepai_binary_in_docker_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

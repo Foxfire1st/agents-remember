@@ -31,8 +31,6 @@ ar-coordination/
   providers/
     requirements/
     patches/
-    _venvs/
-    _bin/
     runners/
     data/
     logs/

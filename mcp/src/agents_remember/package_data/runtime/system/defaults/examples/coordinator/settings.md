@@ -72,14 +72,13 @@ refresh, install, and integrity behavior belongs to MCP/package-owned lifecycle
 tooling, not coordinator-owned scripts.
 
 Provider installs should be coordination-owned. Use pinned requirements under
-`providers/requirements/`, one reusable virtual environment per non-Dockerized
-Python provider type under `providers/_venvs/`, and version-checked patches
-under `providers/patches/`. Do not use `providers/_bin/` as a managed provider
-contract. Prefer Docker-wrapped providers and backend services when the provider
-needs native binaries, a database, or daemonized infrastructure. Do not require
-host-level PostgreSQL, FalkorDB, Ollama, OS services, launch agents,
-package-manager services, or global user daemons for normal managed provider
-mode.
+`providers/requirements/`, version-checked patches under `providers/patches/`,
+and Docker runner image locks beside those pins. Do not use `providers/_bin/`
+or `providers/_venvs/` as managed provider contracts. Prefer Docker-wrapped
+providers and backend services when the provider needs native binaries, a
+database, or daemonized infrastructure. Do not require host-level PostgreSQL,
+FalkorDB, Ollama, OS services, launch agents, package-manager services, Python
+virtual environments, or global user daemons for normal managed provider mode.
 
 Semantic providers must keep generated config, index, logs, and state out of
 source repositories and durable memory roots. For GrepAI, configure one
@@ -103,8 +102,12 @@ CodeGraphContext, configure one `codegraphcontext-code` provider with a `roots`
 array of `{ repoId, path }` entries. The lifecycle manager expands those entries
 into per-repo runtime roots under
 `providers/runners/codegraphcontext/<repo-id>/.codegraphcontext/`, while all repos share
-one lifecycle-owned FalkorDB Docker DBMS with persistent data under
-`providers/data/codegraphcontext/falkordb/`.
+one lifecycle-owned FalkorDB Docker DBMS on the shared CGC Docker network with
+persistent data under `providers/data/codegraphcontext/falkordb/`.
+CodeGraphContext itself runs from the lifecycle-owned Docker runner
+image/container, launched as the host user when supported so mounted runtime
+files stay user-owned; managed mode must not create or use a host Python virtual
+environment for CGC commands.
 
 Treat CGC runtime environment and persisted CGC config as separate surfaces.
 `processEnvTemplate` is applied when launching CGC commands and should not be
@@ -113,9 +116,9 @@ accepted by the installed CGC version.
 
 Provider reinstall/update is non-destructive to provider data by default.
 `providers/` contains a mix of package-owned defaults and live provider runtime
-state. MCP runtime reinstall may recreate non-Docker provider virtual
-environments, runner instances, copied pins, and patches, while preserving
-`providers/data/` and `providers/logs/`. Durable provider databases live under
+state. MCP runtime reinstall may recreate Docker runner instances, image build
+roots, copied pins, and patches, while preserving `providers/data/` and
+`providers/logs/`. Durable provider databases live under
 `providers/data/`; deleting FalkorDB data, graph namespaces, or repository
 indexes still requires an explicit destructive lifecycle command.
 

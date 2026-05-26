@@ -38,7 +38,7 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertTrue((source_root / "runtime" / "providers").is_dir())
             self.assertTrue((source_root / "benchmarks" / "cases").is_dir())
 
-    def test_runtime_install_preserves_installed_provider_runtimes(self) -> None:
+    def test_runtime_install_preserves_docker_provider_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             source_root = create_runtime_source(root)
@@ -79,7 +79,7 @@ class InstallRuntimeTests(unittest.TestCase):
 
             self.assertEqual(summary.dependency_runs, 0)
             self.assertFalse((providers_root / "_bin" / "grepai.exe").exists())
-            self.assertTrue(cgc_exe.exists())
+            self.assertFalse(cgc_exe.exists())
             self.assertTrue(cgc_state.exists())
             self.assertTrue(grepai_watch_log.exists())
             self.assertTrue(cgc_data.exists())
@@ -114,7 +114,7 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertEqual(summary.dependency_runs, 0)
             self.assertTrue(grepai_data.exists())
             self.assertTrue(grepai_log.exists())
-            self.assertTrue(old_venv.exists())
+            self.assertFalse(old_venv.exists())
             self.assertTrue((providers_root / "data" / "codegraphcontext").is_dir())
             self.assertTrue((providers_root / "data" / "grepai").is_dir())
             self.assertTrue((providers_root / "logs" / "codegraphcontext").is_dir())

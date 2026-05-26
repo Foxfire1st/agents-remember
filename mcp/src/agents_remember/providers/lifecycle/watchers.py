@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle import (
@@ -34,7 +33,6 @@ def watcher_scoped_args(args: argparse.Namespace, provider: str, action: str) ->
     if provider == "cgc":
         values["repo_id"] = None
         values["code_repo_root"] = None
-        values.setdefault("python", sys.executable)
     if provider == "grepai":
         values.setdefault("force", False)
         values.setdefault("root", None)

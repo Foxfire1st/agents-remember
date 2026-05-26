@@ -16,6 +16,12 @@ from agents_remember.providers.cgc.lifecycle.core import (
     cgc_scoped_args,
     cgc_uses_settings,
 )
+from agents_remember.providers.cgc.lifecycle.runner import (
+    cgc_docker_command,
+    cgc_runner_image_build,
+    cgc_runner_image_status,
+    cgc_watcher_running,
+)
 from agents_remember.providers.context import (
     CGC_CGCIGNORE_PATCH_ID,
     CGC_DELETE_PATCH_ID,
@@ -41,7 +47,6 @@ from agents_remember.providers.context import (
     cgc_viz_server_route_patch_applied,
     cleanup_cgc_runtime_artifacts,
     ensure_cgc_runtime_layout,
-    file_sha256,
     find_cgc_cgcignore_module,
     find_cgc_cli_helpers_module,
     find_cgc_discovery_module,
@@ -52,10 +57,9 @@ from agents_remember.providers.context import (
     write_provider_state,
 )
 from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.docker_runtime import docker_command
 from agents_remember.providers.lifecycle.process_status import (
-    process_alive,
     process_namespace_status,
-    python_executable,
 )
 from agents_remember.providers.lifecycle.state_files import (
     read_json,
@@ -63,12 +67,10 @@ from agents_remember.providers.lifecycle.state_files import (
 )
 
 
-def cgc_install_commands(args: argparse.Namespace, layout: Any) -> tuple[Path, list[list[str]]]:
-    venv_python = python_executable(layout.venv_root)
-    return venv_python, [
-        [args.python, "-m", "venv", layout.venv_root.as_posix()],
-        [venv_python.as_posix(), "-m", "pip", "install", "-r", layout.requirements_file.as_posix()],
-        [layout.cgc_executable().as_posix(), "doctor"],
+def cgc_install_commands(layout: Any) -> tuple[Path, list[list[str]]]:
+    return layout.image_build_root, [
+        [docker_command(), "build", "-t", layout.runner_image, layout.image_build_root.as_posix()],
+        cgc_docker_command(layout, ["doctor"]),
     ]
 
 
@@ -79,22 +81,10 @@ def cgc_install_dry_run_result(layout: Any, commands: list[list[str]]) -> dict[s
         "ok": True,
         "dryRun": True,
         "repoId": layout.repo_id,
-        "venvRoot": layout.venv_root.as_posix(),
-        "requirementsFile": layout.requirements_file.as_posix(),
+        "runnerImage": layout.runner_image,
+        "imageBuildRoot": layout.image_build_root.as_posix(),
+        "imageLockFile": layout.image_lock_file.as_posix(),
         "commands": commands,
-    }
-
-
-def cgc_venv_result(args: argparse.Namespace, layout: Any, command: list[str], venv_python: Path) -> dict[str, Any]:
-    if not venv_python.exists():
-        return run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
-    return {
-        "command": command,
-        "cwd": layout.coordination_root.as_posix(),
-        "returncode": 0,
-        "durationSeconds": 0,
-        "stdout": "provider venv already exists",
-        "stderr": "",
     }
 
 
@@ -106,21 +96,6 @@ def cgc_failed_install_result(layout: Any, results: list[dict[str, Any]]) -> dic
         "repoId": layout.repo_id,
         "commands": results,
     }
-
-
-def cgc_install_base_dependencies(
-    args: argparse.Namespace,
-    layout: Any,
-    commands: list[list[str]],
-    venv_python: Path,
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    results = [cgc_venv_result(args, layout, commands[0], venv_python)]
-    if results[-1]["returncode"] != 0:
-        return results, cgc_failed_install_result(layout, results)
-    results.append(run_command(commands[1], cwd=layout.coordination_root, timeout=args.timeout))
-    if results[-1]["returncode"] != 0:
-        return results, cgc_failed_install_result(layout, results)
-    return results, None
 
 
 def cgc_install_backend(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
@@ -145,12 +120,12 @@ def cgc_write_install_state(
             "repoId": layout.repo_id,
             "codeRepoRoot": layout.code_repo_root.as_posix(),
             "runtimeRoot": layout.runtime_root.as_posix(),
-            "venvRoot": layout.venv_root.as_posix(),
-            "requirementsFile": layout.requirements_file.as_posix(),
-            "requirementsSha256": file_sha256(layout.requirements_file),
+            "runnerImage": layout.runner_image,
+            "imageBuildRoot": layout.image_build_root.as_posix(),
+            "imageLockFile": layout.image_lock_file.as_posix(),
             "lastAction": "install",
             "lastInstall": {
-                "pipReturncode": install_result["returncode"],
+                "imageOk": install_result.get("ok"),
                 "backendOk": backend_result.get("ok") if backend_result else None,
                 "patchOk": patch_result.get("ok"),
                 "doctorOk": doctor_result.get("ok"),
@@ -163,14 +138,15 @@ def cgc_write_install_state(
 
 
 def cgc_install_preflight(
-    args: argparse.Namespace, layout: Any, commands: list[list[str]], venv_python: Path
+    args: argparse.Namespace, layout: Any, commands: list[list[str]]
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
         return [], cgc_install_dry_run_result(layout, commands), None
     ensure_cgc_runtime_layout(layout)
-    results, error = cgc_install_base_dependencies(args, layout, commands, venv_python)
-    if error:
-        return results, error, None
+    image_result = cgc_runner_image_build(args, layout)
+    results = [image_result]
+    if not image_result.get("ok"):
+        return results, cgc_failed_install_result(layout, results), None
     backend_result = cgc_install_backend(args, layout)
     if backend_result is not None and not backend_result.get("ok"):
         return results, backend_result, backend_result
@@ -181,31 +157,29 @@ def cgc_install(args: argparse.Namespace) -> dict[str, Any]:
     if cgc_uses_settings(args) and args.repo_id is None:
         return cgc_install_all(args)
     layout = cgc_layout_from_args(args)
-    venv_python, commands = cgc_install_commands(args, layout)
-    results, early_result, backend_result = cgc_install_preflight(
-        args, layout, commands, venv_python
-    )
+    _, commands = cgc_install_commands(layout)
+    results, early_result, backend_result = cgc_install_preflight(args, layout, commands)
     if early_result:
         return early_result
-    patch_result = cgc_patch(args)
     doctor_result = cgc_doctor(args)
     cgc_write_install_state(
         layout,
         install_result=results[-1],
         backend_result=backend_result,
-        patch_result=patch_result,
+        patch_result={"ok": True, "mode": "docker-image"},
         doctor_result=doctor_result,
     )
     return {
         "provider": "codegraphcontext",
         "action": "install",
-        "ok": bool(patch_result.get("ok")) and bool(doctor_result.get("ok")),
+        "ok": bool(results[-1].get("ok")) and bool(doctor_result.get("ok")),
         "repoId": layout.repo_id,
-        "venvRoot": layout.venv_root.as_posix(),
-        "requirementsFile": layout.requirements_file.as_posix(),
+        "runnerImage": layout.runner_image,
+        "imageBuildRoot": layout.image_build_root.as_posix(),
+        "imageLockFile": layout.image_lock_file.as_posix(),
         "commands": results,
         "backend": backend_result,
-        "patch": patch_result,
+        "patch": {"ok": True, "mode": "docker-image"},
         "doctor": doctor_result,
     }
 
@@ -259,24 +233,20 @@ def cgc_install_all(args: argparse.Namespace) -> dict[str, Any]:
 def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
     layout = cgc_layout_from_args(args)
     artifacts = [path.as_posix() for path in source_provider_artifacts(layout.code_repo_root)]
-    cgc_executable = layout.cgc_executable()
-    state = read_json(layout.state_file)
-    pid = state.get("process", {}).get("pid")
-    patch = cgc_status_patch(layout, cgc_executable)
+    image = cgc_runner_image_status(args, layout)
+    running = cgc_watcher_running(args, layout)
+    patch = {"module": None, "applied": image["exists"], "error": None, "mode": "docker-image"}
 
     return {
         "provider": "codegraphcontext",
         "action": "status",
-        "ok": cgc_executable.exists() and not artifacts and bool(patch["applied"]),
+        "ok": image["exists"] and not artifacts,
         "repoId": layout.repo_id,
         "codeRepoRoot": layout.code_repo_root.as_posix(),
         "runtimeRoot": layout.runtime_root.as_posix(),
         "cgcRoot": layout.cgc_root.as_posix(),
-        "venvRoot": layout.venv_root.as_posix(),
-        "cgcExecutable": cgc_executable.as_posix(),
-        "cgcExecutableExists": cgc_executable.exists(),
-        "requirementsFile": layout.requirements_file.as_posix(),
-        "patchesRoot": layout.patches_root.as_posix(),
+        "runnerImage": image,
+        "watcherContainer": layout.watcher_container_name,
         "backendRoot": layout.backend_root.as_posix(),
         "backendDataRoot": layout.backend_data_root.as_posix(),
         "watchCwd": layout.watch_cwd.as_posix(),
@@ -284,8 +254,10 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
         "sourceArtifacts": artifacts,
         "patch": patch,
         "process": {
-            "pid": pid,
-            "alive": process_alive(int(pid)) if isinstance(pid, int) else False,
+            "pid": None,
+            "alive": running,
+            "mode": "docker-container-watch",
+            "containerName": layout.watcher_container_name,
         },
         "processNamespace": process_namespace_status(),
     }
@@ -364,9 +336,9 @@ def cgc_init_layout(args: argparse.Namespace) -> dict[str, Any]:
                 "repoId": layout.repo_id,
                 "codeRepoRoot": layout.code_repo_root.as_posix(),
                 "runtimeRoot": layout.runtime_root.as_posix(),
-                "requirementsFile": layout.requirements_file.as_posix(),
-                "requirementsSha256": file_sha256(layout.requirements_file),
-                "patchesRoot": layout.patches_root.as_posix(),
+                "runnerImage": layout.runner_image,
+                "imageBuildRoot": layout.image_build_root.as_posix(),
+                "imageLockFile": layout.image_lock_file.as_posix(),
                 "lastAction": "init-layout",
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             },
@@ -379,9 +351,9 @@ def cgc_init_layout(args: argparse.Namespace) -> dict[str, Any]:
         "repoId": layout.repo_id,
         "runtimeRoot": layout.runtime_root.as_posix(),
         "cgcRoot": layout.cgc_root.as_posix(),
-        "venvRoot": layout.venv_root.as_posix(),
-        "requirementsFile": layout.requirements_file.as_posix(),
-        "patchesRoot": layout.patches_root.as_posix(),
+        "runnerImage": layout.runner_image,
+        "imageBuildRoot": layout.image_build_root.as_posix(),
+        "imageLockFile": layout.image_lock_file.as_posix(),
         "stateFile": layout.state_file.as_posix(),
     }
 
@@ -479,9 +451,7 @@ def cgc_patch_changed(patch_results: dict[str, dict[str, Any]]) -> bool:
 
 
 def cgc_patch_any_applied(patch_results: dict[str, dict[str, Any]]) -> bool:
-    return any(
-        result["alreadyApplied"] or result["changed"] for result in patch_results.values()
-    )
+    return any(result["alreadyApplied"] or result["changed"] for result in patch_results.values())
 
 
 def cgc_patch_applied_ids(patch_results: dict[str, dict[str, Any]]) -> set[str]:
@@ -516,15 +486,14 @@ def cgc_update_patch_state(
 
 def cgc_patch(args: argparse.Namespace) -> dict[str, Any]:
     layout = cgc_layout_from_args(args)
-    patch_results = cgc_patch_results(args, layout)
-    cgc_update_patch_state(layout, args, patch_results)
     return {
         "provider": "codegraphcontext",
         "action": "patch",
-        "ok": all(result["applied"] or result["changed"] for result in patch_results.values()),
+        "ok": True,
         "dryRun": args.dry_run,
-        "patches": patch_results,
-        "changed": cgc_patch_changed(patch_results),
+        "mode": "docker-image",
+        "runnerImage": layout.runner_image,
+        "changed": False,
     }
 
 
@@ -542,30 +511,28 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
             "artifacts": status["sourceArtifacts"],
         },
         {
-            "name": "cgc-executable",
-            "ok": status["cgcExecutableExists"],
-            "path": status["cgcExecutable"],
+            "name": "cgc-runner-image",
+            "ok": status["runnerImage"]["exists"],
+            "image": status["runnerImage"]["image"],
         },
         {
-            "name": "cgcignore-patch",
+            "name": "cgc-image-patches",
             "ok": bool(status["patch"]["applied"]),
             "details": status["patch"],
         },
     ]
     command_result = None
-    if status["cgcExecutableExists"] and not args.dry_run:
+    if status["runnerImage"]["exists"] and not args.dry_run:
         command_result = run_command(
-            [layout.cgc_executable().as_posix(), "doctor"],
-            cwd=layout.runtime_root,
-            env=layout.env(),
+            cgc_docker_command(layout, ["doctor"]),
+            cwd=layout.coordination_root,
             timeout=args.timeout,
         )
         checks.append({"name": "cgc-doctor-command", "ok": command_result["returncode"] == 0})
     elif args.dry_run:
         command_result = {
-            "command": [layout.cgc_executable().as_posix(), "doctor"],
-            "cwd": layout.runtime_root.as_posix(),
-            "env": layout.env(),
+            "command": cgc_docker_command(layout, ["doctor"]),
+            "cwd": layout.coordination_root.as_posix(),
         }
 
     ok = all(check["ok"] for check in checks)

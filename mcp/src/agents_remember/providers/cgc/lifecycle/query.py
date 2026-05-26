@@ -7,6 +7,10 @@ from typing import Any
 
 from agents_remember.providers.cgc.lifecycle.core import cgc_layout_from_args, cgc_uses_settings
 from agents_remember.providers.cgc.lifecycle.installation import cgc_status
+from agents_remember.providers.cgc.lifecycle.runner import (
+    cgc_docker_command,
+    cgc_visualize_docker_command,
+)
 from agents_remember.providers.context import ContextProviderError, ensure_cgc_runtime_layout
 from agents_remember.providers.lifecycle.command_runner import run_command, run_foreground_command
 from agents_remember.providers.lifecycle.process_status import require_durable_process_namespace
@@ -56,14 +60,14 @@ def cgc_run(args: argparse.Namespace) -> dict[str, Any]:
     if cgc_uses_settings(args) and args.repo_id is None:
         raise ContextProviderError("cgc run requires --repo-id when using settings-backed roots")
     layout = cgc_layout_from_args(args)
-    command = [layout.cgc_executable().as_posix(), *cgc_run_native_args(args)]
+    command = cgc_docker_command(layout, cgc_run_native_args(args))
     if args.dry_run:
         return cgc_run_dry_result(layout, command)
     ensure_cgc_runtime_layout(layout)
     status_result = cgc_run_status_result(args)
     if status_result:
         return status_result
-    result = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout)
+    result = run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
     return {
         "provider": "codegraphcontext",
         "action": "run",
@@ -83,17 +87,7 @@ def cgc_visualize_validate(args: argparse.Namespace) -> None:
 
 
 def cgc_visualize_command(args: argparse.Namespace, layout: Any) -> list[str]:
-    command = [
-        layout.cgc_executable().as_posix(),
-        "visualize",
-        "--repo",
-        layout.code_repo_root.as_posix(),
-        "--port",
-        str(args.port),
-    ]
-    if args.context:
-        command.extend(["--context", args.context])
-    return command
+    return cgc_visualize_docker_command(args, layout)
 
 
 def cgc_visualize_dry_result(layout: Any, command: list[str], url: str) -> dict[str, Any]:
@@ -128,7 +122,7 @@ def cgc_visualize(args: argparse.Namespace) -> dict[str, Any]:
     status_result = cgc_visualize_status_result(args)
     if status_result:
         return status_result
-    result = run_foreground_command(command, cwd=layout.runtime_root, env=layout.env())
+    result = run_foreground_command(command, cwd=layout.coordination_root)
     return {
         "provider": "codegraphcontext",
         "action": "visualize",

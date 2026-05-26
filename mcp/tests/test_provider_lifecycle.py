@@ -13,6 +13,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import lifecycle, lifecycle_service
 from agents_remember.providers.cgc.lifecycle import query as cgc_query
+from agents_remember.providers.cgc.lifecycle.runner import cgc_runner_patch_script
 from agents_remember.providers.grepai.lifecycle import actions as grepai_actions
 from agents_remember.providers.grepai.lifecycle import backend as grepai_backend
 from agents_remember.providers.grepai.lifecycle import core as grepai_core
@@ -203,9 +204,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(
-            args.coordination_root, lifecycle.default_coordination_root().resolve()
-        )
+        self.assertEqual(args.coordination_root, lifecycle.default_coordination_root().resolve())
 
     def test_watchers_defaults_coordination_root_to_installed_runtime_root(self) -> None:
         parser = lifecycle.build_parser()
@@ -374,7 +373,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
     def test_ephemeral_namespace_rejects_daemon_actions(self) -> None:
         original = lifecycle_process_status.process_namespace_warning
-        lifecycle_process_status.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        lifecycle_process_status.process_namespace_warning = lambda: (
+            "sandbox init has --die-with-parent"
+        )
         try:
             with self.assertRaisesRegex(
                 lifecycle.ContextProviderError,
@@ -386,7 +387,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
     def test_process_namespace_status_reports_warning(self) -> None:
         original = lifecycle_process_status.process_namespace_warning
-        lifecycle_process_status.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        lifecycle_process_status.process_namespace_warning = lambda: (
+            "sandbox init has --die-with-parent"
+        )
         try:
             self.assertEqual(
                 lifecycle.process_namespace_status(),
@@ -400,7 +403,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
     def test_visualize_rejects_ephemeral_process_namespace(self) -> None:
         original = lifecycle_process_status.process_namespace_warning
-        lifecycle_process_status.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        lifecycle_process_status.process_namespace_warning = lambda: (
+            "sandbox init has --die-with-parent"
+        )
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 root = Path(tmp_dir)
@@ -454,10 +459,22 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertTrue(result["longRunning"])
         self.assertEqual(result["action"], "visualize")
         self.assertEqual(result["url"], "http://127.0.0.1:8123")
+        self.assertEqual(Path(result["command"][0]).name, "docker")
+        self.assertEqual(result["command"][1:4], ["run", "--rm", "--network"])
+        self.assertIn("ar-cgc-code", result["command"])
+        self.assertIn("agents-remember/codegraphcontext:0.4.10", result["command"])
         self.assertEqual(
-            result["command"][1:5], ["visualize", "--repo", repo.resolve().as_posix(), "--port"]
+            result["command"][-5:-1],
+            ["visualize", "--repo", repo.resolve().as_posix(), "--port"],
         )
-        self.assertEqual(result["command"][5], "8123")
+        self.assertEqual(result["command"][-1], "8123")
+
+    def test_cgc_runner_patch_script_embeds_replacements_as_python_data(self) -> None:
+        script = cgc_runner_patch_script()
+
+        compile(script, "patch_cgc.py", "exec")
+        self.assertIn("operations = [", script)
+        self.assertNotIn("json.loads({", script)
 
     def test_run_rejects_visualizer_server(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -494,7 +511,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "cgc_status": cgc_query.cgc_status,
             "run_command": cgc_query.run_command,
         }
-        lifecycle_process_status.process_namespace_warning = lambda: "sandbox init has --die-with-parent"
+        lifecycle_process_status.process_namespace_warning = lambda: (
+            "sandbox init has --die-with-parent"
+        )
         cgc_query.ensure_cgc_runtime_layout = lambda layout: None
         cgc_query.cgc_status = lambda args: {"ok": True}
         cgc_query.run_command = lambda command, **kwargs: {
@@ -530,7 +549,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             self.assertEqual(result["action"], "run")
             self.assertEqual(result["command"]["stdout"], "hit\n")
         finally:
-            lifecycle_process_status.process_namespace_warning = originals["process_namespace_warning"]
+            lifecycle_process_status.process_namespace_warning = originals[
+                "process_namespace_warning"
+            ]
             cgc_query.ensure_cgc_runtime_layout = originals["ensure_cgc_runtime_layout"]
             cgc_query.cgc_status = originals["cgc_status"]
             cgc_query.run_command = originals["run_command"]
@@ -555,9 +576,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         grepai_backend.docker_command = lambda: "docker"
         grepai_backend.run_command = fake_run_command
         try:
-            result = lifecycle.docker_wait_for_postgres(
-                backend, cwd=Path("/tmp"), timeout=1
-            )
+            result = lifecycle.docker_wait_for_postgres(backend, cwd=Path("/tmp"), timeout=1)
         finally:
             grepai_backend.docker_command = originals["docker_command"]
             grepai_backend.run_command = originals["run_command"]

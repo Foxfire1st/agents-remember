@@ -10,10 +10,14 @@ from typing import Any
 
 from agents_remember.providers.cgc.context.constants import (
     CGC_ENV_FILE_EXCLUDED_KEYS,
+    CGC_FALKORDB_CONTAINER_NAME,
     CGC_FALKORDB_DEFAULT_HOST,
     CGC_FALKORDB_DEFAULT_PORT,
+    CGC_NETWORK_NAME,
     CGC_PROVIDER,
     CGC_REQUIREMENTS,
+    CGC_RUNNER_IMAGE_REPOSITORY,
+    CGC_WATCHER_CONTAINER_PREFIX,
     DEFAULT_CGCIGNORE,
     SOURCE_ARTIFACT_NAMES,
     read_gitignore_patterns,
@@ -38,6 +42,10 @@ class CgcRuntimeLayout:
     venv_root: Path
     requirements_file: Path
     patches_root: Path
+    image_build_root: Path
+    image_lock_file: Path
+    runner_image: str
+    watcher_container_name: str
     state_file: Path
     cgcignore_path: Path
     cgcignore_patterns: tuple[str, ...]
@@ -45,6 +53,8 @@ class CgcRuntimeLayout:
     env_file: Path
     backend_root: Path
     backend_data_root: Path
+    backend_container_name: str
+    network_name: str
     backend_state_file: Path
     run_root: Path
     logs_root: Path
@@ -108,9 +118,15 @@ def cgc_runtime_layout(
     venv_root: Path | None = None,
     requirements_file: Path | None = None,
     patches_root: Path | None = None,
+    image_build_root: Path | None = None,
+    image_lock_file: Path | None = None,
+    runner_image: str | None = None,
+    watcher_container_name: str | None = None,
     state_file: Path | None = None,
     backend_root: Path | None = None,
     backend_data_root: Path | None = None,
+    backend_container_name: str | None = None,
+    network_name: str | None = None,
     backend_state_file: Path | None = None,
     process_env_template: dict[str, str] | None = None,
     cgcignore_patterns: tuple[str, ...] = (),
@@ -149,6 +165,17 @@ def cgc_runtime_layout(
             patches_root,
             providers_root / "patches" / CGC_PROVIDER,
         ),
+        image_build_root=_resolve_optional_path(
+            image_build_root,
+            providers_root / "runners" / CGC_PROVIDER / "image",
+        ),
+        image_lock_file=_resolve_optional_path(
+            image_lock_file,
+            providers_root / "requirements" / "codegraphcontext-runner-docker.lock",
+        ),
+        runner_image=runner_image or _cgc_runner_image(),
+        watcher_container_name=watcher_container_name
+        or f"{CGC_WATCHER_CONTAINER_PREFIX}-{repo_id}",
         state_file=_resolve_optional_path(state_file, runtime_root / "provider-state.json"),
         cgcignore_path=cgc_root / ".cgcignore",
         cgcignore_patterns=tuple(pattern for pattern in cgcignore_patterns if pattern),
@@ -156,6 +183,8 @@ def cgc_runtime_layout(
         env_file=cgc_root / ".env",
         backend_root=backend_root,
         backend_data_root=backend_data_root,
+        backend_container_name=backend_container_name or CGC_FALKORDB_CONTAINER_NAME,
+        network_name=network_name or CGC_NETWORK_NAME,
         backend_state_file=_resolve_optional_path(
             backend_state_file,
             backend_root / "backend-state.json",
@@ -190,15 +219,25 @@ def cgc_runtime_layout_from_provider_settings(
         {"runtimeRoot": provider_runtime_root.as_posix(), "repoId": repo_id},
     )
     backend_settings = _dict_setting(provider_settings.get("backend"))
+    runtime_settings = _dict_setting(provider_settings.get("runtime"))
+    runner_settings = _dict_setting(runtime_settings.get("runner"))
     backend_runtime_root, backend_data_root = _cgc_backend_roots(
         coordination_root,
         provider_runtime_root,
         backend_settings,
     )
+    image_build_root, image_lock_file, runner_image, watcher_container_name = _cgc_runner_settings(
+        coordination_root,
+        provider_runtime_root,
+        runner_settings,
+        repo_id,
+    )
     backend_bind_host, backend_host_port = _cgc_backend_host_settings(
         backend_runtime_root,
         backend_settings,
     )
+    backend_container_name = str(backend_settings.get("containerName", CGC_FALKORDB_CONTAINER_NAME))
+    network_name = _cgc_backend_network_name(backend_settings)
     watch_cwd, watch_log_file, state_file = _cgc_watch_paths(
         provider_settings,
         provider_runtime_root,
@@ -213,25 +252,46 @@ def cgc_runtime_layout_from_provider_settings(
         runtime_root=instance_root,
         venv_root=Path(
             expand_template(
-                str(provider_settings["venvRoot"]),
+                str(
+                    provider_settings.get(
+                        "venvRoot",
+                        "<coordination_root>/providers/_venvs/codegraphcontext",
+                    )
+                ),
                 base_variables,
             )
         ),
         requirements_file=Path(
             expand_template(
-                str(provider_settings["requirementsFile"]),
+                str(
+                    provider_settings.get(
+                        "requirementsFile",
+                        "<coordination_root>/providers/requirements/codegraphcontext.txt",
+                    )
+                ),
                 base_variables,
             )
         ),
         patches_root=Path(
             expand_template(
-                str(provider_settings["patchesRoot"]),
+                str(
+                    provider_settings.get(
+                        "patchesRoot",
+                        "<coordination_root>/providers/patches/codegraphcontext",
+                    )
+                ),
                 base_variables,
             )
         ),
+        image_build_root=image_build_root,
+        image_lock_file=image_lock_file,
+        runner_image=runner_image,
+        watcher_container_name=watcher_container_name,
         state_file=state_file,
         backend_root=backend_runtime_root,
         backend_data_root=backend_data_root,
+        backend_container_name=backend_container_name,
+        network_name=network_name,
         process_env_template=_cgc_process_env_template(
             provider_settings,
             backend_bind_host=backend_bind_host,
@@ -248,6 +308,14 @@ def _cgc_base_variables(coordination_root: Path) -> dict[str, str]:
         "coordination_root": coordination_root.as_posix(),
         "workspace_root": coordination_root.parent.as_posix(),
     }
+
+
+def _cgc_version() -> str:
+    return CGC_REQUIREMENTS[0].split("==", 1)[1]
+
+
+def _cgc_runner_image() -> str:
+    return f"{CGC_RUNNER_IMAGE_REPOSITORY}:{_cgc_version()}"
 
 
 def _template_path(value: Any, variables: dict[str, str]) -> Path:
@@ -300,6 +368,43 @@ def _cgc_backend_roots(
     return backend_runtime_root, backend_data_root
 
 
+def _cgc_runner_settings(
+    coordination_root: Path,
+    provider_runtime_root: Path,
+    runner_settings: dict[str, Any],
+    repo_id: str,
+) -> tuple[Path, Path, str, str]:
+    variables = {
+        "coordination_root": coordination_root.as_posix(),
+        "runtimeRoot": provider_runtime_root.as_posix(),
+        "repoId": repo_id,
+    }
+    image_build_root = _template_path(
+        runner_settings.get("buildRoot", "<runtimeRoot>/image"),
+        variables,
+    )
+    image_lock_file = _template_path(
+        runner_settings.get(
+            "imageLockFile",
+            "<coordination_root>/providers/requirements/codegraphcontext-runner-docker.lock",
+        ),
+        variables,
+    )
+    runner_image = str(runner_settings.get("image", _cgc_runner_image())).strip()
+    if not runner_image or "<" in runner_image or ">" in runner_image:
+        raise ContextProviderError("codegraphcontext runner.image must be a concrete Docker tag")
+    container_name = expand_template(
+        str(
+            runner_settings.get(
+                "containerNameTemplate",
+                f"{CGC_WATCHER_CONTAINER_PREFIX}-<repoId>",
+            )
+        ),
+        variables,
+    )
+    return image_build_root, image_lock_file, runner_image, container_name
+
+
 def _cgc_backend_host_settings(
     backend_runtime_root: Path,
     backend_settings: dict[str, Any],
@@ -323,6 +428,11 @@ def _cgc_backend_host_settings(
     if backend_host_port == "auto":
         backend_host_port = CGC_FALKORDB_DEFAULT_PORT
     return backend_bind_host, backend_host_port
+
+
+def _cgc_backend_network_name(backend_settings: dict[str, Any]) -> str:
+    network = _dict_setting(backend_settings.get("network"))
+    return str(network.get("name", CGC_NETWORK_NAME))
 
 
 def _load_cgc_backend_state(backend_state_file: Path) -> dict[str, Any]:
@@ -408,9 +518,10 @@ def ensure_cgc_runtime_layout(layout: CgcRuntimeLayout) -> None:
 
 def _cgc_runtime_directories(layout: CgcRuntimeLayout) -> list[Path]:
     return [
-        layout.venv_root,
         layout.requirements_file.parent,
         layout.patches_root,
+        layout.image_build_root,
+        layout.image_lock_file.parent,
         layout.cgc_root,
         layout.backend_data_root,
         layout.backend_state_file.parent,

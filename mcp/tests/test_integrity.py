@@ -11,12 +11,12 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.mcp.config import load_config
+from agents_remember.providers import status as provider_status
 from agents_remember.providers.integrity import (
     check_provider_runner_integrity,
     manifest_path_for_config,
     write_provider_runner_manifest,
 )
-from agents_remember.providers.status import provider_status_packet
 from test_config import settings_payload, write_json
 
 
@@ -31,7 +31,7 @@ class ProviderIntegrityTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(result["state"], "notInstalled")
 
-    def test_records_and_detects_runner_file_changes(self) -> None:
+    def test_manifest_ignores_legacy_venv_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = write_and_load_config(root)
@@ -53,15 +53,13 @@ class ProviderIntegrityTests(unittest.TestCase):
             changed = check_provider_runner_integrity(config)
 
             self.assertTrue(write_result["ok"])
+            self.assertEqual(write_result["fileCount"], 0)
             self.assertTrue(clean["ok"])
-            self.assertFalse(changed["ok"])
-            self.assertEqual(
-                changed["changed"],
-                ["providers/_venvs/codegraphcontext/bin/cgc"],
-            )
+            self.assertTrue(changed["ok"])
+            self.assertEqual(changed["fileCount"], 0)
             self.assertTrue(manifest_path_for_config(config).exists())
 
-    def test_provider_status_short_circuits_on_unrecorded_runner_files(self) -> None:
+    def test_provider_status_does_not_short_circuit_on_legacy_venv_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = write_and_load_config(root)
@@ -77,12 +75,22 @@ class ProviderIntegrityTests(unittest.TestCase):
             runner.parent.mkdir(parents=True)
             runner.write_text("unrecorded\n", encoding="utf-8")
 
-            packet = provider_status_packet(config)
+            original = provider_status._watchers_status
+            provider_status._watchers_status = lambda config: {
+                "ok": True,
+                "partial": False,
+                "enabled": {"codegraphcontext-code": True, "grepai-memory": False},
+                "results": [],
+                "recoveryActions": [],
+            }
+            try:
+                packet = provider_status.provider_status_packet(config)
+            finally:
+                provider_status._watchers_status = original
 
-            self.assertFalse(packet["ok"])
-            self.assertEqual(packet["state"], "runnerIntegrityFailed")
-            self.assertEqual(packet["integrity"]["state"], "manifestMissing")
-            self.assertEqual(packet["recoveryActions"][0]["action"], "runtime_install")
+            self.assertTrue(packet["ok"])
+            self.assertEqual(packet["state"], "checked")
+            self.assertEqual(packet["integrity"]["state"], "notInstalled")
 
 
 def write_and_load_config(root: Path):

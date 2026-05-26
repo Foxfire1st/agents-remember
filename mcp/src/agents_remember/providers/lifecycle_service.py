@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,6 @@ class ProviderLifecycleServiceConfig:
     settings_path: Path
     dry_run: bool = True
     timeout: int = 60
-    python: str = sys.executable
 
     def normalized(self) -> ProviderLifecycleServiceConfig:
         return ProviderLifecycleServiceConfig(
@@ -30,7 +28,6 @@ class ProviderLifecycleServiceConfig:
             settings_path=self.settings_path.resolve(),
             dry_run=self.dry_run,
             timeout=self.timeout,
-            python=self.python,
         )
 
 
@@ -59,7 +56,6 @@ def run_cgc_lifecycle(
         timeout=config.timeout,
         repo_id=stable_provider_id(repo_id) if repo_id else None,
         code_repo_root=None,
-        python=config.python,
         native_args=list(native_args or []),
         port=port,
         context=context,

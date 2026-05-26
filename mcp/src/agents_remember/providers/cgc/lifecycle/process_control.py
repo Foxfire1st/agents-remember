@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import signal
 import subprocess
 import time
 from pathlib import Path
@@ -19,15 +17,19 @@ from agents_remember.providers.cgc.lifecycle.core import (
     cgc_uses_settings,
 )
 from agents_remember.providers.cgc.lifecycle.installation import cgc_doctor
+from agents_remember.providers.cgc.lifecycle.runner import (
+    cgc_watcher_command,
+    cgc_watcher_inspect,
+    cgc_watcher_running,
+)
 from agents_remember.providers.context import (
     ContextProviderError,
     ensure_cgc_runtime_layout,
     write_provider_state,
 )
-from agents_remember.providers.lifecycle.command_runner import popen_detached_command
+from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.docker_runtime import docker_command
 from agents_remember.providers.lifecycle.process_status import (
-    process_alive,
-    process_cmdline,
     require_durable_process_namespace,
 )
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
@@ -40,7 +42,7 @@ def cgc_start_dry_run_result(layout: Any) -> dict[str, Any]:
         "ok": True,
         "repoId": layout.repo_id,
         "dryRun": True,
-        "command": [layout.cgc_executable().as_posix(), "watch", layout.code_repo_root.as_posix()],
+        "command": cgc_watcher_command(layout),
         "cwd": layout.watch_cwd.as_posix(),
         "env": layout.env(),
     }
@@ -54,13 +56,10 @@ def cgc_start_backend(args: argparse.Namespace, layout: Any) -> dict[str, Any] |
 
 
 def cgc_running_process_result(
-    layout: Any, backend_result: dict[str, Any] | None
+    args: argparse.Namespace, layout: Any, backend_result: dict[str, Any] | None
 ) -> dict[str, Any] | None:
-    process_state = read_json(layout.state_file).get("process", {})
-    if not isinstance(process_state, dict):
-        return None
-    pid = process_state.get("pid")
-    if not isinstance(pid, int) or not process_alive(pid):
+    inspect_data = cgc_watcher_inspect(args, layout)
+    if not cgc_watcher_running(args, layout):
         return None
     return {
         "provider": "codegraphcontext",
@@ -68,26 +67,22 @@ def cgc_running_process_result(
         "ok": True,
         "repoId": layout.repo_id,
         "alreadyRunning": True,
-        "pid": pid,
-        "logFile": process_state.get("logFile", layout.watch_log_file.as_posix()),
+        "containerName": layout.watcher_container_name,
+        "containerId": inspect_data.get("Id") if inspect_data else None,
+        "logFile": layout.watch_log_file.as_posix(),
         "backend": backend_result,
     }
 
 
-def cgc_start_watch_process(layout: Any) -> Any:
+def cgc_start_watch_process(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
     watch_log = layout.watch_log_file
     watch_log.parent.mkdir(parents=True, exist_ok=True)
-    with watch_log.open("ab") as log_handle:
-        return popen_detached_command(
-            [layout.cgc_executable().as_posix(), "watch", layout.code_repo_root.as_posix()],
-            cwd=layout.watch_cwd,
-            env=layout.env(),
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-        )
+    return run_command(
+        cgc_watcher_command(layout), cwd=layout.coordination_root, timeout=args.timeout
+    )
 
 
-def cgc_write_start_state(layout: Any, process: Any) -> None:
+def cgc_write_start_state(layout: Any, result: dict[str, Any]) -> None:
     write_provider_state(
         layout,
         {
@@ -96,9 +91,11 @@ def cgc_write_start_state(layout: Any, process: Any) -> None:
             "codeRepoRoot": layout.code_repo_root.as_posix(),
             "runtimeRoot": layout.runtime_root.as_posix(),
             "process": {
-                "pid": process.pid,
+                "pid": None,
+                "containerName": layout.watcher_container_name,
                 "logFile": layout.watch_log_file.as_posix(),
-                "mode": "watch",
+                "mode": "docker-container-watch",
+                "returncode": result["returncode"],
             },
             "lastAction": "start",
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -116,7 +113,7 @@ def cgc_start_preflight(
     backend_result = cgc_start_backend(args, layout)
     if backend_result is not None and not backend_result.get("ok"):
         return backend_result, backend_result
-    return cgc_running_process_result(layout, backend_result), backend_result
+    return cgc_running_process_result(args, layout, backend_result), backend_result
 
 
 def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
@@ -129,15 +126,16 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
     doctor = cgc_doctor(args)
     if not doctor["ok"]:
         return {**doctor, "action": "start", "ok": False, "repoId": layout.repo_id}
-    process = cgc_start_watch_process(layout)
+    process = cgc_start_watch_process(args, layout)
     cgc_write_start_state(layout, process)
     return {
         "provider": "codegraphcontext",
         "action": "start",
-        "ok": True,
+        "ok": process["returncode"] == 0,
         "repoId": layout.repo_id,
-        "pid": process.pid,
+        "containerName": layout.watcher_container_name,
         "logFile": layout.watch_log_file.as_posix(),
+        "command": process,
         "backend": backend_result,
     }
 
@@ -231,100 +229,68 @@ def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def cgc_stop_pid_state(layout: Any) -> tuple[dict[str, Any], int | None, dict[str, Any] | None]:
-    state = read_json(layout.state_file)
-    process_state = state.get("process", {})
-    if not isinstance(process_state, dict):
-        process_state = {}
-    pid = process_state.get("pid")
-    if isinstance(pid, int):
-        return state, pid, None
-    return state, None, {
-        "provider": "codegraphcontext",
-        "action": "stop",
-        "ok": True,
-        "repoId": layout.repo_id,
-        "message": "no managed pid",
-    }
-
-
-def cgc_validate_stop_pid(layout: Any, pid: int) -> dict[str, Any] | None:
-    cmdline = process_cmdline(pid)
-    if not cmdline or "cgc" in cmdline or "codegraphcontext" in cmdline.lower():
-        return None
-    return {
-        "provider": "codegraphcontext",
-        "action": "stop",
-        "ok": False,
-        "repoId": layout.repo_id,
-        "message": "managed pid no longer looks like a CGC process",
-        "pid": pid,
-        "cmdline": cmdline,
-    }
-
-
-def cgc_stop_dry_run_result(layout: Any, pid: int) -> dict[str, Any]:
+def cgc_stop_dry_run_result(layout: Any) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "stop",
         "ok": True,
         "repoId": layout.repo_id,
         "dryRun": True,
-        "pid": pid,
+        "command": [docker_command(), "rm", "-f", layout.watcher_container_name],
     }
 
 
-def cgc_mark_stopped(layout: Any, state: dict[str, Any], pid: int) -> None:
-    if process_alive(pid):
-        os.kill(pid, signal.SIGTERM)
+def cgc_mark_stopped(layout: Any, result: dict[str, Any]) -> None:
+    state = read_json(layout.state_file)
     state["process"] = {
-        "pid": pid,
+        "pid": None,
         "alive": False,
+        "containerName": layout.watcher_container_name,
+        "mode": "docker-container-watch",
+        "returncode": result["returncode"],
         "stoppedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     state["lastAction"] = "stop"
     write_json(layout.state_file, state)
 
 
-def cgc_stop_preflight(
-    args: argparse.Namespace, layout: Any
-) -> tuple[dict[str, Any], int | None, dict[str, Any] | None]:
+def cgc_stop_preflight(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
     if not args.dry_run:
         require_durable_process_namespace("cgc stop")
-    state, pid, result = cgc_stop_pid_state(layout)
-    return cgc_stop_pid_preflight(args, layout, state, pid, result)
-
-
-def cgc_stop_pid_preflight(
-    args: argparse.Namespace,
-    layout: Any,
-    state: dict[str, Any],
-    pid: int | None,
-    result: dict[str, Any] | None,
-) -> tuple[dict[str, Any], int | None, dict[str, Any] | None]:
-    if result or pid is None:
-        return state, pid, result
-    pid_error = cgc_validate_stop_pid(layout, pid)
-    if pid_error or not args.dry_run:
-        return state, pid, pid_error
-    return state, pid, cgc_stop_dry_run_result(layout, pid)
+    if args.dry_run:
+        return cgc_stop_dry_run_result(layout)
+    if not cgc_watcher_running(args, layout):
+        return {
+            "provider": "codegraphcontext",
+            "action": "stop",
+            "ok": True,
+            "repoId": layout.repo_id,
+            "message": "watcher container is not running",
+            "containerName": layout.watcher_container_name,
+        }
+    return None
 
 
 def cgc_stop(args: argparse.Namespace) -> dict[str, Any]:
     if cgc_uses_settings(args) and args.repo_id is None:
         return cgc_stop_all(args)
     layout = cgc_layout_from_args(args)
-    state, pid, result = cgc_stop_preflight(args, layout)
+    result = cgc_stop_preflight(args, layout)
     if result:
         return result
-    assert pid is not None
-    cgc_mark_stopped(layout, state, pid)
+    command_result = run_command(
+        [docker_command(), "rm", "-f", layout.watcher_container_name],
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
+    )
+    cgc_mark_stopped(layout, command_result)
     return {
         "provider": "codegraphcontext",
         "action": "stop",
-        "ok": True,
+        "ok": command_result["returncode"] == 0,
         "repoId": layout.repo_id,
-        "pid": pid,
+        "containerName": layout.watcher_container_name,
+        "command": command_result,
     }
 
 

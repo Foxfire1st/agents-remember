@@ -34,7 +34,6 @@ BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
 BENCHMARK_SOURCE_IGNORE_PATHS = {Path("workspaces"), Path("user-runs")}
 MAX_REMOVE_ATTEMPTS = 6
 PROVIDER_DEPENDENCY_PATHS = {
-    Path("_venvs"),
     Path("runners"),
 }
 PROVIDER_DATA_PATHS = {
@@ -398,7 +397,6 @@ def install_provider_dependencies_from_settings(
                 json=True,
                 repo_id=None,
                 code_repo_root=None,
-                python=sys.executable,
             )
             results.append(lifecycle.cgc_install_all(cgc_args))
     finally:
@@ -449,10 +447,9 @@ def install_runtime(
     remove_path(coordination_root / "scripts", summary, dry_run)
 
     # Provider runtime scaffolding is disposable during a full reinstall. A
-    # dependency-skipped copy must preserve provider venvs and live provider
-    # instance roots so script/docs-only updates do not break non-Dockerized
-    # watchers. Host provider binaries under providers/_bin are not a managed
-    # runtime contract.
+    # dependency-skipped copy preserves live provider runner state so
+    # script/docs-only updates do not interrupt Docker-owned watchers. Host
+    # provider binaries and venvs are not managed runtime contracts.
     # Durable provider data and logs are user-owned coordinator state and must
     # not be removed by either install mode.
     if install_provider_deps:

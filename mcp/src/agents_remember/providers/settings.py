@@ -9,6 +9,10 @@ from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
 from agents_remember.providers.context import (
+    CGC_NETWORK_NAME,
+    CGC_PIN,
+    CGC_RUNNER_IMAGE_REPOSITORY,
+    CGC_WATCHER_CONTAINER_PREFIX,
     GREPAI_NETWORK_NAME,
     GREPAI_OLLAMA_CONTAINER_NAME,
     GREPAI_OLLAMA_IMAGE,
@@ -155,6 +159,7 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
 
 
 def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str, Any]:
+    version = CGC_PIN.split("==", 1)[1]
     return {
         "type": "relationship",
         "scope": "code",
@@ -165,11 +170,6 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
         ],
         "runtimeRoot": provider.runtime_root.as_posix(),
         "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-        "venvRoot": config.coordination_root.joinpath(
-            "providers",
-            "_venvs",
-            "codegraphcontext",
-        ).as_posix(),
         "requirementsFile": config.coordination_root.joinpath(
             "providers",
             "requirements",
@@ -181,10 +181,24 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
             "codegraphcontext",
         ).as_posix(),
         "stateFileTemplate": "<instanceRoot>/provider-state.json",
+        "runtime": {
+            "mode": "docker",
+            "runner": {
+                "image": f"{CGC_RUNNER_IMAGE_REPOSITORY}:{version}",
+                "buildRoot": provider.runtime_root.joinpath("image").as_posix(),
+                "imageLockFile": config.coordination_root.joinpath(
+                    "providers",
+                    "requirements",
+                    "codegraphcontext-runner-docker.lock",
+                ).as_posix(),
+                "containerNameTemplate": f"{CGC_WATCHER_CONTAINER_PREFIX}-<repoId>",
+            },
+        },
         "backend": {
             "id": "codegraphcontext-falkordb",
             "type": "falkordb-remote",
             "mode": "docker",
+            "network": {"name": CGC_NETWORK_NAME},
             "image": "falkordb/falkordb:v4.18.7",
             "imageLockFile": config.coordination_root.joinpath(
                 "providers",

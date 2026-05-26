@@ -96,7 +96,8 @@ see `examples/mcp/settings.example.json`.
 The MCP settings file replaces the removed coordinator context-provider JSON
 example. It names the allowed repositories and provider ids once, then the
 server derives provider lifecycle settings such as roots, data directories,
-logs, venvs, binaries, backend containers, and watch settings internally.
+logs, Docker runner images/containers, backend containers, Docker networks, and
+watch settings internally.
 
 ```json
 {

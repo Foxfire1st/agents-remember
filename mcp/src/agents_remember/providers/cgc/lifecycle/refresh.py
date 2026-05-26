@@ -18,12 +18,13 @@ from agents_remember.providers.cgc.lifecycle.process_control import (
     cgc_backend_all_error,
     cgc_layout_action_results,
 )
+from agents_remember.providers.cgc.lifecycle.runner import cgc_docker_command
 from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
 def cgc_refresh_command(layout: Any) -> list[str]:
-    return [layout.cgc_executable().as_posix(), "index", layout.code_repo_root.as_posix(), "--force"]
+    return cgc_docker_command(layout, ["index", layout.code_repo_root.as_posix(), "--force"])
 
 
 def cgc_refresh_dry_result(layout: Any, command: list[str]) -> dict[str, Any]:
@@ -85,7 +86,7 @@ def cgc_refresh(args: argparse.Namespace) -> dict[str, Any]:
     early_result, backend_result = cgc_refresh_preflight(args, layout, command)
     if early_result:
         return early_result
-    result = run_command(command, cwd=layout.runtime_root, env=layout.env(), timeout=args.timeout)
+    result = run_command(command, cwd=layout.coordination_root, timeout=args.timeout)
     cgc_write_refresh_state(layout, result)
     return {
         "provider": "codegraphcontext",

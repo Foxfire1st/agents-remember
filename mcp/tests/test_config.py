@@ -137,6 +137,10 @@ class McpConfigTests(unittest.TestCase):
                     / "falkordb"
                 ).as_posix(),
             )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["backend"]["network"]["name"],
+                "ar-cgc-code",
+            )
 
     def test_harness_skill_root_is_none_without_registration_folder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -12,7 +12,7 @@ from agents_remember.mcp.config import McpRuntimeConfig
 MANIFEST_VERSION = 1
 IGNORED_NAMES = {"__pycache__"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
-WATCHED_PROVIDER_PATHS = (Path("providers") / "_venvs",)
+WATCHED_PROVIDER_PATHS: tuple[Path, ...] = ()
 IGNORED_RECORDED_PROVIDER_PATHS = (Path("providers") / "_bin",)
 
 

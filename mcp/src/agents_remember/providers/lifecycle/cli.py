@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -69,11 +68,6 @@ def add_cgc_common_args(parser: argparse.ArgumentParser) -> None:
         "--repo-id", default=argparse.SUPPRESS, help="Stable provider id for this code repository."
     )
     parser.add_argument("--code-repo-root", type=Path, default=argparse.SUPPRESS)
-    parser.add_argument(
-        "--python",
-        default=argparse.SUPPRESS,
-        help="Python executable used to create the provider venv.",
-    )
 
 
 def add_cgc_action_parser(
@@ -92,7 +86,6 @@ def normalize_cgc_args(args: argparse.Namespace) -> None:
         "from_settings": None,
         "repo_id": None,
         "code_repo_root": None,
-        "python": sys.executable,
     }.items():
         if not hasattr(args, key):
             setattr(args, key, value)
