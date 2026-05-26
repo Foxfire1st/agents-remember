@@ -251,20 +251,48 @@ def grepai_search_payload(
     config: McpRuntimeConfig,
     query: str,
     *,
+    repo_ids: list[str] | None = None,
+    all_repos: bool = True,
+    limit: int = 10,
+    output_format: str = "json",
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return grepai_search_tool(config, query=query, dry_run=dry_run, timeout=timeout)
+    return grepai_search_tool(
+        config,
+        query=query,
+        repo_ids=repo_ids,
+        all_repos=all_repos,
+        limit=limit,
+        output_format=output_format,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
 
 
 def grepai_trace_payload(
     config: McpRuntimeConfig,
-    query: str,
+    trace_action: str,
+    symbol: str,
     *,
+    repo_ids: list[str] | None = None,
+    all_repos: bool = True,
+    depth: int | None = None,
+    output_format: str = "json",
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return grepai_trace_tool(config, query=query, dry_run=dry_run, timeout=timeout)
+    return grepai_trace_tool(
+        config,
+        trace_action=trace_action,
+        symbol=symbol,
+        repo_ids=repo_ids,
+        all_repos=all_repos,
+        depth=depth,
+        output_format=output_format,
+        dry_run=dry_run,
+        timeout=timeout,
+    )
 
 
 def cgc_symbol_search_payload(

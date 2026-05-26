@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,10 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
 )
 from agents_remember.providers import lifecycle_service
 from agents_remember.providers.integrity import check_provider_runner_integrity
-from agents_remember.providers.settings import write_lifecycle_settings
+from agents_remember.providers.settings import (
+    lifecycle_settings_from_config,
+    write_lifecycle_settings,
+)
 from agents_remember.providers.status import provider_status_packet
 from agents_remember.worktrees import git_worktree_manager
 
@@ -221,9 +225,30 @@ def grepai_search_tool(
     config: McpRuntimeConfig,
     *,
     query: str,
+    repo_ids: list[str] | None = None,
+    all_repos: bool = True,
+    limit: int = 10,
+    output_format: str = "json",
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
+    selection = _grepai_project_selection(
+        config,
+        repo_ids=repo_ids,
+        all_repos=all_repos,
+        allow_multiple=True,
+    )
+    native_args = [
+        "search",
+        _required_text(query, "query"),
+        "--workspace",
+        selection.workspace,
+        "--limit",
+        str(_positive_int(limit, "limit")),
+        _grepai_output_flag(output_format),
+    ]
+    for project_id in selection.project_ids:
+        native_args.extend(["--project", project_id])
     return _provider_operation_result(
         config,
         operation="grepai_search",
@@ -232,7 +257,7 @@ def grepai_search_tool(
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
             action="run",
-            native_args=["search", query],
+            native_args=native_args,
         ),
     )
 
@@ -240,10 +265,36 @@ def grepai_search_tool(
 def grepai_trace_tool(
     config: McpRuntimeConfig,
     *,
-    query: str,
+    trace_action: str,
+    symbol: str,
+    repo_ids: list[str] | None = None,
+    all_repos: bool = True,
+    depth: int | None = None,
+    output_format: str = "json",
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
+    action = _grepai_trace_action(trace_action)
+    if depth is not None and action != "graph":
+        raise ValueError("grepai_trace depth is only supported for trace_action='graph'")
+    selection = _grepai_project_selection(
+        config,
+        repo_ids=repo_ids,
+        all_repos=all_repos,
+        allow_multiple=False,
+    )
+    native_args = [
+        "trace",
+        action,
+        _required_text(symbol, "symbol"),
+        "--workspace",
+        selection.workspace,
+        _grepai_output_flag(output_format),
+    ]
+    if depth is not None:
+        native_args.extend(["--depth", str(_positive_int(depth, "depth"))])
+    for project_id in selection.project_ids:
+        native_args.extend(["--project", project_id])
     return _provider_operation_result(
         config,
         operation="grepai_trace",
@@ -252,7 +303,7 @@ def grepai_trace_tool(
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
             action="run",
-            native_args=["trace", query],
+            native_args=native_args,
         ),
     )
 
@@ -406,6 +457,145 @@ def _cgc_run_tool(
 def _required_text(value: str, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a non-empty string")
+    return value
+
+
+@dataclass(frozen=True)
+class GrepaiProjectSelection:
+    workspace: str
+    project_ids: tuple[str, ...]
+
+
+def _grepai_project_selection(
+    config: McpRuntimeConfig,
+    *,
+    repo_ids: list[str] | None,
+    all_repos: bool,
+    allow_multiple: bool,
+) -> GrepaiProjectSelection:
+    provider_settings = _grepai_provider_settings(config)
+    workspace = _required_text(
+        str(provider_settings.get("workspace", "agents-remember-memory")),
+        "grepai workspace",
+    )
+    project_by_repo = _grepai_project_ids_by_repo(config, provider_settings)
+    selected_repo_ids = _normalized_repo_ids(repo_ids)
+    if not selected_repo_ids:
+        return _grepai_workspace_selection(workspace, all_repos)
+
+    _validate_grepai_project_selection(
+        config,
+        selected_repo_ids=selected_repo_ids,
+        project_by_repo=project_by_repo,
+        allow_multiple=allow_multiple,
+    )
+    return GrepaiProjectSelection(
+        workspace=workspace,
+        project_ids=tuple(project_by_repo[repo_id] for repo_id in selected_repo_ids),
+    )
+
+
+def _grepai_workspace_selection(workspace: str, all_repos: bool) -> GrepaiProjectSelection:
+    if all_repos:
+        return GrepaiProjectSelection(workspace=workspace, project_ids=())
+    raise ValueError("repo_ids is required when all_repos is false")
+
+
+def _validate_grepai_project_selection(
+    config: McpRuntimeConfig,
+    *,
+    selected_repo_ids: tuple[str, ...],
+    project_by_repo: dict[str, str],
+    allow_multiple: bool,
+) -> None:
+    if not allow_multiple and len(selected_repo_ids) > 1:
+        raise ValueError(
+            "grepai_trace supports at most one repo_id because GrepAI trace has one --project flag"
+        )
+    _raise_unknown_grepai_repo_ids(config, selected_repo_ids)
+    _raise_missing_grepai_projects(selected_repo_ids, project_by_repo)
+
+
+def _raise_unknown_grepai_repo_ids(
+    config: McpRuntimeConfig,
+    selected_repo_ids: tuple[str, ...],
+) -> None:
+    unknown = [repo_id for repo_id in selected_repo_ids if repo_id not in config.repositories]
+    if unknown:
+        raise ValueError(
+            "unknown repo_ids for MCP configuration: "
+            f"{', '.join(unknown)}; configured repo_ids: {', '.join(config.allowed_repo_ids)}"
+        )
+
+
+def _raise_missing_grepai_projects(
+    selected_repo_ids: tuple[str, ...],
+    project_by_repo: dict[str, str],
+) -> None:
+    missing_projects = [repo_id for repo_id in selected_repo_ids if repo_id not in project_by_repo]
+    if missing_projects:
+        raise ValueError(
+            "repo_ids are configured but not indexed by grepai-memory: "
+            f"{', '.join(missing_projects)}"
+        )
+
+
+def _grepai_provider_settings(config: McpRuntimeConfig) -> dict[str, Any]:
+    settings = lifecycle_settings_from_config(config)
+    provider = settings.get("contextProviders", {}).get("providers", {}).get("grepai-memory")
+    if not isinstance(provider, dict):
+        raise ValueError("grepai-memory provider is not configured")
+    return provider
+
+
+def _grepai_project_ids_by_repo(
+    config: McpRuntimeConfig,
+    provider_settings: dict[str, Any],
+) -> dict[str, str]:
+    roots = provider_settings.get("roots")
+    if not isinstance(roots, list):
+        raise ValueError("grepai-memory provider roots are not configured")
+
+    project_by_repo: dict[str, str] = {}
+    for root in roots:
+        if not isinstance(root, dict):
+            continue
+        project_id = root.get("projectId")
+        if isinstance(project_id, str) and project_id in config.repositories:
+            project_by_repo[project_id] = project_id
+    return project_by_repo
+
+
+def _normalized_repo_ids(repo_ids: list[str] | None) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for repo_id in repo_ids or []:
+        value = _required_text(repo_id, "repo_id")
+        if value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return tuple(normalized)
+
+
+def _positive_int(value: int, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return value
+
+
+def _grepai_output_flag(output_format: str) -> str:
+    value = _required_text(output_format, "output_format").lower()
+    if value == "json":
+        return "--json"
+    if value == "toon":
+        return "--toon"
+    raise ValueError("output_format must be json or toon")
+
+
+def _grepai_trace_action(trace_action: str) -> str:
+    value = _required_text(trace_action, "trace_action")
+    if value not in {"callers", "callees", "graph"}:
+        raise ValueError("grepai_trace trace_action must be callers, callees, or graph")
     return value
 
 

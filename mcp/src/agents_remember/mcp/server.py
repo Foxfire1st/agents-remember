@@ -159,18 +159,46 @@ def create_server(config: McpRuntimeConfig) -> Any:
     @server.tool()
     def grepai_search(
         query: str,
+        repo_ids: list[str] | None = None,
+        all_repos: bool = True,
+        limit: int = 10,
+        output_format: str = "json",
         dry_run: bool = True,
         timeout: int | None = None,
     ) -> dict[str, Any]:
-        return grepai_search_payload(config, query, dry_run=dry_run, timeout=timeout)
+        return grepai_search_payload(
+            config,
+            query,
+            repo_ids=repo_ids,
+            all_repos=all_repos,
+            limit=limit,
+            output_format=output_format,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
 
     @server.tool()
     def grepai_trace(
-        query: str,
+        trace_action: str,
+        symbol: str,
+        repo_ids: list[str] | None = None,
+        all_repos: bool = True,
+        depth: int | None = None,
+        output_format: str = "json",
         dry_run: bool = True,
         timeout: int | None = None,
     ) -> dict[str, Any]:
-        return grepai_trace_payload(config, query, dry_run=dry_run, timeout=timeout)
+        return grepai_trace_payload(
+            config,
+            trace_action,
+            symbol,
+            repo_ids=repo_ids,
+            all_repos=all_repos,
+            depth=depth,
+            output_format=output_format,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
 
     @server.tool()
     def cgc_symbol_search(

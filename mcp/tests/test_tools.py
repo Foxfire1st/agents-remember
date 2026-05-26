@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -8,6 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+from mcp.client.stdio import stdio_client
+
+from mcp import ClientSession, StdioServerParameters
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -27,6 +32,8 @@ from agents_remember.mcp.tools import (
     codex_benchmark_prepare_payload,
     codex_benchmark_run_payload,
     context_packet_payload,
+    grepai_search_payload,
+    grepai_trace_payload,
     memory_baseline_status_payload,
     memory_carryover_plan_payload,
     memory_init_payload,
@@ -489,6 +496,116 @@ class McpToolTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "function"):
                 cgc_callees_payload(config, "agents-remember-md", "")
 
+    def test_grepai_search_builds_workspace_wide_and_multi_repo_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            (root / "workspace" / "other-repo").mkdir(parents=True)
+            (root / "ar-coordination" / "memory-repos" / "ar-other-repo").mkdir(parents=True)
+            payload_data = settings_payload(root)
+            payload_data["repositories"]["other-repo"] = {}
+            path = root / "mcp-settings.json"
+            write_json(path, payload_data)
+            config = load_config(path)
+
+            workspace_payload = grepai_search_payload(
+                config,
+                "provider lifecycle",
+                dry_run=True,
+            )
+            scoped_payload = grepai_search_payload(
+                config,
+                "provider lifecycle",
+                repo_ids=["agents-remember-md", "other-repo"],
+                limit=5,
+                output_format="toon",
+                dry_run=True,
+            )
+
+        self.assertTrue(workspace_payload["ok"])
+        self.assertEqual(
+            workspace_payload["command"][4:],
+            [
+                "search",
+                "provider lifecycle",
+                "--workspace",
+                "agents-remember-memory",
+                "--limit",
+                "10",
+                "--json",
+            ],
+        )
+        self.assertNotIn("--project", workspace_payload["command"])
+
+        self.assertTrue(scoped_payload["ok"])
+        self.assertEqual(
+            scoped_payload["command"][4:],
+            [
+                "search",
+                "provider lifecycle",
+                "--workspace",
+                "agents-remember-memory",
+                "--limit",
+                "5",
+                "--toon",
+                "--project",
+                "agents-remember-md",
+                "--project",
+                "other-repo",
+            ],
+        )
+
+    def test_grepai_payloads_reject_invalid_scope_and_trace_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with self.assertRaisesRegex(ValueError, "unknown repo_ids"):
+                grepai_search_payload(config, "provider lifecycle", repo_ids=["unknown-repo"])
+            with self.assertRaisesRegex(ValueError, "repo_ids is required"):
+                grepai_search_payload(config, "provider lifecycle", all_repos=False)
+            with self.assertRaisesRegex(ValueError, "trace_action"):
+                grepai_trace_payload(config, "neighbors", "resolve_context")
+            with self.assertRaisesRegex(ValueError, "depth"):
+                grepai_trace_payload(config, "callers", "resolve_context", depth=2)
+
+    def test_grepai_trace_builds_explicit_action_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            payload = grepai_trace_payload(
+                config,
+                "graph",
+                "resolve_context",
+                repo_ids=["agents-remember-md"],
+                depth=3,
+                dry_run=True,
+            )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(
+            payload["command"][4:],
+            [
+                "trace",
+                "graph",
+                "resolve_context",
+                "--workspace",
+                "agents-remember-memory",
+                "--json",
+                "--depth",
+                "3",
+                "--project",
+                "agents-remember-md",
+            ],
+        )
+
     def test_provider_integrity_ignores_legacy_cgc_venv_in_docker_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -547,6 +664,81 @@ class McpToolTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["state"], "checked")
         self.assertEqual(payload["fileCount"], 0)
+
+
+REAL_MCP_CONFIG = os.environ.get("AGENTS_REMEMBER_REAL_MCP_CONFIG")
+
+
+@unittest.skipUnless(
+    REAL_MCP_CONFIG,
+    "set AGENTS_REMEMBER_REAL_MCP_CONFIG to run real MCP integration tests",
+)
+class RealMcpIntegrationTests(unittest.TestCase):
+    def test_real_mcp_grepai_search_dry_run_uses_workspace_scope(self) -> None:
+        payload = asyncio.run(
+            self.call_tool(
+                "grepai_search",
+                {
+                    "query": "provider lifecycle",
+                    "limit": 1,
+                    "output_format": "json",
+                    "dry_run": True,
+                },
+            )
+        )
+
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(
+            payload["command"][4:],
+            [
+                "search",
+                "provider lifecycle",
+                "--workspace",
+                "agents-remember-memory",
+                "--limit",
+                "1",
+                "--json",
+            ],
+        )
+        self.assertNotIn("--project", payload["command"])
+
+    def test_real_mcp_grepai_search_runs_with_project_filter(self) -> None:
+        payload = asyncio.run(
+            self.call_tool(
+                "grepai_search",
+                {
+                    "query": "provider lifecycle",
+                    "repo_ids": ["agents-remember-md"],
+                    "limit": 1,
+                    "output_format": "json",
+                    "dry_run": False,
+                    "timeout": 60,
+                },
+            )
+        )
+
+        self.assertTrue(payload["ok"], payload)
+        command = payload["command"]["command"]
+        self.assertIn("--workspace", command)
+        self.assertIn("agents-remember-memory", command)
+        self.assertIn("--project", command)
+        self.assertIn("agents-remember-md", command)
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> dict:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "agents_remember.mcp", "--config", str(REAL_MCP_CONFIG)],
+            env={**os.environ, "PYTHONPATH": str(MCP_SRC)},
+        )
+        async with (
+            stdio_client(params) as (read, write),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+            result = await session.call_tool(name, arguments)
+        if result.structuredContent is not None:
+            return dict(result.structuredContent)
+        return json.loads(result.content[0].text)
 
 
 def initialize_context_fixture(root: Path) -> None:

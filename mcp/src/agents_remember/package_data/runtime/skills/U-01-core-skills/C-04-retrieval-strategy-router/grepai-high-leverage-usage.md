@@ -14,30 +14,29 @@ known.
 ## Managed Invocation
 
 Request GrepAI through the Agents Remember MCP provider tools. The MCP uses the
-runtime-owned GrepAI binary and provider-owned environment so workspace config,
+configured Docker runner and provider-owned environment so workspace config,
 logs, state, and cache stay under `providers/runners/grepai/` instead of using a
 global user install.
 
 ```text
-grepai_search(query="<query>", dry_run=false)
-grepai_trace(query="<query>", dry_run=false)
+grepai_search(query="<query>", all_repos=true, limit=5, output_format="json", dry_run=false)
+grepai_search(query="<query>", repo_ids=["<repoId>", "<repoId>"], limit=5, output_format="json", dry_run=false)
+grepai_trace(trace_action="callers", symbol="<symbol>", output_format="json", dry_run=false)
 ```
 
 The managed workspace name comes from the MCP-generated GrepAI lifecycle
-settings; examples use `<workspace>`.
+settings. `repo_ids` accepts only repositories configured through MCP.
 
 ## Choosing A Command
 
 | Question | Command Pattern |
 | --- | --- |
-| Which memory project or route talks about this vague concept? | `search "<query>" --workspace <workspace> --toon --compact --limit <n>` |
-| I need compact machine-readable anchors only. | `search "<query>" --workspace <workspace> --json --compact --limit <n>` |
-| I need a snippet to understand why the result matched. | `search "<query>" --workspace <workspace> --json --limit <n>` |
-| I know the target memory project. | Add `--project <projectId>`; repeat it for a small project set. |
-| I know the likely onboarding route or folder. | Add `--path <path-prefix>`. |
-| I need a symbol neighborhood inside a GrepAI-indexed source project. | `trace callers`, `trace callees`, or `trace graph`; prefer CGC when available for code relationships. |
-| I need provider coverage/health, not retrieval. | `workspace status <workspace>`, `status --no-ui`, or lifecycle `grepai status`. |
-| I need to estimate token savings. | `stats --json` or `stats --history --json`. |
+| Which memory project or route talks about this vague concept? | `grepai_search(query="<query>", all_repos=true, limit=<n>, output_format="json", dry_run=false)` |
+| I need machine-readable anchors. | `grepai_search(query="<query>", all_repos=true, limit=<n>, output_format="json", dry_run=false)` |
+| I know the target memory project. | Add `repo_ids=["<repoId>"]`; repeat repo ids for a small configured set. |
+| I know the likely onboarding route or folder. | Search the configured repo, then open the selected paths with source/onboarding reads. |
+| I need a symbol neighborhood inside a GrepAI-indexed source project. | `grepai_trace(trace_action="callers"|"callees"|"graph", symbol="<symbol>", output_format="json", dry_run=false)`; prefer CGC when available for code relationships. |
+| I need provider coverage/health, not retrieval. | `provider_status()` |
 
 ## Cross-Memory Semantic Routing
 
@@ -47,17 +46,23 @@ Use broad workspace search when the task is vague and the missing packet is
 ```text
 grepai_search(
   query="where is the retry backoff behavior documented",
+  all_repos=true,
+  limit=5,
+  output_format="json",
   dry_run=false,
 )
 ```
 
-Synthetic output shape:
+Synthetic JSON shape:
 
-```text
-results[3]{project,path,lines,score}:
-  1 | <memoryProject> | onboarding/src/jobs/retry-policy.ts.md | 18-34 | 0.84
-  2 | <memoryProject> | onboarding/src/http/client.ts.md | 41-59 | 0.78
-  3 | <memoryProject> | onboarding/overview.md | 72-81 | 0.73
+```json
+{
+  "results": [
+    {"project": "<memoryProject>", "path": "onboarding/src/jobs/retry-policy.ts.md", "startLine": 18, "endLine": 34, "score": 0.84},
+    {"project": "<memoryProject>", "path": "onboarding/src/http/client.ts.md", "startLine": 41, "endLine": 59, "score": 0.78},
+    {"project": "<memoryProject>", "path": "onboarding/overview.md", "startLine": 72, "endLine": 81, "score": 0.73}
+  ]
+}
 ```
 
 Use the result as a route hint. Open the selected overview, sidecar, or source
@@ -71,11 +76,14 @@ project is relevant. This avoids cross-repo noise and keeps the answer small.
 ```text
 grepai_search(
   query="validation rules for imported records",
+  repo_ids=["<repoId>", "<repoId>"],
+  limit=5,
+  output_format="json",
   dry_run=false,
 )
 ```
 
-Synthetic compact JSON shape:
+Synthetic JSON shape:
 
 ```json
 {
@@ -92,17 +100,21 @@ Synthetic compact JSON shape:
 }
 ```
 
-Use compact JSON when an agent only needs anchors. If the matching reason is
-unclear, rerun without `--compact` for a small limit and inspect the snippet.
+Use JSON when an agent needs stable anchors. If the matching reason is unclear,
+keep the limit small and inspect the selected onboarding/source.
 
-## Route-Scoped Snippet Search
+## Route-Focused Snippet Search
 
-Use path scoping when you already know the likely route and need the most
-relevant sidecar or overview inside it.
+Use scoped search when you already know the likely repo and need the most
+relevant sidecar or overview inside it. If a returned path looks promising,
+open that onboarding/source file directly.
 
 ```text
 grepai_search(
   query="how rejected records are surfaced to operators",
+  repo_ids=["<repoId>"],
+  limit=3,
+  output_format="json",
   dry_run=false,
 )
 ```
@@ -137,7 +149,11 @@ GrepAI-indexed project is the only available source of symbol relationships.
 
 ```text
 grepai_trace(
-  query="processImportedRecord",
+  trace_action="graph",
+  symbol="processImportedRecord",
+  repo_ids=["<repoId>"],
+  depth=2,
+  output_format="json",
   dry_run=false,
 )
 ```
@@ -178,21 +194,16 @@ Watcher: running
 Last update: recent
 ```
 
-For lifecycle-managed health, prefer:
-
-```bash
-provider_status()
-```
-
 ## Practical Rules
 
-- Start broad with `--toon --compact` when the route is unknown.
-- Switch to `--json --compact` when an API caller needs stable anchors.
-- Rerun without `--compact` only when snippets are needed to choose between
-  close candidates.
-- Add `--project` as soon as the relevant memory root is known.
-- Add `--path` only after route discovery has already narrowed the search.
-- Keep `--limit` small, usually 3 to 8.
+- Start broad with `all_repos=true` when the route is unknown.
+- Use `output_format="json"` when an API caller needs stable anchors.
+- Keep the first MCP search small. If snippets are not enough to choose, inspect
+  the selected onboarding/source instead of widening the search reflexively.
+- Add `repo_ids` as soon as the relevant configured memory root is known.
+- Use source/onboarding reads after route discovery has narrowed the search;
+  the MCP GrepAI tools do not currently expose path scoping.
+- Keep `limit` small, usually 3 to 8.
 - Use GrepAI output as semantic discovery, not proof. Confirm with onboarding
   and bounded source reads before answering or editing.
 - Do not use a global GrepAI binary/config path in reusable instructions; use
