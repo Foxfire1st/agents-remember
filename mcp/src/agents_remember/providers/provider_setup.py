@@ -10,9 +10,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers import cgc_bundle, cgc_seed, cgc_setup, grepai_setup, setup_common
-from agents_remember.providers.cgc_seed import CgcSeedOptions
-from agents_remember.providers.cgc_setup import IsolatedCgcOptions
+from agents_remember.providers import setup_common
+from agents_remember.providers.cgc import bundle as cgc_bundle
+from agents_remember.providers.cgc import seed as cgc_seed
+from agents_remember.providers.cgc import setup as cgc_setup
+from agents_remember.providers.cgc.seed import CgcSeedOptions
+from agents_remember.providers.cgc.setup import IsolatedCgcOptions
+from agents_remember.providers.grepai import setup as grepai_setup
 
 command_display = setup_common.command_display
 context_providers = setup_common.context_providers

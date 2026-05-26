@@ -1,0 +1,610 @@
+"""CodeGraphContext backend container lifecycle."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+
+from agents_remember.providers.cgc.lifecycle.core import (
+    cgc_all_layouts_from_settings,
+    cgc_backend_settings,
+)
+from agents_remember.providers.context import (
+    ContextProviderError,
+    ensure_cgc_runtime_layout,
+)
+from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.docker_runtime import (
+    docker_command,
+    docker_container_port,
+    docker_container_running,
+    docker_data_mount_source,
+    docker_host_path_matches,
+    docker_inspect_container,
+    docker_repo_digest,
+    docker_wait_for_ping,
+)
+from agents_remember.providers.lifecycle.host_ports import allocate_host_port
+from agents_remember.providers.lifecycle.state_files import (
+    read_json,
+    write_json,
+)
+
+
+def cgc_primary_backend_context(
+    args: argparse.Namespace,
+) -> tuple[Path, dict[str, Any], Any, dict[str, Any]]:
+    settings_path, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    if not layouts:
+        raise ContextProviderError("codegraphcontext-code.roots must define at least one root")
+    layout = layouts[0]
+    return settings_path, provider_settings, layout, cgc_backend_settings(provider_settings, layout)
+
+
+def cgc_backend_ping(
+    args: argparse.Namespace,
+    layout: Any,
+    backend: dict[str, Any],
+    *,
+    running: bool,
+) -> dict[str, Any] | None:
+    if not running or args.dry_run:
+        return None
+    try:
+        return run_command(
+            [docker_command(), "exec", backend["containerName"], "redis-cli", "ping"],
+            cwd=layout.coordination_root,
+            timeout=15,
+        )
+    except (ContextProviderError, subprocess.TimeoutExpired, OSError) as error:
+        return {"returncode": 1, "stderr": str(error), "stdout": ""}
+
+
+def cgc_backend_runtime_details(
+    layout: Any,
+    backend: dict[str, Any],
+    state: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    actual_data_mount = docker_data_mount_source(inspect_data)
+    return {
+        "actualDataMount": actual_data_mount,
+        "dataMountMatches": cgc_backend_data_mount_matches(
+            inspect_data, actual_data_mount, layout.backend_data_root
+        ),
+        "falkordbEndpoint": cgc_backend_endpoint(
+            state,
+            backend,
+            inspect_data,
+            port_key="falkordb",
+            host_default_key="falkordbHost",
+            host_port_default_key="falkordbHostPort",
+            container_port_key="falkordbContainerPort",
+        ),
+        "browserEndpoint": cgc_backend_endpoint(
+            state,
+            backend,
+            inspect_data,
+            port_key="browser",
+            host_default_key="browserHost",
+            host_port_default_key="browserHostPort",
+            container_port_key="browserContainerPort",
+        ),
+    }
+
+
+def cgc_backend_data_mount_matches(
+    inspect_data: dict[str, Any] | None, actual_data_mount: str | None, expected: Path
+) -> bool:
+    return bool(inspect_data) and docker_host_path_matches(actual_data_mount, expected)
+
+
+def cgc_backend_endpoint(
+    state: dict[str, Any],
+    backend: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+    *,
+    port_key: str,
+    host_default_key: str,
+    host_port_default_key: str,
+    container_port_key: str,
+) -> tuple[Any, Any]:
+    inspected = cgc_container_endpoint(inspect_data, backend[container_port_key])
+    return inspected or cgc_state_endpoint(
+        state, port_key, backend[host_default_key], backend[host_port_default_key]
+    )
+
+
+def cgc_container_endpoint(
+    inspect_data: dict[str, Any] | None, container_port: int
+) -> tuple[Any, Any] | None:
+    if not inspect_data:
+        return None
+    return docker_container_port(inspect_data, container_port)
+
+
+def cgc_state_endpoint(
+    state: dict[str, Any], port_key: str, host_default: Any, port_default: Any
+) -> tuple[Any, Any]:
+    port_state = state.get("backend", {}).get("ports", {}).get(port_key, {})
+    return (
+        port_state.get("bindHost", host_default),
+        port_state.get("hostPort", port_default),
+    )
+
+
+def cgc_backend_status(args: argparse.Namespace) -> dict[str, Any]:
+    settings_path, _, layout, backend = cgc_primary_backend_context(args)
+    state = read_json(layout.backend_state_file)
+    inspect_data = cgc_backend_inspect(args, layout, backend)
+    running = docker_container_running(inspect_data)
+    ping = cgc_backend_ping(args, layout, backend, running=running)
+    details = cgc_backend_runtime_details(layout, backend, state, inspect_data)
+    falkordb_host, falkordb_port = details["falkordbEndpoint"]
+    browser_host, browser_port = details["browserEndpoint"]
+    return {
+        "provider": "codegraphcontext",
+        "action": "backend-status",
+        "ok": cgc_backend_status_ok(running, details, ping),
+        "dryRun": args.dry_run,
+        "settingsFile": settings_path.as_posix(),
+        "containerName": backend["containerName"],
+        "image": backend["image"],
+        "running": running,
+        "backendRuntimeRoot": layout.backend_root.as_posix(),
+        "backendDataRoot": layout.backend_data_root.as_posix(),
+        "dataMount": {
+            "expected": layout.backend_data_root.as_posix(),
+            "actual": details["actualDataMount"],
+            "matches": details["dataMountMatches"],
+        },
+        "ports": {
+            "falkordb": {
+                "bindHost": falkordb_host,
+                "hostPort": falkordb_port,
+                "containerPort": backend["falkordbContainerPort"],
+            },
+            "browser": {
+                "bindHost": browser_host,
+                "hostPort": browser_port,
+                "containerPort": backend["browserContainerPort"],
+            },
+        },
+        "browserUrl": cgc_browser_url(browser_host, browser_port),
+        "ping": ping,
+    }
+
+
+def cgc_backend_inspect(
+    args: argparse.Namespace, layout: Any, backend: dict[str, Any]
+) -> dict[str, Any] | None:
+    if args.dry_run:
+        return None
+    return docker_inspect_container(
+        backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
+    )
+
+
+def cgc_backend_status_ok(
+    running: bool, details: dict[str, Any], ping: dict[str, Any] | None
+) -> bool:
+    checks = [
+        bool(running),
+        bool(details["dataMountMatches"]),
+        ping is None or ping.get("returncode") == 0,
+    ]
+    return all(checks)
+
+
+def cgc_browser_url(host: str, port: int | str) -> str | None:
+    return None if str(port) == "auto" else f"http://{host}:{port}"
+
+
+def cgc_backend_start_context(
+    args: argparse.Namespace,
+) -> tuple[Path, Any, dict[str, Any]]:
+    settings_path, _, layout, backend = cgc_primary_backend_context(args)
+    ensure_cgc_runtime_layout(layout)
+    if backend["type"] != "falkordb-remote" or backend["mode"] != "docker":
+        raise ContextProviderError("managed CGC backend must be falkordb-remote docker")
+    return settings_path, layout, backend
+
+
+def cgc_backend_remove_mismatched_container(
+    args: argparse.Namespace,
+    layout: Any,
+    backend: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    if not inspect_data:
+        return inspect_data, None, None
+    if docker_host_path_matches(docker_data_mount_source(inspect_data), layout.backend_data_root):
+        return inspect_data, None, None
+    result = run_command(
+        [docker_command(), "rm", "-f", backend["containerName"]],
+        cwd=layout.coordination_root,
+        timeout=args.timeout,
+    )
+    if result["returncode"] != 0:
+        return inspect_data, result, {
+            "provider": "codegraphcontext",
+            "action": "backend-start",
+            "ok": False,
+            "command": result,
+        }
+    return None, result, None
+
+
+def cgc_backend_ports(
+    backend: dict[str, Any], inspect_data: dict[str, Any]
+) -> tuple[str, int | str, str, int | str]:
+    falkordb_host, falkordb_port = docker_container_port(
+        inspect_data, backend["falkordbContainerPort"]
+    ) or (backend["falkordbHost"], backend["falkordbHostPort"])
+    browser_host, browser_port = docker_container_port(
+        inspect_data, backend["browserContainerPort"]
+    ) or (backend["browserHost"], backend["browserHostPort"])
+    return falkordb_host, falkordb_port, browser_host, browser_port
+
+
+def cgc_backend_existing_start_result(
+    args: argparse.Namespace,
+    *,
+    settings_path: Path,
+    layout: Any,
+    backend: dict[str, Any],
+    inspect_data: dict[str, Any],
+) -> dict[str, Any]:
+    falkordb_host, falkordb_port, browser_host, browser_port = cgc_backend_ports(
+        backend, inspect_data
+    )
+    ping = docker_wait_for_ping(
+        backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
+    )
+    backend_state = cgc_backend_state(
+        layout,
+        backend,
+        settings_path=settings_path,
+        status="running",
+        falkordb_host=str(falkordb_host),
+        falkordb_port=int(falkordb_port),
+        browser_host=str(browser_host),
+        browser_port=int(browser_port),
+        image_digest=docker_repo_digest(backend["image"], cwd=layout.coordination_root, timeout=args.timeout),
+        container_id=str(inspect_data.get("Id", "")),
+    )
+    write_json(layout.backend_state_file, backend_state)
+    write_json(backend["imageLockFile"], backend_state["backend"]["imageLock"])
+    return {
+        "provider": "codegraphcontext",
+        "action": "backend-start",
+        "ok": True,
+        "alreadyRunning": True,
+        "containerName": backend["containerName"],
+        "ports": backend_state["backend"]["ports"],
+        "browserUrl": backend_state["backend"]["browserUrl"],
+        "dataMount": {
+            "expected": layout.backend_data_root.as_posix(),
+            "actual": docker_data_mount_source(inspect_data),
+            "matches": True,
+        },
+        "ping": ping,
+    }
+
+
+def cgc_backend_host_ports(args: argparse.Namespace, backend: dict[str, Any]) -> tuple[int, int]:
+    if args.dry_run:
+        falkordb = backend["falkordbHostPort"]
+        browser = backend["browserHostPort"]
+        return (
+            6379 if str(falkordb) == "auto" else int(falkordb),
+            3000 if str(browser) == "auto" else int(browser),
+        )
+    return (
+        allocate_host_port(backend["falkordbHost"], backend["falkordbHostPort"], 6379),
+        allocate_host_port(backend["browserHost"], backend["browserHostPort"], 3000),
+    )
+
+
+def cgc_backend_run_command_line(
+    layout: Any,
+    backend: dict[str, Any],
+    falkordb_port: int,
+    browser_port: int,
+) -> list[str]:
+    return [
+        docker_command(),
+        "run",
+        "-d",
+        "--name",
+        backend["containerName"],
+        "--restart",
+        "unless-stopped",
+        "-p",
+        f"{backend['falkordbHost']}:{falkordb_port}:{backend['falkordbContainerPort']}",
+        "-p",
+        f"{backend['browserHost']}:{browser_port}:{backend['browserContainerPort']}",
+        "-v",
+        f"{layout.backend_data_root!s}:/data",
+        "-e",
+        "REDIS_ARGS=--appendonly yes",
+        backend["image"],
+    ]
+
+
+def cgc_backend_planned_commands(
+    backend: dict[str, Any],
+    run_command_line: list[str],
+    inspect_data: dict[str, Any] | None,
+) -> list[list[str]]:
+    commands = [[docker_command(), "pull", backend["image"]]]
+    if inspect_data:
+        commands.append([docker_command(), "rm", backend["containerName"]])
+    commands.append(run_command_line)
+    return commands
+
+
+def cgc_backend_dry_run_result(
+    *,
+    settings_path: Path,
+    layout: Any,
+    backend: dict[str, Any],
+    commands: list[list[str]],
+    falkordb_port: int,
+    browser_port: int,
+) -> dict[str, Any]:
+    return {
+        "provider": "codegraphcontext",
+        "action": "backend-start",
+        "ok": True,
+        "dryRun": True,
+        "settingsFile": settings_path.as_posix(),
+        "commands": commands,
+        "backendRuntimeRoot": layout.backend_root.as_posix(),
+        "backendDataRoot": layout.backend_data_root.as_posix(),
+        "ports": {
+            "falkordb": {
+                "bindHost": backend["falkordbHost"],
+                "hostPort": falkordb_port,
+                "containerPort": backend["falkordbContainerPort"],
+            },
+            "browser": {
+                "bindHost": backend["browserHost"],
+                "hostPort": browser_port,
+                "containerPort": backend["browserContainerPort"],
+            },
+        },
+        "browserUrl": f"http://{backend['browserHost']}:{browser_port}",
+    }
+
+
+def cgc_run_checked_command(
+    command: list[str],
+    *,
+    layout: Any,
+    timeout: int,
+    action: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    result = run_command(command, cwd=layout.coordination_root, timeout=timeout)
+    if result["returncode"] == 0:
+        return result, None
+    return result, {
+        "provider": "codegraphcontext",
+        "action": action,
+        "ok": False,
+        "command": result,
+    }
+
+
+def cgc_backend_new_start_result(
+    args: argparse.Namespace,
+    *,
+    settings_path: Path,
+    layout: Any,
+    backend: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+    forced_remove_result: dict[str, Any] | None,
+    run_command_line: list[str],
+    falkordb_port: int,
+    browser_port: int,
+) -> dict[str, Any]:
+    pull_result, error = cgc_backend_pull(args, layout, backend)
+    if error:
+        return error
+
+    rm_result, error = cgc_backend_remove_existing(args, layout, backend, inspect_data)
+    if error:
+        return error
+
+    run_result, error = cgc_backend_run_container(args, layout, run_command_line)
+    if error:
+        return error
+
+    ping = docker_wait_for_ping(
+        backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
+    )
+    inspect_data = docker_inspect_container(
+        backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
+    )
+    backend_state = cgc_backend_state(
+        layout,
+        backend,
+        settings_path=settings_path,
+        status="running",
+        falkordb_host=backend["falkordbHost"],
+        falkordb_port=falkordb_port,
+        browser_host=backend["browserHost"],
+        browser_port=browser_port,
+        image_digest=docker_repo_digest(backend["image"], cwd=layout.coordination_root, timeout=args.timeout),
+        container_id=str(inspect_data.get("Id", "")) if inspect_data else None,
+    )
+    write_json(layout.backend_state_file, backend_state)
+    write_json(backend["imageLockFile"], backend_state["backend"]["imageLock"])
+    return {
+        "provider": "codegraphcontext",
+        "action": "backend-start",
+        "ok": True,
+        "containerName": backend["containerName"],
+        "ports": backend_state["backend"]["ports"],
+        "browserUrl": backend_state["backend"]["browserUrl"],
+        "commands": {
+            "pull": pull_result,
+            "remove": rm_result,
+            "forcedRemove": forced_remove_result,
+            "run": run_result,
+        },
+        "ping": ping,
+    }
+
+
+def cgc_backend_pull(
+    args: argparse.Namespace, layout: Any, backend: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    return cgc_run_checked_command(
+        [docker_command(), "pull", backend["image"]],
+        layout=layout,
+        timeout=args.timeout,
+        action="backend-start",
+    )
+
+
+def cgc_backend_remove_existing(
+    args: argparse.Namespace,
+    layout: Any,
+    backend: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not inspect_data:
+        return None, None
+    return cgc_run_checked_command(
+        [docker_command(), "rm", backend["containerName"]],
+        layout=layout,
+        timeout=args.timeout,
+        action="backend-start",
+    )
+
+
+def cgc_backend_run_container(
+    args: argparse.Namespace, layout: Any, run_command_line: list[str]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    return cgc_run_checked_command(
+        run_command_line,
+        layout=layout,
+        timeout=args.timeout,
+        action="backend-start",
+    )
+
+
+def cgc_backend_start(args: argparse.Namespace) -> dict[str, Any]:
+    settings_path, layout, backend = cgc_backend_start_context(args)
+    inspect_data = cgc_backend_inspect(args, layout, backend)
+    inspect_data, forced_remove_result, error = cgc_backend_remove_mismatched_container(
+        args, layout, backend, inspect_data
+    )
+    if error:
+        return error
+    if cgc_backend_already_running(inspect_data):
+        return cgc_backend_existing_start_result(
+            args,
+            settings_path=settings_path,
+            layout=layout,
+            backend=backend,
+            inspect_data=inspect_data,
+        )
+    return cgc_backend_create_start_result(
+        args,
+        settings_path=settings_path,
+        layout=layout,
+        backend=backend,
+        inspect_data=inspect_data,
+        forced_remove_result=forced_remove_result,
+    )
+
+
+def cgc_backend_already_running(inspect_data: dict[str, Any] | None) -> bool:
+    return bool(inspect_data) and docker_container_running(inspect_data)
+
+
+def cgc_backend_create_start_result(
+    args: argparse.Namespace,
+    *,
+    settings_path: Path,
+    layout: Any,
+    backend: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+    forced_remove_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    falkordb_port, browser_port = cgc_backend_host_ports(args, backend)
+    run_command_line = cgc_backend_run_command_line(
+        layout, backend, falkordb_port, browser_port
+    )
+    commands = cgc_backend_planned_commands(backend, run_command_line, inspect_data)
+    if args.dry_run:
+        return cgc_backend_dry_run_result(
+            settings_path=settings_path,
+            layout=layout,
+            backend=backend,
+            commands=commands,
+            falkordb_port=falkordb_port,
+            browser_port=browser_port,
+        )
+    return cgc_backend_new_start_result(
+        args,
+        settings_path=settings_path,
+        layout=layout,
+        backend=backend,
+        inspect_data=inspect_data,
+        forced_remove_result=forced_remove_result,
+        run_command_line=run_command_line,
+        falkordb_port=falkordb_port,
+        browser_port=browser_port,
+    )
+
+
+def cgc_backend_state(
+    layout: Any,
+    backend: dict[str, Any],
+    *,
+    settings_path: Path,
+    status: str,
+    falkordb_host: str,
+    falkordb_port: int,
+    browser_host: str,
+    browser_port: int,
+    image_digest: str | None,
+    container_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "provider": "codegraphcontext",
+        "backend": {
+            "id": backend["id"],
+            "type": backend["type"],
+            "mode": backend["mode"],
+            "image": backend["image"],
+            "imageLock": {"image": backend["image"], "repoDigest": image_digest},
+            "imageLockFile": backend["imageLockFile"].as_posix(),
+            "containerName": backend["containerName"],
+            "containerId": container_id,
+            "runtimeRoot": layout.backend_root.as_posix(),
+            "dataRoot": layout.backend_data_root.as_posix(),
+            "status": status,
+            "ports": {
+                "falkordb": {
+                    "bindHost": falkordb_host,
+                    "hostPort": falkordb_port,
+                    "containerPort": backend["falkordbContainerPort"],
+                },
+                "browser": {
+                    "bindHost": browser_host,
+                    "hostPort": browser_port,
+                    "containerPort": backend["browserContainerPort"],
+                },
+            },
+            "browserUrl": f"http://{browser_host}:{browser_port}",
+        },
+        "settingsFile": settings_path.as_posix(),
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }

@@ -167,6 +167,89 @@ def write_contract(path: Path, contract: WorktreeContract) -> None:
     path.write_text(contract_to_text(contract), encoding="utf-8")
 
 
+def _memory_lines(contract: WorktreeContract) -> list[str]:
+    lines = [
+        "memory:",
+        f"  mode: {contract.memory_mode}",
+    ]
+    if contract.memory_repo_path is not None:
+        lines.append(f"  repo_path: {contract.memory_repo_path.as_posix()}")
+    if contract.memory_source_branch:
+        lines.append(f"  source_branch: {contract.memory_source_branch}")
+    if contract.memory_work_branch:
+        lines.append(f"  work_branch: {contract.memory_work_branch}")
+    if contract.memory_base_commit:
+        lines.append(f"  base_commit: {contract.memory_base_commit}")
+    if contract.memory_worktree is not None:
+        lines.append(f"  worktree: {contract.memory_worktree.as_posix()}")
+    if contract.ledger_path is not None:
+        lines.append(f"  ledger: {contract.ledger_path.as_posix()}")
+    if contract.memory_state:
+        lines.append(f"  state: {contract.memory_state}")
+    return lines
+
+
+def _human_review_lines(contract: WorktreeContract, approved: str) -> list[str]:
+    lines = [
+        "human_review:",
+        f"  status: {contract.human_review_status}",
+        f"  approved_for_commit: {approved}",
+    ]
+    if contract.commit_approval_note:
+        lines.append(f"  commit_approval_note: {contract.commit_approval_note}")
+    return lines
+
+
+def _closeout_lines(contract: WorktreeContract) -> list[str]:
+    lines = [
+        "closeout:",
+        f"  status: {contract.closeout_status}",
+    ]
+    if contract.code_commit:
+        lines.append(f"  code_commit: {contract.code_commit}")
+    if contract.memory_content_commit:
+        lines.append(f"  memory_content_commit: {contract.memory_content_commit}")
+    if contract.ledger_commit:
+        lines.append(f"  ledger_commit: {contract.ledger_commit}")
+    return lines
+
+
+def _integration_lines(contract: WorktreeContract) -> list[str]:
+    lines = [
+        "integration:",
+        f"  status: {contract.integration_status}",
+    ]
+    if contract.integration_strategy:
+        lines.append(f"  strategy: {contract.integration_strategy}")
+    if contract.integrated_code_commit:
+        lines.append(f"  code_commit: {contract.integrated_code_commit}")
+    if contract.integrated_memory_content_commit:
+        lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
+    if contract.integrated_ledger_commit:
+        lines.append(f"  ledger_commit: {contract.integrated_ledger_commit}")
+    lines.append(f"  cleanup: {contract.cleanup}")
+    return lines
+
+
+def _contract_body_lines(contract: WorktreeContract, approved: str) -> list[str]:
+    lines = [
+        f"# Worktree Contract - {contract.task_id}",
+        "",
+        "## Wrapped Workflow",
+        "",
+        f"Artifact: `{contract.task_artifact.as_posix()}`",
+        "",
+        "## Human Review State",
+        "",
+        f"- Status: {contract.human_review_status}",
+        f"- Approved for commit: {approved}",
+    ]
+    if contract.commit_approval_note:
+        lines.append(f"- Commit approval note: {contract.commit_approval_note}")
+    lines.append("")
+    return lines
+
+
 def contract_to_text(contract: WorktreeContract) -> str:
     approved = "yes" if contract.approved_for_commit else "no"
     lines = [
@@ -192,81 +275,17 @@ def contract_to_text(contract: WorktreeContract) -> str:
         f"  base_commit: {contract.code_base_commit}",
         f"  worktree: {contract.code_worktree.as_posix()}",
         "",
-        "memory:",
-        f"  mode: {contract.memory_mode}",
+        *_memory_lines(contract),
+        "",
+        *_human_review_lines(contract, approved),
+        "",
+        *_closeout_lines(contract),
+        "",
+        *_integration_lines(contract),
+        "---",
+        "",
+        *_contract_body_lines(contract, approved),
     ]
-    if contract.memory_repo_path is not None:
-        lines.append(f"  repo_path: {contract.memory_repo_path.as_posix()}")
-    if contract.memory_source_branch:
-        lines.append(f"  source_branch: {contract.memory_source_branch}")
-    if contract.memory_work_branch:
-        lines.append(f"  work_branch: {contract.memory_work_branch}")
-    if contract.memory_base_commit:
-        lines.append(f"  base_commit: {contract.memory_base_commit}")
-    if contract.memory_worktree is not None:
-        lines.append(f"  worktree: {contract.memory_worktree.as_posix()}")
-    if contract.ledger_path is not None:
-        lines.append(f"  ledger: {contract.ledger_path.as_posix()}")
-    if contract.memory_state:
-        lines.append(f"  state: {contract.memory_state}")
-    lines.extend(
-        [
-            "",
-            "human_review:",
-            f"  status: {contract.human_review_status}",
-            f"  approved_for_commit: {approved}",
-        ]
-    )
-    if contract.commit_approval_note:
-        lines.append(f"  commit_approval_note: {contract.commit_approval_note}")
-    lines.extend(
-        [
-            "",
-            "closeout:",
-            f"  status: {contract.closeout_status}",
-        ]
-    )
-    if contract.code_commit:
-        lines.append(f"  code_commit: {contract.code_commit}")
-    if contract.memory_content_commit:
-        lines.append(f"  memory_content_commit: {contract.memory_content_commit}")
-    if contract.ledger_commit:
-        lines.append(f"  ledger_commit: {contract.ledger_commit}")
-    lines.extend(
-        [
-            "",
-            "integration:",
-            f"  status: {contract.integration_status}",
-        ]
-    )
-    if contract.integration_strategy:
-        lines.append(f"  strategy: {contract.integration_strategy}")
-    if contract.integrated_code_commit:
-        lines.append(f"  code_commit: {contract.integrated_code_commit}")
-    if contract.integrated_memory_content_commit:
-        lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
-    if contract.integrated_ledger_commit:
-        lines.append(f"  ledger_commit: {contract.integrated_ledger_commit}")
-    lines.extend(
-        [
-            f"  cleanup: {contract.cleanup}",
-            "---",
-            "",
-            f"# Worktree Contract - {contract.task_id}",
-            "",
-            "## Wrapped Workflow",
-            "",
-            f"Artifact: `{contract.task_artifact.as_posix()}`",
-            "",
-            "## Human Review State",
-            "",
-            f"- Status: {contract.human_review_status}",
-            f"- Approved for commit: {approved}",
-        ]
-    )
-    if contract.commit_approval_note:
-        lines.append(f"- Commit approval note: {contract.commit_approval_note}")
-    lines.append("")
     return "\n".join(lines)
 
 
