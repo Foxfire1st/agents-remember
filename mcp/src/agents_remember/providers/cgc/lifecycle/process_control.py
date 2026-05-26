@@ -85,11 +85,27 @@ def cgc_running_process_result(
     }
 
 
-def cgc_start_watch_process(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+def cgc_backend_result_port(
+    backend_result: dict[str, Any] | None, service: str
+) -> int | str | None:
+    if not backend_result:
+        return None
+    return backend_result.get("ports", {}).get(service, {}).get("hostPort")
+
+
+def cgc_start_compose_render(args: argparse.Namespace, backend_result: dict[str, Any] | None):
+    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    return cgc_compose_render(
+        provider_settings,
+        layouts,
+        falkordb_port=cgc_backend_result_port(backend_result, "falkordb"),
+        browser_port=cgc_backend_result_port(backend_result, "browser"),
+    )
+
+
+def cgc_start_watch_process(args: argparse.Namespace, layout: Any, render: Any) -> dict[str, Any]:
     watch_log = layout.watch_log_file
     watch_log.parent.mkdir(parents=True, exist_ok=True)
-    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
-    render = cgc_compose_render(provider_settings, layouts)
     return run_compose(
         render,
         ["up", "-d", cgc_watcher_service_name(layout)],
@@ -142,8 +158,7 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
     doctor = cgc_doctor(args)
     if not doctor["ok"]:
         return {**doctor, "action": "start", "ok": False, "repoId": layout.repo_id}
-    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
-    render = cgc_compose_render(provider_settings, layouts)
+    render = cgc_start_compose_render(args, backend_result)
     migration = remove_unmanaged_compose_container(
         layout.watcher_container_name,
         project_name="agents-remember-cgc",
@@ -151,7 +166,7 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
         timeout=args.timeout,
         dry_run=args.dry_run,
     )
-    process = cgc_start_watch_process(args, layout)
+    process = cgc_start_watch_process(args, layout, render)
     cgc_write_start_state(layout, process)
     return {
         "provider": "codegraphcontext",

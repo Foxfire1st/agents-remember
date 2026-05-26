@@ -14,6 +14,7 @@ from agents_remember.providers.context import (
     ensure_grepai_runtime_layout,
 )
 from agents_remember.providers.grepai.lifecycle.compose import (
+    GREPAI_COMPOSE_PROJECT,
     grepai_compose_render,
     grepai_compose_summary,
 )
@@ -22,6 +23,7 @@ from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
     compose_plan,
     remove_unmanaged_compose_container,
+    remove_unmanaged_compose_network,
     run_compose,
 )
 from agents_remember.providers.lifecycle.docker_runtime import (
@@ -355,7 +357,21 @@ def grepai_backend_remove_mismatched_container(
     return None, result, None
 
 
-def grepai_backend_host_port(args: argparse.Namespace, backend: dict[str, Any]) -> int:
+def grepai_existing_backend_host_port(
+    backend: dict[str, Any], inspect_data: dict[str, Any] | None
+) -> int | None:
+    if not inspect_data:
+        return None
+    mapping = docker_container_port(inspect_data, backend["postgresContainerPort"])
+    return mapping[1] if mapping else None
+
+
+def grepai_backend_host_port(
+    args: argparse.Namespace, backend: dict[str, Any], inspect_data: dict[str, Any] | None
+) -> int:
+    existing = grepai_existing_backend_host_port(backend, inspect_data)
+    if existing is not None:
+        return existing
     configured_port = backend["postgresHostPort"]
     if args.dry_run:
         return 5432 if str(configured_port) == "auto" else int(configured_port)
@@ -400,13 +416,7 @@ def grepai_backend_start(args: argparse.Namespace) -> dict[str, Any]:
         args
     )
     network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
-    migration = remove_unmanaged_compose_container(
-        backend["containerName"],
-        project_name="agents-remember-grepai",
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
+    migration = grepai_project_migration(args, provider_settings, layout, backend)
     inspect_data = grepai_backend_inspect(args, layout, backend)
     inspect_data, forced_remove_result, error = grepai_backend_remove_mismatched_container(
         args, layout, backend, inspect_data
@@ -419,6 +429,7 @@ def grepai_backend_start(args: argparse.Namespace) -> dict[str, Any]:
         provider_settings=provider_settings,
         layout=layout,
         backend=backend,
+        inspect_data=inspect_data,
         network_result=network_result,
         forced_remove_result=forced_remove_result,
         migration=migration,
@@ -442,11 +453,12 @@ def grepai_backend_create_start_result(
     provider_settings: dict[str, Any],
     layout: Any,
     backend: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
     network_result: dict[str, Any],
     forced_remove_result: dict[str, Any] | None,
     migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    postgres_port = grepai_backend_host_port(args, backend)
+    postgres_port = grepai_backend_host_port(args, backend, inspect_data)
     runner = grepai_runner_settings(provider_settings, layout)
     render = grepai_compose_render(
         provider_settings,
@@ -509,4 +521,47 @@ def grepai_backend_create_start_result(
         "compose": grepai_compose_summary(render),
         "ping": ping,
         "extension": extension,
+    }
+
+
+def grepai_project_migration(
+    args: argparse.Namespace,
+    provider_settings: dict[str, Any],
+    layout: Any,
+    backend: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    backend = backend or grepai_backend_settings(provider_settings, layout)
+    embedder = grepai_embedder_backend_settings(provider_settings, layout)
+    runner = grepai_runner_settings(provider_settings, layout)
+    return {
+        "containers": {
+            "postgres": remove_unmanaged_compose_container(
+                backend["containerName"],
+                project_name=GREPAI_COMPOSE_PROJECT,
+                cwd=layout.coordination_root,
+                timeout=args.timeout,
+                dry_run=args.dry_run,
+            ),
+            "ollama": remove_unmanaged_compose_container(
+                embedder["containerName"],
+                project_name=GREPAI_COMPOSE_PROJECT,
+                cwd=layout.coordination_root,
+                timeout=args.timeout,
+                dry_run=args.dry_run,
+            ),
+            "watcher": remove_unmanaged_compose_container(
+                runner["containerName"],
+                project_name=GREPAI_COMPOSE_PROJECT,
+                cwd=layout.coordination_root,
+                timeout=args.timeout,
+                dry_run=args.dry_run,
+            ),
+        },
+        "network": remove_unmanaged_compose_network(
+            grepai_network_name(provider_settings),
+            project_name=GREPAI_COMPOSE_PROJECT,
+            cwd=layout.coordination_root,
+            timeout=args.timeout,
+            dry_run=args.dry_run,
+        ),
     }

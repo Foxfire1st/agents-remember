@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from agents_remember.providers.grepai.lifecycle.core import (
+    grepai_container_env,
     grepai_embedder_backend_settings,
     grepai_network_name,
 )
 from agents_remember.providers.lifecycle.compose_runtime import (
     ComposeRender,
+    optional_yaml_line,
     provider_asset_path,
     provider_asset_text,
     render_template,
     yaml_environment,
+    yaml_port_mapping,
     yaml_scalar,
 )
 
@@ -35,16 +39,16 @@ def grepai_compose_render(
     values = {
         "POSTGRES_IMAGE": yaml_scalar(backend["image"]),
         "POSTGRES_CONTAINER_NAME": yaml_scalar(backend["containerName"]),
-        "POSTGRES_PORT": yaml_scalar(
-            f"{backend['postgresHost']}:{postgres_port}:{backend['postgresContainerPort']}"
+        "POSTGRES_PORT": yaml_port_mapping(
+            backend["postgresHost"], postgres_port, backend["postgresContainerPort"]
         ),
         "POSTGRES_DATA_VOLUME": yaml_scalar(
             f"{layout.backend_data_root.as_posix()}:{backend['dataDestination']}"
         ),
         "OLLAMA_IMAGE": yaml_scalar(embedder["image"]),
         "OLLAMA_CONTAINER_NAME": yaml_scalar(embedder["containerName"]),
-        "OLLAMA_PORT": yaml_scalar(
-            f"{embedder['httpHost']}:{ollama_port}:{embedder['httpContainerPort']}"
+        "OLLAMA_PORT": yaml_port_mapping(
+            embedder["httpHost"], ollama_port, embedder["httpContainerPort"]
         ),
         "OLLAMA_DATA_VOLUME": yaml_scalar(
             f"{embedder['dataRoot'].as_posix()}:{embedder['dataDestination']}"
@@ -56,7 +60,8 @@ def grepai_compose_render(
         "GREPAI_VERSION": yaml_scalar(runner["version"]),
         "GREPAI_ARCH": yaml_scalar(runner["releaseArch"]),
         "WATCHER_CONTAINER_NAME": yaml_scalar(runner["containerName"]),
-        "WATCHER_ENVIRONMENT": yaml_environment(layout.env()),
+        "WATCHER_USER_BLOCK": grepai_user_block(),
+        "WATCHER_ENVIRONMENT": yaml_environment(grepai_container_env(runner)),
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(
             f"{layout.runtime_root.as_posix()}:{runner['runtimeMount']}"
         ),
@@ -76,6 +81,16 @@ def grepai_compose_render(
         base_file=provider_asset_path("compose", "grepai.compose.yaml"),
         override_yaml=override_yaml,
     )
+
+
+def grepai_user() -> str | None:
+    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
+        return None
+    return f"{os.getuid()}:{os.getgid()}"
+
+
+def grepai_user_block() -> str:
+    return optional_yaml_line("user", grepai_user(), indent=4)
 
 
 def grepai_compose_summary(render: ComposeRender) -> dict[str, Any]:

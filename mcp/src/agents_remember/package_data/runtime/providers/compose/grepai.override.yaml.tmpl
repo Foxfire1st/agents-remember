@@ -24,7 +24,7 @@ services:
       args:
         GREPAI_VERSION: @GREPAI_VERSION@
         GREPAI_ARCH: @GREPAI_ARCH@
-    environment:
+@WATCHER_USER_BLOCK@    environment:
 @WATCHER_ENVIRONMENT@
     volumes:
       - @WATCHER_RUNTIME_VOLUME@

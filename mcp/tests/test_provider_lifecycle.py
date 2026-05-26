@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import unittest
@@ -91,6 +92,10 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
         self.assertIn('"returncode": 0', stdout.getvalue())
         self.assertNotIn('"command"', stdout.getvalue())
         self.assertNotIn("\\u256d", stdout.getvalue())
+
+    def test_compose_auto_ports_render_with_empty_published_port(self) -> None:
+        self.assertEqual(lifecycle.yaml_port_mapping("127.0.0.1", "auto", 11434), '"127.0.0.1::11434"')
+        self.assertEqual(lifecycle.yaml_port_mapping("127.0.0.1", 5432, 5432), '"127.0.0.1:5432:5432"')
 
 
 class ProviderLifecycleParserTests(unittest.TestCase):
@@ -305,6 +310,13 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertEqual(result["embedder"]["commands"][0]["command"][-3:], ["up", "-d", "ollama"])
         self.assertEqual(result["backend"]["compose"]["overrideMode"], "stdin")
         self.assertEqual(result["embedder"]["compose"]["overrideMode"], "stdin")
+        self.assertEqual(
+            result["backend"]["migration"]["network"]["networkName"], "ar-grepai-memory"
+        )
+        self.assertEqual(
+            result["backend"]["migration"]["containers"]["watcher"]["containerName"],
+            "ar-grepai-watcher",
+        )
         self.assertEqual(result["watcher"]["containerName"], "ar-grepai-watcher")
         self.assertEqual(result["watcher"]["image"]["image"], "agents-remember/grepai:0.35.0")
         self.assertEqual(result["watcher"]["commands"][0]["command"][-3:], ["up", "-d", "watcher"])
@@ -363,6 +375,18 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertIn('container_name: "ar-grepai-postgres"', render.override_yaml)
         self.assertIn('image: "ollama/ollama:latest"', render.override_yaml)
         self.assertIn('container_name: "ar-grepai-watcher"', render.override_yaml)
+        self.assertIn('HOME: "/grepai/runtime/home"', render.override_yaml)
+        self.assertIn('XDG_CACHE_HOME: "/grepai/runtime/cache/xdg"', render.override_yaml)
+        self.assertIn('XDG_STATE_HOME: "/grepai/runtime/state/xdg"', render.override_yaml)
+        self.assertNotIn(f'HOME: "{layout.home_root.as_posix()}"', render.override_yaml)
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            self.assertIn(
+                f'user: "{os.getuid()}:{os.getgid()}"',
+                render.override_yaml,
+            )
+        self.assertIn('"127.0.0.1::5432"', render.override_yaml)
+        self.assertIn('"127.0.0.1::11434"', render.override_yaml)
+        self.assertNotIn(":auto:", render.override_yaml)
         self.assertIn('name: "ar-grepai-memory"', render.override_yaml)
         self.assertEqual(len(render.override_sha256), 64)
 
@@ -391,8 +415,35 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertIn("watcher-repo-a:", render.override_yaml)
         self.assertIn('container_name: "ar-cgc-watcher-repo-a"', render.override_yaml)
         self.assertIn('FALKORDB_HOST: "ar-cgc-falkordb"', render.override_yaml)
+        self.assertIn('"127.0.0.1::6379"', render.override_yaml)
+        self.assertIn('"127.0.0.1::3000"', render.override_yaml)
+        self.assertNotIn(":auto:", render.override_yaml)
         self.assertIn(':ro"', render.override_yaml)
         self.assertEqual(len(render.override_sha256), 64)
+
+    def test_cgc_start_all_dry_run_reports_project_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "start",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--dry-run",
+                ]
+            )
+
+            result = lifecycle.cgc_start(args)
+
+        self.assertTrue(result["ok"])
+        migration = result["backend"]["migration"]
+        self.assertEqual(migration["network"]["networkName"], "ar-cgc-code")
+        self.assertEqual(
+            migration["containers"]["watchers"]["repo-a"]["containerName"],
+            "ar-cgc-watcher-repo-a",
+        )
 
     def test_watchers_service_reads_settings_without_cli_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

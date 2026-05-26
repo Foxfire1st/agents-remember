@@ -200,6 +200,8 @@ def grepai_docker_start(
         args,
         runner=runner,
         network_name=grepai_network_name(provider_settings),
+        postgres_port=backend_result.get("ports", {}).get("postgres", {}).get("hostPort"),
+        ollama_port=embedder_result.get("ports", {}).get("http", {}).get("hostPort"),
     )
     if not args.dry_run:
         write_json(

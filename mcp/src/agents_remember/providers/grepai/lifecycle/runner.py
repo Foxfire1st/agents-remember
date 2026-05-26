@@ -7,6 +7,7 @@ import argparse
 import time
 from typing import Any
 
+from agents_remember.providers.grepai.lifecycle.backend import grepai_project_migration
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_render,
     grepai_compose_summary,
@@ -17,7 +18,6 @@ from agents_remember.providers.lifecycle.compose_runtime import (
     compose_plan,
     provider_asset_path,
     provider_asset_text,
-    remove_unmanaged_compose_container,
     run_compose,
 )
 from agents_remember.providers.lifecycle.docker_runtime import (
@@ -193,6 +193,8 @@ def grepai_watcher_container_start(
     *,
     runner: dict[str, Any],
     network_name: str,
+    postgres_port: int | str | None = None,
+    ollama_port: int | str | None = None,
 ) -> dict[str, Any]:
     layout, network_result, image, error = grepai_watcher_start_prerequisites(
         args, runner=runner, network_name=network_name
@@ -205,6 +207,8 @@ def grepai_watcher_container_start(
         network_result=network_result,
         image=image,
         layout=layout,
+        postgres_port=postgres_port,
+        ollama_port=ollama_port,
     )
 
 
@@ -215,18 +219,21 @@ def grepai_watcher_create_start_result(
     network_result: dict[str, Any],
     image: dict[str, Any],
     layout: Any,
+    postgres_port: int | str | None,
+    ollama_port: int | str | None,
 ) -> dict[str, Any]:
     _, provider_settings, _ = grepai_layout_from_args(args)
     backend = grepai_backend_settings(provider_settings, layout)
-    render = grepai_compose_render(provider_settings, layout, runner, backend)
-    command_args = ["up", "-d", "watcher"]
-    migration = remove_unmanaged_compose_container(
-        runner["containerName"],
-        project_name="agents-remember-grepai",
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
+    render = grepai_compose_render(
+        provider_settings,
+        layout,
+        runner,
+        backend,
+        postgres_port=postgres_port,
+        ollama_port=ollama_port,
     )
+    command_args = ["up", "-d", "watcher"]
+    migration = grepai_project_migration(args, provider_settings, layout, backend)
     if args.dry_run:
         return grepai_watcher_dry_run_start_result(
             runner=runner,

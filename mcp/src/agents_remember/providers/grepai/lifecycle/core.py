@@ -279,13 +279,13 @@ def grepai_container_project_paths(layout: Any, runner: dict[str, Any]) -> dict[
     }
 
 
-def grepai_container_env(runner: dict[str, Any]) -> list[str]:
+def grepai_container_env(runner: dict[str, Any]) -> dict[str, str]:
     runtime_mount = runner["runtimeMount"].rstrip("/")
-    return [
-        f"HOME={runtime_mount}/home",
-        f"XDG_STATE_HOME={runtime_mount}/state/xdg",
-        f"XDG_CACHE_HOME={runtime_mount}/cache/xdg",
-    ]
+    return {
+        "HOME": f"{runtime_mount}/home",
+        "XDG_STATE_HOME": f"{runtime_mount}/state/xdg",
+        "XDG_CACHE_HOME": f"{runtime_mount}/cache/xdg",
+    }
 
 
 def grepai_container_dsn(backend: dict[str, Any]) -> str:

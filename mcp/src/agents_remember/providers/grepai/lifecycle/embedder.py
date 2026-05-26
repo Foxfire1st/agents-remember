@@ -12,6 +12,7 @@ from typing import Any
 from agents_remember.providers.context import (
     ContextProviderError,
 )
+from agents_remember.providers.grepai.lifecycle.backend import grepai_project_migration
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_render,
     grepai_compose_summary,
@@ -20,7 +21,6 @@ from agents_remember.providers.grepai.lifecycle.core import *
 from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
     compose_plan,
-    remove_unmanaged_compose_container,
     run_compose,
 )
 from agents_remember.providers.lifecycle.docker_runtime import (
@@ -269,7 +269,21 @@ def grepai_embedder_remove_mismatched_container(
     return None, result, None
 
 
-def grepai_embedder_host_port(args: argparse.Namespace, embedder: dict[str, Any]) -> int:
+def grepai_existing_embedder_host_port(
+    embedder: dict[str, Any], inspect_data: dict[str, Any] | None
+) -> int | None:
+    if not inspect_data:
+        return None
+    mapping = docker_container_port(inspect_data, embedder["httpContainerPort"])
+    return mapping[1] if mapping else None
+
+
+def grepai_embedder_host_port(
+    args: argparse.Namespace, embedder: dict[str, Any], inspect_data: dict[str, Any] | None
+) -> int:
+    existing = grepai_existing_embedder_host_port(embedder, inspect_data)
+    if existing is not None:
+        return existing
     configured_port = embedder["httpHostPort"]
     if args.dry_run:
         return 11434 if str(configured_port) == "auto" else int(configured_port)
@@ -315,13 +329,7 @@ def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
         return external_result
     network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
     grepai_embedder_prepare_storage(args, embedder)
-    migration = remove_unmanaged_compose_container(
-        embedder["containerName"],
-        project_name="agents-remember-grepai",
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
+    migration = grepai_project_migration(args, provider_settings, layout)
     inspect_data = grepai_embedder_inspect(args, layout, embedder)
     inspect_data, forced_remove_result, error = grepai_embedder_remove_mismatched_container(
         args, layout, embedder, inspect_data
@@ -333,6 +341,7 @@ def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
         settings_path=settings_path,
         provider_settings=provider_settings,
         embedder=embedder,
+        inspect_data=inspect_data,
         layout=layout,
         network_result=network_result,
         forced_remove_result=forced_remove_result,
@@ -356,12 +365,13 @@ def grepai_embedder_create_start_result(
     settings_path: Path,
     provider_settings: dict[str, Any],
     embedder: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
     layout: Any,
     network_result: dict[str, Any],
     forced_remove_result: dict[str, Any] | None,
     migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    http_port = grepai_embedder_host_port(args, embedder)
+    http_port = grepai_embedder_host_port(args, embedder, inspect_data)
     backend = grepai_backend_settings(provider_settings, layout)
     runner = grepai_runner_settings(provider_settings, layout)
     render = grepai_compose_render(

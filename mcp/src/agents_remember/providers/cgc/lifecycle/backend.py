@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle.compose import (
+    CGC_COMPOSE_PROJECT,
     cgc_compose_render,
     cgc_compose_summary,
 )
@@ -24,6 +25,7 @@ from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
     compose_plan,
     remove_unmanaged_compose_container,
+    remove_unmanaged_compose_network,
     run_compose,
 )
 from agents_remember.providers.lifecycle.docker_runtime import (
@@ -276,7 +278,24 @@ def cgc_backend_remove_mismatched_container(
     return None, result, None
 
 
-def cgc_backend_host_ports(args: argparse.Namespace, backend: dict[str, Any]) -> tuple[int, int]:
+def cgc_existing_backend_host_ports(
+    backend: dict[str, Any], inspect_data: dict[str, Any] | None
+) -> tuple[int, int] | None:
+    if not inspect_data:
+        return None
+    falkordb = docker_container_port(inspect_data, backend["falkordbContainerPort"])
+    browser = docker_container_port(inspect_data, backend["browserContainerPort"])
+    if not falkordb or not browser:
+        return None
+    return falkordb[1], browser[1]
+
+
+def cgc_backend_host_ports(
+    args: argparse.Namespace, backend: dict[str, Any], inspect_data: dict[str, Any] | None
+) -> tuple[int, int]:
+    existing = cgc_existing_backend_host_ports(backend, inspect_data)
+    if existing:
+        return existing
     if args.dry_run:
         falkordb = backend["falkordbHostPort"]
         browser = backend["browserHostPort"]
@@ -333,13 +352,7 @@ def cgc_backend_dry_run_result(
 def cgc_backend_start(args: argparse.Namespace) -> dict[str, Any]:
     settings_path, provider_settings, layouts, layout, backend = cgc_backend_start_context(args)
     network_result = {"ok": True, "name": backend["networkName"], "managedBy": "docker-compose"}
-    migration = remove_unmanaged_compose_container(
-        backend["containerName"],
-        project_name="agents-remember-cgc",
-        cwd=layout.coordination_root,
-        timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
+    migration = cgc_project_migration(args, layouts, backend)
     inspect_data = cgc_backend_inspect(args, layout, backend)
     inspect_data, forced_remove_result, error = cgc_backend_remove_mismatched_container(
         args, layout, backend, inspect_data
@@ -373,7 +386,7 @@ def cgc_backend_create_start_result(
     network_result: dict[str, Any],
     migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    falkordb_port, browser_port = cgc_backend_host_ports(args, backend)
+    falkordb_port, browser_port = cgc_backend_host_ports(args, backend, inspect_data)
     render = cgc_compose_render(
         provider_settings,
         layouts,
@@ -440,6 +453,39 @@ def cgc_backend_create_start_result(
         "network": network_result,
         "compose": cgc_compose_summary(render),
         "ping": ping,
+    }
+
+
+def cgc_project_migration(
+    args: argparse.Namespace, layouts: list[Any], backend: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "containers": {
+            "falkordb": remove_unmanaged_compose_container(
+                backend["containerName"],
+                project_name=CGC_COMPOSE_PROJECT,
+                cwd=layouts[0].coordination_root,
+                timeout=args.timeout,
+                dry_run=args.dry_run,
+            ),
+            "watchers": {
+                layout.repo_id: remove_unmanaged_compose_container(
+                    layout.watcher_container_name,
+                    project_name=CGC_COMPOSE_PROJECT,
+                    cwd=layout.coordination_root,
+                    timeout=args.timeout,
+                    dry_run=args.dry_run,
+                )
+                for layout in layouts
+            },
+        },
+        "network": remove_unmanaged_compose_network(
+            backend["networkName"],
+            project_name=CGC_COMPOSE_PROJECT,
+            cwd=layouts[0].coordination_root,
+            timeout=args.timeout,
+            dry_run=args.dry_run,
+        ),
     }
 
 

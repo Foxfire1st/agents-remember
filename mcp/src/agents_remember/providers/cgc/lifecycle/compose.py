@@ -13,6 +13,7 @@ from agents_remember.providers.lifecycle.compose_runtime import (
     provider_asset_text,
     render_template,
     yaml_environment,
+    yaml_port_mapping,
     yaml_scalar,
 )
 
@@ -38,11 +39,11 @@ def cgc_compose_render(
     values = {
         "FALKORDB_IMAGE": yaml_scalar(backend["image"]),
         "FALKORDB_CONTAINER_NAME": yaml_scalar(backend["containerName"]),
-        "FALKORDB_PORT": yaml_scalar(
-            f"{backend['falkordbHost']}:{falkordb_port}:{backend['falkordbContainerPort']}"
+        "FALKORDB_PORT": yaml_port_mapping(
+            backend["falkordbHost"], falkordb_port, backend["falkordbContainerPort"]
         ),
-        "BROWSER_PORT": yaml_scalar(
-            f"{backend['browserHost']}:{browser_port}:{backend['browserContainerPort']}"
+        "BROWSER_PORT": yaml_port_mapping(
+            backend["browserHost"], browser_port, backend["browserContainerPort"]
         ),
         "FALKORDB_DATA_VOLUME": yaml_scalar(
             f"{layout.backend_data_root.as_posix()}:/data"

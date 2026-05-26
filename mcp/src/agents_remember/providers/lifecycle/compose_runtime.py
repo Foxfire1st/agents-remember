@@ -94,6 +94,11 @@ def yaml_scalar(value: Any) -> str:
     return json.dumps(str(value))
 
 
+def yaml_port_mapping(host: Any, host_port: Any, container_port: Any) -> str:
+    published = "" if host_port is None or str(host_port) == "auto" else str(host_port)
+    return yaml_scalar(f"{host}:{published}:{container_port}")
+
+
 def yaml_environment(env: dict[str, Any], *, indent: int = 6) -> str:
     prefix = " " * indent
     return "\n".join(
@@ -123,12 +128,49 @@ def container_managed_by_project(
     return inspect_data is not None and container_compose_project(inspect_data) == project_name
 
 
+def docker_inspect_network(network_name: str, *, cwd: Path, timeout: int) -> dict[str, Any] | None:
+    result = run_command(
+        [docker_command(), "network", "inspect", network_name], cwd=cwd, timeout=timeout
+    )
+    if result["returncode"] != 0:
+        return None
+    try:
+        data = json.loads(result["stdout"])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list) or not data:
+        return None
+    return data[0]
+
+
+def network_compose_project(inspect_data: dict[str, Any] | None) -> str | None:
+    if not inspect_data:
+        return None
+    labels = inspect_data.get("Labels", {})
+    if not isinstance(labels, dict):
+        return None
+    project = labels.get("com.docker.compose.project")
+    return str(project) if project else None
+
+
+def network_managed_by_project(inspect_data: dict[str, Any] | None, project_name: str) -> bool:
+    return inspect_data is not None and network_compose_project(inspect_data) == project_name
+
+
 def remove_container_command(container_name: str) -> list[str]:
     return [docker_command(), "rm", "-f", container_name]
 
 
+def remove_network_command(network_name: str) -> list[str]:
+    return [docker_command(), "network", "rm", network_name]
+
+
 def remove_container_dry_run(container_name: str, command: list[str]) -> dict[str, Any]:
     return {"containerName": container_name, "command": command, "dryRun": True}
+
+
+def remove_network_dry_run(network_name: str, command: list[str]) -> dict[str, Any]:
+    return {"networkName": network_name, "command": command, "dryRun": True}
 
 
 def remove_container_result(
@@ -141,6 +183,21 @@ def remove_container_result(
     result = run_command(command, cwd=cwd, timeout=timeout)
     return {
         "containerName": container_name,
+        "removed": result["returncode"] == 0,
+        "command": result,
+    }
+
+
+def remove_network_result(
+    network_name: str,
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> dict[str, Any]:
+    result = run_command(command, cwd=cwd, timeout=timeout)
+    return {
+        "networkName": network_name,
         "removed": result["returncode"] == 0,
         "command": result,
     }
@@ -164,3 +221,23 @@ def remove_unmanaged_compose_container(
     if inspect_data is None:
         return None
     return remove_container_result(container_name, command, cwd=cwd, timeout=timeout)
+
+
+def remove_unmanaged_compose_network(
+    network_name: str,
+    *,
+    project_name: str,
+    cwd: Path,
+    timeout: int,
+    dry_run: bool,
+) -> dict[str, Any] | None:
+    command = remove_network_command(network_name)
+    if dry_run:
+        return remove_network_dry_run(network_name, command)
+
+    inspect_data = docker_inspect_network(network_name, cwd=cwd, timeout=timeout)
+    if network_managed_by_project(inspect_data, project_name):
+        return None
+    if inspect_data is None:
+        return None
+    return remove_network_result(network_name, command, cwd=cwd, timeout=timeout)
