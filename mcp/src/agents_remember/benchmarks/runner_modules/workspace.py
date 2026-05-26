@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from agents_remember.benchmarks.runner_modules.commands import (
+    git_command,
+    repo_has_commit,
+    run_command,
+)
+from agents_remember.benchmarks.runner_modules.constants import (
+    SOURCE_ONLY_AGENTS_TEMPLATE,
+    WORKSPACE_AGENTS_TEMPLATE,
+)
+from agents_remember.benchmarks.runner_modules.filesystem import (
+    remove_path,
+    render_template,
+    sync_runtime_assets,
+    sync_workspace_skill_exposure,
+    write_benchmark_root_marker,
+)
+from agents_remember.benchmarks.runner_modules.manifest import (
+    manifest_path_component,
+    manifest_relative_path,
+)
+from agents_remember.benchmarks.runner_modules.mcp_registration import (
+    default_cgc_seed_source_coordination_root,
+    prepare_configured_providers,
+    write_benchmark_mcp_registration,
+)
+from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
+
+
+def prepare_repo(
+    repository: dict[str, Any], repo_root: Path, dry_run: bool, force_clone: bool = False
+) -> None:
+    url = str(repository["url"])
+    commit = str(repository["commit"])
+    if dry_run:
+        print(f"Would ensure directory {repo_root.parent}")
+    else:
+        repo_root.parent.mkdir(parents=True, exist_ok=True)
+    if force_clone and (repo_root.exists() or repo_root.is_symlink()):
+        if dry_run:
+            print(f"Would remove existing repository {repo_root}")
+        else:
+            remove_path(repo_root)
+    existing_repo = not force_clone and (repo_root / ".git").exists()
+    if not existing_repo:
+        run_command(git_command("clone", url, str(repo_root)), dry_run)
+    elif repo_has_commit(repo_root, commit):
+        if dry_run:
+            print(f"Would reuse cached repository {repo_root} at {commit}")
+    else:
+        run_command(git_command("-C", str(repo_root), "fetch", "--all", "--tags"), dry_run)
+    run_command(git_command("-C", str(repo_root), "checkout", "--detach", commit), dry_run)
+    run_command(git_command("-C", str(repo_root), "reset", "--hard", commit), dry_run)
+    run_command(git_command("-C", str(repo_root), "clean", "-fdx"), dry_run)
+
+
+def workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
+    return benchmarks_root / manifest_relative_path(
+        case.workspace["fixturePath"], f"{case.case_id}.workspace.fixturePath"
+    )
+
+
+def source_only_workspace_path(case: BenchmarkCase) -> Path:
+    configured = case.workspace.get("sourceOnlyRoot")
+    if configured:
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.sourceOnlyRoot")
+    return Path("source-only")
+
+
+def with_memory_workspace_path(case: BenchmarkCase) -> Path:
+    configured = case.workspace.get("withMemoryRoot") or case.workspace.get("withOnboardingRoot")
+    if configured:
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.withMemoryRoot")
+    return Path("with-memory")
+
+
+def source_only_workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
+    return workspace_root(benchmarks_root, case) / source_only_workspace_path(case)
+
+
+def with_memory_workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:
+    return workspace_root(benchmarks_root, case) / with_memory_workspace_path(case)
+
+
+def repository_path(case: BenchmarkCase) -> Path:
+    configured = case.workspace.get("repoRelativePath")
+    if configured:
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.repoRelativePath")
+    repo_name = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    return Path("repos") / repo_name
+
+
+def coordination_path(case: BenchmarkCase) -> Path:
+    configured = case.workspace.get("coordinationRoot") or case.workspace.get(
+        "withOnboardingCoordinationRoot"
+    )
+    if configured:
+        return manifest_relative_path(configured, f"{case.case_id}.workspace.coordinationRoot")
+    return Path("ar-coordination")
+
+
+def memory_repo_name(case: BenchmarkCase) -> str:
+    configured = case.memory_repository.get("name") or case.workspace.get("externalMemoryRepo")
+    if not configured:
+        raise RuntimeError(f"memory repository name is missing for case {case.case_id}")
+    return manifest_path_component(configured, f"{case.case_id}.memoryRepository.name")
+
+
+def render_workspace_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> Path:
+    template_path = benchmarks_root / WORKSPACE_AGENTS_TEMPLATE
+    if not template_path.is_file():
+        raise RuntimeError(f"benchmark workspace template not found: {template_path}")
+
+    repo_relative_path = repository_path(case).as_posix()
+    coordination_root = coordination_path(case).as_posix()
+    destination = with_memory_workspace_root(benchmarks_root, case) / "AGENTS.md"
+    rendered = render_template(
+        template_path.read_text(encoding="utf-8"),
+        {
+            "case_id": case.case_id,
+            "repository_name": str(case.repository["name"]),
+            "repo_relative_path": repo_relative_path,
+            "coordination_root": coordination_root,
+            "memory_repository_name": memory_repo_name(case),
+        },
+    )
+    if dry_run:
+        print(f"Would render {template_path} -> {destination}")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(rendered, encoding="utf-8")
+    return destination
+
+
+def render_source_only_agents(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> Path:
+    template_path = benchmarks_root / SOURCE_ONLY_AGENTS_TEMPLATE
+    if not template_path.is_file():
+        raise RuntimeError(f"benchmark source-only template not found: {template_path}")
+
+    repo_relative_path = repository_path(case).as_posix()
+    destination = source_only_workspace_root(benchmarks_root, case) / "AGENTS.md"
+    rendered = render_template(
+        template_path.read_text(encoding="utf-8"),
+        {
+            "case_id": case.case_id,
+            "repository_name": str(case.repository["name"]),
+            "repo_relative_path": repo_relative_path,
+        },
+    )
+    if dry_run:
+        print(f"Would render {template_path} -> {destination}")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(rendered, encoding="utf-8")
+    return destination
+
+
+def prune_legacy_workspace_paths(root: Path, dry_run: bool) -> None:
+    for relative in (Path("AGENTS.md"), Path("repos"), Path("ar-coordination")):
+        path = root / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        if dry_run:
+            print(f"Would remove legacy workspace path {path}")
+            continue
+        remove_path(path)
+
+
+def prepare_memory_repo(
+    case: BenchmarkCase, coordination_root: Path, dry_run: bool, force_clone: bool = False
+) -> Path:
+    memory_repo = coordination_root / "memory-repos" / memory_repo_name(case)
+    memory_repository = case.memory_repository
+    if memory_repository:
+        prepare_repo(memory_repository, memory_repo, dry_run, force_clone=force_clone)
+    elif not memory_repo.exists() and not dry_run:
+        raise RuntimeError(f"workspace memory repo missing after preparation: {memory_repo}")
+    return memory_repo
+
+
+def prepare_case(
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    dry_run: bool,
+    skill_exposure_mode: str = "copy",
+    force_clone: bool = False,
+    provider_timeout: int = 1800,
+    provider_ids: tuple[str, ...] = (),
+) -> None:
+    repository = case.repository
+    root = workspace_root(benchmarks_root, case)
+    source_only_root = source_only_workspace_root(benchmarks_root, case)
+    with_memory_root = with_memory_workspace_root(benchmarks_root, case)
+    source_only_repo_root = source_only_root / repository_path(case)
+    with_memory_repo_root = with_memory_root / repository_path(case)
+    print(f"Preparing {case.case_id}")
+
+    prune_legacy_workspace_paths(root, dry_run)
+    render_source_only_agents(benchmarks_root, case, dry_run)
+    render_workspace_agents(benchmarks_root, case, dry_run)
+    write_benchmark_root_marker(source_only_root, dry_run)
+    write_benchmark_root_marker(with_memory_root, dry_run)
+    prepare_repo(repository, source_only_repo_root, dry_run, force_clone=force_clone)
+    prepare_repo(repository, with_memory_repo_root, dry_run, force_clone=force_clone)
+
+    coordination_root = with_memory_root / coordination_path(case)
+    sync_runtime_assets(coordination_root, dry_run)
+    sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
+    memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
+    write_benchmark_mcp_registration(
+        case=case,
+        workspace_root=with_memory_root,
+        coordination_root=coordination_root,
+        source_repo_root=with_memory_repo_root,
+        memory_repo=memory_repo,
+        provider_ids=provider_ids,
+        provider_timeout=provider_timeout,
+        dry_run=dry_run,
+    )
+    prepare_configured_providers(
+        case,
+        coordination_root,
+        with_memory_repo_root,
+        memory_repo,
+        dry_run,
+        provider_timeout,
+        provider_ids=provider_ids,
+        cgc_seed_source_coordination_root=default_cgc_seed_source_coordination_root(
+            benchmarks_root, coordination_root
+        ),
+        cgc_seed_repo_id=manifest_path_component(
+            repository["name"], f"{case.case_id}.repository.name"
+        ),
+    )
+
+    if dry_run:
+        print(f"Would verify benchmark memory repo exists: {memory_repo}")

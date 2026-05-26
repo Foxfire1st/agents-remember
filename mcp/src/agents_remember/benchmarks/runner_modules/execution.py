@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+import concurrent.futures
+import json
+import shutil
+import subprocess
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from agents_remember.benchmarks.runner_modules.analysis import analyze_run_root, write_summary
+from agents_remember.benchmarks.runner_modules.constants import (
+    BENCHMARK_ROOT_MARKER,
+    CODEX_BENCHMARK_SANDBOX,
+    CODEX_BENCHMARK_SANDBOX_MODES,
+    CODEX_BENCHMARK_SCOPE,
+    CODEX_EXECUTABLE_NAME,
+    CODEX_EXECUTABLE_RESOLUTION,
+    CODEX_SANDBOX_DEFAULT,
+)
+from agents_remember.benchmarks.runner_modules.manifest import (
+    case_prompt,
+    manifest_relative_path,
+    prompt_variant,
+    selected_provider_ids,
+)
+from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
+from agents_remember.benchmarks.runner_modules.workspace import prepare_case
+
+BenchmarkTask = tuple[dict[str, Any], dict[str, Any], int]
+
+
+def run_id() -> str:
+    return datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+
+
+class CodexExecutableNotFound(RuntimeError):
+    """Raised when the Codex benchmark runner cannot resolve Codex from PATH."""
+
+
+def resolve_codex_executable() -> str:
+    resolved = shutil.which(CODEX_EXECUTABLE_NAME)
+    if resolved:
+        return resolved
+    raise CodexExecutableNotFound(
+        "codex executable was not found on PATH; benchmark execution resolves "
+        "Codex only from the MCP server process PATH"
+    )
+
+
+def validate_codex_sandbox(codex_sandbox: str) -> str:
+    if codex_sandbox not in CODEX_BENCHMARK_SANDBOX_MODES:
+        allowed = ", ".join(CODEX_BENCHMARK_SANDBOX_MODES)
+        raise ValueError(
+            f"unsupported Codex benchmark sandbox {codex_sandbox!r}; expected {allowed}"
+        )
+    return codex_sandbox
+
+
+def codex_sandbox_argument(codex_sandbox: str) -> str | None:
+    sandbox = validate_codex_sandbox(codex_sandbox)
+    if sandbox == CODEX_SANDBOX_DEFAULT:
+        return None
+    return sandbox
+
+
+def codex_execution_policy(
+    resolved_executable: str | None = None,
+    *,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+) -> dict[str, Any]:
+    sandbox = validate_codex_sandbox(codex_sandbox)
+    sandbox_argument = codex_sandbox_argument(sandbox)
+    policy: dict[str, Any] = {
+        "scope": CODEX_BENCHMARK_SCOPE,
+        "benchmarkOnly": True,
+        "hostProcess": True,
+        "executable": CODEX_EXECUTABLE_NAME,
+        "resolution": CODEX_EXECUTABLE_RESOLUTION,
+        "pathVariable": CODEX_EXECUTABLE_RESOLUTION,
+        "sandbox": sandbox,
+        "sandboxArgument": sandbox_argument or "omitted",
+        "sandboxModes": list(CODEX_BENCHMARK_SANDBOX_MODES),
+        "approvalPolicy": "never",
+        "genericExecutableOverride": False,
+        "arbitraryShell": False,
+    }
+    if resolved_executable:
+        policy["resolvedExecutable"] = resolved_executable
+    return policy
+
+
+def codex_command(
+    cwd: Path,
+    final_message_path: Path,
+    *,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+) -> list[str]:
+    resolved_executable = resolve_codex_executable()
+    command = [
+        resolved_executable,
+        "exec",
+        "--json",
+        "--ephemeral",
+        "--cd",
+        str(cwd),
+        "--skip-git-repo-check",
+        "--output-last-message",
+        str(final_message_path),
+        "-c",
+        'approval_policy="never"',
+        "-c",
+        f"project_root_markers=['{BENCHMARK_ROOT_MARKER}']",
+    ]
+    sandbox_argument = codex_sandbox_argument(codex_sandbox)
+    if sandbox_argument is not None:
+        command[7:7] = ["--sandbox", sandbox_argument]
+    return command
+
+
+def write_metadata(path: Path, metadata: dict[str, Any], dry_run: bool) -> None:
+    if dry_run:
+        print(f"Would write metadata {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def run_one(
+    *,
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    prompt: dict[str, Any],
+    variant: dict[str, Any],
+    repetition: int,
+    output_root: Path,
+    dry_run: bool,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+) -> None:
+    prompt_id = str(prompt["id"])
+    variant_id = str(variant["id"])
+    prompt_path = case.path.parent / manifest_relative_path(
+        variant["promptPath"],
+        f"{case.case_id}.{prompt_id}.{variant_id}.promptPath",
+    )
+    prompt_text = prompt_path.read_text(encoding="utf-8")
+    cwd = benchmarks_root / manifest_relative_path(
+        variant["cwd"],
+        f"{case.case_id}.{prompt_id}.{variant_id}.cwd",
+    )
+    run_prefix = output_root / prompt_id / variant_id / f"run-{repetition:03d}"
+    jsonl_path = run_prefix.with_suffix(".jsonl")
+    stderr_path = run_prefix.with_suffix(".stderr")
+    metadata_path = run_prefix.with_suffix(".metadata.json")
+    final_message_path = run_prefix.with_suffix(".final.md")
+    command = codex_command(cwd, final_message_path, codex_sandbox=codex_sandbox)
+    execution_policy = codex_execution_policy(command[0], codex_sandbox=codex_sandbox)
+
+    if dry_run:
+        print(f"Would write JSONL to {jsonl_path}")
+        print(f"Would write stderr to {stderr_path}")
+        print(f"Would write final message to {final_message_path}")
+        print(
+            "Benchmark host execution: "
+            f"{CODEX_BENCHMARK_SCOPE}; {CODEX_EXECUTABLE_NAME} resolved from "
+            f"{CODEX_EXECUTABLE_RESOLUTION} to {command[0]}"
+        )
+        print(f"Benchmark sandbox: {execution_policy['sandbox']}")
+        print("Would run: " + " ".join(command) + " <prompt via stdin>")
+        write_metadata(
+            metadata_path,
+            {
+                "case": case.case_id,
+                "prompt": prompt_id,
+                "variant": variant_id,
+                "repetition": repetition,
+                "cwd": str(cwd),
+                "finalMessagePath": str(final_message_path),
+                "dryRun": True,
+                "codexExecutionPolicy": execution_policy,
+            },
+            dry_run=True,
+        )
+        return
+
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    with (
+        jsonl_path.open("w", encoding="utf-8") as stdout,
+        stderr_path.open("w", encoding="utf-8") as stderr,
+    ):
+        completed = subprocess.run(
+            command,
+            input=prompt_text,
+            stdout=stdout,
+            stderr=stderr,
+            text=True,
+            check=False,
+        )
+    duration = time.monotonic() - started
+    write_metadata(
+        metadata_path,
+        {
+            "case": case.case_id,
+            "prompt": prompt_id,
+            "variant": variant_id,
+            "repetition": repetition,
+            "cwd": str(cwd),
+            "command": [*command, "<prompt via stdin>"],
+            "codexExecutionPolicy": execution_policy,
+            "durationSeconds": round(duration, 3),
+            "exitCode": completed.returncode,
+            "finalMessagePath": str(final_message_path),
+            "jsonlPath": str(jsonl_path),
+            "stderrPath": str(stderr_path),
+        },
+        dry_run=False,
+    )
+
+
+def maybe_prepare_case(
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    *,
+    prompt_id: str | None,
+    variant_id: str | None,
+    dry_run: bool,
+    skip_prepare: bool,
+    skill_exposure_mode: str,
+    force_clone: bool,
+    provider_timeout: int,
+) -> None:
+    if skip_prepare:
+        return
+    prepare_case(
+        benchmarks_root,
+        case,
+        dry_run=dry_run,
+        skill_exposure_mode=skill_exposure_mode,
+        force_clone=force_clone,
+        provider_timeout=provider_timeout,
+        provider_ids=selected_provider_ids(case, prompt_id=prompt_id, variant_id=variant_id),
+    )
+
+
+def create_output_root(benchmarks_root: Path, case: BenchmarkCase, dry_run: bool) -> Path:
+    output_root = benchmarks_root / "user-runs" / case.case_id / run_id()
+    if dry_run:
+        print(f"Would create run output root {output_root}")
+    else:
+        output_root.mkdir(parents=True, exist_ok=False)
+    return output_root
+
+
+def benchmark_task_batches(
+    case: BenchmarkCase,
+    *,
+    prompt_id: str | None,
+    variant_id: str | None,
+    repetitions: int | None,
+) -> tuple[list[list[BenchmarkTask]], int]:
+    task_batches: list[list[BenchmarkTask]] = []
+    default_jobs = 1
+    for prompt in case_prompt(case, prompt_id):
+        variants = prompt_variant(prompt, variant_id)
+        default_jobs = max(default_jobs, len(variants))
+        task_batches.extend(task_batches_for_prompt(prompt, variants, repetitions))
+    return task_batches, default_jobs
+
+
+def task_batches_for_prompt(
+    prompt: dict[str, Any],
+    variants: list[dict[str, Any]],
+    repetitions: int | None,
+) -> list[list[BenchmarkTask]]:
+    prompt_runs = int(repetitions or prompt.get("runs") or 3)
+    return [
+        [(prompt, variant, repetition) for variant in variants]
+        for repetition in range(1, prompt_runs + 1)
+    ]
+
+
+def run_dry_batches(
+    *,
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    task_batches: list[list[BenchmarkTask]],
+    output_root: Path,
+    codex_sandbox: str,
+) -> None:
+    for task_batch in task_batches:
+        for prompt, variant, repetition in task_batch:
+            run_one(
+                benchmarks_root=benchmarks_root,
+                case=case,
+                prompt=prompt,
+                variant=variant,
+                repetition=repetition,
+                output_root=output_root,
+                dry_run=True,
+                codex_sandbox=codex_sandbox,
+            )
+
+
+def submit_task_batch(
+    executor: concurrent.futures.Executor,
+    *,
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    task_batch: list[BenchmarkTask],
+    output_root: Path,
+    codex_sandbox: str,
+) -> dict[concurrent.futures.Future[None], BenchmarkTask]:
+    return {
+        executor.submit(
+            run_one,
+            benchmarks_root=benchmarks_root,
+            case=case,
+            prompt=prompt,
+            variant=variant,
+            repetition=repetition,
+            output_root=output_root,
+            dry_run=False,
+            codex_sandbox=codex_sandbox,
+        ): (prompt, variant, repetition)
+        for prompt, variant, repetition in task_batch
+    }
+
+
+def completed_task_failures(
+    future_to_task: dict[concurrent.futures.Future[None], BenchmarkTask],
+) -> list[str]:
+    failures: list[str] = []
+    for future in concurrent.futures.as_completed(future_to_task):
+        prompt, variant, repetition = future_to_task[future]
+        try:
+            future.result()
+        except Exception as error:
+            failures.append(f"{prompt.get('id')}/{variant.get('id')}/run-{repetition:03d}: {error}")
+    return failures
+
+
+def run_task_batches(
+    *,
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    task_batches: list[list[BenchmarkTask]],
+    output_root: Path,
+    max_workers: int,
+    codex_sandbox: str,
+) -> list[str]:
+    failures: list[str] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for task_batch in task_batches:
+            future_to_task = submit_task_batch(
+                executor,
+                benchmarks_root=benchmarks_root,
+                case=case,
+                task_batch=task_batch,
+                output_root=output_root,
+                codex_sandbox=codex_sandbox,
+            )
+            failures.extend(completed_task_failures(future_to_task))
+    return failures
+
+
+def raise_for_failures(failures: list[str]) -> None:
+    if failures:
+        joined = "\n".join(f"  - {failure}" for failure in failures)
+        raise RuntimeError(f"benchmark run completed with failed subprocesses:\n{joined}")
+
+
+def run_case(
+    benchmarks_root: Path,
+    case: BenchmarkCase,
+    *,
+    prompt_id: str | None,
+    variant_id: str | None,
+    repetitions: int | None,
+    jobs: int | None,
+    dry_run: bool,
+    skip_prepare: bool,
+    skill_exposure_mode: str,
+    force_clone: bool,
+    provider_timeout: int,
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+) -> Path:
+    maybe_prepare_case(
+        benchmarks_root,
+        case,
+        prompt_id=prompt_id,
+        variant_id=variant_id,
+        dry_run=dry_run,
+        skip_prepare=skip_prepare,
+        skill_exposure_mode=skill_exposure_mode,
+        force_clone=force_clone,
+        provider_timeout=provider_timeout,
+    )
+    output_root = create_output_root(benchmarks_root, case, dry_run)
+    task_batches, default_jobs = benchmark_task_batches(
+        case,
+        prompt_id=prompt_id,
+        variant_id=variant_id,
+        repetitions=repetitions,
+    )
+    if dry_run:
+        run_dry_batches(
+            benchmarks_root=benchmarks_root,
+            case=case,
+            task_batches=task_batches,
+            output_root=output_root,
+            codex_sandbox=codex_sandbox,
+        )
+        return output_root
+
+    max_workers = jobs or default_jobs
+    if max_workers < 1:
+        raise RuntimeError("--jobs must be greater than zero")
+
+    failures = run_task_batches(
+        benchmarks_root=benchmarks_root,
+        case=case,
+        task_batches=task_batches,
+        output_root=output_root,
+        max_workers=max_workers,
+        codex_sandbox=codex_sandbox,
+    )
+    write_summary(output_root, analyze_run_root(output_root))
+    raise_for_failures(failures)
+    return output_root
