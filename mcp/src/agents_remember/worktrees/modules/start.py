@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -34,6 +35,8 @@ class ProviderStartPaths:
     source_coordination_root: Path
     source_repo_root: Path
     target_repo_root: Path
+    source_memory_root: Path | None
+    target_memory_root: Path | None
     provider_runtime_root: Path
     provider_settings_path: Path
 
@@ -242,9 +245,13 @@ def prepare_providers_for_start(
     if skipped:
         return skipped
     paths = _provider_start_paths(context, contract, args)
-    cgc_state = _cgc_enablement_state(paths.target_coordination_root, paths.provider_settings_path)
-    if cgc_state["state"] != "enabled":
-        return cgc_state
+    provider_state = _provider_enablement_state(
+        paths.target_coordination_root,
+        paths.provider_settings_path,
+        target_memory_root=paths.target_memory_root,
+    )
+    if provider_state["state"] != "enabled":
+        return provider_state
 
     payload = _run_provider_setup(context, args, paths)
     if not payload.get("ok"):
@@ -253,9 +260,45 @@ def prepare_providers_for_start(
             "reason": "provider setup failed",
             "payload": payload,
         }
+    state_file = _write_provider_state_file(contract, payload, args.dry_run)
     return {
         "state": "planned" if args.dry_run else "prepared",
         "payload": payload,
+        "provider_state_file": state_file.as_posix(),
+    }
+
+
+def _write_provider_state_file(
+    contract: WorktreeContract,
+    payload: dict[str, object],
+    dry_run: bool,
+) -> Path:
+    state_file = contract.worktree_group / "provider-runtime" / "provider-state.json"
+    if dry_run:
+        return state_file
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps(_provider_state_payload(contract, payload), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return state_file
+
+
+def _provider_state_payload(
+    contract: WorktreeContract,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    isolated = payload.get("isolatedProviderSettings")
+    return {
+        "schema": "ar-worktree-provider-state/v1",
+        "taskName": contract.task_name,
+        "repoName": contract.repo_name,
+        "worktreeGroup": contract.worktree_group.as_posix(),
+        "codeWorktree": contract.code_worktree.as_posix(),
+        "memoryWorktree": contract.memory_worktree.as_posix()
+        if contract.memory_worktree is not None
+        else None,
+        "isolatedProviderSettings": isolated,
     }
 
 
@@ -281,6 +324,10 @@ def _provider_start_paths(
         ).resolve(),
         source_repo_root=context.code_repository_root.resolve(),
         target_repo_root=contract.code_worktree.resolve(),
+        source_memory_root=context.memory_root.resolve()
+        if getattr(context, "memory_root", None) is not None
+        else None,
+        target_memory_root=_grepai_target_memory_root(contract),
         provider_runtime_root=(contract.worktree_group / "provider-runtime").resolve(),
         provider_settings_path=setup_config.settings_path.resolve(),
     )
@@ -306,6 +353,77 @@ def _cgc_enablement_state(target_coordination_root, provider_settings_path) -> d
     }
 
 
+def _provider_enablement_state(
+    target_coordination_root: Path,
+    provider_settings_path: Path,
+    *,
+    target_memory_root: Path | None,
+) -> dict[str, object]:
+    try:
+        settings = provider_setup.load_settings(target_coordination_root, provider_settings_path)
+    except RuntimeError as error:
+        return {
+            "state": "blocked",
+            "reason": str(error),
+            "targetCoordinationRoot": target_coordination_root.as_posix(),
+        }
+    cgc_enabled = bool(settings) and provider_setup.provider_enabled(
+        settings, "codegraphcontext-code"
+    )
+    grepai_enabled = bool(settings) and provider_setup.provider_enabled(
+        settings, "grepai-memory"
+    )
+    grepai_worktree_enabled = grepai_enabled and target_memory_root is not None
+    if cgc_enabled or grepai_worktree_enabled:
+        return _enabled_provider_state(cgc_enabled, grepai_worktree_enabled)
+    return {
+        "state": "skipped",
+        "reason": _provider_enablement_skip_reason(
+            cgc_enabled=cgc_enabled,
+            grepai_enabled=grepai_enabled,
+            target_memory_root=target_memory_root,
+        ),
+        "settingsFile": provider_setup.settings_path(
+            target_coordination_root, provider_settings_path
+        ).as_posix(),
+    }
+
+
+def _enabled_provider_state(
+    cgc_enabled: bool,
+    grepai_worktree_enabled: bool,
+) -> dict[str, object]:
+    return {
+        "state": "enabled",
+        "codegraphcontext-code": cgc_enabled,
+        "grepai-memory": grepai_worktree_enabled,
+    }
+
+
+def _provider_enablement_skip_reason(
+    *,
+    cgc_enabled: bool,
+    grepai_enabled: bool,
+    target_memory_root: Path | None,
+) -> str:
+    reasons = []
+    if not cgc_enabled:
+        reasons.append("codegraphcontext-code is not enabled")
+    if not grepai_enabled:
+        reasons.append("grepai-memory is not enabled")
+    elif target_memory_root is None:
+        reasons.append("grepai-memory requires worktree memory")
+    return "; ".join(reasons)
+
+
+def _grepai_target_memory_root(contract: WorktreeContract) -> Path | None:
+    if contract.memory_mode == "external":
+        return contract.memory_worktree.resolve() if contract.memory_worktree is not None else None
+    if contract.memory_mode == "internal":
+        return (contract.code_worktree / "ar-memory").resolve()
+    return None
+
+
 def _run_provider_setup(
     context,
     args: argparse.Namespace,
@@ -319,7 +437,7 @@ def _run_provider_setup(
         ),
         timeout=getattr(args, "provider_timeout", 1800),
         dry_run=args.dry_run,
-        skip_grepai=True,
+        skip_grepai=paths.target_memory_root is None,
         cgc_seed=provider_setup.CgcSeedOptions(
             source_coordination_root=paths.source_coordination_root,
             repo_id=context.code_repository_name,
@@ -327,6 +445,18 @@ def _run_provider_setup(
             target_repo_root=paths.target_repo_root,
         ),
         cgc_isolated=provider_setup.IsolatedCgcOptions(runtime_root=paths.provider_runtime_root),
+        grepai_seed=provider_setup.GrepaiSeedOptions(
+            source_coordination_root=paths.source_coordination_root,
+            source_settings_path=paths.provider_settings_path,
+            project_id=context.code_repository_name,
+            target_memory_root=paths.target_memory_root,
+        ),
+        grepai_isolated=provider_setup.IsolatedGrepaiOptions(
+            runtime_root=paths.provider_runtime_root,
+            project_id=context.code_repository_name,
+            target_memory_root=paths.target_memory_root,
+            allow_missing_roots=args.dry_run,
+        ),
     )
     return provider_setup.run_provider_setup(request)
 

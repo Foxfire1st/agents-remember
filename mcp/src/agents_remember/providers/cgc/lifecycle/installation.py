@@ -74,7 +74,11 @@ def cgc_install_commands(args: argparse.Namespace, layout: Any) -> tuple[Path, l
     render = cgc_compose_render(provider_settings, layouts)
     return layout.image_build_root, [
         compose_plan(render, ["build", "runner"], cwd=layout.coordination_root),
-        compose_plan(render, ["run", "--rm", "runner", "doctor"], cwd=layout.coordination_root),
+        compose_plan(
+            render,
+            ["run", "--rm", "--no-deps", "runner", "doctor"],
+            cwd=layout.coordination_root,
+        ),
     ]
 
 
@@ -505,10 +509,7 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
     layout = cgc_layout_from_args(args)
     status = cgc_status(args)
     checks: list[dict[str, Any]] = [
-        {
-            "name": "runtime-root-contained",
-            "ok": layout.runtime_root.is_relative_to(layout.providers_root),
-        },
+        cgc_runtime_root_containment_check(layout),
         {
             "name": "source-artifact-clean",
             "ok": not status["sourceArtifacts"],
@@ -531,7 +532,7 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
         render = cgc_compose_render(provider_settings, layouts)
         command_result = run_compose(
             render,
-            ["run", "--rm", "runner", "doctor"],
+            ["run", "--rm", "--no-deps", "runner", "doctor"],
             cwd=layout.coordination_root,
             timeout=args.timeout,
         )
@@ -542,7 +543,7 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
         command_result = {
             **compose_plan(
                 render,
-                ["run", "--rm", "runner", "doctor"],
+                ["run", "--rm", "--no-deps", "runner", "doctor"],
                 cwd=layout.coordination_root,
             ),
             "compose": cgc_compose_summary(render),
@@ -556,4 +557,25 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
         "dryRun": args.dry_run,
         "checks": checks,
         "command": command_result,
+    }
+
+
+def cgc_runtime_root_containment_check(layout: Any) -> dict[str, Any]:
+    """Return the CGC runtime-root containment safety check."""
+
+    under_provider_root = layout.runtime_root.is_relative_to(layout.providers_root)
+    under_coordination_root = layout.runtime_root.is_relative_to(layout.coordination_root)
+    outside_source_repo = not layout.runtime_root.is_relative_to(layout.code_repo_root)
+    return {
+        "name": "runtime-root-contained",
+        "ok": (under_provider_root or under_coordination_root) and outside_source_repo,
+        "details": {
+            "runtimeRoot": layout.runtime_root.as_posix(),
+            "providersRoot": layout.providers_root.as_posix(),
+            "coordinationRoot": layout.coordination_root.as_posix(),
+            "codeRepoRoot": layout.code_repo_root.as_posix(),
+            "underProviderRoot": under_provider_root,
+            "underCoordinationRoot": under_coordination_root,
+            "outsideSourceRepo": outside_source_repo,
+        },
     }

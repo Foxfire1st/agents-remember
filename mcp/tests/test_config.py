@@ -10,6 +10,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.config import ConfigError, load_config, require_config_path
+from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 
@@ -94,37 +95,97 @@ class McpConfigTests(unittest.TestCase):
                 config.repositories["agents-remember-md"].memory_root.name,
                 "ar-agents-remember-md",
             )
-            self.assertEqual(config.providers["grepai-memory"].log_root.name, "grepai")
+            self.assertEqual(config.providers["grepai-memory"].scope, "workspace")
+            self.assertEqual(config.providers["grepai-memory"].instance_id, "workspace")
+            self.assertEqual(
+                config.providers["grepai-memory"].log_root,
+                root
+                / "ar-coordination"
+                / "providers"
+                / "logs"
+                / "grepai"
+                / config.providers["grepai-memory"].instance_id,
+            )
             self.assertEqual(
                 config.providers["codegraphcontext-code"].runtime_root,
-                root / "ar-coordination" / "providers" / "runners" / "codegraphcontext",
+                root
+                / "ar-coordination"
+                / "providers"
+                / "runners"
+                / "codegraphcontext"
+                / config.providers["codegraphcontext-code"].instance_id,
             )
 
             lifecycle_settings = lifecycle_settings_from_config(config)
             providers = lifecycle_settings["contextProviders"]["providers"]
             grepai = providers["grepai-memory"]
+            grepai_instance = config.providers["grepai-memory"].instance_id
+            cgc_instance = config.providers["codegraphcontext-code"].instance_id
             self.assertEqual(
                 grepai["runtimeRoot"],
-                (root / "ar-coordination" / "providers" / "runners" / "grepai").as_posix(),
+                (
+                    root
+                    / "ar-coordination"
+                    / "providers"
+                    / "runners"
+                    / "grepai"
+                    / grepai_instance
+                ).as_posix(),
+            )
+            self.assertEqual(grepai["instance"]["id"], grepai_instance)
+            self.assertEqual(grepai["instance"]["scope"], "workspace")
+            self.assertEqual(
+                grepai["instance"]["labels"]["agents-remember.instance-id"],
+                grepai_instance,
+            )
+            self.assertEqual(
+                grepai["instance"]["labels"]["agents-remember.provider"],
+                "grepai-memory",
             )
             self.assertEqual(grepai["runtime"]["mode"], "docker")
-            self.assertEqual(grepai["runtime"]["network"]["name"], "ar-grepai-memory")
+            self.assertEqual(
+                grepai["runtime"]["composeProject"],
+                f"agents-remember-grepai-{grepai_instance}",
+            )
+            self.assertEqual(
+                grepai["runtime"]["network"]["name"],
+                f"ar-grepai-memory-{grepai_instance}",
+            )
             self.assertEqual(grepai["runtime"]["runner"]["image"], "agents-remember/grepai:0.35.0")
             self.assertEqual(
                 grepai["runtime"]["runner"]["containerName"],
-                "ar-grepai-watcher",
+                f"ar-grepai-watcher-{grepai_instance}",
             )
             self.assertEqual(
                 grepai["backend"]["runtimeRoot"],
                 (
-                    root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres"
+                    root
+                    / "ar-coordination"
+                    / "providers"
+                    / "data"
+                    / "grepai"
+                    / grepai_instance
+                    / "postgres"
                 ).as_posix(),
             )
             self.assertEqual(grepai["embedder"]["provider"], "ollama")
             self.assertEqual(grepai["embedder"]["backend"]["image"], "ollama/ollama:latest")
             self.assertEqual(
                 grepai["embedder"]["backend"]["containerName"],
-                "ar-grepai-ollama",
+                f"ar-grepai-ollama-{grepai_instance}",
+            )
+            self.assertEqual(providers["codegraphcontext-code"]["instance"]["id"], cgc_instance)
+            self.assertEqual(
+                providers["codegraphcontext-code"]["instance"]["scope"],
+                "workspace",
+            )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["runtime"]["composeProject"],
+                f"agents-remember-cgc-{cgc_instance}",
+            )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["runtime"]["runner"]["containerNameTemplate"],
+                f"ar-cgc-watcher-{cgc_instance}-<repoId>",
             )
             self.assertEqual(
                 providers["codegraphcontext-code"]["backend"]["runtimeRoot"],
@@ -134,12 +195,75 @@ class McpConfigTests(unittest.TestCase):
                     / "providers"
                     / "data"
                     / "codegraphcontext"
+                    / cgc_instance
                     / "falkordb"
                 ).as_posix(),
             )
             self.assertEqual(
                 providers["codegraphcontext-code"]["backend"]["network"]["name"],
-                "ar-cgc-code",
+                f"ar-cgc-code-{cgc_instance}",
+            )
+
+    def test_provider_instance_id_can_be_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            payload["providers"]["grepai-memory"]["instanceId"] = "bench-case-a"
+            payload["providers"]["grepai-memory"]["scope"] = "benchmark"
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, payload)
+
+            config = load_config(path)
+
+            provider = config.providers["grepai-memory"]
+            self.assertEqual(provider.instance_id, "bench-case-a")
+            self.assertEqual(provider.scope, "benchmark")
+            self.assertEqual(
+                provider.runtime_root,
+                root / "ar-coordination" / "providers" / "runners" / "grepai" / "bench-case-a",
+            )
+
+    def test_default_provider_instance_ids_are_readable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            workspace_root = root / "Projects"
+            coordination_root = workspace_root / "ar-coordination"
+            worktree_runtime = (
+                coordination_root
+                / "worktrees"
+                / "agents-remember-md"
+                / "provider-task"
+                / "provider-runtime"
+            )
+
+            self.assertEqual(provider_instance_id("workspace", workspace_root), "projects")
+            self.assertEqual(
+                provider_instance_id("worktree", worktree_runtime),
+                "projects-provider-task",
+            )
+            self.assertEqual(
+                provider_instance_id("benchmark", workspace_root),
+                "projects-benchmark",
+            )
+
+    def test_repository_memory_root_prefers_internal_ar_memory_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo_root = root / "workspace" / "agents-remember-md"
+            internal_memory = repo_root / "ar-memory"
+            internal_memory.mkdir(parents=True)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+
+            config = load_config(path)
+
+            self.assertEqual(config.repositories["agents-remember-md"].memory_root, internal_memory)
+            grepai_roots = lifecycle_settings_from_config(config)["contextProviders"][
+                "providers"
+            ]["grepai-memory"]["roots"]
+            self.assertEqual(
+                grepai_roots,
+                [{"projectId": "agents-remember-md", "path": internal_memory.as_posix()}],
             )
 
     def test_harness_skill_root_is_none_without_registration_folder(self) -> None:

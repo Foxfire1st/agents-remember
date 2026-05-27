@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle.compose import (
-    CGC_COMPOSE_PROJECT,
+    cgc_compose_project,
     cgc_compose_render,
     cgc_compose_summary,
 )
@@ -352,7 +352,7 @@ def cgc_backend_dry_run_result(
 def cgc_backend_start(args: argparse.Namespace) -> dict[str, Any]:
     settings_path, provider_settings, layouts, layout, backend = cgc_backend_start_context(args)
     network_result = {"ok": True, "name": backend["networkName"], "managedBy": "docker-compose"}
-    migration = cgc_project_migration(args, layouts, backend)
+    migration = cgc_project_migration(args, provider_settings, layouts, backend)
     inspect_data = cgc_backend_inspect(args, layout, backend)
     inspect_data, forced_remove_result, error = cgc_backend_remove_mismatched_container(
         args, layout, backend, inspect_data
@@ -457,13 +457,17 @@ def cgc_backend_create_start_result(
 
 
 def cgc_project_migration(
-    args: argparse.Namespace, layouts: list[Any], backend: dict[str, Any]
+    args: argparse.Namespace,
+    provider_settings: dict[str, Any],
+    layouts: list[Any],
+    backend: dict[str, Any],
 ) -> dict[str, Any]:
+    project_name = cgc_compose_project(provider_settings)
     return {
         "containers": {
             "falkordb": remove_unmanaged_compose_container(
                 backend["containerName"],
-                project_name=CGC_COMPOSE_PROJECT,
+                project_name=project_name,
                 cwd=layouts[0].coordination_root,
                 timeout=args.timeout,
                 dry_run=args.dry_run,
@@ -471,7 +475,7 @@ def cgc_project_migration(
             "watchers": {
                 layout.repo_id: remove_unmanaged_compose_container(
                     layout.watcher_container_name,
-                    project_name=CGC_COMPOSE_PROJECT,
+                    project_name=project_name,
                     cwd=layout.coordination_root,
                     timeout=args.timeout,
                     dry_run=args.dry_run,
@@ -481,7 +485,7 @@ def cgc_project_migration(
         },
         "network": remove_unmanaged_compose_network(
             backend["networkName"],
-            project_name=CGC_COMPOSE_PROJECT,
+            project_name=project_name,
             cwd=layouts[0].coordination_root,
             timeout=args.timeout,
             dry_run=args.dry_run,

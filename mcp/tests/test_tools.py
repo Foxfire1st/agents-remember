@@ -47,6 +47,7 @@ from agents_remember.providers.integrity import (
     check_provider_runner_integrity,
     manifest_path_for_config,
 )
+from agents_remember.providers.settings import lifecycle_settings_from_config
 from test_config import settings_payload
 
 
@@ -61,6 +62,11 @@ def planned_command(payload: dict) -> list[str]:
 
 def command_after(command: list[str], token: str) -> list[str]:
     return command[command.index(token) + 1 :]
+
+
+def grepai_workspace(config) -> str:
+    settings = lifecycle_settings_from_config(config)
+    return settings["contextProviders"]["providers"]["grepai-memory"]["workspace"]
 
 
 class McpToolTests(unittest.TestCase):
@@ -529,6 +535,7 @@ class McpToolTests(unittest.TestCase):
                 output_format="toon",
                 dry_run=True,
             )
+            workspace = grepai_workspace(config)
 
         self.assertTrue(workspace_payload["ok"])
         self.assertEqual(
@@ -537,7 +544,7 @@ class McpToolTests(unittest.TestCase):
                 "search",
                 "provider lifecycle",
                 "--workspace",
-                "agents-remember-memory",
+                workspace,
                 "--limit",
                 "10",
                 "--json",
@@ -552,7 +559,7 @@ class McpToolTests(unittest.TestCase):
                 "search",
                 "provider lifecycle",
                 "--workspace",
-                "agents-remember-memory",
+                workspace,
                 "--limit",
                 "5",
                 "--toon",
@@ -596,6 +603,7 @@ class McpToolTests(unittest.TestCase):
                 depth=3,
                 dry_run=True,
             )
+            workspace = grepai_workspace(config)
 
         self.assertTrue(payload["ok"])
         self.assertEqual(
@@ -605,7 +613,7 @@ class McpToolTests(unittest.TestCase):
                 "graph",
                 "resolve_context",
                 "--workspace",
-                "agents-remember-memory",
+                workspace,
                 "--json",
                 "--depth",
                 "3",

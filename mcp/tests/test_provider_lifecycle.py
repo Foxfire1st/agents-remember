@@ -5,6 +5,7 @@ import io
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import lifecycle, lifecycle_service
 from agents_remember.providers.cgc.lifecycle import query as cgc_query
+from agents_remember.providers.cgc.lifecycle import refresh as cgc_refresh_lifecycle
 from agents_remember.providers.cgc.lifecycle.runner import cgc_runner_patch_script
 from agents_remember.providers.grepai.lifecycle import actions as grepai_actions
 from agents_remember.providers.grepai.lifecycle import backend as grepai_backend
@@ -163,6 +165,19 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             dry_run=True,
             timeout=1,
         )
+
+    def multi_repo_service_config(
+        self, root: Path
+    ) -> lifecycle_service.ProviderLifecycleServiceConfig:
+        service_config = self.service_config(root)
+        repo = root / "workspace" / "repo-b"
+        repo.mkdir(parents=True)
+        settings = lifecycle.read_json(service_config.settings_path)
+        settings["contextProviders"]["providers"]["codegraphcontext-code"]["roots"].append(
+            {"repoId": "repo-b", "path": repo.as_posix()}
+        )
+        lifecycle.write_json(service_config.settings_path, settings)
+        return service_config
 
     def test_visualize_accepts_named_options_after_subcommand(self) -> None:
         args = self.parse_cgc(
@@ -444,6 +459,147 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             migration["containers"]["watchers"]["repo-a"]["containerName"],
             "ar-cgc-watcher-repo-a",
         )
+
+    def test_cgc_start_all_dry_run_uses_one_bulk_compose_up(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.multi_repo_service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "start",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--dry-run",
+                ]
+            )
+
+            result = lifecycle.cgc_start(args)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["parallel"])
+        command = result["command"]["command"]
+        self.assertIn("up", command)
+        self.assertIn("-d", command)
+        self.assertLess(command.index("watcher-repo-a"), command.index("watcher-repo-b"))
+        self.assertEqual(command.count("watcher-repo-a"), 1)
+        self.assertEqual(command.count("watcher-repo-b"), 1)
+
+    def test_cgc_refresh_all_indexes_repos_in_parallel_after_starting_watchers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.multi_repo_service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "refresh-all",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                ]
+            )
+            originals = {
+                "cgc_start_all": cgc_refresh_lifecycle.cgc_start_all,
+                "run_compose": cgc_refresh_lifecycle.run_compose,
+            }
+            barrier = threading.Barrier(2, timeout=2)
+            lock = threading.Lock()
+            active = 0
+            max_active = 0
+            index_calls: list[list[str]] = []
+            runner_renders: dict[str, str] = {}
+
+            def fake_run_compose(render, command_args, **kwargs):
+                nonlocal active, max_active
+                index_calls.append(command_args)
+                runner_renders[command_args[5]] = render.override_yaml
+                with lock:
+                    active += 1
+                    max_active = max(max_active, active)
+                barrier.wait()
+                with lock:
+                    active -= 1
+                return {
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": 0,
+                    "durationSeconds": 0.1,
+                    "timedOut": False,
+                }
+
+            cgc_refresh_lifecycle.cgc_start_all = lambda scoped_args: {
+                "provider": "codegraphcontext",
+                "action": "start-all",
+                "ok": True,
+                "backend": {"ok": True},
+            }
+            cgc_refresh_lifecycle.run_compose = fake_run_compose
+            try:
+                result = lifecycle.cgc_refresh_all(args)
+            finally:
+                cgc_refresh_lifecycle.cgc_start_all = originals["cgc_start_all"]
+                cgc_refresh_lifecycle.run_compose = originals["run_compose"]
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["parallel"])
+        self.assertEqual(result["watchers"]["action"], "start-all")
+        self.assertEqual(len(index_calls), 2)
+        self.assertEqual(max_active, 2)
+        self.assertTrue(
+            all(call[:5] == ["run", "--rm", "--no-deps", "runner", "index"] for call in index_calls)
+        )
+        for repo_path, override_yaml in runner_renders.items():
+            self.assertIn(f'{repo_path}:{repo_path}:ro"', override_yaml)
+            self.assertIn("watcher-repo-a:", override_yaml)
+            self.assertIn("watcher-repo-b:", override_yaml)
+
+    def test_cgc_runtime_containment_allows_workflow_local_provider_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            coordination_root = root / "coordination"
+            code_repo = root / "workspace" / "repo-a"
+            code_repo.mkdir(parents=True)
+            layout = lifecycle.cgc_runtime_layout(
+                coordination_root=coordination_root,
+                repo_id="repo-a",
+                code_repo_root=code_repo,
+                runtime_root=(
+                    coordination_root
+                    / "worktrees"
+                    / "repo-a"
+                    / "task-ar"
+                    / "provider-runtime"
+                    / "providers"
+                    / "runners"
+                    / "codegraphcontext"
+                    / "worktree-abc123"
+                    / "repo-a"
+                ),
+            )
+
+            result = lifecycle.cgc_runtime_root_containment_check(layout)
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["details"]["underProviderRoot"])
+        self.assertTrue(result["details"]["underCoordinationRoot"])
+        self.assertTrue(result["details"]["outsideSourceRepo"])
+
+    def test_cgc_runtime_containment_rejects_source_repo_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            coordination_root = root / "coordination"
+            code_repo = root / "workspace" / "repo-a"
+            code_repo.mkdir(parents=True)
+            layout = lifecycle.cgc_runtime_layout(
+                coordination_root=coordination_root,
+                repo_id="repo-a",
+                code_repo_root=code_repo,
+                runtime_root=code_repo / ".codegraphcontext",
+            )
+
+            result = lifecycle.cgc_runtime_root_containment_check(layout)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["details"]["outsideSourceRepo"])
 
     def test_watchers_service_reads_settings_without_cli_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

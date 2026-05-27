@@ -14,6 +14,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import provider_setup
+from agents_remember.providers.identity import provider_instance_id
 
 
 class ProviderSetupTests(unittest.TestCase):
@@ -143,6 +144,95 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertNotIn(source_root.resolve().as_posix(), combined)
             self.assertIn(target_root.resolve().as_posix(), combined)
 
+    def test_cgc_seed_uses_container_mounted_runtime_bundle_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_coordination = root / "source" / "ar-coordination"
+            target_coordination = root / "target" / "ar-coordination"
+            source_repo = root / "source" / "repo-a"
+            target_repo = root / "target" / "repo-a"
+            source_repo.mkdir(parents=True)
+            target_repo.mkdir(parents=True)
+            source_settings = root / "source-settings.json"
+            source_settings.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "codegraphcontext-code": {
+                                    "enabled": True,
+                                    "runtimeRoot": (
+                                        source_coordination / "providers" / "runners" / "cgc"
+                                    ).as_posix(),
+                                    "instanceRootTemplate": "<runtimeRoot>/<repoId>",
+                                    "roots": [
+                                        {
+                                            "repoId": "repo-a",
+                                            "path": source_repo.as_posix(),
+                                        }
+                                    ],
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            target_settings = {
+                "contextProviders": {
+                    "enabled": True,
+                    "providers": {
+                        "codegraphcontext-code": {
+                            "enabled": True,
+                            "runtimeRoot": (
+                                target_coordination / "providers" / "runners" / "cgc"
+                            ).as_posix(),
+                            "instanceRootTemplate": "<runtimeRoot>/<repoId>",
+                            "roots": [
+                                {
+                                    "repoId": "repo-a",
+                                    "path": target_repo.as_posix(),
+                                }
+                            ],
+                        }
+                    },
+                }
+            }
+            args = argparse.Namespace(
+                coordination_root=target_coordination,
+                from_settings=root / "target-settings.json",
+                cgc_from_settings=root / "target-settings.json",
+                provider_from_settings=None,
+                cgc_seed_source_coordination_root=source_coordination,
+                cgc_seed_source_from_settings=source_settings,
+                cgc_seed_repo_id="repo-a",
+                cgc_seed_source_repo_id=None,
+                cgc_seed_source_repo_root=None,
+                cgc_seed_target_repo_root=None,
+                cgc_seed_bundle_dir=None,
+                cgc_seed_allow_commit_mismatch=False,
+                cgc_seed_allow_same_coordination_root=False,
+                cgc_isolated_runtime_root=None,
+                timeout=30,
+                dry_run=True,
+            )
+
+            result = provider_setup.cgc_seed_bundle(args, target_settings)
+
+        self.assertTrue(result["ok"])
+        export_command = " ".join(result["export"]["command"])
+        load_command = " ".join(result["load"]["command"])
+        self.assertIn("bundle import", load_command)
+        self.assertIn(
+            (source_coordination / "providers" / "runners" / "cgc" / "repo-a" / "seed-bundles").as_posix(),
+            export_command,
+        )
+        self.assertIn(
+            (target_coordination / "providers" / "runners" / "cgc" / "repo-a" / "seed-bundles").as_posix(),
+            load_command,
+        )
+
     def test_isolated_cgc_settings_targets_worktree_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -188,14 +278,39 @@ class ProviderSetupTests(unittest.TestCase):
             isolated = provider_setup.isolated_cgc_settings(args, settings)
             self.assertIsNotNone(isolated)
             cgc = isolated["contextProviders"]["providers"]["codegraphcontext-code"]
+            instance_id = provider_instance_id(
+                "worktree",
+                isolated_root,
+                workspace_name=coordination_root.parent.name,
+            )
 
             self.assertEqual(
                 cgc["roots"],
                 [{"repoId": "agents-remember-md", "path": target_repo.resolve().as_posix()}],
             )
+            self.assertEqual(cgc["instance"]["id"], instance_id)
+            self.assertEqual(cgc["instance"]["scope"], "worktree")
+            self.assertEqual(
+                cgc["instance"]["labels"]["agents-remember.provider"],
+                "codegraphcontext-code",
+            )
             self.assertEqual(
                 cgc["runtimeRoot"],
-                (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix(),
+                (
+                    isolated_root
+                    / "providers"
+                    / "runners"
+                    / "codegraphcontext"
+                    / instance_id
+                ).as_posix(),
+            )
+            self.assertEqual(
+                cgc["runtime"]["composeProject"],
+                f"agents-remember-cgc-{instance_id}",
+            )
+            self.assertEqual(
+                cgc["runtime"]["runner"]["containerNameTemplate"],
+                f"ar-cgc-watcher-{instance_id}-<repoId>",
             )
             self.assertEqual(
                 cgc["venvRoot"],
@@ -203,11 +318,252 @@ class ProviderSetupTests(unittest.TestCase):
             )
             self.assertEqual(
                 cgc["backend"]["runtimeRoot"],
-                (isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb").as_posix(),
+                (
+                    isolated_root
+                    / "providers"
+                    / "data"
+                    / "codegraphcontext"
+                    / instance_id
+                    / "falkordb"
+                ).as_posix(),
             )
-            self.assertTrue(
-                cgc["backend"]["containerName"].startswith("ar-cgc-falkordb-agents-remember-md-")
+            self.assertEqual(
+                cgc["backend"]["containerName"],
+                f"ar-cgc-falkordb-{instance_id}-agents-remember-md",
             )
+            self.assertEqual(
+                cgc["backend"]["network"]["name"],
+                f"ar-cgc-code-{instance_id}",
+            )
+
+    def test_isolated_grepai_settings_swaps_only_active_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination_root = root / "ar-coordination"
+            isolated_root = root / "worktrees" / "agents-remember-md" / "task" / "provider-runtime"
+            source_memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            target_memory = root / "worktrees" / "agents-remember-md" / "task" / "memory"
+            other_memory = root / "ar-coordination" / "memory-repos" / "ar-other-repo"
+            args = argparse.Namespace(
+                coordination_root=coordination_root,
+                grepai_isolated_runtime_root=isolated_root,
+                grepai_seed_project_id="agents-remember-md",
+                grepai_seed_target_memory_root=target_memory,
+                grepai_allow_missing_roots=True,
+            )
+            settings = {
+                "contextProviders": {
+                    "enabled": True,
+                    "providers": {
+                        "grepai-memory": {
+                            "enabled": True,
+                            "workspace": "agents-remember-memory",
+                            "runtimeRoot": "<coordination_root>/providers/runners/grepai",
+                            "roots": [
+                                {
+                                    "projectId": "agents-remember-md",
+                                    "path": source_memory.as_posix(),
+                                },
+                                {"projectId": "other-repo", "path": other_memory.as_posix()},
+                            ],
+                        }
+                    },
+                }
+            }
+
+            isolated = provider_setup.isolated_grepai_settings(args, settings)
+            self.assertIsNotNone(isolated)
+            grepai = isolated["contextProviders"]["providers"]["grepai-memory"]
+            instance_id = provider_instance_id(
+                "worktree",
+                isolated_root,
+                workspace_name=coordination_root.parent.name,
+            )
+
+            self.assertEqual(grepai["instance"]["id"], instance_id)
+            self.assertEqual(grepai["instance"]["scope"], "worktree")
+            self.assertEqual(grepai["allowMissingRoots"], True)
+            self.assertEqual(
+                grepai["workspace"],
+                f"agents-remember-memory-{instance_id}",
+            )
+            self.assertEqual(
+                grepai["runtimeRoot"],
+                (isolated_root / "providers" / "runners" / "grepai" / instance_id).as_posix(),
+            )
+            self.assertEqual(
+                grepai["runtime"]["runner"]["containerName"],
+                f"ar-grepai-watcher-{instance_id}",
+            )
+            roots = {root["projectId"]: root["path"] for root in grepai["roots"]}
+            self.assertEqual(roots["agents-remember-md"], target_memory.resolve().as_posix())
+            self.assertEqual(roots["other-repo"], other_memory.as_posix())
+
+    def test_run_provider_setup_warm_starts_isolated_grepai_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination_root = root / "ar-coordination"
+            source_memory = coordination_root / "memory-repos" / "ar-agents-remember-md"
+            other_memory = coordination_root / "memory-repos" / "ar-other-repo"
+            target_memory = root / "worktrees" / "agents-remember-md" / "task" / "memory"
+            isolated_root = root / "worktrees" / "agents-remember-md" / "task" / "provider-runtime"
+            source_memory.mkdir(parents=True)
+            other_memory.mkdir(parents=True)
+            settings_path = root / "provider-settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "grepai-memory": {
+                                    "enabled": True,
+                                    "workspace": "agents-remember-memory",
+                                    "runtimeRoot": (
+                                        coordination_root / "providers" / "runners" / "grepai"
+                                    ).as_posix(),
+                                    "roots": [
+                                        {
+                                            "projectId": "agents-remember-md",
+                                            "path": source_memory.as_posix(),
+                                        },
+                                        {
+                                            "projectId": "other-repo",
+                                            "path": other_memory.as_posix(),
+                                        },
+                                    ],
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            payload = provider_setup.run_provider_setup(
+                provider_setup.ProviderSetupRequest(
+                    action="prepare",
+                    coordination_root=coordination_root,
+                    settings_path=settings_path,
+                    dry_run=True,
+                    grepai_seed=provider_setup.GrepaiSeedOptions(
+                        source_coordination_root=coordination_root,
+                        source_settings_path=settings_path,
+                        project_id="agents-remember-md",
+                        target_memory_root=target_memory,
+                    ),
+                    grepai_isolated=provider_setup.IsolatedGrepaiOptions(
+                        runtime_root=isolated_root,
+                        project_id="agents-remember-md",
+                        target_memory_root=target_memory,
+                        allow_missing_roots=True,
+                    ),
+                )
+            )
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(
+                payload["isolatedProviderSettings"]["providers"],
+                ["grepai-memory"],
+            )
+            clone = next(result for result in payload["results"] if result["action"] == "clone-db")
+            self.assertTrue(clone["ok"])
+            self.assertEqual(clone["strategy"], "database-clone-active-project-reconcile")
+            self.assertIn("pg_dump", clone["clone"]["commands"]["dump"])
+            self.assertNotIn("--single-transaction", clone["clone"]["commands"]["dump"])
+            target_settings = payload["isolatedProviderSettings"]["settings"]
+            grepai = target_settings["contextProviders"]["providers"]["grepai-memory"]
+            roots = {root["projectId"]: root["path"] for root in grepai["roots"]}
+            self.assertEqual(roots["agents-remember-md"], target_memory.resolve().as_posix())
+            self.assertEqual(roots["other-repo"], other_memory.as_posix())
+
+    def test_grepai_clone_uses_non_isolated_target_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_coordination = root / "source" / "ar-coordination"
+            target_coordination = root / "target" / "ar-coordination"
+            source_memory = source_coordination / "memory-repos" / "ar-repo-a"
+            target_memory = target_coordination / "memory-repos" / "ar-repo-a"
+            source_memory.mkdir(parents=True)
+            target_memory.mkdir(parents=True)
+            source_settings = root / "source-settings.json"
+            target_settings = root / "target-settings.json"
+            source_settings.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "grepai-memory": {
+                                    "enabled": True,
+                                    "workspace": "source-memory",
+                                    "runtimeRoot": (
+                                        source_coordination / "providers" / "runners" / "grepai"
+                                    ).as_posix(),
+                                    "roots": [
+                                        {
+                                            "projectId": "repo-a",
+                                            "path": source_memory.as_posix(),
+                                        }
+                                    ],
+                                    "backend": {
+                                        "containerName": "ar-grepai-postgres-source",
+                                    },
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            target_settings.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "grepai-memory": {
+                                    "enabled": True,
+                                    "workspace": "target-memory",
+                                    "runtimeRoot": (
+                                        target_coordination / "providers" / "runners" / "grepai"
+                                    ).as_posix(),
+                                    "roots": [
+                                        {
+                                            "projectId": "repo-a",
+                                            "path": target_memory.as_posix(),
+                                        }
+                                    ],
+                                    "backend": {
+                                        "containerName": "ar-grepai-postgres-target",
+                                    },
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            payload = provider_setup.run_provider_setup(
+                provider_setup.ProviderSetupRequest(
+                    action="prepare",
+                    coordination_root=target_coordination,
+                    settings_path=target_settings,
+                    dry_run=True,
+                    grepai_seed=provider_setup.GrepaiSeedOptions(
+                        source_coordination_root=source_coordination,
+                        source_settings_path=source_settings,
+                        project_id="repo-a",
+                        target_memory_root=target_memory,
+                    ),
+                )
+            )
+
+        self.assertTrue(payload["ok"])
+        clone = next(result for result in payload["results"] if result["action"] == "clone-db")
+        self.assertTrue(clone["ok"])
+        self.assertEqual(clone["targetSettingsFile"], target_settings.resolve().as_posix())
 
     def test_run_command_forces_utf8_for_lifecycle_children(self) -> None:
         captured = {}

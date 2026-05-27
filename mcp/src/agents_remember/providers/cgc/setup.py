@@ -12,6 +12,15 @@ from agents_remember.providers.cgc.seed import (
     cgc_extra_args,
     cgc_seed_bundle,
 )
+from agents_remember.providers.context import (
+    CGC_NETWORK_NAME,
+    CGC_WATCHER_CONTAINER_PREFIX,
+)
+from agents_remember.providers.identity import (
+    provider_instance_id,
+    provider_ownership_labels,
+    scoped_name,
+)
 from agents_remember.providers.setup_common import (
     context_providers,
     run_lifecycle,
@@ -71,22 +80,59 @@ def _isolated_settings_payload(cgc: dict[str, Any]) -> dict[str, Any]:
 def _isolated_cgc_provider(args: Any, provider: dict[str, Any]) -> dict[str, Any]:
     isolated_root = args.cgc_isolated_runtime_root.resolve()
     repo_id = stable_provider_id(args.cgc_seed_repo_id or args.cgc_seed_target_repo_root.name)
+    instance_id = provider_instance_id(
+        "worktree",
+        isolated_root,
+        workspace_name=args.coordination_root.parent.name,
+    )
     cgc = json.loads(json.dumps(provider))
-    cgc.update(_isolated_cgc_base_fields(args, isolated_root, repo_id))
-    cgc["backend"] = _isolated_cgc_backend(args, cgc.get("backend"), isolated_root, repo_id)
+    cgc.update(_isolated_cgc_base_fields(args, isolated_root, repo_id, instance_id))
+    cgc["runtime"] = _isolated_cgc_runtime(cgc.get("runtime"), instance_id)
+    cgc["backend"] = _isolated_cgc_backend(
+        args,
+        cgc.get("backend"),
+        isolated_root,
+        repo_id,
+        instance_id,
+    )
     return cgc
 
 
-def _isolated_cgc_base_fields(args: Any, isolated_root: Path, repo_id: str) -> dict[str, Any]:
+def _isolated_cgc_base_fields(
+    args: Any,
+    isolated_root: Path,
+    repo_id: str,
+    instance_id: str,
+) -> dict[str, Any]:
+    runtime_root = isolated_root / "providers" / "runners" / "codegraphcontext" / instance_id
+    log_file = (
+        isolated_root
+        / "providers"
+        / "logs"
+        / "codegraphcontext"
+        / instance_id
+        / "<repoId>"
+        / "watch.log"
+    )
     return {
         "enabled": True,
+        "instance": {
+            "id": instance_id,
+            "scope": "worktree",
+            "labels": provider_ownership_labels(
+                provider_id=CGC_PROVIDER_ID,
+                instance_id=instance_id,
+                scope="worktree",
+                coordination_root=args.coordination_root,
+            ),
+        },
         "roots": [
             {
                 "repoId": repo_id,
                 "path": args.cgc_seed_target_repo_root.resolve().as_posix(),
             }
         ],
-        "runtimeRoot": (isolated_root / "providers" / "runners" / "codegraphcontext").as_posix(),
+        "runtimeRoot": runtime_root.as_posix(),
         "instanceRootTemplate": "<runtimeRoot>/<repoId>",
         "venvRoot": (
             args.coordination_root / "providers" / "_venvs" / "codegraphcontext"
@@ -98,7 +144,27 @@ def _isolated_cgc_base_fields(args: Any, isolated_root: Path, repo_id: str) -> d
             args.coordination_root / "providers" / "patches" / "codegraphcontext"
         ).as_posix(),
         "stateFileTemplate": "<instanceRoot>/provider-state.json",
+        "watch": {
+            "mode": "managed-foreground",
+            "cwdTemplate": "<instanceRoot>",
+            "logFileTemplate": log_file.as_posix(),
+        },
     }
+
+
+def _isolated_cgc_runtime(runtime_settings: Any, instance_id: str) -> dict[str, Any]:
+    runtime = runtime_settings if isinstance(runtime_settings, dict) else {}
+    runtime = dict(runtime)
+    runner = runtime.get("runner")
+    runner = dict(runner) if isinstance(runner, dict) else {}
+    runner["buildRoot"] = "<runtimeRoot>/image"
+    runner["containerNameTemplate"] = (
+        f"{scoped_name(CGC_WATCHER_CONTAINER_PREFIX, instance_id)}-<repoId>"
+    )
+    runtime["mode"] = "docker"
+    runtime["composeProject"] = scoped_name("agents-remember-cgc", instance_id)
+    runtime["runner"] = runner
+    return runtime
 
 
 def _isolated_cgc_backend(
@@ -106,13 +172,19 @@ def _isolated_cgc_backend(
     backend_settings: Any,
     isolated_root: Path,
     repo_id: str,
+    instance_id: str,
 ) -> dict[str, Any]:
     backend = backend_settings if isinstance(backend_settings, dict) else {}
     backend = dict(backend)
     backend.update(
         {
             "runtimeRoot": (
-                isolated_root / "providers" / "data" / "codegraphcontext" / "falkordb"
+                isolated_root
+                / "providers"
+                / "data"
+                / "codegraphcontext"
+                / instance_id
+                / "falkordb"
             ).as_posix(),
             "dataRoot": "<backendRuntimeRoot>/data",
             "imageLockFile": (
@@ -121,16 +193,17 @@ def _isolated_cgc_backend(
                 / "requirements"
                 / "codegraphcontext-falkordb-docker.lock"
             ).as_posix(),
-            "containerName": _isolated_cgc_container_name(args, isolated_root, repo_id),
+            "containerName": _isolated_cgc_container_name(args, instance_id, repo_id),
+            "network": {"name": scoped_name(CGC_NETWORK_NAME, instance_id)},
         }
     )
     return backend
 
 
-def _isolated_cgc_container_name(args: Any, isolated_root: Path, repo_id: str) -> str:
+def _isolated_cgc_container_name(args: Any, instance_id: str, repo_id: str) -> str:
     return (
         args.cgc_isolated_container_name
-        or f"ar-cgc-falkordb-{repo_id}-{stable_provider_id(isolated_root.name)}"
+        or scoped_name("ar-cgc-falkordb", instance_id, repo_id)
     )
 
 

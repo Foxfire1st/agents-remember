@@ -1,6 +1,8 @@
   @WATCHER_SERVICE@:
     image: @RUNNER_IMAGE@
     container_name: @WATCHER_CONTAINER_NAME@
+    labels:
+@SERVICE_LABELS@
     restart: unless-stopped
     depends_on:
       falkordb:

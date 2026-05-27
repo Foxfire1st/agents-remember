@@ -17,11 +17,27 @@ from agents_remember.providers.lifecycle.compose_runtime import (
     provider_asset_text,
     render_template,
     yaml_environment,
+    yaml_labels,
     yaml_port_mapping,
     yaml_scalar,
 )
 
 GREPAI_COMPOSE_PROJECT = "agents-remember-grepai"
+
+
+def grepai_compose_project(provider_settings: dict[str, Any]) -> str:
+    runtime = provider_settings.get("runtime")
+    if not isinstance(runtime, dict):
+        return GREPAI_COMPOSE_PROJECT
+    return str(runtime.get("composeProject", GREPAI_COMPOSE_PROJECT))
+
+
+def grepai_ownership_labels(provider_settings: dict[str, Any]) -> dict[str, str]:
+    instance = provider_settings.get("instance")
+    if not isinstance(instance, dict):
+        return {"agents-remember.legacy-provider-settings": "true"}
+    labels = instance.get("labels")
+    return labels if isinstance(labels, dict) else {"agents-remember.legacy-provider-settings": "true"}
 
 
 def grepai_compose_render(
@@ -61,6 +77,7 @@ def grepai_compose_render(
         "GREPAI_ARCH": yaml_scalar(runner["releaseArch"]),
         "WATCHER_CONTAINER_NAME": yaml_scalar(runner["containerName"]),
         "WATCHER_USER_BLOCK": grepai_user_block(),
+        "SERVICE_LABELS": yaml_labels(grepai_ownership_labels(provider_settings)),
         "WATCHER_ENVIRONMENT": yaml_environment(grepai_container_env(runner)),
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(
             f"{layout.runtime_root.as_posix()}:{runner['runtimeMount']}"
@@ -77,7 +94,7 @@ def grepai_compose_render(
         values,
     )
     return ComposeRender(
-        project_name=GREPAI_COMPOSE_PROJECT,
+        project_name=grepai_compose_project(provider_settings),
         base_file=provider_asset_path("compose", "grepai.compose.yaml"),
         override_yaml=override_yaml,
     )

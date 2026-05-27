@@ -15,10 +15,7 @@ from agents_remember.benchmarks.runner_modules.constants import (
     BENCHMARK_MCP_STARTUP_TIMEOUT_SECONDS,
     CODEX_HARNESS_DIR,
 )
-from agents_remember.benchmarks.runner_modules.manifest import (
-    benchmark_stable_id,
-    manifest_path_component,
-)
+from agents_remember.benchmarks.runner_modules.manifest import manifest_path_component
 from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
 from agents_remember.mcp.config import (
     McpRuntimeConfig,
@@ -27,6 +24,7 @@ from agents_remember.mcp.config import (
     provider_runtime_name,
 )
 from agents_remember.providers import provider_setup
+from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 
@@ -62,13 +60,17 @@ def benchmark_mcp_settings_payload(
     workspace_root: Path,
     provider_ids: tuple[str, ...],
     provider_timeout: int,
+    provider_instance: str | None = None,
 ) -> dict[str, Any]:
+    provider_settings = {"scope": "benchmark"}
+    if provider_instance is not None:
+        provider_settings["instanceId"] = provider_instance
     return {
         "version": 1,
         "coordinationRoot": coordination_root.resolve().as_posix(),
         "workspaceRoot": workspace_root.resolve().as_posix(),
         "repositories": {repo_id: {}},
-        "providers": {provider_id: {} for provider_id in provider_ids},
+        "providers": {provider_id: dict(provider_settings) for provider_id in provider_ids},
         "timeoutCaps": {
             "toolSeconds": 30,
             "providerSeconds": provider_timeout,
@@ -131,6 +133,7 @@ def write_benchmark_mcp_registration(
         workspace_root=source_repo_root.parent,
         provider_ids=provider_ids,
         provider_timeout=provider_timeout,
+        provider_instance=provider_instance_id("benchmark", workspace_root),
     )
     if dry_run:
         print(f"Would write benchmark MCP settings {mcp_settings_path}")
@@ -175,21 +178,30 @@ def benchmark_mcp_config(
     provider_ids: tuple[str, ...],
 ) -> McpRuntimeConfig:
     repo_id = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+    workspace_root = coordination_root.parent.resolve()
+    instance_id = provider_instance_id("benchmark", workspace_root)
     providers = {
         provider_id: ProviderScope(
             provider_id=provider_id,
             runtime_root=coordination_root
             / "providers"
             / "runners"
-            / provider_runtime_name(provider_id),
-            log_root=coordination_root / "providers" / "logs" / provider_runtime_name(provider_id),
+            / provider_runtime_name(provider_id)
+            / instance_id,
+            log_root=coordination_root
+            / "providers"
+            / "logs"
+            / provider_runtime_name(provider_id)
+            / instance_id,
+            instance_id=instance_id,
+            scope="benchmark",
         )
         for provider_id in provider_ids
     }
     return McpRuntimeConfig(
         config_path=coordination_root / ".benchmark-mcp-settings.generated.json",
         coordination_root=coordination_root.resolve(),
-        workspace_root=coordination_root.parent.resolve(),
+        workspace_root=workspace_root,
         transcript_root=coordination_root / "providers" / "logs" / "mcp",
         repositories={
             repo_id: RepositoryScope(
@@ -218,16 +230,7 @@ def benchmark_lifecycle_settings(
         memory_repo=memory_repo,
         provider_ids=provider_ids,
     )
-    settings = lifecycle_settings_from_config(config)
-    providers = settings["contextProviders"]["providers"]
-    case_id = benchmark_stable_id(case.case_id)
-    grepai = providers.get("grepai-memory")
-    if isinstance(grepai, dict) and isinstance(grepai.get("backend"), dict):
-        grepai["backend"]["containerName"] = f"ar-grepai-postgres-bench-{case_id}"
-    cgc = providers.get("codegraphcontext-code")
-    if isinstance(cgc, dict) and isinstance(cgc.get("backend"), dict):
-        cgc["backend"]["containerName"] = f"ar-cgc-falkordb-bench-{case_id}"
-    return settings
+    return lifecycle_settings_from_config(config)
 
 
 def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
@@ -254,6 +257,7 @@ def prepare_configured_providers(
     provider_ids: tuple[str, ...],
     cgc_seed_source_coordination_root: Path | None,
     cgc_seed_repo_id: str,
+    provider_seed_source_settings_path: Path | None = None,
 ) -> None:
     if not provider_ids:
         if dry_run:
@@ -283,7 +287,16 @@ def prepare_configured_providers(
         ):
             cgc_seed = provider_setup.CgcSeedOptions(
                 source_coordination_root=cgc_seed_source_coordination_root,
+                source_settings_path=provider_seed_source_settings_path,
                 repo_id=cgc_seed_repo_id,
+            )
+        grepai_seed = provider_setup.GrepaiSeedOptions()
+        if "grepai-memory" in provider_ids and cgc_seed_source_coordination_root is not None:
+            grepai_seed = provider_setup.GrepaiSeedOptions(
+                source_coordination_root=cgc_seed_source_coordination_root,
+                source_settings_path=provider_seed_source_settings_path,
+                project_id=cgc_seed_repo_id,
+                target_memory_root=memory_repo,
             )
         payload = provider_setup.run_provider_setup(
             provider_setup.ProviderSetupRequest(
@@ -293,6 +306,7 @@ def prepare_configured_providers(
                 timeout=provider_timeout,
                 dry_run=dry_run,
                 cgc_seed=cgc_seed,
+                grepai_seed=grepai_seed,
             )
         )
     finally:

@@ -13,11 +13,27 @@ from agents_remember.providers.lifecycle.compose_runtime import (
     provider_asset_text,
     render_template,
     yaml_environment,
+    yaml_labels,
     yaml_port_mapping,
     yaml_scalar,
 )
 
 CGC_COMPOSE_PROJECT = "agents-remember-cgc"
+
+
+def cgc_compose_project(provider_settings: dict[str, Any]) -> str:
+    runtime = provider_settings.get("runtime")
+    if not isinstance(runtime, dict):
+        return CGC_COMPOSE_PROJECT
+    return str(runtime.get("composeProject", CGC_COMPOSE_PROJECT))
+
+
+def cgc_ownership_labels(provider_settings: dict[str, Any]) -> dict[str, str]:
+    instance = provider_settings.get("instance")
+    if not isinstance(instance, dict):
+        return {"agents-remember.legacy-provider-settings": "true"}
+    labels = instance.get("labels")
+    return labels if isinstance(labels, dict) else {"agents-remember.legacy-provider-settings": "true"}
 
 
 def cgc_compose_render(
@@ -53,6 +69,7 @@ def cgc_compose_render(
             provider_asset_path("docker", "codegraphcontext").as_posix()
         ),
         "RUNNER_USER_BLOCK": cgc_user_block(),
+        "SERVICE_LABELS": yaml_labels(cgc_ownership_labels(provider_settings)),
         "RUNNER_WORKING_DIR": yaml_scalar(layout.runtime_root.as_posix()),
         "RUNNER_RUNTIME_VOLUME": yaml_scalar(
             f"{layout.runtime_root.as_posix()}:{layout.runtime_root.as_posix()}"
@@ -69,7 +86,7 @@ def cgc_compose_render(
         values,
     )
     return ComposeRender(
-        project_name=CGC_COMPOSE_PROJECT,
+        project_name=cgc_compose_project(provider_settings),
         base_file=provider_asset_path("compose", "codegraphcontext.compose.yaml"),
         override_yaml=override_yaml,
     )
@@ -97,13 +114,13 @@ def cgc_user_block() -> str:
 
 
 def cgc_watcher_service_yaml(provider_settings: dict[str, Any], layout: Any) -> str:
-    del provider_settings
     template = provider_asset_text("compose", "codegraphcontext.watcher.yaml.tmpl")
     values = {
         "WATCHER_SERVICE": cgc_watcher_service_name(layout),
         "RUNNER_IMAGE": yaml_scalar(layout.runner_image),
         "WATCHER_CONTAINER_NAME": yaml_scalar(layout.watcher_container_name),
         "WATCHER_USER_BLOCK": cgc_user_block(),
+        "SERVICE_LABELS": yaml_labels(cgc_ownership_labels(provider_settings)),
         "WATCHER_WORKING_DIR": yaml_scalar(layout.runtime_root.as_posix()),
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(
             f"{layout.runtime_root.as_posix()}:{layout.runtime_root.as_posix()}"

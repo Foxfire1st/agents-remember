@@ -142,8 +142,13 @@ def grepai_roots_from_provider_settings(
     }
     normalized: list[GrepaiMemoryRoot] = []
     seen: set[str] = set()
+    allow_missing_roots = provider_settings.get("allowMissingRoots") is True
     for root in roots:
-        project_id, expanded = _grepai_root_identity(root, base_variables)
+        project_id, expanded = _grepai_root_identity(
+            root,
+            base_variables,
+            allow_missing=allow_missing_roots,
+        )
         if project_id in seen:
             raise ContextProviderError(f"duplicate grepai project id: {project_id}")
         seen.add(project_id)
@@ -151,10 +156,15 @@ def grepai_roots_from_provider_settings(
     return tuple(normalized)
 
 
-def _grepai_root_identity(root: Any, base_variables: dict[str, str]) -> tuple[str, Path]:
+def _grepai_root_identity(
+    root: Any,
+    base_variables: dict[str, str],
+    *,
+    allow_missing: bool = False,
+) -> tuple[str, Path]:
     raw_path, project_id = _grepai_raw_root(root)
     expanded = Path(expand_template(raw_path, base_variables)).resolve()
-    _validate_grepai_root_path(expanded)
+    _validate_grepai_root_path(expanded, allow_missing=allow_missing)
     return project_id, expanded
 
 
@@ -176,9 +186,11 @@ def _grepai_dict_root(root: dict[str, Any]) -> tuple[str, str]:
     return raw_path, project_id
 
 
-def _validate_grepai_root_path(path: Path) -> None:
+def _validate_grepai_root_path(path: Path, *, allow_missing: bool = False) -> None:
     if "<" in path.as_posix() or ">" in path.as_posix():
         raise ContextProviderError(f"unresolved grepai root path placeholder: {path.as_posix()}")
+    if allow_missing:
+        return
     if not path.exists() or not path.is_dir():
         raise ContextProviderError(
             f"grepai root path does not exist or is not a directory: {path.as_posix()}"

@@ -14,7 +14,7 @@ from agents_remember.providers.context import (
     ensure_grepai_runtime_layout,
 )
 from agents_remember.providers.grepai.lifecycle.compose import (
-    GREPAI_COMPOSE_PROJECT,
+    grepai_compose_project,
     grepai_compose_render,
     grepai_compose_summary,
 )
@@ -533,25 +533,26 @@ def grepai_project_migration(
     backend = backend or grepai_backend_settings(provider_settings, layout)
     embedder = grepai_embedder_backend_settings(provider_settings, layout)
     runner = grepai_runner_settings(provider_settings, layout)
+    project_name = grepai_compose_project(provider_settings)
     return {
         "containers": {
             "postgres": remove_unmanaged_compose_container(
                 backend["containerName"],
-                project_name=GREPAI_COMPOSE_PROJECT,
+                project_name=project_name,
                 cwd=layout.coordination_root,
                 timeout=args.timeout,
                 dry_run=args.dry_run,
             ),
             "ollama": remove_unmanaged_compose_container(
                 embedder["containerName"],
-                project_name=GREPAI_COMPOSE_PROJECT,
+                project_name=project_name,
                 cwd=layout.coordination_root,
                 timeout=args.timeout,
                 dry_run=args.dry_run,
             ),
             "watcher": remove_unmanaged_compose_container(
                 runner["containerName"],
-                project_name=GREPAI_COMPOSE_PROJECT,
+                project_name=project_name,
                 cwd=layout.coordination_root,
                 timeout=args.timeout,
                 dry_run=args.dry_run,
@@ -559,7 +560,7 @@ def grepai_project_migration(
         },
         "network": remove_unmanaged_compose_network(
             grepai_network_name(provider_settings),
-            project_name=GREPAI_COMPOSE_PROJECT,
+            project_name=project_name,
             cwd=layout.coordination_root,
             timeout=args.timeout,
             dry_run=args.dry_run,

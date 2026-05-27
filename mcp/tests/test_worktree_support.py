@@ -32,7 +32,9 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.mcp.config import load_config
 from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
+from agents_remember.providers.identity import provider_instance_id
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
     load_contract,
@@ -457,6 +459,90 @@ class WorktreeSupportTests(unittest.TestCase):
             )
 
             self.assertEqual(context.task_root, root / "ar-coordination" / "tasks" / "repo-a")
+
+    def test_worktree_provider_start_passes_grepai_worktree_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination_root = root / "ar-coordination"
+            code_repo = root / "repo-a"
+            memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+            settings_path = root / "provider-settings.json"
+            code_repo.mkdir(parents=True)
+            memory_repo.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "grepai-memory": {
+                                    "enabled": True,
+                                    "roots": [
+                                        {
+                                            "projectId": "repo-a",
+                                            "path": memory_repo.as_posix(),
+                                        }
+                                    ],
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            contract = default_contract(
+                task_name="Provider task",
+                repo_name="repo-a",
+                workflow_kind="light-task",
+                memory_mode="external",
+                coordination_root=coordination_root,
+                code_repo_path=code_repo,
+                code_source_branch="main",
+                code_work_branch="ar/provider-task",
+                code_base_commit="abc123",
+                worktree_name="provider-task",
+                memory_repo_path=memory_repo,
+                memory_source_branch="main",
+                memory_work_branch="ar/provider-task",
+                memory_base_commit="def456",
+            )
+            context = Namespace(
+                code_repository_name="repo-a",
+                code_repository_root=code_repo,
+                coordination_root=coordination_root,
+                memory_root=memory_repo,
+            )
+            args = Namespace(
+                dry_run=True,
+                skip_provider_setup=False,
+                provider_timeout=1,
+                provider_setup_config=worktree_manager.WorktreeProviderSetupConfig(
+                    coordination_root=coordination_root,
+                    settings_path=settings_path,
+                    seed_source_coordination_root=coordination_root,
+                ),
+            )
+            captured: dict[str, object] = {}
+
+            def fake_run_provider_setup(request):
+                captured["request"] = request
+                return {"ok": True, "results": []}
+
+            with mock.patch.object(
+                worktree_start.provider_setup,
+                "run_provider_setup",
+                side_effect=fake_run_provider_setup,
+            ):
+                payload = worktree_manager.prepare_providers_for_start(context, contract, args)
+
+            self.assertEqual(payload["state"], "planned")
+            request = captured["request"]
+            self.assertEqual(request.skip_grepai, False)
+            self.assertEqual(request.grepai_seed.project_id, "repo-a")
+            self.assertEqual(request.grepai_seed.source_coordination_root, coordination_root)
+            self.assertEqual(request.grepai_seed.target_memory_root, contract.memory_worktree)
+            self.assertEqual(request.grepai_isolated.runtime_root, contract.worktree_group / "provider-runtime")
+            self.assertEqual(request.grepai_isolated.target_memory_root, contract.memory_worktree)
 
     def test_start_ignores_legacy_ledger_branch_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2088,13 +2174,24 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 providers["codegraphcontext-code"]["roots"],
                 [{"repoId": "repo-a", "path": source_repo.resolve().as_posix()}],
             )
+            instance_id = provider_instance_id("benchmark", coordination_root.parent)
+            self.assertEqual(providers["grepai-memory"]["instance"]["id"], instance_id)
+            self.assertEqual(providers["grepai-memory"]["instance"]["scope"], "benchmark")
+            self.assertEqual(
+                providers["codegraphcontext-code"]["instance"]["id"],
+                instance_id,
+            )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["instance"]["scope"],
+                "benchmark",
+            )
             self.assertEqual(
                 providers["grepai-memory"]["backend"]["containerName"],
-                "ar-grepai-postgres-bench-case-a",
+                f"ar-grepai-postgres-{instance_id}",
             )
             self.assertEqual(
                 providers["codegraphcontext-code"]["backend"]["containerName"],
-                "ar-cgc-falkordb-bench-case-a",
+                f"ar-cgc-falkordb-{instance_id}",
             )
 
     def test_benchmark_provider_setup_uses_generated_settings_file(self) -> None:
@@ -2152,6 +2249,58 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
             self.assertEqual(captured["cgc_seed_repo_id"], "repo-a")
 
+    def test_benchmark_provider_setup_seeds_grepai_from_source_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coordination_root = root / "ar-coordination"
+            source_coordination_root = root / "source-coordination"
+            source_settings_path = root / "source-provider-settings.json"
+            source_repo = root / "repos" / "repo-a"
+            memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+            source_repo.mkdir(parents=True)
+            memory_repo.mkdir(parents=True)
+            case = benchmark_runner.BenchmarkCase(
+                Path("case.json"),
+                {
+                    "id": "case-a",
+                    "repository": {"name": "repo-a"},
+                    "workspace": {"fixturePath": "workspaces/case-a"},
+                },
+            )
+            captured: dict[str, object] = {}
+
+            def fake_run_provider_setup(
+                request: benchmark_runner.provider_setup.ProviderSetupRequest,
+            ) -> dict[str, object]:
+                captured["grepai_seed_source"] = request.grepai_seed.source_coordination_root
+                captured["grepai_seed_source_settings"] = request.grepai_seed.source_settings_path
+                captured["grepai_seed_project"] = request.grepai_seed.project_id
+                captured["grepai_target_memory"] = request.grepai_seed.target_memory_root
+                return {"ok": True}
+
+            with mock.patch.object(
+                benchmark_runner.provider_setup,
+                "run_provider_setup",
+                side_effect=fake_run_provider_setup,
+            ):
+                benchmark_runner.prepare_configured_providers(
+                    case,
+                    coordination_root,
+                    source_repo,
+                    memory_repo,
+                    dry_run=False,
+                    provider_timeout=1,
+                    provider_ids=("grepai-memory",),
+                    cgc_seed_source_coordination_root=source_coordination_root,
+                    cgc_seed_repo_id="repo-a",
+                    provider_seed_source_settings_path=source_settings_path,
+                )
+
+            self.assertEqual(captured["grepai_seed_source"], source_coordination_root)
+            self.assertEqual(captured["grepai_seed_source_settings"], source_settings_path)
+            self.assertEqual(captured["grepai_seed_project"], "repo-a")
+            self.assertEqual(captured["grepai_target_memory"], memory_repo)
+
     def test_benchmark_prepare_writes_workspace_mcp_registration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2197,6 +2346,11 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 ("codegraphcontext-code", "grepai-memory"),
             )
             self.assertEqual(config.timeout_caps["providerSeconds"], 123)
+            self.assertEqual(config.providers["grepai-memory"].scope, "benchmark")
+            self.assertEqual(
+                config.providers["grepai-memory"].instance_id,
+                provider_instance_id("benchmark", coordination_root.parent),
+            )
             config_text = config_path.read_text(encoding="utf-8")
             self.assertIn("[mcp_servers.agents_remember_benchmark]", config_text)
             self.assertIn("agents_remember.mcp", config_text)

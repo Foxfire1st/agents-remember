@@ -12,6 +12,7 @@ from agents_remember.providers.cgc.lifecycle.compose import (
 from agents_remember.providers.cgc.lifecycle.core import (
     cgc_all_layouts_from_settings,
     cgc_layout_from_args,
+    cgc_project_layouts_from_settings,
     cgc_uses_settings,
 )
 from agents_remember.providers.cgc.lifecycle.installation import cgc_status
@@ -45,9 +46,12 @@ def cgc_run_native_args(args: argparse.Namespace) -> list[str]:
 def cgc_run_command(
     args: argparse.Namespace, layout: Any, native_args: list[str]
 ) -> tuple[dict[str, Any], Any, list[str]]:
-    _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
+    if cgc_uses_settings(args):
+        _, provider_settings, layouts = cgc_project_layouts_from_settings(args, layout.repo_id)
+    else:
+        _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
-    command_args = ["run", "--rm", "runner", *native_args]
+    command_args = ["run", "--rm", "--no-deps", "runner", *native_args]
     return compose_plan(render, command_args, cwd=layout.coordination_root), render, command_args
 
 

@@ -106,6 +106,13 @@ def yaml_environment(env: dict[str, Any], *, indent: int = 6) -> str:
     )
 
 
+def yaml_labels(labels: dict[str, Any], *, indent: int = 6) -> str:
+    prefix = " " * indent
+    return "\n".join(
+        f"{prefix}{key}: {yaml_scalar(value)}" for key, value in sorted(labels.items())
+    )
+
+
 def optional_yaml_line(name: str, value: str | None, *, indent: int = 4) -> str:
     if not value:
         return ""

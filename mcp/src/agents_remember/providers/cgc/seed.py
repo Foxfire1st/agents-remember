@@ -41,12 +41,18 @@ class CgcSeedContext:
     source_repo_id: str
     target_repo_root: Path
     source_repo_root: Path
+    target_runtime_root: Path
+    source_runtime_root: Path
     target_head: str | None
     source_head: str | None
 
 
 def cgc_extra_args(args: Any) -> list[str]:
-    path = getattr(args, "cgc_from_settings", None)
+    path = (
+        getattr(args, "cgc_from_settings", None)
+        or getattr(args, "provider_from_settings", None)
+        or getattr(args, "from_settings", None)
+    )
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
@@ -101,6 +107,42 @@ def _configured_cgc_root_tuple(
     selected_repo_id = stable_provider_id(str(selected.get("repoId", repo_id or "")))
     expanded = Path(expand_template(raw_path, coordination_root)).resolve()
     return selected_repo_id, expanded
+
+
+def _seed_runtime_root(
+    coordination_root: Path,
+    settings: dict[str, Any],
+    repo_id: str,
+) -> Path | dict[str, Any]:
+    provider = _cgc_provider(settings)
+    if provider is None:
+        return _seed_skip("CGC provider is not configured")
+    runtime_root = _configured_cgc_runtime_root(coordination_root, provider)
+    instance_template = str(provider.get("instanceRootTemplate", "<runtimeRoot>/<repoId>"))
+    variables = {
+        "coordination_root": coordination_root.as_posix(),
+        "workspace_root": coordination_root.parent.as_posix(),
+        "runtimeRoot": runtime_root.as_posix(),
+        "repoId": stable_provider_id(repo_id),
+    }
+    return Path(_expand_tokens(instance_template, variables)).resolve()
+
+
+def _configured_cgc_runtime_root(
+    coordination_root: Path,
+    provider: dict[str, Any],
+) -> Path:
+    raw_root = str(
+        provider.get("runtimeRoot", "<coordination_root>/providers/runners/codegraphcontext")
+    )
+    return Path(expand_template(raw_root, coordination_root)).resolve()
+
+
+def _expand_tokens(value: str, variables: dict[str, str]) -> str:
+    expanded = value
+    for key, replacement in variables.items():
+        expanded = expanded.replace(f"<{key}>", replacement)
+    return expanded
 
 
 def cgc_seed_source_settings_path(
@@ -183,7 +225,19 @@ def _resolve_seed_context(args: Any, settings: dict[str, Any]) -> CgcSeedContext
     root_failure = _first_seed_skip(target, source)
     if root_failure is not None:
         return root_failure
-    return _validated_seed_context(args, source_coordination_root, target, source)
+    target_runtime = _seed_runtime_root(args.coordination_root, settings, target[0])
+    source_runtime = _seed_runtime_root(source_coordination_root, source_settings, source[0])
+    runtime_failure = _first_seed_skip(target_runtime, source_runtime)
+    if runtime_failure is not None:
+        return runtime_failure
+    return _validated_seed_context(
+        args,
+        source_coordination_root,
+        target,
+        source,
+        target_runtime,
+        source_runtime,
+    )
 
 
 def _load_seed_source_settings(
@@ -220,7 +274,7 @@ def _seed_roots(
     return target, source
 
 
-def _first_seed_skip(*values: tuple[str, Path] | dict[str, Any]) -> dict[str, Any] | None:
+def _first_seed_skip(*values: Any) -> dict[str, Any] | None:
     return next((value for value in values if _is_seed_skip(value)), None)
 
 
@@ -250,6 +304,8 @@ def _validated_seed_context(
     source_coordination_root: Path,
     target: tuple[str, Path],
     source: tuple[str, Path],
+    target_runtime_root: Path,
+    source_runtime_root: Path,
 ) -> CgcSeedContext | dict[str, Any]:
     target_repo_id, target_repo_root = target
     source_repo_id, source_repo_root = source
@@ -272,6 +328,8 @@ def _validated_seed_context(
         source_repo_id=source_repo_id,
         target_repo_root=target_repo_root,
         source_repo_root=source_repo_root,
+        target_runtime_root=target_runtime_root,
+        source_runtime_root=source_runtime_root,
         target_head=target_head,
         source_head=source_head,
     )
@@ -339,16 +397,22 @@ def _seed_same_coordination_root_failure(
 
 
 def _seed_bundle_paths(args: Any, context: CgcSeedContext) -> dict[str, Path]:
-    bundle_root = (
-        args.cgc_seed_bundle_dir or context.target_coordination_root / "temp" / "provider-seeds"
-    ).resolve()
     seed_id = stable_provider_id(str(context.target_repo_id or context.target_repo_root.name))
+    source_bundle_root = _seed_bundle_root(args, context.source_runtime_root, "source")
+    target_bundle_root = _seed_bundle_root(args, context.target_runtime_root, "target")
     if not args.dry_run:
-        bundle_root.mkdir(parents=True, exist_ok=True)
+        source_bundle_root.mkdir(parents=True, exist_ok=True)
+        target_bundle_root.mkdir(parents=True, exist_ok=True)
     return {
-        "source": bundle_root / f"{seed_id}.source.cgc",
-        "rewritten": bundle_root / f"{seed_id}.target.cgc",
+        "source": source_bundle_root / f"{seed_id}.source.cgc",
+        "rewritten": target_bundle_root / f"{seed_id}.target.cgc",
     }
+
+
+def _seed_bundle_root(args: Any, runtime_root: Path, side: str) -> Path:
+    if args.cgc_seed_bundle_dir is not None:
+        return args.cgc_seed_bundle_dir.resolve() / side
+    return runtime_root / "seed-bundles"
 
 
 def _seed_source_backend(args: Any, context: CgcSeedContext) -> dict[str, Any]:
@@ -416,7 +480,7 @@ def _seed_load(args: Any, context: CgcSeedContext, rewritten_bundle: Path) -> di
         timeout=args.timeout,
         dry_run=args.dry_run,
         extra_args=[*cgc_extra_args(args), "--repo-id", str(context.target_repo_id)],
-        native_args=["--", "load", rewritten_bundle.as_posix(), "--clear"],
+        native_args=["--", "bundle", "import", rewritten_bundle.as_posix()],
     )
 
 

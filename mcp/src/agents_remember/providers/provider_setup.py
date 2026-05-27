@@ -17,6 +17,7 @@ from agents_remember.providers.cgc import setup as cgc_setup
 from agents_remember.providers.cgc.seed import CgcSeedOptions
 from agents_remember.providers.cgc.setup import IsolatedCgcOptions
 from agents_remember.providers.grepai import setup as grepai_setup
+from agents_remember.providers.grepai.setup import GrepaiSeedOptions, IsolatedGrepaiOptions
 
 command_display = setup_common.command_display
 context_providers = setup_common.context_providers
@@ -41,11 +42,12 @@ cgc_seed_source_settings_path = cgc_seed.cgc_seed_source_settings_path
 configured_cgc_repo_root = cgc_seed.configured_cgc_repo_root
 git_head = cgc_seed.git_head
 isolated_cgc_settings = cgc_setup.isolated_cgc_settings
+isolated_grepai_settings = grepai_setup.isolated_grepai_settings
+write_isolated_cgc_settings = cgc_setup.write_isolated_cgc_settings
 path_replacements = cgc_bundle.path_replacements
 rewrite_cgc_bundle_paths = cgc_bundle.rewrite_cgc_bundle_paths
 rewrite_json_value = cgc_bundle.rewrite_json_value
 rewrite_string = cgc_bundle.rewrite_string
-write_isolated_cgc_settings = cgc_setup.write_isolated_cgc_settings
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,8 @@ class ProviderSetupRequest:
     cgc_refresh_fallback: bool = True
     cgc_seed: CgcSeedOptions = field(default_factory=CgcSeedOptions)
     cgc_isolated: IsolatedCgcOptions = field(default_factory=IsolatedCgcOptions)
+    grepai_seed: GrepaiSeedOptions = field(default_factory=GrepaiSeedOptions)
+    grepai_isolated: IsolatedGrepaiOptions = field(default_factory=IsolatedGrepaiOptions)
 
     def normalized(self) -> ProviderSetupRequest:
         return ProviderSetupRequest(
@@ -88,6 +92,25 @@ class ProviderSetupRequest:
                 runtime_root=_resolve_optional_path(self.cgc_isolated.runtime_root),
                 settings_path=_resolve_optional_path(self.cgc_isolated.settings_path),
                 container_name=self.cgc_isolated.container_name,
+            ),
+            grepai_seed=GrepaiSeedOptions(
+                source_coordination_root=_resolve_optional_path(
+                    self.grepai_seed.source_coordination_root
+                ),
+                source_settings_path=_resolve_optional_path(
+                    self.grepai_seed.source_settings_path
+                ),
+                project_id=self.grepai_seed.project_id,
+                target_memory_root=_resolve_optional_path(self.grepai_seed.target_memory_root),
+            ),
+            grepai_isolated=IsolatedGrepaiOptions(
+                runtime_root=_resolve_optional_path(self.grepai_isolated.runtime_root),
+                settings_path=_resolve_optional_path(self.grepai_isolated.settings_path),
+                project_id=self.grepai_isolated.project_id,
+                target_memory_root=_resolve_optional_path(
+                    self.grepai_isolated.target_memory_root
+                ),
+                allow_missing_roots=self.grepai_isolated.allow_missing_roots,
             ),
         )
 
@@ -122,6 +145,19 @@ def request_from_args(args: argparse.Namespace) -> ProviderSetupRequest:
             settings_path=args.cgc_isolated_settings_path,
             container_name=args.cgc_isolated_container_name,
         ),
+        grepai_seed=GrepaiSeedOptions(
+            source_coordination_root=args.grepai_seed_source_coordination_root,
+            source_settings_path=args.grepai_seed_source_from_settings,
+            project_id=args.grepai_seed_project_id,
+            target_memory_root=args.grepai_seed_target_memory_root,
+        ),
+        grepai_isolated=IsolatedGrepaiOptions(
+            runtime_root=args.grepai_isolated_runtime_root,
+            settings_path=args.grepai_isolated_settings_path,
+            project_id=args.grepai_seed_project_id,
+            target_memory_root=args.grepai_seed_target_memory_root,
+            allow_missing_roots=args.grepai_allow_missing_roots,
+        ),
     )
 
 
@@ -148,7 +184,19 @@ def args_from_request(request: ProviderSetupRequest) -> argparse.Namespace:
         cgc_isolated_runtime_root=normalized.cgc_isolated.runtime_root,
         cgc_isolated_settings_path=normalized.cgc_isolated.settings_path,
         cgc_isolated_container_name=normalized.cgc_isolated.container_name,
+        grepai_seed_source_coordination_root=normalized.grepai_seed.source_coordination_root,
+        grepai_seed_source_from_settings=normalized.grepai_seed.source_settings_path,
+        grepai_seed_project_id=normalized.grepai_seed.project_id
+        or normalized.grepai_isolated.project_id,
+        grepai_seed_target_memory_root=normalized.grepai_seed.target_memory_root
+        or normalized.grepai_isolated.target_memory_root,
+        grepai_isolated_runtime_root=normalized.grepai_isolated.runtime_root,
+        grepai_isolated_settings_path=normalized.grepai_isolated.settings_path,
+        grepai_allow_missing_roots=normalized.grepai_isolated.allow_missing_roots,
         cgc_from_settings=None,
+        grepai_from_settings=None,
+        provider_from_settings=None,
+        provider_isolated_settings_data=None,
     )
 
 
@@ -165,6 +213,7 @@ def prepare_enabled_providers(
     args: argparse.Namespace, settings: dict[str, Any]
 ) -> list[dict[str, Any]]:
     results = install_enabled_providers(args, settings)
+    results.extend(grepai_setup.prepare_enabled_provider(args, settings))
     results.extend(grepai_setup.refresh_enabled_provider(args, settings))
     results.extend(cgc_setup.prepare_enabled_provider(args, settings))
     results.extend(_watcher_results(args, settings))
@@ -181,7 +230,7 @@ def _watcher_results(args: argparse.Namespace, settings: dict[str, Any]) -> list
             "start",
             timeout=args.timeout,
             dry_run=args.dry_run,
-            extra_args=cgc_extra_args(args),
+            extra_args=provider_settings_extra_args(args),
         ),
         run_lifecycle(
             args.coordination_root,
@@ -189,9 +238,19 @@ def _watcher_results(args: argparse.Namespace, settings: dict[str, Any]) -> list
             "status",
             timeout=args.timeout,
             dry_run=args.dry_run,
-            extra_args=cgc_extra_args(args),
+            extra_args=provider_settings_extra_args(args),
         ),
     ]
+
+
+def provider_settings_extra_args(args: argparse.Namespace) -> list[str]:
+    path = getattr(args, "provider_from_settings", None)
+    if path is not None:
+        return ["--from-settings", path.as_posix()]
+    cgc_args = cgc_extra_args(args)
+    if cgc_args:
+        return cgc_args
+    return grepai_setup.grepai_extra_args(args)
 
 
 def _watchers_needed(args: argparse.Namespace, settings: dict[str, Any]) -> bool:
@@ -214,7 +273,7 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
         return _missing_settings_payload(args)
 
     enabled = _enabled_provider_summary(args, settings)
-    isolated = write_isolated_cgc_settings(args, settings)
+    isolated = write_isolated_provider_settings(args, settings)
     results = _action_results(args, settings)
 
     return {
@@ -223,9 +282,97 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "dryRun": args.dry_run,
         "coordinationRoot": args.coordination_root.as_posix(),
         "settingsFile": settings_path(args.coordination_root, args.from_settings).as_posix(),
-        "isolatedCgcSettings": isolated,
+        "isolatedProviderSettings": isolated,
+        "isolatedCgcSettings": _isolated_legacy_payload(isolated, cgc_setup.CGC_PROVIDER_ID),
+        "isolatedGrepaiSettings": _isolated_legacy_payload(
+            isolated, grepai_setup.GREPAI_PROVIDER_ID
+        ),
         "enabled": enabled,
         "results": results,
+    }
+
+
+def write_isolated_provider_settings(
+    args: argparse.Namespace,
+    settings: dict[str, Any],
+) -> dict[str, Any] | None:
+    providers: dict[str, Any] = {}
+    cgc = isolated_cgc_settings(args, settings)
+    grepai = (
+        None if getattr(args, "skip_grepai", False) else isolated_grepai_settings(args, settings)
+    )
+    if cgc is not None:
+        providers.update(cgc["contextProviders"]["providers"])
+    if grepai is not None:
+        providers.update(grepai["contextProviders"]["providers"])
+    if not providers:
+        args.cgc_from_settings = None
+        args.grepai_from_settings = None
+        args.provider_from_settings = None
+        args.provider_isolated_settings_data = None
+        return None
+
+    path = _isolated_provider_settings_path(args)
+    args.provider_from_settings = path.resolve()
+    args.cgc_from_settings = (
+        args.provider_from_settings if cgc_setup.CGC_PROVIDER_ID in providers else None
+    )
+    args.grepai_from_settings = (
+        args.provider_from_settings if grepai_setup.GREPAI_PROVIDER_ID in providers else None
+    )
+    data = _isolated_provider_settings_payload(providers)
+    args.provider_isolated_settings_data = data
+    if not args.dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return {
+        "path": args.provider_from_settings.as_posix(),
+        "dryRun": args.dry_run,
+        "providers": sorted(providers),
+        "settings": data if args.dry_run else None,
+    }
+
+
+def _isolated_provider_settings_path(args: argparse.Namespace) -> Path:
+    explicit = (
+        getattr(args, "grepai_isolated_settings_path", None)
+        or getattr(args, "cgc_isolated_settings_path", None)
+    )
+    if explicit is not None:
+        return explicit
+    root = (
+        getattr(args, "grepai_isolated_runtime_root", None)
+        or getattr(args, "cgc_isolated_runtime_root", None)
+    )
+    if root is None:
+        raise RuntimeError("isolated provider settings require an isolated runtime root")
+    return root.resolve() / "settings" / "provider-settings.json"
+
+
+def _isolated_provider_settings_payload(providers: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "contextProviders": {
+            "enabled": True,
+            "providers": providers,
+            "policy": {
+                "discoveryOnly": True,
+                "sourceProofRequired": True,
+            },
+        },
+    }
+
+
+def _isolated_legacy_payload(
+    isolated: dict[str, Any] | None,
+    provider_id: str,
+) -> dict[str, Any] | None:
+    if isolated is None or provider_id not in isolated.get("providers", []):
+        return None
+    return {
+        "path": isolated["path"],
+        "dryRun": isolated["dryRun"],
+        "settings": isolated.get("settings"),
     }
 
 
@@ -300,6 +447,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cgc-isolated-container-name")
     parser.add_argument("--cgc-seed-allow-commit-mismatch", action="store_true")
     parser.add_argument("--cgc-seed-allow-same-coordination-root", action="store_true")
+    parser.add_argument("--grepai-seed-source-coordination-root", type=Path)
+    parser.add_argument("--grepai-seed-source-from-settings", type=Path)
+    parser.add_argument("--grepai-seed-project-id")
+    parser.add_argument("--grepai-seed-target-memory-root", type=Path)
+    parser.add_argument("--grepai-isolated-runtime-root", type=Path)
+    parser.add_argument("--grepai-isolated-settings-path", type=Path)
+    parser.add_argument("--grepai-allow-missing-roots", action="store_true")
     return parser
 
 
@@ -364,6 +518,11 @@ _PATH_ARG_NAMES = (
     "cgc_seed_bundle_dir",
     "cgc_isolated_runtime_root",
     "cgc_isolated_settings_path",
+    "grepai_seed_source_coordination_root",
+    "grepai_seed_source_from_settings",
+    "grepai_seed_target_memory_root",
+    "grepai_isolated_runtime_root",
+    "grepai_isolated_settings_path",
     "from_settings",
 )
 

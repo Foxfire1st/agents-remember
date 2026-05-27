@@ -6,6 +6,7 @@ import argparse
 import json
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,21 @@ def cgc_start_watch_process(args: argparse.Namespace, layout: Any, render: Any) 
     )
 
 
+def cgc_start_all_watch_process(
+    args: argparse.Namespace,
+    layouts: list[Any],
+    render: Any,
+) -> dict[str, Any]:
+    for layout in layouts:
+        layout.watch_log_file.parent.mkdir(parents=True, exist_ok=True)
+    return run_compose(
+        render,
+        ["up", "-d", *(cgc_watcher_service_name(layout) for layout in layouts)],
+        cwd=layouts[0].coordination_root,
+        timeout=args.timeout,
+    )
+
+
 def cgc_write_start_state(layout: Any, result: dict[str, Any]) -> None:
     write_provider_state(
         layout,
@@ -133,6 +149,28 @@ def cgc_write_start_state(layout: Any, result: dict[str, Any]) -> None:
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
     )
+
+
+def cgc_start_result(
+    layout: Any,
+    *,
+    process: dict[str, Any],
+    render: Any,
+    migration: dict[str, Any] | None,
+    backend_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "provider": "codegraphcontext",
+        "action": "start",
+        "ok": process["returncode"] == 0,
+        "repoId": layout.repo_id,
+        "containerName": layout.watcher_container_name,
+        "logFile": layout.watch_log_file.as_posix(),
+        "compose": cgc_compose_summary(render),
+        "migration": migration,
+        "command": process,
+        "backend": backend_result,
+    }
 
 
 def cgc_start_preflight(
@@ -161,25 +199,20 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
     render = cgc_start_compose_render(args, backend_result)
     migration = remove_unmanaged_compose_container(
         layout.watcher_container_name,
-        project_name="agents-remember-cgc",
+        project_name=render.project_name,
         cwd=layout.coordination_root,
         timeout=args.timeout,
         dry_run=args.dry_run,
     )
     process = cgc_start_watch_process(args, layout, render)
     cgc_write_start_state(layout, process)
-    return {
-        "provider": "codegraphcontext",
-        "action": "start",
-        "ok": process["returncode"] == 0,
-        "repoId": layout.repo_id,
-        "containerName": layout.watcher_container_name,
-        "logFile": layout.watch_log_file.as_posix(),
-        "compose": cgc_compose_summary(render),
-        "migration": migration,
-        "command": process,
-        "backend": backend_result,
-    }
+    return cgc_start_result(
+        layout,
+        process=process,
+        render=render,
+        migration=migration,
+        backend_result=backend_result,
+    )
 
 
 def cgc_layout_action_results(
@@ -208,6 +241,49 @@ def cgc_layout_action_results(
             }
         results.append(result)
     return results
+
+
+def cgc_layout_action_result(
+    args: argparse.Namespace,
+    layout: Any,
+    action: str,
+    handler: Any,
+) -> dict[str, Any]:
+    scoped = cgc_scoped_args(args, layout.repo_id, action)
+    try:
+        return handler(scoped)
+    except (
+        ContextProviderError,
+        subprocess.TimeoutExpired,
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
+        return {
+            "provider": "codegraphcontext",
+            "action": action,
+            "ok": False,
+            "repoId": layout.repo_id,
+            "error": str(error),
+        }
+
+
+def cgc_parallel_layout_action_results(
+    args: argparse.Namespace,
+    layouts: list[Any],
+    action: str,
+    handler: Any,
+) -> list[dict[str, Any]]:
+    if not layouts:
+        return []
+    results: list[dict[str, Any] | None] = [None] * len(layouts)
+    with ThreadPoolExecutor(max_workers=len(layouts), thread_name_prefix=f"cgc-{action}") as pool:
+        futures = {
+            pool.submit(cgc_layout_action_result, args, layout, action, handler): index
+            for index, layout in enumerate(layouts)
+        }
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    return [result for result in results if result is not None]
 
 
 def cgc_backend_all_error(
@@ -250,6 +326,50 @@ def cgc_all_result(
     return data
 
 
+def cgc_start_all_migrations(
+    args: argparse.Namespace,
+    layouts: list[Any],
+    render: Any,
+) -> dict[str, dict[str, Any] | None]:
+    return {
+        layout.repo_id: remove_unmanaged_compose_container(
+            layout.watcher_container_name,
+            project_name=render.project_name,
+            cwd=layout.coordination_root,
+            timeout=args.timeout,
+            dry_run=args.dry_run,
+        )
+        for layout in layouts
+    }
+
+
+def cgc_start_all_dry_results(
+    layouts: list[Any],
+    render: Any,
+    migrations: dict[str, dict[str, Any] | None],
+    backend: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    command_args = ["up", "-d", *(cgc_watcher_service_name(layout) for layout in layouts)]
+    command = compose_plan(render, command_args, cwd=layouts[0].coordination_root)
+    results = [
+        {
+            "provider": "codegraphcontext",
+            "action": "start",
+            "ok": True,
+            "repoId": layout.repo_id,
+            "dryRun": True,
+            "containerName": layout.watcher_container_name,
+            "logFile": layout.watch_log_file.as_posix(),
+            "command": command,
+            "compose": cgc_compose_summary(render),
+            "migration": migrations.get(layout.repo_id),
+            "backend": backend,
+        }
+        for layout in layouts
+    ]
+    return command, results
+
+
 def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     if args.repo_id is not None:
         raise ContextProviderError(
@@ -262,13 +382,43 @@ def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     error = cgc_backend_all_error(args, settings_path, backend, "start-all")
     if error:
         return error
-    return cgc_all_result(
+    if not args.dry_run:
+        for layout in layouts:
+            ensure_cgc_runtime_layout(layout)
+    scoped = cgc_scoped_args(args, layouts[0].repo_id, "start")
+    doctor = None if args.dry_run else cgc_doctor(scoped)
+    if doctor is not None and not doctor["ok"]:
+        return {**doctor, "action": "start-all", "ok": False, "repoId": None}
+    render = cgc_start_compose_render(args, backend)
+    migrations = cgc_start_all_migrations(args, layouts, render)
+    if args.dry_run:
+        command, results = cgc_start_all_dry_results(layouts, render, migrations, backend)
+    else:
+        command = cgc_start_all_watch_process(args, layouts, render)
+        results = [
+            cgc_start_result(
+                layout,
+                process=command,
+                render=render,
+                migration=migrations.get(layout.repo_id),
+                backend_result=backend,
+            )
+            for layout in layouts
+        ]
+        for layout in layouts:
+            cgc_write_start_state(layout, command)
+    result = cgc_all_result(
         args,
         settings_path=settings_path,
         backend=backend,
         action="start-all",
-        results=cgc_layout_action_results(args, layouts, "start", cgc_start),
+        results=results,
     )
+    result["command"] = command
+    result["compose"] = cgc_compose_summary(render)
+    result["doctor"] = doctor
+    result["parallel"] = True
+    return result
 
 
 def cgc_stop_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str, Any]:

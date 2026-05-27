@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents_remember.providers.identity import (
+    explicit_provider_instance_id,
+    provider_instance_id,
+)
+
 
 class ConfigError(ValueError):
     """Raised when MCP authority settings are missing or unsafe."""
@@ -26,6 +31,8 @@ class ProviderScope:
     provider_id: str
     runtime_root: Path
     log_root: Path
+    instance_id: str
+    scope: str = "workspace"
 
 
 @dataclass(frozen=True)
@@ -96,7 +103,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         coordination_root,
         workspace_root,
     )
-    providers = parse_providers(data.get("providers", {}), coordination_root)
+    providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
 
     return McpRuntimeConfig(
@@ -127,7 +134,7 @@ def parse_repositories(
             raise ConfigError(f"repository settings for {repo_id!r} must be an object")
 
         repo_path = workspace_root / repo_id
-        memory_root = coordination_root / "memory-repos" / f"ar-{repo_id}"
+        memory_root = default_memory_root(repo_path, coordination_root, repo_id)
         contract_path = optional_coordination_path(
             value,
             "contractPath",
@@ -160,13 +167,24 @@ def parse_repositories(
     return repositories
 
 
+def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) -> Path:
+    internal_memory_root = repo_path / "ar-memory"
+    if internal_memory_root.exists():
+        return internal_memory_root.resolve()
+    return coordination_root / "memory-repos" / f"ar-{repo_id}"
+
+
 def infer_harness_skill_root(config_path: Path) -> Path | None:
     if config_path.parent.name != "mcp":
         return None
     return (config_path.parent.parent / "skills").resolve()
 
 
-def parse_providers(raw: object, coordination_root: Path) -> dict[str, ProviderScope]:
+def parse_providers(
+    raw: object,
+    coordination_root: Path,
+    workspace_root: Path,
+) -> dict[str, ProviderScope]:
     if not isinstance(raw, dict):
         raise ConfigError("providers must be an object keyed by provider id")
 
@@ -177,20 +195,56 @@ def parse_providers(raw: object, coordination_root: Path) -> dict[str, ProviderS
         if not isinstance(value, dict):
             raise ConfigError(f"provider settings for {provider_id!r} must be an object")
 
-        if value:
-            unsupported = ", ".join(sorted(value))
+        provider_config = parse_provider_config(provider_id, value, workspace_root)
+        unsupported = sorted(set(value) - {"instanceId", "scope"})
+        if unsupported:
+            unsupported_text = ", ".join(unsupported)
             raise ConfigError(
                 f"provider {provider_id} settings are derived by the server; "
-                f"remove unsupported fields: {unsupported}"
+                f"remove unsupported fields: {unsupported_text}"
             )
         provider_name = provider_runtime_name(provider_id)
 
         providers[provider_id] = ProviderScope(
             provider_id=provider_id,
-            runtime_root=coordination_root / "providers" / "runners" / provider_name,
-            log_root=coordination_root / "providers" / "logs" / provider_name,
+            runtime_root=(
+                coordination_root
+                / "providers"
+                / "runners"
+                / provider_name
+                / provider_config["instance_id"]
+            ),
+            log_root=(
+                coordination_root
+                / "providers"
+                / "logs"
+                / provider_name
+                / provider_config["instance_id"]
+            ),
+            instance_id=provider_config["instance_id"],
+            scope=provider_config["scope"],
         )
     return providers
+
+
+def parse_provider_config(
+    provider_id: str,
+    value: dict[str, Any],
+    workspace_root: Path,
+) -> dict[str, str]:
+    del provider_id
+    scope = value.get("scope", "workspace")
+    if not isinstance(scope, str) or not scope:
+        raise ConfigError("provider scope must be a non-empty string")
+    scope = explicit_provider_instance_id(scope)
+    raw_instance = value.get("instanceId")
+    if raw_instance is None:
+        instance_id = provider_instance_id(scope, workspace_root)
+    elif not isinstance(raw_instance, str) or not raw_instance:
+        raise ConfigError("provider instanceId must be a non-empty string")
+    else:
+        instance_id = explicit_provider_instance_id(raw_instance)
+    return {"scope": scope, "instance_id": instance_id}
 
 
 def provider_runtime_name(provider_id: str) -> str:

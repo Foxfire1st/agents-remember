@@ -14,12 +14,11 @@ from agents_remember.providers.context import (
     CGC_RUNNER_IMAGE_REPOSITORY,
     CGC_WATCHER_CONTAINER_PREFIX,
     GREPAI_NETWORK_NAME,
-    GREPAI_OLLAMA_CONTAINER_NAME,
     GREPAI_OLLAMA_IMAGE,
     GREPAI_PIN,
-    GREPAI_RUNNER_CONTAINER_NAME,
     GREPAI_RUNNER_IMAGE_REPOSITORY,
 )
+from agents_remember.providers.identity import provider_ownership_labels, scoped_name
 
 
 def lifecycle_settings_from_config(config: McpRuntimeConfig) -> dict[str, Any]:
@@ -60,10 +59,28 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
     if not roots:
         roots = [config.coordination_root.joinpath("memory-repos").as_posix()]
     version = GREPAI_PIN.split("==", 1)[1]
+    labels = provider_ownership_labels(
+        provider_id=provider.provider_id,
+        instance_id=provider.instance_id,
+        scope=provider.scope,
+        coordination_root=config.coordination_root,
+    )
+    postgres_container = scoped_name("ar-grepai-postgres", provider.instance_id)
+    ollama_container = scoped_name("ar-grepai-ollama", provider.instance_id)
+    watcher_container = scoped_name("ar-grepai-watcher", provider.instance_id)
+    network_name = scoped_name(GREPAI_NETWORK_NAME, provider.instance_id)
+    compose_project = scoped_name("agents-remember-grepai", provider.instance_id)
+    workspace_name = scoped_name("agents-remember-memory", provider.instance_id)
     return {
         "type": "semantic",
         "scope": "memory",
         "enabled": True,
+        "instance": {
+            "id": provider.instance_id,
+            "scope": provider.scope,
+            "labels": labels,
+        },
+        "workspace": workspace_name,
         "roots": roots,
         "runtimeRoot": provider.runtime_root.as_posix(),
         "requirementsFile": config.coordination_root.joinpath(
@@ -74,10 +91,11 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
         "stateFile": provider.runtime_root.joinpath("state", "provider-state.json").as_posix(),
         "runtime": {
             "mode": "docker",
-            "network": {"name": GREPAI_NETWORK_NAME},
+            "composeProject": compose_project,
+            "network": {"name": network_name},
             "runner": {
                 "image": f"{GREPAI_RUNNER_IMAGE_REPOSITORY}:{version}",
-                "containerName": GREPAI_RUNNER_CONTAINER_NAME,
+                "containerName": watcher_container,
                 "imageLockFile": config.coordination_root.joinpath(
                     "providers",
                     "requirements",
@@ -102,10 +120,11 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
                 "providers",
                 "data",
                 "grepai",
+                provider.instance_id,
                 "postgres",
             ).as_posix(),
             "dataRoot": "<backendRuntimeRoot>/data",
-            "containerName": "ar-grepai-postgres",
+            "containerName": postgres_container,
             "postgres": {
                 "user": "grepai",
                 "password": "grepai",
@@ -122,7 +141,7 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
         "embedder": {
             "provider": "ollama",
             "model": "nomic-embed-text",
-            "endpoint": f"http://{GREPAI_OLLAMA_CONTAINER_NAME}:11434",
+            "endpoint": f"http://{ollama_container}:11434",
             "dimensions": 768,
             "backend": {
                 "mode": "docker",
@@ -136,11 +155,12 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
                     "providers",
                     "data",
                     "grepai",
+                    provider.instance_id,
                     "ollama",
                 ).as_posix(),
                 "dataRoot": "<embedderRuntimeRoot>/data",
                 "dataDestination": "/root/.ollama",
-                "containerName": GREPAI_OLLAMA_CONTAINER_NAME,
+                "containerName": ollama_container,
                 "ports": {
                     "http": {
                         "bindHost": "127.0.0.1",
@@ -160,10 +180,25 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
 
 def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str, Any]:
     version = CGC_PIN.split("==", 1)[1]
+    labels = provider_ownership_labels(
+        provider_id=provider.provider_id,
+        instance_id=provider.instance_id,
+        scope=provider.scope,
+        coordination_root=config.coordination_root,
+    )
+    backend_container = scoped_name("ar-cgc-falkordb", provider.instance_id)
+    watcher_template = f"{scoped_name(CGC_WATCHER_CONTAINER_PREFIX, provider.instance_id)}-<repoId>"
+    network_name = scoped_name(CGC_NETWORK_NAME, provider.instance_id)
+    compose_project = scoped_name("agents-remember-cgc", provider.instance_id)
     return {
         "type": "relationship",
         "scope": "code",
         "enabled": True,
+        "instance": {
+            "id": provider.instance_id,
+            "scope": provider.scope,
+            "labels": labels,
+        },
         "roots": [
             {"repoId": repo.repo_id, "path": repo.path.as_posix()}
             for repo in config.repositories.values()
@@ -183,6 +218,7 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
         "stateFileTemplate": "<instanceRoot>/provider-state.json",
         "runtime": {
             "mode": "docker",
+            "composeProject": compose_project,
             "runner": {
                 "image": f"{CGC_RUNNER_IMAGE_REPOSITORY}:{version}",
                 "buildRoot": provider.runtime_root.joinpath("image").as_posix(),
@@ -191,14 +227,14 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
                     "requirements",
                     "codegraphcontext-runner-docker.lock",
                 ).as_posix(),
-                "containerNameTemplate": f"{CGC_WATCHER_CONTAINER_PREFIX}-<repoId>",
+                "containerNameTemplate": watcher_template,
             },
         },
         "backend": {
             "id": "codegraphcontext-falkordb",
             "type": "falkordb-remote",
             "mode": "docker",
-            "network": {"name": CGC_NETWORK_NAME},
+            "network": {"name": network_name},
             "image": "falkordb/falkordb:v4.18.7",
             "imageLockFile": config.coordination_root.joinpath(
                 "providers",
@@ -209,10 +245,11 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
                 "providers",
                 "data",
                 "codegraphcontext",
+                provider.instance_id,
                 "falkordb",
             ).as_posix(),
             "dataRoot": "<backendRuntimeRoot>/data",
-            "containerName": "ar-cgc-falkordb",
+            "containerName": backend_container,
             "ports": {
                 "falkordb": {
                     "bindHost": "127.0.0.1",
