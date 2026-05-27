@@ -1,3 +1,13 @@
+# Update instructions:
+#
+# edit the mcp/pyproject.toml
+# version = "0.1.1"
+# git add mcp/pyproject.toml
+# git commit -m "Release MCP 0.1.1"
+# git tag mcp-v0.1.1
+# git push origin main
+# git push origin mcp-v0.1.1
+
 name: Publish MCP package to PyPI
 
 on:
