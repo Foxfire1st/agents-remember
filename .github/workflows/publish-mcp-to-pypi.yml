@@ -1,0 +1,56 @@
+name: Publish MCP package to PyPI
+
+on:
+  push:
+    tags:
+      - "mcp-v*"
+
+jobs:
+  build:
+    name: Build MCP package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build
+        run: python -m pip install --upgrade build
+
+      - name: Build wheel and sdist
+        working-directory: mcp
+        run: python -m build
+
+      - name: Upload package distributions
+        uses: actions/upload-artifact@v5
+        with:
+          name: agents-remember-mcp-dist
+          path: mcp/dist/
+
+  publish:
+    name: Publish MCP package to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/agents-remember-mcp
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download package distributions
+        uses: actions/download-artifact@v6
+        with:
+          name: agents-remember-mcp-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
