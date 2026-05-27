@@ -125,6 +125,11 @@ the more specific authority for its code repository.
 
 ### Boundaries
 
+- Do not run Git commands against `ar-coordination/` as a whole.
+- Use Git only against the resolved `code_repository_root` or `memory_root`
+  when those paths are Git repositories.
+- Task files under `ar-coordination/tasks/` are local coordination artifacts
+  unless a workflow explicitly says otherwise.
 - Do not move protected branches unless the developer explicitly asks.
 - Do not create, close out, integrate, push, or clean up worktrees without the
   approval gates required by the selected workflow.
