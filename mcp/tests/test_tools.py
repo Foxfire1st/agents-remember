@@ -78,7 +78,7 @@ class McpToolTests(unittest.TestCase):
             {
                 "ok": True,
                 "server": "agents-remember",
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "transport": "stdio",
             },
         )
