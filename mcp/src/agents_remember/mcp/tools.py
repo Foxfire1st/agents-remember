@@ -4,36 +4,43 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.context_packet import ContextPacketRequest, build_context_packet
-from agents_remember.controllers.runtime_install import (
-    RuntimeInstallRequest,
-    run_runtime_install,
-)
-from agents_remember.controllers.skill_tools import (
-    cgc_callees_tool,
-    cgc_callers_tool,
-    cgc_complexity_tool,
-    cgc_dependencies_tool,
-    cgc_symbol_search_tool,
-    cgc_visualize_tool,
+from agents_remember.controllers.benchmark_tools import (
     codex_benchmark_prepare_tool,
     codex_benchmark_run_tool,
-    direct_closeout_apply_tool,
-    direct_closeout_preview_tool,
+)
+from agents_remember.controllers.context_packet import ContextPacketRequest, build_context_packet
+from agents_remember.controllers.coordination_tools import resolve_context_tool
+from agents_remember.controllers.memory_tools import (
     drift_check_tool,
-    grepai_search_tool,
-    grepai_trace_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
     memory_carryover_apply_tool,
     memory_carryover_plan_tool,
     memory_init_tool,
     memory_quality_check_tool,
+    route_index_refresh_tool,
+)
+from agents_remember.controllers.provider_tools import (
+    cgc_callees_tool,
+    cgc_callers_tool,
+    cgc_complexity_tool,
+    cgc_dependencies_tool,
+    cgc_symbol_search_tool,
+    cgc_visualize_tool,
+    grepai_search_tool,
+    grepai_trace_tool,
+    provider_diagnostics_tool,
     provider_status_tool,
     provider_watchers_tool,
-    resolve_context_tool,
-    route_index_refresh_tool,
-    skills_install_tool,
+)
+from agents_remember.controllers.runtime_install import (
+    RuntimeInstallRequest,
+    run_runtime_install,
+)
+from agents_remember.controllers.skill_tools import skills_install_tool
+from agents_remember.controllers.worktree_tools import (
+    direct_closeout_apply_tool,
+    direct_closeout_preview_tool,
     worktree_attach_tool,
     worktree_cleanup_tool,
     worktree_closeout_apply_tool,
@@ -42,6 +49,7 @@ from agents_remember.controllers.skill_tools import (
     worktree_start_tool,
     worktree_status_tool,
 )
+from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 
 from . import SERVER_NAME, SERVER_VERSION
 from .config import McpRuntimeConfig
@@ -59,6 +67,7 @@ PUBLIC_TOOLS = (
     "memory_init",
     "skills_install",
     "provider_status",
+    "provider_diagnostics",
     "grepai_search",
     "grepai_trace",
     "cgc_symbol_search",
@@ -87,33 +96,44 @@ PUBLIC_TOOLS = (
 RESERVED_TOOLS: tuple[str, ...] = ()
 
 
+def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    model = PUBLIC_TOOL_RESPONSE_MODELS[tool_name]
+    return model.model_validate(payload).model_dump(mode="json", exclude_none=True)
+
+
 def ping_payload() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "server": SERVER_NAME,
-        "version": SERVER_VERSION,
-        "transport": TRANSPORT,
-    }
+    return _tool_payload(
+        "ping",
+        {
+            "ok": True,
+            "server": SERVER_NAME,
+            "version": SERVER_VERSION,
+            "transport": TRANSPORT,
+        },
+    )
 
 
 def server_info_payload(config: McpRuntimeConfig) -> dict[str, Any]:
-    return {
-        "ok": True,
-        "server": SERVER_NAME,
-        "version": SERVER_VERSION,
-        "transport": TRANSPORT,
-        "configPath": config.config_path.as_posix(),
-        "coordinationRoot": config.coordination_root.as_posix(),
-        "workspaceRoot": config.workspace_root.as_posix(),
-        "transcriptRoot": config.transcript_root.as_posix(),
-        "harnessSkillRoot": (
-            config.harness_skill_root.as_posix() if config.harness_skill_root else None
-        ),
-        "allowedRepoIds": list(config.allowed_repo_ids),
-        "allowedProviderIds": list(config.allowed_provider_ids),
-        "tools": list(PUBLIC_TOOLS),
-        "reservedTools": list(RESERVED_TOOLS),
-    }
+    return _tool_payload(
+        "server_info",
+        {
+            "ok": True,
+            "server": SERVER_NAME,
+            "version": SERVER_VERSION,
+            "transport": TRANSPORT,
+            "configPath": config.config_path.as_posix(),
+            "coordinationRoot": config.coordination_root.as_posix(),
+            "workspaceRoot": config.workspace_root.as_posix(),
+            "transcriptRoot": config.transcript_root.as_posix(),
+            "harnessSkillRoot": (
+                config.harness_skill_root.as_posix() if config.harness_skill_root else None
+            ),
+            "allowedRepoIds": list(config.allowed_repo_ids),
+            "allowedProviderIds": list(config.allowed_provider_ids),
+            "tools": list(PUBLIC_TOOLS),
+            "reservedTools": list(RESERVED_TOOLS),
+        },
+    )
 
 
 def context_packet_payload(
@@ -123,12 +143,15 @@ def context_packet_payload(
     include_providers: bool = True,
     include_drift: bool = False,
 ) -> dict[str, Any]:
-    return build_context_packet(
-        config,
-        ContextPacketRequest(
-            repo_id=repo_id,
-            include_providers=include_providers,
-            include_drift=include_drift,
+    return _tool_payload(
+        "context_packet",
+        build_context_packet(
+            config,
+            ContextPacketRequest(
+                repo_id=repo_id,
+                include_providers=include_providers,
+                include_drift=include_drift,
+            ),
         ),
     )
 
@@ -140,12 +163,15 @@ def runtime_install_payload(
     include_benchmarks: bool = False,
     install_provider_deps: bool = True,
 ) -> dict[str, Any]:
-    return run_runtime_install(
-        config,
-        RuntimeInstallRequest(
-            dry_run=dry_run,
-            include_benchmarks=include_benchmarks,
-            install_provider_deps=install_provider_deps,
+    return _tool_payload(
+        "runtime_install",
+        run_runtime_install(
+            config,
+            RuntimeInstallRequest(
+                dry_run=dry_run,
+                include_benchmarks=include_benchmarks,
+                install_provider_deps=install_provider_deps,
+            ),
         ),
     )
 
@@ -159,13 +185,16 @@ def resolve_context_payload(
     worktree_name: str | None = None,
     topology: str | None = None,
 ) -> dict[str, Any]:
-    return resolve_context_tool(
-        config,
-        repo_id=repo_id,
-        task_name=task_name,
-        contract_path=contract_path,
-        worktree_name=worktree_name,
-        topology=topology,
+    return _tool_payload(
+        "resolve_context",
+        resolve_context_tool(
+            config,
+            repo_id=repo_id,
+            task_name=task_name,
+            contract_path=contract_path,
+            worktree_name=worktree_name,
+            topology=topology,
+        ),
     )
 
 
@@ -175,7 +204,10 @@ def drift_check_payload(
     *,
     detail_limit: int = 50,
 ) -> dict[str, Any]:
-    return drift_check_tool(config, repo_id=repo_id, detail_limit=detail_limit)
+    return _tool_payload(
+        "drift_check",
+        drift_check_tool(config, repo_id=repo_id, detail_limit=detail_limit),
+    )
 
 
 def memory_quality_check_payload(
@@ -185,11 +217,14 @@ def memory_quality_check_payload(
     checks: list[str] | None = None,
     detail_limit: int = 50,
 ) -> dict[str, Any]:
-    return memory_quality_check_tool(
-        config,
-        repo_id=repo_id,
-        checks=checks,
-        detail_limit=detail_limit,
+    return _tool_payload(
+        "memory_quality_check",
+        memory_quality_check_tool(
+            config,
+            repo_id=repo_id,
+            checks=checks,
+            detail_limit=detail_limit,
+        ),
     )
 
 
@@ -199,7 +234,10 @@ def route_index_refresh_payload(
     *,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    return route_index_refresh_tool(config, repo_id=repo_id, dry_run=dry_run)
+    return _tool_payload(
+        "route_index_refresh",
+        route_index_refresh_tool(config, repo_id=repo_id, dry_run=dry_run),
+    )
 
 
 def memory_init_payload(
@@ -209,11 +247,14 @@ def memory_init_payload(
     dry_run: bool = True,
     initialize_git: bool = True,
 ) -> dict[str, Any]:
-    return memory_init_tool(
-        config,
-        repo_id=repo_id,
-        dry_run=dry_run,
-        initialize_git=initialize_git,
+    return _tool_payload(
+        "memory_init",
+        memory_init_tool(
+            config,
+            repo_id=repo_id,
+            dry_run=dry_run,
+            initialize_git=initialize_git,
+        ),
     )
 
 
@@ -225,17 +266,34 @@ def skills_install_payload(
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:
-    return skills_install_tool(
-        config,
-        layout=layout,
-        dry_run=dry_run,
-        overwrite=overwrite,
-        archive_existing=archive_existing,
+    return _tool_payload(
+        "skills_install",
+        skills_install_tool(
+            config,
+            layout=layout,
+            dry_run=dry_run,
+            overwrite=overwrite,
+            archive_existing=archive_existing,
+        ),
     )
 
 
 def provider_status_payload(config: McpRuntimeConfig, *, detail_limit: int = 20) -> dict[str, Any]:
-    return provider_status_tool(config, detail_limit=detail_limit)
+    return _tool_payload(
+        "provider_status",
+        provider_status_tool(config, detail_limit=detail_limit),
+    )
+
+
+def provider_diagnostics_payload(
+    config: McpRuntimeConfig,
+    *,
+    detail_limit: int = 20,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "provider_diagnostics",
+        provider_diagnostics_tool(config, detail_limit=detail_limit),
+    )
 
 
 def provider_watchers_payload(
@@ -244,7 +302,10 @@ def provider_watchers_payload(
     action: str,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    return provider_watchers_tool(config, action=action, dry_run=dry_run)
+    return _tool_payload(
+        "provider_watchers",
+        provider_watchers_tool(config, action=action, dry_run=dry_run),
+    )
 
 
 def grepai_search_payload(
@@ -258,15 +319,18 @@ def grepai_search_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return grepai_search_tool(
-        config,
-        query=query,
-        repo_ids=repo_ids,
-        all_repos=all_repos,
-        limit=limit,
-        output_format=output_format,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "grepai_search",
+        grepai_search_tool(
+            config,
+            query=query,
+            repo_ids=repo_ids,
+            all_repos=all_repos,
+            limit=limit,
+            output_format=output_format,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -282,16 +346,19 @@ def grepai_trace_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return grepai_trace_tool(
-        config,
-        trace_action=trace_action,
-        symbol=symbol,
-        repo_ids=repo_ids,
-        all_repos=all_repos,
-        depth=depth,
-        output_format=output_format,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "grepai_trace",
+        grepai_trace_tool(
+            config,
+            trace_action=trace_action,
+            symbol=symbol,
+            repo_ids=repo_ids,
+            all_repos=all_repos,
+            depth=depth,
+            output_format=output_format,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -303,12 +370,15 @@ def cgc_symbol_search_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_symbol_search_tool(
-        config,
-        repo_id=repo_id,
-        name=name,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "cgc_symbol_search",
+        cgc_symbol_search_tool(
+            config,
+            repo_id=repo_id,
+            name=name,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -321,13 +391,16 @@ def cgc_callers_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_callers_tool(
-        config,
-        repo_id=repo_id,
-        function=function,
-        file=file,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "cgc_callers",
+        cgc_callers_tool(
+            config,
+            repo_id=repo_id,
+            function=function,
+            file=file,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -339,12 +412,15 @@ def cgc_callees_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_callees_tool(
-        config,
-        repo_id=repo_id,
-        function=function,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "cgc_callees",
+        cgc_callees_tool(
+            config,
+            repo_id=repo_id,
+            function=function,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -356,12 +432,15 @@ def cgc_dependencies_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_dependencies_tool(
-        config,
-        repo_id=repo_id,
-        module=module,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "cgc_dependencies",
+        cgc_dependencies_tool(
+            config,
+            repo_id=repo_id,
+            module=module,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -373,12 +452,15 @@ def cgc_complexity_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_complexity_tool(
-        config,
-        repo_id=repo_id,
-        function=function,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "cgc_complexity",
+        cgc_complexity_tool(
+            config,
+            repo_id=repo_id,
+            function=function,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -391,13 +473,16 @@ def cgc_visualize_payload(
     dry_run: bool = True,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    return cgc_visualize_tool(
-        config,
-        repo_id=repo_id,
-        port=port,
-        context=context,
-        dry_run=dry_run,
-        timeout=timeout,
+    return _tool_payload(
+        "cgc_visualize",
+        cgc_visualize_tool(
+            config,
+            repo_id=repo_id,
+            port=port,
+            context=context,
+            dry_run=dry_run,
+            timeout=timeout,
+        ),
     )
 
 
@@ -415,18 +500,21 @@ def worktree_start_payload(
     skip_provider_setup: bool = False,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    return worktree_start_tool(
-        config,
-        repo_id=repo_id,
-        task_name=task_name,
-        worktree_name=worktree_name,
-        workflow_kind=workflow_kind,
-        source_branch=source_branch,
-        work_branch=work_branch,
-        memory_mode=memory_mode,
-        memory_choice=memory_choice,
-        skip_provider_setup=skip_provider_setup,
-        dry_run=dry_run,
+    return _tool_payload(
+        "worktree_start",
+        worktree_start_tool(
+            config,
+            repo_id=repo_id,
+            task_name=task_name,
+            worktree_name=worktree_name,
+            workflow_kind=workflow_kind,
+            source_branch=source_branch,
+            work_branch=work_branch,
+            memory_mode=memory_mode,
+            memory_choice=memory_choice,
+            skip_provider_setup=skip_provider_setup,
+            dry_run=dry_run,
+        ),
     )
 
 
@@ -437,11 +525,14 @@ def worktree_attach_payload(
     task_name: str | None = None,
     contract_path: str | None = None,
 ) -> dict[str, Any]:
-    return worktree_attach_tool(
-        config,
-        repo_id=repo_id,
-        task_name=task_name,
-        contract_path=contract_path,
+    return _tool_payload(
+        "worktree_attach",
+        worktree_attach_tool(
+            config,
+            repo_id=repo_id,
+            task_name=task_name,
+            contract_path=contract_path,
+        ),
     )
 
 
@@ -452,11 +543,14 @@ def worktree_status_payload(
     task_name: str | None = None,
     contract_path: str | None = None,
 ) -> dict[str, Any]:
-    return worktree_status_tool(
-        config,
-        repo_id=repo_id,
-        task_name=task_name,
-        contract_path=contract_path,
+    return _tool_payload(
+        "worktree_status",
+        worktree_status_tool(
+            config,
+            repo_id=repo_id,
+            task_name=task_name,
+            contract_path=contract_path,
+        ),
     )
 
 
@@ -468,12 +562,15 @@ def worktree_closeout_preview_payload(
     memory_commit_message: str = "",
     ledger_commit_message: str = "",
 ) -> dict[str, Any]:
-    return worktree_closeout_preview_tool(
-        config,
-        contract_path=contract_path,
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
+    return _tool_payload(
+        "worktree_closeout_preview",
+        worktree_closeout_preview_tool(
+            config,
+            contract_path=contract_path,
+            code_commit_message=code_commit_message,
+            memory_commit_message=memory_commit_message,
+            ledger_commit_message=ledger_commit_message,
+        ),
     )
 
 
@@ -487,14 +584,17 @@ def worktree_closeout_apply_payload(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return worktree_closeout_apply_tool(
-        config,
-        contract_path=contract_path,
-        intent_note=intent_note,
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
-        dry_run=dry_run,
+    return _tool_payload(
+        "worktree_closeout_apply",
+        worktree_closeout_apply_tool(
+            config,
+            contract_path=contract_path,
+            intent_note=intent_note,
+            code_commit_message=code_commit_message,
+            memory_commit_message=memory_commit_message,
+            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
     )
 
 
@@ -508,14 +608,17 @@ def direct_closeout_preview_payload(
     memory_commit_message: str = "",
     ledger_commit_message: str = "",
 ) -> dict[str, Any]:
-    return direct_closeout_preview_tool(
-        config,
-        repo_id=repo_id,
-        task_name=task_name,
-        source_branch=source_branch,
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
+    return _tool_payload(
+        "direct_closeout_preview",
+        direct_closeout_preview_tool(
+            config,
+            repo_id=repo_id,
+            task_name=task_name,
+            source_branch=source_branch,
+            code_commit_message=code_commit_message,
+            memory_commit_message=memory_commit_message,
+            ledger_commit_message=ledger_commit_message,
+        ),
     )
 
 
@@ -531,16 +634,19 @@ def direct_closeout_apply_payload(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return direct_closeout_apply_tool(
-        config,
-        repo_id=repo_id,
-        task_name=task_name,
-        source_branch=source_branch,
-        intent_note=intent_note,
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
-        dry_run=dry_run,
+    return _tool_payload(
+        "direct_closeout_apply",
+        direct_closeout_apply_tool(
+            config,
+            repo_id=repo_id,
+            task_name=task_name,
+            source_branch=source_branch,
+            intent_note=intent_note,
+            code_commit_message=code_commit_message,
+            memory_commit_message=memory_commit_message,
+            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
     )
 
 
@@ -552,12 +658,15 @@ def worktree_integrate_payload(
     ledger_commit_message: str = "",
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    return worktree_integrate_tool(
-        config,
-        contract_path=contract_path,
-        strategy=strategy,
-        ledger_commit_message=ledger_commit_message,
-        dry_run=dry_run,
+    return _tool_payload(
+        "worktree_integrate",
+        worktree_integrate_tool(
+            config,
+            contract_path=contract_path,
+            strategy=strategy,
+            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
     )
 
 
@@ -567,11 +676,17 @@ def worktree_cleanup_payload(
     *,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    return worktree_cleanup_tool(config, contract_path=contract_path, dry_run=dry_run)
+    return _tool_payload(
+        "worktree_cleanup",
+        worktree_cleanup_tool(config, contract_path=contract_path, dry_run=dry_run),
+    )
 
 
 def memory_baseline_status_payload(config: McpRuntimeConfig, repo_id: str) -> dict[str, Any]:
-    return memory_baseline_status_tool(config, repo_id=repo_id)
+    return _tool_payload(
+        "memory_baseline_status",
+        memory_baseline_status_tool(config, repo_id=repo_id),
+    )
 
 
 def memory_baseline_adopt_payload(
@@ -583,13 +698,16 @@ def memory_baseline_adopt_payload(
     work_branch: str | None = None,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    return memory_baseline_adopt_tool(
-        config,
-        repo_id=repo_id,
-        accept_drift=accept_drift,
-        source_branch=source_branch,
-        work_branch=work_branch,
-        dry_run=dry_run,
+    return _tool_payload(
+        "memory_baseline_adopt",
+        memory_baseline_adopt_tool(
+            config,
+            repo_id=repo_id,
+            accept_drift=accept_drift,
+            source_branch=source_branch,
+            work_branch=work_branch,
+            dry_run=dry_run,
+        ),
     )
 
 
@@ -603,14 +721,17 @@ def memory_carryover_plan_payload(
     *,
     replace_existing: bool = False,
 ) -> dict[str, Any]:
-    return memory_carryover_plan_tool(
-        config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
-        replace_existing=replace_existing,
+    return _tool_payload(
+        "memory_carryover_plan",
+        memory_carryover_plan_tool(
+            config,
+            repo_id=repo_id,
+            source_memory=source_memory,
+            official_code_ref=official_code_ref,
+            source_code_ref=source_code_ref,
+            old_base=old_base,
+            replace_existing=replace_existing,
+        ),
     )
 
 
@@ -628,18 +749,21 @@ def memory_carryover_apply_payload(
     memory_commit_message: str = "Carry over landed branch memory",
     ledger_commit_message: str = "Record branch memory carryover",
 ) -> dict[str, Any]:
-    return memory_carryover_apply_tool(
-        config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
-        intent_note=intent_note,
-        replace_existing=replace_existing,
-        include_review_required=include_review_required,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
+    return _tool_payload(
+        "memory_carryover_apply",
+        memory_carryover_apply_tool(
+            config,
+            repo_id=repo_id,
+            source_memory=source_memory,
+            official_code_ref=official_code_ref,
+            source_code_ref=source_code_ref,
+            old_base=old_base,
+            intent_note=intent_note,
+            replace_existing=replace_existing,
+            include_review_required=include_review_required,
+            memory_commit_message=memory_commit_message,
+            ledger_commit_message=ledger_commit_message,
+        ),
     )
 
 
@@ -654,15 +778,18 @@ def codex_benchmark_prepare_payload(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
-    return codex_benchmark_prepare_tool(
-        config,
-        target=target,
-        case_id=case_id,
-        benchmarks_root=benchmarks_root,
-        dry_run=dry_run,
-        force_clone=force_clone,
-        skill_exposure_mode=skill_exposure_mode,
-        provider_timeout=provider_timeout,
+    return _tool_payload(
+        "codex_benchmark_prepare",
+        codex_benchmark_prepare_tool(
+            config,
+            target=target,
+            case_id=case_id,
+            benchmarks_root=benchmarks_root,
+            dry_run=dry_run,
+            force_clone=force_clone,
+            skill_exposure_mode=skill_exposure_mode,
+            provider_timeout=provider_timeout,
+        ),
     )
 
 
@@ -683,19 +810,22 @@ def codex_benchmark_run_payload(
     provider_timeout: int = 1800,
     codex_sandbox: str = "danger-full-access",
 ) -> dict[str, Any]:
-    return codex_benchmark_run_tool(
-        config,
-        target=target,
-        case_id=case_id,
-        benchmarks_root=benchmarks_root,
-        prompt=prompt,
-        variant=variant,
-        repetitions=repetitions,
-        jobs=jobs,
-        dry_run=dry_run,
-        skip_prepare=skip_prepare,
-        force_clone=force_clone,
-        skill_exposure_mode=skill_exposure_mode,
-        provider_timeout=provider_timeout,
-        codex_sandbox=codex_sandbox,
+    return _tool_payload(
+        "codex_benchmark_run",
+        codex_benchmark_run_tool(
+            config,
+            target=target,
+            case_id=case_id,
+            benchmarks_root=benchmarks_root,
+            prompt=prompt,
+            variant=variant,
+            repetitions=repetitions,
+            jobs=jobs,
+            dry_run=dry_run,
+            skip_prepare=skip_prepare,
+            force_clone=force_clone,
+            skill_exposure_mode=skill_exposure_mode,
+            provider_timeout=provider_timeout,
+            codex_sandbox=codex_sandbox,
+        ),
     )

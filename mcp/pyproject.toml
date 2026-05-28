@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "mcp>=1.12.4,<2",
+  "pydantic>=2,<3",
+  "tiktoken>=0.12,<1",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +19,7 @@ dev = [
   "coverage>=7.14,<8",
   "pytest>=9,<10",
   "pytest-cov>=7,<8",
+  "pyright>=1.1,<2",
   "radon>=6,<7",
   "ruff>=0.15,<1",
 ]

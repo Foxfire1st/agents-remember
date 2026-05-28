@@ -1,0 +1,1813 @@
+{
+  "ok": true,
+  "operation": "context_packet",
+  "contextPacketVersion": 1,
+  "repoId": "agents-remember-md",
+  "limits": {
+    "providerItems": 20,
+    "driftItems": 10
+  },
+  "repo": {
+    "id": "agents-remember-md",
+    "root": "/home/mohamedreadone/Projects/agents-remember-md",
+    "branch": "main",
+    "head": "9680d150ac9d2e6c1ae04dbab42eac0088dceef8",
+    "dirty": false,
+    "state": "available"
+  },
+  "coordination": {
+    "root": "/home/mohamedreadone/Projects/ar-coordination",
+    "taskRoot": "/home/mohamedreadone/Projects/ar-coordination/tasks/agents-remember-md",
+    "settingsPath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/system/settings.md",
+    "pathSettingsPath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/system/settings.json",
+    "systemRoot": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/system",
+    "toolsPath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/system/tools.md"
+  },
+  "memory": {
+    "mode": "external",
+    "root": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md",
+    "onboardingRoot": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/onboarding",
+    "ledgerPath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/memory.md",
+    "settingsPath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md/system/settings.md"
+  },
+  "storage": {
+    "mode": "memory-repo",
+    "default": "memory-repo",
+    "pathRules": [
+      {
+        "path": "",
+        "storage": "",
+        "include": {
+          "paths": [
+            "AGENTS.md",
+            "README.md",
+            "examples/mcp/**",
+            "installer/**",
+            "mcp/**",
+            "runtime/**",
+            "scripts/**"
+          ],
+          "fileTypes": [".json", ".md", ".patch", ".py", ".sh", ".toml", ".txt"]
+        },
+        "exclude": {
+          "paths": [
+            "docs/**",
+            "CODE_OF_CONDUCT.md",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "LICENSE",
+            "roadmap/**",
+            "benchmarks/user-runs/**",
+            "benchmarks/workspaces/**",
+            "mcp/src/agents_remember/package_data/benchmarks/**",
+            "node_modules/**",
+            "vendor/**",
+            "dist/**",
+            "build/**",
+            "coverage/**",
+            ".cache/**",
+            ".pytest_cache/**",
+            ".venv/**",
+            ".idea/**",
+            ".vscode/**",
+            ".env",
+            ".env.*",
+            "**/generated/**",
+            "**/*.generated.*",
+            "**/*.Zone.Identifier",
+            "**/*:Zone.Identifier"
+          ],
+          "fileTypes": [".gif", ".jpeg", ".jpg", ".png", ".zip"]
+        }
+      }
+    ]
+  },
+  "pathRules": [
+    {
+      "path": "",
+      "storage": "",
+      "include": {
+        "paths": [
+          "AGENTS.md",
+          "README.md",
+          "examples/mcp/**",
+          "installer/**",
+          "mcp/**",
+          "runtime/**",
+          "scripts/**"
+        ],
+        "fileTypes": [".json", ".md", ".patch", ".py", ".sh", ".toml", ".txt"]
+      },
+      "exclude": {
+        "paths": [
+          "docs/**",
+          "CODE_OF_CONDUCT.md",
+          "CONTRIBUTING.md",
+          "SECURITY.md",
+          "LICENSE",
+          "roadmap/**",
+          "benchmarks/user-runs/**",
+          "benchmarks/workspaces/**",
+          "mcp/src/agents_remember/package_data/benchmarks/**",
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
+        "fileTypes": [".gif", ".jpeg", ".jpg", ".png", ".zip"]
+      }
+    }
+  ],
+  "crossRepo": {
+    "allow": []
+  },
+  "worktree": {
+    "state": "inactive"
+  },
+  "providers": {
+    "configured": true,
+    "enabled": true,
+    "state": "ready",
+    "ok": true,
+    "partial": false,
+    "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+    "currentStateFile": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/status/workspace/projects/current.json",
+    "currentState": {
+      "version": 1,
+      "kind": "provider-current-state",
+      "instance": {
+        "id": "projects",
+        "scope": "workspace",
+        "coordinationRoot": "/home/mohamedreadone/Projects/ar-coordination"
+      },
+      "state": "ready",
+      "ok": true,
+      "checkedAt": "2026-05-28T14:19:49.793864+00:00",
+      "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+      "enabled": {
+        "grepai-memory": true,
+        "codegraphcontext-code": true
+      },
+      "processNamespace": {
+        "durableForDaemons": true,
+        "warning": null
+      },
+      "providers": {
+        "grepai-memory": {
+          "id": "grepai-memory",
+          "state": "ready",
+          "ok": true,
+          "enabled": true,
+          "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects",
+          "logRoot": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/grepai/projects",
+          "watcherUp": true,
+          "indexingState": "unknown",
+          "resources": {
+            "postgres": {
+              "state": "ready",
+              "ok": true,
+              "containerName": "ar-grepai-postgres-projects",
+              "image": "pgvector/pgvector:pg16",
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:34.877107+00:00",
+              "uptimeSeconds": 80114,
+              "health": "healthy"
+            },
+            "ollama": {
+              "state": "ready",
+              "ok": true,
+              "containerName": "ar-grepai-ollama-projects",
+              "image": "ollama/ollama:latest",
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:37.672009+00:00",
+              "uptimeSeconds": 80111,
+              "health": null
+            },
+            "watcher": {
+              "state": "ready",
+              "ok": true,
+              "containerName": "ar-grepai-watcher-projects",
+              "image": "agents-remember/grepai:0.35.0",
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-28T14:19:23.939145+00:00",
+              "uptimeSeconds": 25,
+              "health": null
+            }
+          }
+        },
+        "codegraphcontext-code": {
+          "id": "codegraphcontext-code",
+          "state": "ready",
+          "ok": true,
+          "enabled": true,
+          "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects",
+          "logRoot": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects",
+          "indexingState": "unknown",
+          "resources": {
+            "falkordb": {
+              "state": "ready",
+              "ok": true,
+              "containerName": "ar-cgc-falkordb-projects",
+              "image": "falkordb/falkordb:v4.18.7",
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:53.948146+00:00",
+              "uptimeSeconds": 80095,
+              "health": "healthy"
+            },
+            "watchers": {
+              "azureinfrastructure": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "azureinfrastructure",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-azureinfrastructure",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.124066+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "cobalt": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "cobalt",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-cobalt",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.118506+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "tas-expand": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "tas-expand",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-tas-expand",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.083068+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "agents-remember-md": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "agents-remember-md",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-agents-remember-md",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.113205+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "dema-platform-backend": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "dema-platform-backend",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-dema-platform-backend",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.106347+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "device-management": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "device-management",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-device-management",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.093660+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "tensorflow": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "tensorflow",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-tensorflow",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.126961+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              },
+              "twf": {
+                "state": "ready",
+                "ok": true,
+                "repoId": "twf",
+                "watcherUp": true,
+                "indexingState": "unknown",
+                "lastRefresh": null,
+                "containerName": "ar-cgc-watcher-projects-twf",
+                "containerState": "running",
+                "running": true,
+                "startedAt": "2026-05-28T14:19:28.120973+00:00",
+                "uptimeSeconds": 21,
+                "health": null
+              }
+            }
+          }
+        }
+      }
+    },
+    "integrity": {
+      "ok": true,
+      "state": "checked",
+      "manifestPath": "/home/mohamedreadone/Projects/.codex/mcp/agents-remember-settings.provider-runners.manifest.json",
+      "fileCount": 0,
+      "changed": [],
+      "missing": []
+    },
+    "processNamespace": {
+      "durableForDaemons": true,
+      "warning": null
+    },
+    "items": [
+      {
+        "id": "codegraphcontext-code",
+        "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects",
+        "logRoot": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects",
+        "configured": true,
+        "ok": true,
+        "watcherState": "running",
+        "freshness": "unknown",
+        "rawStatus": {
+          "provider": "codegraphcontext",
+          "action": "status-all",
+          "ok": true,
+          "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+          "backend": {
+            "provider": "codegraphcontext",
+            "action": "backend-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-cgc-falkordb-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:53.948146+00:00",
+              "uptimeSeconds": 80095,
+              "health": "healthy"
+            },
+            "image": "falkordb/falkordb:v4.18.7",
+            "running": true,
+            "backendRuntimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+            "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+            "dataMount": {
+              "expected": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "actual": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "matches": true
+            },
+            "network": {
+              "name": "ar-cgc-code-projects",
+              "connected": true,
+              "containerNetworks": ["ar-cgc-code-projects"]
+            },
+            "ports": {
+              "falkordb": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 6379,
+                "containerPort": 6379
+              },
+              "browser": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 3000,
+                "containerPort": 3000
+              }
+            },
+            "browserUrl": "http://127.0.0.1:3000",
+            "ping": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "ar-cgc-falkordb-projects",
+                "redis-cli",
+                "ping"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.113,
+              "stdout": "PONG\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          },
+          "count": 8,
+          "results": [
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "azureinfrastructure",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/AzureInfrastructure",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/azureinfrastructure",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/azureinfrastructure/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-azureinfrastructure",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/azureinfrastructure",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/azureinfrastructure/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-azureinfrastructure",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.124066+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "cobalt",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/Cobalt",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/cobalt",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/cobalt/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-cobalt",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/cobalt",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/cobalt/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-cobalt",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.118506+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "tas-expand",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/TAS-Expand",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tas-expand",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tas-expand/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-tas-expand",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tas-expand",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/tas-expand/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-tas-expand",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.083068+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "agents-remember-md",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/agents-remember-md",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/agents-remember-md",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/agents-remember-md/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-agents-remember-md",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/agents-remember-md",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/agents-remember-md/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-agents-remember-md",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.113205+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "dema-platform-backend",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/dema-platform-backend",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/dema-platform-backend",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/dema-platform-backend/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-dema-platform-backend",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/dema-platform-backend",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/dema-platform-backend/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-dema-platform-backend",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.106347+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "device-management",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/device-management",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/device-management",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/device-management/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-device-management",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/device-management",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/device-management/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-device-management",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.093660+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "tensorflow",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/tensorflow",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tensorflow",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tensorflow/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-tensorflow",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tensorflow",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/tensorflow/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-tensorflow",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.126961+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "twf",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/twf",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/twf",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/twf/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-twf",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/twf",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/twf/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-twf",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.120973+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "grepai-memory",
+        "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects",
+        "logRoot": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/grepai/projects",
+        "configured": true,
+        "ok": true,
+        "watcherState": "running",
+        "freshness": "replaceable-cache",
+        "rawStatus": {
+          "provider": "grepai",
+          "action": "status",
+          "ok": true,
+          "dryRun": false,
+          "mode": "docker",
+          "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+          "workspace": "agents-remember-memory-projects",
+          "roots": [
+            {
+              "projectId": "azureinfrastructure",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/azureinfrastructure",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-AzureInfrastructure"
+            },
+            {
+              "projectId": "cobalt",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/cobalt",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-Cobalt"
+            },
+            {
+              "projectId": "tas-expand",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/tas-expand",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-TAS-Expand"
+            },
+            {
+              "projectId": "agents-remember-md",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/agents-remember-md",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md"
+            },
+            {
+              "projectId": "dema-platform-backend",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/dema-platform-backend",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-dema-platform-backend"
+            },
+            {
+              "projectId": "device-management",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/device-management",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-device-management"
+            },
+            {
+              "projectId": "tensorflow",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/tensorflow",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-tensorflow"
+            },
+            {
+              "projectId": "twf",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/twf",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-twf"
+            }
+          ],
+          "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects",
+          "workspaceConfigFile": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/home/.grepai/workspace.yaml",
+          "rootArtifacts": [],
+          "backend": {
+            "provider": "grepai",
+            "action": "backend-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-grepai-postgres-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:34.877107+00:00",
+              "uptimeSeconds": 80114,
+              "health": "healthy"
+            },
+            "image": "pgvector/pgvector:pg16",
+            "running": true,
+            "backendRuntimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres",
+            "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres/data",
+            "network": {
+              "name": "ar-grepai-memory-projects",
+              "connected": true,
+              "containerNetworks": ["ar-grepai-memory-projects"]
+            },
+            "dataMount": {
+              "expected": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres/data",
+              "actual": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres/data",
+              "matches": true
+            },
+            "ports": {
+              "postgres": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 34649,
+                "containerPort": 5432
+              }
+            },
+            "ping": {
+              "returncode": 0,
+              "stdout": " ?column? \n----------\n        1\n(1 row)\n\n",
+              "stderr": "",
+              "pgReady": {
+                "command": [
+                  "/usr/bin/docker",
+                  "exec",
+                  "-e",
+                  "PGPASSWORD=grepai",
+                  "ar-grepai-postgres-projects",
+                  "pg_isready",
+                  "-U",
+                  "grepai",
+                  "-d",
+                  "grepai"
+                ],
+                "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+                "returncode": 0,
+                "durationSeconds": 0.145,
+                "stdout": "/var/run/postgresql:5432 - accepting connections\n",
+                "stderr": "",
+                "timedOut": false
+              },
+              "database": {
+                "command": [
+                  "/usr/bin/docker",
+                  "exec",
+                  "-e",
+                  "PGPASSWORD=grepai",
+                  "ar-grepai-postgres-projects",
+                  "psql",
+                  "-U",
+                  "grepai",
+                  "-d",
+                  "grepai",
+                  "-v",
+                  "ON_ERROR_STOP=1",
+                  "-c",
+                  "SELECT 1;"
+                ],
+                "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+                "returncode": 0,
+                "durationSeconds": 0.143,
+                "stdout": " ?column? \n----------\n        1\n(1 row)\n\n",
+                "stderr": "",
+                "timedOut": false
+              }
+            },
+            "extension": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "-e",
+                "PGPASSWORD=grepai",
+                "ar-grepai-postgres-projects",
+                "psql",
+                "-U",
+                "grepai",
+                "-d",
+                "grepai",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN RAISE EXCEPTION 'pgvector extension is not installed'; END IF; END $$;"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.154,
+              "stdout": "DO\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          },
+          "embedder": {
+            "provider": "grepai",
+            "action": "embedder-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-grepai-ollama-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:37.672009+00:00",
+              "uptimeSeconds": 80111,
+              "health": null
+            },
+            "image": "ollama/ollama:latest",
+            "running": true,
+            "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama",
+            "dataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama/data",
+            "network": {
+              "name": "ar-grepai-memory-projects",
+              "connected": true,
+              "containerNetworks": ["ar-grepai-memory-projects"]
+            },
+            "dataMount": {
+              "expected": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama/data",
+              "actual": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama/data",
+              "matches": true
+            },
+            "ports": {
+              "http": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 60445,
+                "containerPort": 11434
+              }
+            },
+            "list": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "ar-grepai-ollama-projects",
+                "ollama",
+                "list"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.134,
+              "stdout": "NAME                       ID              SIZE      MODIFIED     \nnomic-embed-text:latest    0a109f422b47    274 MB    22 hours ago    \n",
+              "stderr": "",
+              "timedOut": false
+            },
+            "model": {
+              "name": "nomic-embed-text",
+              "present": true
+            }
+          },
+          "watcher": {
+            "provider": "grepai",
+            "action": "watcher-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-grepai-watcher-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-28T14:19:23.939145+00:00",
+              "uptimeSeconds": 25,
+              "health": null
+            },
+            "image": "agents-remember/grepai:0.35.0",
+            "running": true,
+            "network": {
+              "name": "ar-grepai-memory-projects",
+              "connected": true,
+              "containerNetworks": ["ar-grepai-memory-projects"]
+            },
+            "workspaceStatus": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "ar-grepai-watcher-projects",
+                "grepai",
+                "workspace",
+                "status",
+                "agents-remember-memory-projects"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.118,
+              "stdout": "Workspace: agents-remember-memory-projects\n  Backend: postgres\n  Projects: 8\n    - azureinfrastructure: /grepai/runtime/index-roots/azureinfrastructure ✓\n    - cobalt: /grepai/runtime/index-roots/cobalt ✓\n    - tas-expand: /grepai/runtime/index-roots/tas-expand ✓\n    - agents-remember-md: /grepai/runtime/index-roots/agents-remember-md ✓\n    - dema-platform-backend: /grepai/runtime/index-roots/dema-platform-backend ✓\n    - device-management: /grepai/runtime/index-roots/device-management ✓\n    - tensorflow: /grepai/runtime/index-roots/tensorflow ✓\n    - twf: /grepai/runtime/index-roots/twf ✓\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          },
+          "managedProcess": {
+            "mode": "docker-container-watch",
+            "containerName": "ar-grepai-watcher-projects",
+            "alive": true
+          },
+          "watcherRunning": true,
+          "processNamespace": {
+            "durableForDaemons": true,
+            "warning": null
+          }
+        }
+      }
+    ],
+    "recoveryActions": [],
+    "rawStatus": {
+      "provider": "watchers",
+      "action": "status",
+      "ok": true,
+      "partial": false,
+      "dryRun": false,
+      "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+      "processNamespace": {
+        "durableForDaemons": true,
+        "warning": null
+      },
+      "enabled": {
+        "grepai-memory": true,
+        "codegraphcontext-code": true
+      },
+      "results": [
+        {
+          "provider": "grepai",
+          "action": "status",
+          "ok": true,
+          "dryRun": false,
+          "mode": "docker",
+          "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+          "workspace": "agents-remember-memory-projects",
+          "roots": [
+            {
+              "projectId": "azureinfrastructure",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/azureinfrastructure",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-AzureInfrastructure"
+            },
+            {
+              "projectId": "cobalt",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/cobalt",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-Cobalt"
+            },
+            {
+              "projectId": "tas-expand",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/tas-expand",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-TAS-Expand"
+            },
+            {
+              "projectId": "agents-remember-md",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/agents-remember-md",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-agents-remember-md"
+            },
+            {
+              "projectId": "dema-platform-backend",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/dema-platform-backend",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-dema-platform-backend"
+            },
+            {
+              "projectId": "device-management",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/device-management",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-device-management"
+            },
+            {
+              "projectId": "tensorflow",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/tensorflow",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-tensorflow"
+            },
+            {
+              "projectId": "twf",
+              "path": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/index-roots/twf",
+              "sourcePath": "/home/mohamedreadone/Projects/ar-coordination/memory-repos/ar-twf"
+            }
+          ],
+          "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects",
+          "workspaceConfigFile": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/grepai/projects/home/.grepai/workspace.yaml",
+          "rootArtifacts": [],
+          "backend": {
+            "provider": "grepai",
+            "action": "backend-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-grepai-postgres-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:34.877107+00:00",
+              "uptimeSeconds": 80114,
+              "health": "healthy"
+            },
+            "image": "pgvector/pgvector:pg16",
+            "running": true,
+            "backendRuntimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres",
+            "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres/data",
+            "network": {
+              "name": "ar-grepai-memory-projects",
+              "connected": true,
+              "containerNetworks": ["ar-grepai-memory-projects"]
+            },
+            "dataMount": {
+              "expected": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres/data",
+              "actual": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/postgres/data",
+              "matches": true
+            },
+            "ports": {
+              "postgres": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 34649,
+                "containerPort": 5432
+              }
+            },
+            "ping": {
+              "returncode": 0,
+              "stdout": " ?column? \n----------\n        1\n(1 row)\n\n",
+              "stderr": "",
+              "pgReady": {
+                "command": [
+                  "/usr/bin/docker",
+                  "exec",
+                  "-e",
+                  "PGPASSWORD=grepai",
+                  "ar-grepai-postgres-projects",
+                  "pg_isready",
+                  "-U",
+                  "grepai",
+                  "-d",
+                  "grepai"
+                ],
+                "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+                "returncode": 0,
+                "durationSeconds": 0.145,
+                "stdout": "/var/run/postgresql:5432 - accepting connections\n",
+                "stderr": "",
+                "timedOut": false
+              },
+              "database": {
+                "command": [
+                  "/usr/bin/docker",
+                  "exec",
+                  "-e",
+                  "PGPASSWORD=grepai",
+                  "ar-grepai-postgres-projects",
+                  "psql",
+                  "-U",
+                  "grepai",
+                  "-d",
+                  "grepai",
+                  "-v",
+                  "ON_ERROR_STOP=1",
+                  "-c",
+                  "SELECT 1;"
+                ],
+                "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+                "returncode": 0,
+                "durationSeconds": 0.143,
+                "stdout": " ?column? \n----------\n        1\n(1 row)\n\n",
+                "stderr": "",
+                "timedOut": false
+              }
+            },
+            "extension": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "-e",
+                "PGPASSWORD=grepai",
+                "ar-grepai-postgres-projects",
+                "psql",
+                "-U",
+                "grepai",
+                "-d",
+                "grepai",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN RAISE EXCEPTION 'pgvector extension is not installed'; END IF; END $$;"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.154,
+              "stdout": "DO\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          },
+          "embedder": {
+            "provider": "grepai",
+            "action": "embedder-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-grepai-ollama-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:37.672009+00:00",
+              "uptimeSeconds": 80111,
+              "health": null
+            },
+            "image": "ollama/ollama:latest",
+            "running": true,
+            "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama",
+            "dataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama/data",
+            "network": {
+              "name": "ar-grepai-memory-projects",
+              "connected": true,
+              "containerNetworks": ["ar-grepai-memory-projects"]
+            },
+            "dataMount": {
+              "expected": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama/data",
+              "actual": "/home/mohamedreadone/Projects/ar-coordination/providers/data/grepai/projects/ollama/data",
+              "matches": true
+            },
+            "ports": {
+              "http": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 60445,
+                "containerPort": 11434
+              }
+            },
+            "list": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "ar-grepai-ollama-projects",
+                "ollama",
+                "list"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.134,
+              "stdout": "NAME                       ID              SIZE      MODIFIED     \nnomic-embed-text:latest    0a109f422b47    274 MB    22 hours ago    \n",
+              "stderr": "",
+              "timedOut": false
+            },
+            "model": {
+              "name": "nomic-embed-text",
+              "present": true
+            }
+          },
+          "watcher": {
+            "provider": "grepai",
+            "action": "watcher-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-grepai-watcher-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-28T14:19:23.939145+00:00",
+              "uptimeSeconds": 25,
+              "health": null
+            },
+            "image": "agents-remember/grepai:0.35.0",
+            "running": true,
+            "network": {
+              "name": "ar-grepai-memory-projects",
+              "connected": true,
+              "containerNetworks": ["ar-grepai-memory-projects"]
+            },
+            "workspaceStatus": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "ar-grepai-watcher-projects",
+                "grepai",
+                "workspace",
+                "status",
+                "agents-remember-memory-projects"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.118,
+              "stdout": "Workspace: agents-remember-memory-projects\n  Backend: postgres\n  Projects: 8\n    - azureinfrastructure: /grepai/runtime/index-roots/azureinfrastructure ✓\n    - cobalt: /grepai/runtime/index-roots/cobalt ✓\n    - tas-expand: /grepai/runtime/index-roots/tas-expand ✓\n    - agents-remember-md: /grepai/runtime/index-roots/agents-remember-md ✓\n    - dema-platform-backend: /grepai/runtime/index-roots/dema-platform-backend ✓\n    - device-management: /grepai/runtime/index-roots/device-management ✓\n    - tensorflow: /grepai/runtime/index-roots/tensorflow ✓\n    - twf: /grepai/runtime/index-roots/twf ✓\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          },
+          "managedProcess": {
+            "mode": "docker-container-watch",
+            "containerName": "ar-grepai-watcher-projects",
+            "alive": true
+          },
+          "watcherRunning": true,
+          "processNamespace": {
+            "durableForDaemons": true,
+            "warning": null
+          }
+        },
+        {
+          "provider": "codegraphcontext",
+          "action": "status-all",
+          "ok": true,
+          "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+          "backend": {
+            "provider": "codegraphcontext",
+            "action": "backend-status",
+            "ok": true,
+            "dryRun": false,
+            "settingsFile": "/tmp/tmp28h9e2s5-agents-remember-provider-settings.json",
+            "containerName": "ar-cgc-falkordb-projects",
+            "containerState": {
+              "containerState": "running",
+              "running": true,
+              "startedAt": "2026-05-27T16:04:53.948146+00:00",
+              "uptimeSeconds": 80095,
+              "health": "healthy"
+            },
+            "image": "falkordb/falkordb:v4.18.7",
+            "running": true,
+            "backendRuntimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+            "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+            "dataMount": {
+              "expected": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "actual": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "matches": true
+            },
+            "network": {
+              "name": "ar-cgc-code-projects",
+              "connected": true,
+              "containerNetworks": ["ar-cgc-code-projects"]
+            },
+            "ports": {
+              "falkordb": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 6379,
+                "containerPort": 6379
+              },
+              "browser": {
+                "bindHost": "127.0.0.1",
+                "hostPort": 3000,
+                "containerPort": 3000
+              }
+            },
+            "browserUrl": "http://127.0.0.1:3000",
+            "ping": {
+              "command": [
+                "/usr/bin/docker",
+                "exec",
+                "ar-cgc-falkordb-projects",
+                "redis-cli",
+                "ping"
+              ],
+              "cwd": "/home/mohamedreadone/Projects/ar-coordination",
+              "returncode": 0,
+              "durationSeconds": 0.113,
+              "stdout": "PONG\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          },
+          "count": 8,
+          "results": [
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "azureinfrastructure",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/AzureInfrastructure",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/azureinfrastructure",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/azureinfrastructure/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-azureinfrastructure",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/azureinfrastructure",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/azureinfrastructure/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-azureinfrastructure",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.124066+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "cobalt",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/Cobalt",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/cobalt",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/cobalt/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-cobalt",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/cobalt",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/cobalt/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-cobalt",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.118506+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "tas-expand",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/TAS-Expand",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tas-expand",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tas-expand/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-tas-expand",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tas-expand",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/tas-expand/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-tas-expand",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.083068+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "agents-remember-md",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/agents-remember-md",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/agents-remember-md",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/agents-remember-md/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-agents-remember-md",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/agents-remember-md",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/agents-remember-md/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-agents-remember-md",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.113205+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "dema-platform-backend",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/dema-platform-backend",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/dema-platform-backend",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/dema-platform-backend/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-dema-platform-backend",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/dema-platform-backend",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/dema-platform-backend/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-dema-platform-backend",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.106347+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "device-management",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/device-management",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/device-management",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/device-management/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-device-management",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/device-management",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/device-management/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-device-management",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.093660+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "tensorflow",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/tensorflow",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tensorflow",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tensorflow/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-tensorflow",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/tensorflow",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/tensorflow/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-tensorflow",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.126961+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            },
+            {
+              "provider": "codegraphcontext",
+              "action": "status",
+              "ok": true,
+              "repoId": "twf",
+              "codeRepoRoot": "/home/mohamedreadone/Projects/twf",
+              "runtimeRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/twf",
+              "cgcRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/twf/.codegraphcontext",
+              "runnerImage": {
+                "image": "agents-remember/codegraphcontext:0.4.10",
+                "exists": true,
+                "imageLockFile": "/home/mohamedreadone/Projects/ar-coordination/providers/requirements/codegraphcontext-runner-docker.lock",
+                "buildRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/image"
+              },
+              "watcherContainer": "ar-cgc-watcher-projects-twf",
+              "backendRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb",
+              "backendDataRoot": "/home/mohamedreadone/Projects/ar-coordination/providers/data/codegraphcontext/projects/falkordb/data",
+              "watchCwd": "/home/mohamedreadone/Projects/ar-coordination/providers/runners/codegraphcontext/projects/twf",
+              "watchLog": "/home/mohamedreadone/Projects/ar-coordination/logs/providers/codegraphcontext/projects/twf/watch.log",
+              "lastRefresh": null,
+              "indexingState": "unknown",
+              "sourceArtifacts": [],
+              "patch": {
+                "module": null,
+                "applied": true,
+                "error": null,
+                "mode": "docker-image"
+              },
+              "process": {
+                "pid": null,
+                "alive": true,
+                "mode": "docker-container-watch",
+                "containerName": "ar-cgc-watcher-projects-twf",
+                "containerState": {
+                  "containerState": "running",
+                  "running": true,
+                  "startedAt": "2026-05-28T14:19:28.120973+00:00",
+                  "uptimeSeconds": 21,
+                  "health": null
+                }
+              },
+              "processNamespace": {
+                "durableForDaemons": true,
+                "warning": null
+              }
+            }
+          ]
+        }
+      ],
+      "recoveryActions": []
+    }
+  },
+  "drift": {
+    "status": "checked",
+    "count": 265,
+    "actionableCount": 0,
+    "reportPath": "/home/mohamedreadone/Projects/ar-coordination/temp/drift-reports/agents-remember-md/agents-remember-md_main_drift-report.md",
+    "actionableSample": []
+  }
+}

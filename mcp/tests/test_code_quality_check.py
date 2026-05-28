@@ -35,7 +35,13 @@ class CodeQualityCheckTests(unittest.TestCase):
             )
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual(command_modules(commands), ["ruff", "radon", "radon", "pytest"])
+            self.assertEqual(
+                command_modules(commands),
+                ["ruff", "pyright", "radon", "radon", "pytest"],
+            )
+            pyright_command = commands[1]
+            self.assertIn(source.as_posix(), pyright_command)
+            self.assertIn((root / "tests").as_posix(), pyright_command)
             self.assertTrue(any("CRAP-Calculator" in line for line in output))
 
     def test_quality_check_fails_when_a_fixed_step_fails(self) -> None:

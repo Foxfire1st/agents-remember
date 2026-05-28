@@ -42,19 +42,29 @@ class ContextPacketTests(unittest.TestCase):
 
             self.assertTrue(packet["ok"])
             self.assertEqual(packet["operation"], "context_packet")
-            self.assertEqual(packet["contextPacketVersion"], 1)
+            self.assertEqual(packet["contextPacketVersion"], 2)
             self.assertEqual(packet["repo"]["state"], "available")
+            self.assertEqual(packet["repo"]["id"], "agents-remember-md")
             self.assertTrue(packet["repo"]["head"])
             self.assertFalse(packet["repo"]["dirty"])
+            self.assertNotIn("repoId", packet)
+            self.assertNotIn("storage", packet)
+            self.assertNotIn("pathRules", packet)
+            self.assertNotIn("crossRepo", packet)
+            self.assertEqual(
+                packet["paths"]["taskRoot"],
+                str(root / "ar-coordination" / "tasks" / "agents-remember-md"),
+            )
             self.assertEqual(packet["memory"]["mode"], "external")
+            self.assertIn("pathRules", packet["memory"]["storage"])
+            self.assertIn("crossRepo", packet["memory"])
             self.assertEqual(packet["worktree"], {"state": "inactive"})
             self.assertEqual(packet["providers"]["state"], "failed")
-            self.assertEqual(packet["providers"]["currentState"]["state"], "failed")
             self.assertTrue(Path(packet["providers"]["currentStateFile"]).exists())
-            self.assertIn("enabled", packet["providers"]["rawStatus"])
-            self.assertIn("results", packet["providers"]["rawStatus"])
-            self.assertIn("processNamespace", packet["providers"]["rawStatus"])
-            self.assertIn("recoveryActions", packet["providers"]["rawStatus"])
+            self.assertEqual(packet["providers"]["diagnosticsTool"], "provider_diagnostics")
+            self.assertNotIn("currentState", packet["providers"])
+            self.assertNotIn("rawStatus", packet["providers"])
+            self.assertNotIn("rawStatus", packet["providers"]["items"][0])
             self.assertEqual(packet["drift"], {"status": "notChecked"})
 
     def test_builds_drift_summary_when_requested(self) -> None:
@@ -141,7 +151,8 @@ class ContextPacketTests(unittest.TestCase):
             self.assertEqual(packet["worktree"]["state"], "active")
             self.assertEqual(packet["worktree"]["contractPath"], contract.contract_path.as_posix())
             self.assertEqual(packet["worktree"]["phase"], "worktree-started")
-            self.assertEqual(packet["worktree"]["rawStatus"], status_payload(contract))
+            self.assertEqual(packet["worktree"]["taskId"], status_payload(contract)["task_id"])
+            self.assertNotIn("rawStatus", packet["worktree"])
 
     def test_cli_outputs_json_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

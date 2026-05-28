@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mcp.client.stdio import stdio_client
+from mcp.types import TextContent
 
 from mcp import ClientSession, StdioServerParameters
 
@@ -38,6 +39,7 @@ from agents_remember.mcp.tools import (
     memory_carryover_plan_payload,
     memory_init_payload,
     ping_payload,
+    provider_diagnostics_payload,
     provider_watchers_payload,
     route_index_refresh_payload,
     runtime_install_payload,
@@ -73,15 +75,13 @@ def grepai_workspace(config) -> str:
 
 class McpToolTests(unittest.TestCase):
     def test_ping_payload(self) -> None:
-        self.assertEqual(
-            ping_payload(),
-            {
-                "ok": True,
-                "server": "agents-remember",
-                "version": "0.2.0",
-                "transport": "stdio",
-            },
-        )
+        payload = ping_payload()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["server"], "agents-remember")
+        self.assertEqual(payload["version"], "0.2.0")
+        self.assertEqual(payload["transport"], "stdio")
+        self.assertEqual(payload["tokens"], 0)
 
     def test_server_info_payload_reports_safe_config_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -134,11 +134,32 @@ class McpToolTests(unittest.TestCase):
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "context_packet")
-            self.assertEqual(payload["contextPacketVersion"], 1)
-            self.assertEqual(payload["repoId"], "agents-remember-md")
+            self.assertEqual(payload["contextPacketVersion"], 2)
+            self.assertEqual(payload["repo"]["id"], "agents-remember-md")
+            self.assertNotIn("repoId", payload)
             self.assertEqual(payload["providers"]["state"], "failed")
-            self.assertEqual(payload["providers"]["currentState"]["state"], "failed")
+            self.assertNotIn("currentState", payload["providers"])
             self.assertEqual(payload["drift"], {"status": "notChecked"})
+
+    def test_provider_diagnostics_reports_raw_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with patch(
+                "agents_remember.providers.status._watchers_status",
+                return_value=ready_status_payload(root),
+            ):
+                payload = provider_diagnostics_payload(config)
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["operation"], "provider_diagnostics")
+            self.assertEqual(payload["state"], "ready")
+            self.assertEqual(payload["currentState"]["state"], "ready")
+            self.assertIn("rawStatus", payload)
+            self.assertIn("rawStatus", payload["items"][0])
 
     def test_provider_watchers_status_reports_current_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -148,7 +169,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.skill_tools.lifecycle_service.run_watchers_lifecycle",
+                "agents_remember.controllers.provider_tools.lifecycle_service.run_watchers_lifecycle",
                 return_value=ready_status_payload(root),
             ) as run_watchers:
                 payload = provider_watchers_payload(config, action="status")
@@ -210,6 +231,7 @@ class McpToolTests(unittest.TestCase):
             "memory_init",
             "skills_install",
             "provider_status",
+            "provider_diagnostics",
             "grepai_search",
             "grepai_trace",
             "cgc_symbol_search",
@@ -248,7 +270,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.skill_tools.benchmark_runner.resolve_codex_executable",
+                "agents_remember.controllers.benchmark_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
@@ -267,7 +289,7 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["codexExecutionPolicy"]["benchmarkOnly"])
 
             with patch(
-                "agents_remember.controllers.skill_tools.benchmark_runner.resolve_codex_executable",
+                "agents_remember.controllers.benchmark_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
@@ -289,15 +311,15 @@ class McpToolTests(unittest.TestCase):
 
             with (
                 patch(
-                    "agents_remember.controllers.skill_tools.baseline.baseline_status",
+                    "agents_remember.controllers.memory_tools.baseline.baseline_status",
                     return_value={"state": "ready"},
                 ),
                 patch(
-                    "agents_remember.controllers.skill_tools.carryover.build_plan_for_request",
+                    "agents_remember.controllers.memory_tools.carryover.build_plan_for_request",
                     return_value={"state": "would-carryover"},
                 ),
                 patch(
-                    "agents_remember.controllers.skill_tools.benchmark_runner.prepare_benchmarks",
+                    "agents_remember.controllers.benchmark_tools.benchmark_runner.prepare_benchmarks",
                     return_value={
                         "ok": True,
                         "operation": "codex_benchmark_prepare",
@@ -334,7 +356,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.skill_tools.benchmark_runner.prepare_benchmarks",
+                "agents_remember.controllers.benchmark_tools.benchmark_runner.prepare_benchmarks",
                 return_value={
                     "ok": True,
                     "operation": "codex_benchmark_prepare",
@@ -776,7 +798,10 @@ class RealMcpIntegrationTests(unittest.TestCase):
             result = await session.call_tool(name, arguments)
         if result.structuredContent is not None:
             return dict(result.structuredContent)
-        return json.loads(result.content[0].text)
+        content = result.content[0]
+        if not isinstance(content, TextContent):
+            raise AssertionError(f"expected text content, got {type(content).__name__}")
+        return json.loads(content.text)
 
 
 def initialize_context_fixture(root: Path) -> None:

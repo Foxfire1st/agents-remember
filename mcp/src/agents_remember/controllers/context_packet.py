@@ -15,10 +15,21 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     not_checked,
     run_drift_summary,
 )
-from agents_remember.providers.status import provider_status_packet
+from agents_remember.models.context_packet import (
+    ContextPacketV2,
+    ContextPaths,
+    CrossRepoSummary,
+    MemorySummary,
+    RepoSummary,
+    StorageSummary,
+)
+from agents_remember.models.drift import DriftSummary
+from agents_remember.models.providers import ProviderSummary
+from agents_remember.models.worktree import WorktreeSummary
+from agents_remember.providers.status import provider_summary_packet
 from agents_remember.worktrees.status import worktree_status_packet
 
-CONTEXT_PACKET_VERSION = 1
+CONTEXT_PACKET_VERSION = 2
 
 
 class ContextPacketError(ValueError):
@@ -50,42 +61,48 @@ def build_context_packet(
     context_dict = context_to_dict(context)
     git_facts = read_git_facts(repo_scope.repo_id, repo_scope.path)
 
-    return {
-        "ok": git_facts.state in {"available", "detached"},
-        "operation": "context_packet",
-        "contextPacketVersion": CONTEXT_PACKET_VERSION,
-        "repoId": repo_scope.repo_id,
-        "limits": {
-            "providerItems": request.provider_detail_limit,
-            "driftItems": request.drift_detail_limit,
-        },
-        "repo": git_facts_to_packet(git_facts),
-        "coordination": {
-            "root": context_dict["coordination_root"],
-            "taskRoot": context_dict["task_root"],
-            "settingsPath": context_dict["settings_path"],
-            "pathSettingsPath": context_dict["path_settings_path"],
-            "systemRoot": context_dict["system_root"],
-            "toolsPath": context_dict["tools_path"],
-        },
-        "memory": {
-            "mode": context_dict["memory_mode"],
-            "root": context_dict["memory_root"],
-            "onboardingRoot": context_dict["onboarding_root"],
-            "ledgerPath": context_dict["ledger_path"],
-            "settingsPath": context_dict["settings_path"],
-        },
-        "storage": context_dict["storage"],
-        "pathRules": context_dict["pathRules"],
-        "crossRepo": context_dict["crossRepo"],
-        "worktree": worktree_status_packet(context.contract_path),
-        "providers": provider_status_packet(
-            config,
-            include_providers=request.include_providers,
-            detail_limit=request.provider_detail_limit,
+    packet = ContextPacketV2(
+        ok=git_facts.state in {"available", "detached"},
+        repo=RepoSummary.model_validate(git_facts_to_packet(git_facts)),
+        paths=_context_paths(context_dict),
+        memory=_memory_summary(context_dict),
+        worktree=WorktreeSummary.model_validate(worktree_status_packet(context.contract_path)),
+        providers=ProviderSummary.model_validate(
+            provider_summary_packet(
+                config,
+                include_providers=request.include_providers,
+                detail_limit=request.provider_detail_limit,
+                target_repo_id=repo_scope.repo_id,
+            )
         ),
-        "drift": _drift_packet(request, context, repo_scope),
-    }
+        drift=DriftSummary.model_validate(_drift_packet(request, context, repo_scope)),
+    )
+    return packet.model_dump(mode="json", exclude_none=True)
+
+
+def _context_paths(context_dict: dict[str, Any]) -> ContextPaths:
+    return ContextPaths(
+        coordinationRoot=context_dict["coordination_root"],
+        taskRoot=context_dict["task_root"],
+        tempRoot=context_dict["temp_root"],
+        memoryRoot=context_dict["memory_root"],
+        onboardingRoot=context_dict["onboarding_root"],
+        ledgerPath=context_dict["ledger_path"],
+        settingsPath=context_dict["settings_path"],
+        pathSettingsPath=context_dict["path_settings_path"],
+        systemRoot=context_dict["system_root"],
+        sourcesPath=context_dict["sources_path"],
+        toolsPath=context_dict["tools_path"],
+        docsRoot=context_dict["docs_root"],
+    )
+
+
+def _memory_summary(context_dict: dict[str, Any]) -> MemorySummary:
+    return MemorySummary(
+        mode=context_dict["memory_mode"],
+        storage=StorageSummary.model_validate(context_dict["storage"]),
+        crossRepo=CrossRepoSummary.model_validate(context_dict["crossRepo"]),
+    )
 
 
 def _repo_scope(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:

@@ -28,6 +28,7 @@ from .tools import (
     memory_init_payload,
     memory_quality_check_payload,
     ping_payload,
+    provider_diagnostics_payload,
     provider_status_payload,
     provider_watchers_payload,
     resolve_context_payload,
@@ -151,6 +152,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
     @server.tool()
     def provider_status(detail_limit: int = 20) -> dict[str, Any]:
         return provider_status_payload(config, detail_limit=detail_limit)
+
+    @server.tool()
+    def provider_diagnostics(detail_limit: int = 20) -> dict[str, Any]:
+        return provider_diagnostics_payload(config, detail_limit=detail_limit)
 
     @server.tool()
     def provider_watchers(action: str, dry_run: bool = True) -> dict[str, Any]:

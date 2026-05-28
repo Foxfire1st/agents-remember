@@ -80,12 +80,13 @@ class ProviderIntegrityTests(unittest.TestCase):
             provider_status._watchers_status = lambda config: ready_status_payload(root)
             try:
                 packet = provider_status.provider_status_packet(config)
+                diagnostics = provider_status.provider_diagnostics_packet(config)
             finally:
                 provider_status._watchers_status = original
 
             self.assertTrue(packet["ok"])
-            self.assertEqual(packet["state"], "ready")
-            self.assertEqual(packet["integrity"]["state"], "notInstalled")
+            self.assertEqual(packet["providers"]["state"], "ready")
+            self.assertEqual(diagnostics["integrity"]["state"], "notInstalled")
 
 
 def write_and_load_config(root: Path):

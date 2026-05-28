@@ -93,9 +93,9 @@ runtime settings live under the selected `ar-coordination/` or memory root.
 
 ## Code Quality Instructions
 
-After implementing Python code in this source checkout, run Ruff and Radon from
-the `agents-remember-md/` source repository root. Use the resolved memory
-layer's `system/tools.md` for the exact Ruff, Radon, test, build, smoke-check,
+After implementing Python code in this source checkout, run Ruff, Pyright, and
+Radon from the `agents-remember-md/` source repository root. Use the resolved memory
+layer's `system/tools.md` for the exact Ruff, Pyright, Radon, test, build, smoke-check,
 branch, and local command guidance. Use `system/coding-guidelines.md` when
 present for repo-specific coding rules. Use `system/code-quality-report-template.md`
 as a template for reporting code quality results after implementation work

@@ -52,6 +52,7 @@ def quality_commands(config: CheckConfig, coverage_json: Path) -> list[tuple[str
     test_args = [path.as_posix() for path in config.test_paths]
     return [
         ("ruff", [sys.executable, "-m", "ruff", "check", *source_args, *test_args]),
+        ("pyright", [sys.executable, "-m", "pyright", "--project", ".", *source_args, *test_args]),
         (
             "radon-cc",
             [
@@ -179,8 +180,8 @@ def resolve_under_root(path: Path, project_root: Path) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the Agents Remember source quality suite: Ruff, Radon, pytest coverage, "
-            "and CRAP-Calculator."
+            "Run the Agents Remember source quality suite: Ruff, Pyright, Radon, "
+            "pytest coverage, and CRAP-Calculator."
         )
     )
     parser.add_argument(

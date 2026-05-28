@@ -7,10 +7,11 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.controllers.skill_tools import worktree_start_tool
+from agents_remember.controllers.worktree_tools import worktree_start_tool
 from agents_remember.kernel.memory_ledger import create_initial_ledger, ledger_to_text
 from agents_remember.mcp.config import load_config
 from agents_remember.providers import lifecycle, provider_setup
@@ -102,37 +103,49 @@ def _provider_timeout() -> int:
 
 
 def _docker_available() -> bool:
-    return shutil.which("docker") is not None and subprocess.run(
-        ["docker", "info"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    ).returncode == 0
+    return (
+        shutil.which("docker") is not None
+        and subprocess.run(
+            ["docker", "info"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def _dict_value(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return {}
+
+
+def _list_value(value: object) -> list[Any]:
+    if isinstance(value, list):
+        return cast(list[Any], value)
+    return []
 
 
 def _settings_provider_containers(settings: dict[str, object]) -> set[str]:
-    providers = settings.get("contextProviders", {}).get("providers", {})
-    if not isinstance(providers, dict):
-        return set()
+    providers = _dict_value(_dict_value(settings.get("contextProviders")).get("providers"))
     names: set[str] = set()
-    grepai = providers.get("grepai-memory")
-    if isinstance(grepai, dict):
+    grepai = _dict_value(providers.get("grepai-memory"))
+    if grepai:
         names.update(_grepai_containers(grepai))
-    cgc = providers.get("codegraphcontext-code")
-    if isinstance(cgc, dict):
+    cgc = _dict_value(providers.get("codegraphcontext-code"))
+    if cgc:
         names.update(_cgc_containers(cgc))
     return names
 
 
-def _grepai_containers(provider: dict[str, object]) -> set[str]:
-    runtime = provider.get("runtime") if isinstance(provider.get("runtime"), dict) else {}
-    runner = runtime.get("runner") if isinstance(runtime.get("runner"), dict) else {}
-    backend = provider.get("backend") if isinstance(provider.get("backend"), dict) else {}
-    embedder = provider.get("embedder") if isinstance(provider.get("embedder"), dict) else {}
-    embedder_backend = (
-        embedder.get("backend") if isinstance(embedder.get("backend"), dict) else {}
-    )
+def _grepai_containers(provider: dict[str, Any]) -> set[str]:
+    runtime = _dict_value(provider.get("runtime"))
+    runner = _dict_value(runtime.get("runner"))
+    backend = _dict_value(provider.get("backend"))
+    embedder = _dict_value(provider.get("embedder"))
+    embedder_backend = _dict_value(embedder.get("backend"))
     return {
         str(value)
         for value in (
@@ -144,35 +157,34 @@ def _grepai_containers(provider: dict[str, object]) -> set[str]:
     }
 
 
-def _cgc_containers(provider: dict[str, object]) -> set[str]:
-    backend = provider.get("backend") if isinstance(provider.get("backend"), dict) else {}
-    runtime = provider.get("runtime") if isinstance(provider.get("runtime"), dict) else {}
-    runner = runtime.get("runner") if isinstance(runtime.get("runner"), dict) else {}
+def _cgc_containers(provider: dict[str, Any]) -> set[str]:
+    backend = _dict_value(provider.get("backend"))
+    runtime = _dict_value(provider.get("runtime"))
+    runner = _dict_value(runtime.get("runner"))
     template = runner.get("containerNameTemplate")
-    roots = provider.get("roots") if isinstance(provider.get("roots"), list) else []
+    roots = _list_value(provider.get("roots"))
     names = {str(backend.get("containerName"))} if backend.get("containerName") else set()
     if isinstance(template, str):
         for root in roots:
-            if isinstance(root, dict) and root.get("repoId"):
-                names.add(template.replace("<repoId>", str(root["repoId"])))
+            repo_id = _dict_value(root).get("repoId")
+            if repo_id:
+                names.add(template.replace("<repoId>", str(repo_id)))
     return names
 
 
 def _settings_networks(settings: dict[str, object]) -> set[str]:
-    providers = settings.get("contextProviders", {}).get("providers", {})
-    if not isinstance(providers, dict):
-        return set()
+    providers = _dict_value(_dict_value(settings.get("contextProviders")).get("providers"))
     names: set[str] = set()
-    grepai = providers.get("grepai-memory")
-    if isinstance(grepai, dict):
-        runtime = grepai.get("runtime") if isinstance(grepai.get("runtime"), dict) else {}
-        network = runtime.get("network") if isinstance(runtime.get("network"), dict) else {}
+    grepai = _dict_value(providers.get("grepai-memory"))
+    if grepai:
+        runtime = _dict_value(grepai.get("runtime"))
+        network = _dict_value(runtime.get("network"))
         if network.get("name"):
             names.add(str(network["name"]))
-    cgc = providers.get("codegraphcontext-code")
-    if isinstance(cgc, dict):
-        backend = cgc.get("backend") if isinstance(cgc.get("backend"), dict) else {}
-        network = backend.get("network") if isinstance(backend.get("network"), dict) else {}
+    cgc = _dict_value(providers.get("codegraphcontext-code"))
+    if cgc:
+        backend = _dict_value(cgc.get("backend"))
+        network = _dict_value(backend.get("network"))
         if network.get("name"):
             names.add(str(network["name"]))
     return names
@@ -220,7 +232,9 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
     code_root = root / "workspace" / repo_id
     coordination_root = root / "ar-coordination"
     memory_root = coordination_root / "memory-repos" / f"ar-{repo_id}"
-    code_commit = _init_git_repo(code_root, {"README.md": "# Repo A\n", "pkg/app.py": "VALUE = 1\n"})
+    code_commit = _init_git_repo(
+        code_root, {"README.md": "# Repo A\n", "pkg/app.py": "VALUE = 1\n"}
+    )
     _init_memory_repo(memory_root, repo_id, code_commit)
     settings_path = root / ".codex" / "mcp" / "settings.json"
     _write_mcp_settings(settings_path, root=root, instance_id=instance)

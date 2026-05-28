@@ -3,13 +3,43 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
+from agents_remember.models.providers import (
+    CGCWatcherState,
+    ContextProviderItem,
+    GrepAIWatcherState,
+    ProviderDiagnosticsItem,
+    ProviderDiagnosticsResponse,
+    ProviderIdentity,
+    ProviderRawStatus,
+    ProviderState,
+    ProviderStatusResponse,
+    ProviderSummary,
+    ProviderTargetRepo,
+)
 from agents_remember.providers import lifecycle
 from agents_remember.providers.current_state import write_current_provider_state
 from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import write_lifecycle_settings
+
+
+@dataclass(frozen=True)
+class ProviderStatusProjection:
+    configured: bool
+    enabled: bool
+    state: str
+    ok: bool | None
+    partial: bool
+    settings_file: str | None = None
+    current_state_file: str | None = None
+    current_state: dict[str, Any] | None = None
+    integrity: dict[str, Any] | None = None
+    process_namespace: dict[str, Any] | None = None
+    recovery_actions: list[dict[str, Any]] | None = None
+    raw_status: dict[str, Any] | None = None
 
 
 def provider_status_packet(
@@ -17,67 +47,143 @@ def provider_status_packet(
     *,
     include_providers: bool = True,
     detail_limit: int = 20,
+    target_repo_id: str | None = None,
 ) -> dict[str, Any]:
+    summary = provider_summary(
+        config,
+        include_providers=include_providers,
+        detail_limit=detail_limit,
+        target_repo_id=target_repo_id,
+    )
+    return ProviderStatusResponse(ok=True, providers=summary).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+
+
+def provider_summary_packet(
+    config: McpRuntimeConfig,
+    *,
+    include_providers: bool = True,
+    detail_limit: int = 20,
+    target_repo_id: str | None = None,
+) -> dict[str, Any]:
+    return provider_summary(
+        config,
+        include_providers=include_providers,
+        detail_limit=detail_limit,
+        target_repo_id=target_repo_id,
+    ).model_dump(mode="json", exclude_none=True)
+
+
+def provider_diagnostics_packet(
+    config: McpRuntimeConfig,
+    *,
+    detail_limit: int = 20,
+) -> dict[str, Any]:
+    projection = _provider_status_projection(config, include_providers=True)
+    diagnostics = ProviderDiagnosticsResponse(
+        ok=True,
+        configured=projection.configured,
+        enabled=projection.enabled,
+        state=projection.state,
+        partial=projection.partial,
+        settingsFile=projection.settings_file,
+        currentStateFile=projection.current_state_file,
+        currentState=projection.current_state,
+        integrity=projection.integrity,
+        processNamespace=projection.process_namespace,
+        items=_provider_diagnostics_items(config, projection)[:detail_limit],
+        recoveryActions=projection.recovery_actions or [],
+        rawStatus=ProviderRawStatus.model_validate(projection.raw_status)
+        if projection.raw_status
+        else None,
+    )
+    return diagnostics.model_dump(mode="json", exclude_none=True)
+
+
+def provider_summary(
+    config: McpRuntimeConfig,
+    *,
+    include_providers: bool = True,
+    detail_limit: int = 20,
+    target_repo_id: str | None = None,
+) -> ProviderSummary:
+    projection = _provider_status_projection(config, include_providers=include_providers)
+    return ProviderSummary(
+        configured=projection.configured,
+        enabled=projection.enabled,
+        state=_provider_state(projection.state),
+        ok=projection.ok,
+        partial=projection.partial,
+        currentStateFile=projection.current_state_file,
+        processNamespace=projection.process_namespace,
+        items=_provider_summary_items(
+            config,
+            projection,
+            detail_limit=detail_limit,
+            target_repo_id=target_repo_id,
+        ),
+        recoveryActions=projection.recovery_actions or [],
+    )
+
+
+def _provider_status_projection(
+    config: McpRuntimeConfig,
+    *,
+    include_providers: bool,
+) -> ProviderStatusProjection:
     configured = bool(config.providers)
     if not include_providers:
-        return {
-            "configured": configured,
-            "enabled": configured,
-            "state": "skipped",
-            "ok": None,
-            "partial": False,
-            "processNamespace": None,
-            "items": [],
-            "recoveryActions": [],
-        }
+        return ProviderStatusProjection(
+            configured=configured,
+            enabled=configured,
+            state="skipped",
+            ok=None,
+            partial=False,
+        )
     if not configured:
-        return {
-            "configured": False,
-            "enabled": False,
-            "state": "noProviders",
-            "ok": True,
-            "partial": False,
-            "processNamespace": None,
-            "items": [],
-            "recoveryActions": [],
-        }
+        return ProviderStatusProjection(
+            configured=False,
+            enabled=False,
+            state="noProviders",
+            ok=True,
+            partial=False,
+        )
 
     integrity = check_provider_runner_integrity(config)
     if integrity.get("ok") is False:
-        return {
-            "configured": True,
-            "enabled": True,
-            "state": "runnerIntegrityFailed",
-            "ok": False,
-            "partial": False,
-            "processNamespace": None,
-            "items": _configured_provider_items(config)[:detail_limit],
-            "integrity": integrity,
-            "recoveryActions": [
+        return ProviderStatusProjection(
+            configured=True,
+            enabled=True,
+            state="runnerIntegrityFailed",
+            ok=False,
+            partial=False,
+            integrity=integrity,
+            recovery_actions=[
                 {
                     "action": "runtime_install",
                     "reason": "provider runner files changed or were not recorded since install",
                 }
             ],
-        }
+        )
 
     status = _watchers_status(config)
     current_state = write_current_provider_state(config, status)
-    return {
-        "configured": True,
-        "enabled": any(status.get("enabled", {}).values()),
-        "state": current_state["state"]["state"],
-        "ok": status.get("ok"),
-        "partial": status.get("partial", False),
-        "settingsFile": status.get("settingsFile", ""),
-        "currentStateFile": current_state["path"],
-        "currentState": current_state["state"],
-        "integrity": integrity,
-        "processNamespace": status.get("processNamespace"),
-        "items": _provider_items(config, status)[:detail_limit],
-        "recoveryActions": status.get("recoveryActions", []),
-        "rawStatus": status,
-    }
+    return ProviderStatusProjection(
+        configured=True,
+        enabled=any(status.get("enabled", {}).values()),
+        state=current_state["state"]["state"],
+        ok=status.get("ok"),
+        partial=status.get("partial", False),
+        settings_file=status.get("settingsFile", ""),
+        current_state_file=current_state["path"],
+        current_state=current_state["state"],
+        integrity=integrity,
+        process_namespace=status.get("processNamespace"),
+        recovery_actions=status.get("recoveryActions", []),
+        raw_status=status,
+    )
 
 
 def _watchers_status(config: McpRuntimeConfig) -> dict[str, Any]:
@@ -95,76 +201,223 @@ def _watchers_status(config: McpRuntimeConfig) -> dict[str, Any]:
         settings_path.unlink(missing_ok=True)
 
 
-def _provider_items(config: McpRuntimeConfig, status: dict[str, Any]) -> list[dict[str, Any]]:
-    results = status.get("results", [])
+def _provider_summary_items(
+    config: McpRuntimeConfig,
+    projection: ProviderStatusProjection,
+    *,
+    detail_limit: int,
+    target_repo_id: str | None,
+) -> list[ContextProviderItem]:
+    states = _current_provider_states(projection)
+    items: list[ContextProviderItem] = []
+    for provider_id in ("codegraphcontext-code", "grepai-memory"):
+        provider = config.providers.get(provider_id)
+        if provider is not None:
+            items.append(
+                _provider_summary_item(
+                    provider,
+                    states.get(provider_id, {}),
+                    target_repo_id=target_repo_id,
+                    detail_limit=detail_limit,
+                )
+            )
+    return items[:detail_limit]
+
+
+def _provider_summary_item(
+    provider: ProviderScope,
+    state: dict[str, Any],
+    *,
+    target_repo_id: str | None,
+    detail_limit: int,
+) -> ContextProviderItem:
+    return ContextProviderItem(
+        id=provider.provider_id,
+        capability=_provider_capability(provider.provider_id),
+        state=_provider_state(state.get("state")),
+        ok=state.get("ok"),
+        runtime=_provider_runtime(provider.provider_id),
+        identity=_provider_identity(provider),
+        runtimeRoot=state.get("runtimeRoot") or provider.runtime_root.as_posix(),
+        logRoot=state.get("logRoot") or provider.log_root.as_posix(),
+        watchers=_provider_watchers(provider.provider_id, state, target_repo_id, detail_limit),
+        targetRepo=_provider_target_repo(provider.provider_id, state, target_repo_id),
+    )
+
+
+def _provider_diagnostics_items(
+    config: McpRuntimeConfig,
+    projection: ProviderStatusProjection,
+) -> list[ProviderDiagnosticsItem]:
+    results = _raw_results_by_provider(projection)
+    states = _current_provider_states(projection)
+    items: list[ProviderDiagnosticsItem] = []
+    for provider_id, raw_provider in (
+        ("codegraphcontext-code", "codegraphcontext"),
+        ("grepai-memory", "grepai"),
+    ):
+        provider = config.providers.get(provider_id)
+        if provider is not None:
+            items.append(
+                _provider_diagnostics_item(
+                    provider_id,
+                    provider,
+                    state=states.get(provider_id, {}),
+                    raw_status=results.get(raw_provider),
+                )
+            )
+    return items
+
+
+def _provider_diagnostics_item(
+    provider_id: str,
+    provider: ProviderScope,
+    *,
+    state: dict[str, Any],
+    raw_status: dict[str, Any] | None,
+) -> ProviderDiagnosticsItem:
+    return ProviderDiagnosticsItem(
+        id=provider_id,
+        state=str(state.get("state") or "unknown"),
+        ok=state.get("ok"),
+        identity=_provider_identity(provider),
+        runtimeRoot=state.get("runtimeRoot") or provider.runtime_root.as_posix(),
+        logRoot=state.get("logRoot") or provider.log_root.as_posix(),
+        rawStatus=ProviderRawStatus.model_validate(raw_status) if raw_status else None,
+    )
+
+
+def _provider_watchers(
+    provider_id: str,
+    state: dict[str, Any],
+    target_repo_id: str | None,
+    detail_limit: int,
+) -> GrepAIWatcherState | list[CGCWatcherState] | None:
+    if provider_id == "grepai-memory":
+        return GrepAIWatcherState(
+            state=_watcher_state_from_up(state.get("watcherUp")),
+            watcherUp=state.get("watcherUp"),
+            indexingState=str(state.get("indexingState") or "unknown"),
+        )
+    if provider_id != "codegraphcontext-code" or target_repo_id is not None:
+        return None
+    watchers = _cgc_watcher_states(state)
+    return watchers[:detail_limit]
+
+
+def _provider_target_repo(
+    provider_id: str,
+    state: dict[str, Any],
+    target_repo_id: str | None,
+) -> ProviderTargetRepo | None:
+    if target_repo_id is None:
+        return None
+    if provider_id == "codegraphcontext-code":
+        watcher = _cgc_watcher_by_repo(state, target_repo_id)
+        if watcher is None:
+            return ProviderTargetRepo(repoId=target_repo_id, state="unknown")
+        return ProviderTargetRepo(
+            repoId=target_repo_id,
+            state=watcher.state,
+            ok=watcher.ok,
+            watcherUp=watcher.watcherUp,
+            indexingState=watcher.indexingState,
+            lastRefresh=watcher.lastRefresh,
+        )
+    return ProviderTargetRepo(
+        repoId=target_repo_id,
+        state=_provider_state(state.get("state")),
+        ok=state.get("ok"),
+        watcherUp=state.get("watcherUp"),
+        indexingState=str(state.get("indexingState") or "unknown"),
+    )
+
+
+def _cgc_watcher_by_repo(state: dict[str, Any], repo_id: str) -> CGCWatcherState | None:
+    for watcher in _cgc_watcher_states(state):
+        if watcher.repoId == repo_id:
+            return watcher
+    return None
+
+
+def _cgc_watcher_states(state: dict[str, Any]) -> list[CGCWatcherState]:
+    resources = state.get("resources")
+    resources = resources if isinstance(resources, dict) else {}
+    watchers = resources.get("watchers")
+    if not isinstance(watchers, dict):
+        return []
+    items: list[CGCWatcherState] = []
+    for repo_id, watcher in sorted(watchers.items()):
+        if isinstance(watcher, dict):
+            items.append(_cgc_watcher_state(str(repo_id), watcher))
+    return items
+
+
+def _cgc_watcher_state(repo_id: str, watcher: dict[str, Any]) -> CGCWatcherState:
+    return CGCWatcherState(
+        repoId=str(watcher.get("repoId") or repo_id),
+        state=_provider_state(watcher.get("state")),
+        ok=watcher.get("ok"),
+        watcherUp=watcher.get("watcherUp"),
+        indexingState=str(watcher.get("indexingState") or "unknown"),
+        lastRefresh=watcher.get("lastRefresh"),
+    )
+
+
+def _watcher_state_from_up(watcher_up: Any) -> str:
+    if watcher_up is True:
+        return "running"
+    if watcher_up is False:
+        return "stopped"
+    return "unknown"
+
+
+def _current_provider_states(projection: ProviderStatusProjection) -> dict[str, dict[str, Any]]:
+    current_state = projection.current_state or {}
+    states = current_state.get("providers")
+    if not isinstance(states, dict):
+        return {}
+    return {key: value for key, value in states.items() if isinstance(value, dict)}
+
+
+def _raw_results_by_provider(projection: ProviderStatusProjection) -> dict[str, dict[str, Any]]:
+    raw_status = projection.raw_status or {}
+    results = raw_status.get("results")
     if not isinstance(results, list):
-        results = []
-    by_provider = {
-        str(result.get("provider")): result for result in results if isinstance(result, dict)
-    }
-    items: list[dict[str, Any]] = []
-    if "codegraphcontext-code" in config.providers:
-        items.append(
-            _provider_item(
-                config.providers["codegraphcontext-code"],
-                by_provider.get("codegraphcontext", {}),
-            )
-        )
-    if "grepai-memory" in config.providers:
-        items.append(
-            _provider_item(config.providers["grepai-memory"], by_provider.get("grepai", {}))
-        )
-    return items
+        return {}
+    return {str(result.get("provider")): result for result in results if isinstance(result, dict)}
 
 
-def _configured_provider_items(config: McpRuntimeConfig) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    if "codegraphcontext-code" in config.providers:
-        items.append(_provider_item(config.providers["codegraphcontext-code"], {}))
-    if "grepai-memory" in config.providers:
-        items.append(_provider_item(config.providers["grepai-memory"], {}))
-    return items
+def _provider_identity(provider: ProviderScope) -> ProviderIdentity:
+    return ProviderIdentity(
+        scope=provider.scope,
+        instanceId=provider.instance_id,
+    )
 
 
-def _provider_item(provider: ProviderScope, result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": provider.provider_id,
-        "runtimeRoot": provider.runtime_root.as_posix(),
-        "logRoot": provider.log_root.as_posix(),
-        "configured": True,
-        "ok": result.get("ok"),
-        "watcherState": _watcher_state(provider.provider_id, result),
-        "freshness": _freshness_label(provider.provider_id),
-        "rawStatus": result,
-    }
+def _provider_state(value: Any) -> ProviderState:
+    state = str(value or "unknown")
+    if state not in {
+        "ready",
+        "degraded",
+        "failed",
+        "disabled",
+        "unknown",
+        "noProviders",
+        "skipped",
+        "runnerIntegrityFailed",
+    }:
+        state = "unknown"
+    return cast(ProviderState, state)
 
 
-def _watcher_state(provider_id: str, result: dict[str, Any]) -> str:
-    state = "unknown"
-    if not result:
-        return state
+def _provider_capability(provider_id: str) -> str:
     if provider_id == "grepai-memory":
-        state = "running" if result.get("watcherRunning") else "stopped"
-    elif provider_id == "codegraphcontext-code":
-        child_results = result.get("results")
-        if not isinstance(child_results, list):
-            state = "running" if result.get("ok") else "stopped"
-        else:
-            alive_count = sum(
-                1
-                for child in child_results
-                if isinstance(child, dict) and child.get("process", {}).get("alive") is True
-            )
-            if alive_count == len(child_results) and child_results:
-                state = "running"
-            elif alive_count:
-                state = "partial"
-            else:
-                state = "stopped"
-    return state
+        return "semantic-memory-search"
+    return "code-relationship-search"
 
 
-def _freshness_label(provider_id: str) -> str:
-    if provider_id == "grepai-memory":
-        return "replaceable-cache"
+def _provider_runtime(provider_id: str) -> str:
+    if provider_id in {"grepai-memory", "codegraphcontext-code"}:
+        return "docker"
     return "unknown"

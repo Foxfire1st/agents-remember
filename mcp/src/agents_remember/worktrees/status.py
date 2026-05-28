@@ -54,5 +54,4 @@ def _packet_from_status_payload(payload: dict[str, object]) -> dict[str, Any]:
         "nextTool": payload.get("nextTool", ""),
         "nextArgs": payload.get("nextArgs", {}),
         "nextRequiredArgs": payload.get("nextRequiredArgs", []),
-        "rawStatus": payload,
     }

@@ -80,7 +80,9 @@ class ProviderCurrentStateTests(unittest.TestCase):
             write_json(config_path, settings_payload(root))
             config = load_config(config_path)
             status = ready_status_payload(root)
-            cgc = next(result for result in status["results"] if result["provider"] == "codegraphcontext")
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
             cgc["ok"] = False
             cgc["results"][0]["ok"] = False
             cgc["results"][0]["process"]["alive"] = False
@@ -167,11 +169,15 @@ class ProviderCurrentStateTests(unittest.TestCase):
                 return_value=ready_status_payload(root),
             ):
                 packet = provider_status.provider_status_packet(config)
+                diagnostics = provider_status.provider_diagnostics_packet(config)
 
-            self.assertEqual(packet["state"], "ready")
-            self.assertEqual(packet["currentState"]["state"], "ready")
-            self.assertTrue(Path(packet["currentStateFile"]).exists())
-            self.assertNotIn("lastSetup", packet["currentState"])
+            self.assertEqual(packet["operation"], "provider_status")
+            providers = packet["providers"]
+            self.assertEqual(providers["state"], "ready")
+            self.assertTrue(Path(providers["currentStateFile"]).exists())
+            self.assertNotIn("currentState", providers)
+            self.assertEqual(diagnostics["currentState"]["state"], "ready")
+            self.assertNotIn("lastSetup", diagnostics["currentState"])
 
 
 def ready_status_payload(root: Path) -> dict:
@@ -191,7 +197,9 @@ def ready_status_payload(root: Path) -> dict:
                 "provider": "grepai",
                 "action": "status",
                 "ok": True,
-                "runtimeRoot": (root / "ar-coordination" / "providers" / "runners" / "grepai").as_posix(),
+                "runtimeRoot": (
+                    root / "ar-coordination" / "providers" / "runners" / "grepai"
+                ).as_posix(),
                 "watcherRunning": True,
                 "backend": container_payload("ar-grepai-postgres-workspace"),
                 "embedder": container_payload("ar-grepai-ollama-workspace"),

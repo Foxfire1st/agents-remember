@@ -33,6 +33,27 @@ ignore = [
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+[tool.pyright]
+include = ["mcp/src/agents_remember", "mcp/tests"]
+exclude = [
+  "**/__pycache__",
+  ".cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".venv",
+  "build",
+  "dist",
+  "node_modules",
+]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+executionEnvironments = [
+  { root = "mcp/src", extraPaths = ["mcp/src"] },
+  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/tests"] },
+]
+
 [tool.radon]
 # Show only functions/classes that are at least mildly complex.
 # A = 1-5, B = 6-10, C = 11-20, D = 21-30, E = 31-40, F = 41+
