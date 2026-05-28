@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,69 @@ def docker_container_running(inspect_data: dict[str, Any] | None) -> bool:
         return False
     state = inspect_data.get("State", {})
     return bool(isinstance(state, dict) and state.get("Running"))
+
+
+def docker_container_state_summary(inspect_data: dict[str, Any] | None) -> dict[str, Any]:
+    if not inspect_data:
+        return {
+            "containerState": "missing",
+            "running": False,
+            "startedAt": None,
+            "uptimeSeconds": None,
+            "health": None,
+        }
+    state = inspect_data.get("State", {})
+    state = state if isinstance(state, dict) else {}
+    started_at = str(state.get("StartedAt") or "")
+    started = parse_docker_timestamp(started_at)
+    running = bool(state.get("Running"))
+    return {
+        "containerState": str(state.get("Status") or ("running" if running else "unknown")),
+        "running": running,
+        "startedAt": started.isoformat() if started else None,
+        "uptimeSeconds": docker_container_uptime_seconds(started) if running else None,
+        "health": docker_container_health(state),
+    }
+
+
+def docker_container_uptime_seconds(started: datetime | None) -> int | None:
+    if started is None:
+        return None
+    return max(0, int((datetime.now(UTC) - started).total_seconds()))
+
+
+def docker_container_health(state: dict[str, Any]) -> str | None:
+    health = state.get("Health")
+    if not isinstance(health, dict):
+        return None
+    status = health.get("Status")
+    return str(status) if status else None
+
+
+def parse_docker_timestamp(value: str) -> datetime | None:
+    if not value or value.startswith("0001-"):
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    if "." in text:
+        prefix, suffix = text.split(".", 1)
+        fraction = suffix
+        timezone = ""
+        for marker in ("+", "-"):
+            marker_index = suffix.find(marker)
+            if marker_index > 0:
+                fraction = suffix[:marker_index]
+                timezone = suffix[marker_index:]
+                break
+        text = f"{prefix}.{fraction[:6].ljust(6, '0')}{timezone}"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def docker_repo_digest(image: str, *, cwd: Path, timeout: int) -> str | None:

@@ -52,7 +52,144 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertEqual(payload["settingsFile"], settings_path.as_posix())
             self.assertEqual(payload["enabled"]["grepai-memory"], False)
             self.assertEqual(payload["enabled"]["codegraphcontext-code"], False)
+            self.assertEqual(payload["ready"], True)
+            self.assertEqual(payload["state"], "ok")
+            self.assertEqual(payload["failedPhases"], [])
             self.assertEqual(payload["results"], [])
+            self.assertFalse(payload["setupSummary"]["written"])
+            self.assertEqual(payload["setupSummary"]["reason"], "dry-run")
+
+    def test_run_provider_setup_writes_compact_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings_path = root / "provider-settings.json"
+            settings_path.write_text(
+                json.dumps({"contextProviders": {"enabled": False, "providers": {}}}),
+                encoding="utf-8",
+            )
+
+            payload = provider_setup.run_provider_setup(
+                provider_setup.ProviderSetupRequest(
+                    action="prepare",
+                    coordination_root=root,
+                    settings_path=settings_path,
+                    dry_run=False,
+                )
+            )
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["state"], "ok")
+            summary = payload["setupSummary"]
+            self.assertTrue(summary["written"])
+            self.assertEqual(
+                summary["last"],
+                (root / "logs" / "providers" / "setup" / "last-prepare.json").as_posix(),
+            )
+            summary_payload = json.loads(Path(summary["last"]).read_text(encoding="utf-8"))
+            self.assertEqual(summary_payload["kind"], "provider-setup-summary")
+            self.assertEqual(summary_payload["state"], "ok")
+            self.assertEqual(summary_payload["results"], [])
+
+    def test_run_provider_setup_reports_recovered_final_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings_path = root / "provider-settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "codegraphcontext-code": {
+                                    "enabled": True,
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            original = provider_setup._action_results
+
+            def fake_action_results(args, settings):
+                return [
+                    {
+                        "provider": "codegraphcontext",
+                        "action": "refresh-all",
+                        "ok": False,
+                        "json": {
+                            "provider": "codegraphcontext",
+                            "action": "refresh-all",
+                            "ok": False,
+                            "results": [
+                                {
+                                    "provider": "codegraphcontext",
+                                    "action": "refresh",
+                                    "repoId": "repo-a",
+                                    "ok": False,
+                                    "error": "index refresh failed",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "provider": "watchers",
+                        "action": "status",
+                        "ok": True,
+                        "payload": {
+                            "provider": "watchers",
+                            "action": "status",
+                            "ok": True,
+                            "partial": False,
+                            "results": [
+                                {
+                                    "provider": "codegraphcontext",
+                                    "ok": True,
+                                    "results": [
+                                        {
+                                            "repoId": "repo-a",
+                                            "ok": True,
+                                            "process": {"alive": True},
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                ]
+
+            provider_setup._action_results = fake_action_results
+            try:
+                payload = provider_setup.run_provider_setup(
+                    provider_setup.ProviderSetupRequest(
+                        action="prepare",
+                        coordination_root=root,
+                        settings_path=settings_path,
+                        dry_run=False,
+                    )
+                )
+            finally:
+                provider_setup._action_results = original
+
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["ready"], True)
+            self.assertEqual(payload["state"], "ready-with-failed-phases")
+            self.assertEqual(payload["resultCounts"]["failed"], 1)
+            self.assertEqual(payload["failedPhases"][0]["action"], "refresh-all")
+            self.assertEqual(
+                payload["failedPhases"][0]["payload"]["results"][0]["repoId"],
+                "repo-a",
+            )
+            self.assertEqual(payload["finalStatus"]["ok"], True)
+            self.assertEqual(
+                payload["finalStatus"]["results"][0]["results"][0]["process"],
+                {"alive": True},
+            )
+            summary_payload = json.loads(
+                Path(payload["setupSummary"]["last"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary_payload["state"], "ready-with-failed-phases")
+            self.assertNotIn("stdout", json.dumps(summary_payload))
 
     def test_cgc_prepare_is_ok_when_seed_falls_back_to_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,7 +204,6 @@ class ProviderSetupTests(unittest.TestCase):
                                 "codegraphcontext-code": {
                                     "enabled": True,
                                     "runtimeRoot": (root / "providers" / "runners").as_posix(),
-                                    "venvRoot": (root / "providers" / "_venvs").as_posix(),
                                     "roots": [
                                         {
                                             "repoId": "repo-a",
@@ -254,7 +390,6 @@ class ProviderSetupTests(unittest.TestCase):
                             "enabled": True,
                             "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                             "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-                            "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                             "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
                             "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                             "stateFileTemplate": "<instanceRoot>/provider-state.json",
@@ -305,16 +440,24 @@ class ProviderSetupTests(unittest.TestCase):
                 ).as_posix(),
             )
             self.assertEqual(
+                cgc["watch"]["logFileTemplate"],
+                (
+                    isolated_root
+                    / "logs"
+                    / "providers"
+                    / "codegraphcontext"
+                    / instance_id
+                    / "<repoId>"
+                    / "watch.log"
+                ).as_posix(),
+            )
+            self.assertEqual(
                 cgc["runtime"]["composeProject"],
                 f"agents-remember-cgc-{instance_id}",
             )
             self.assertEqual(
                 cgc["runtime"]["runner"]["containerNameTemplate"],
                 f"ar-cgc-watcher-{instance_id}-<repoId>",
-            )
-            self.assertEqual(
-                cgc["venvRoot"],
-                (coordination_root / "providers" / "_venvs" / "codegraphcontext").as_posix(),
             )
             self.assertEqual(
                 cgc["backend"]["runtimeRoot"],
@@ -392,6 +535,10 @@ class ProviderSetupTests(unittest.TestCase):
                 (isolated_root / "providers" / "runners" / "grepai" / instance_id).as_posix(),
             )
             self.assertEqual(
+                grepai["watch"]["logDir"],
+                (isolated_root / "logs" / "providers" / "grepai" / instance_id).as_posix(),
+            )
+            self.assertEqual(
                 grepai["runtime"]["runner"]["containerName"],
                 f"ar-grepai-watcher-{instance_id}",
             )
@@ -466,6 +613,8 @@ class ProviderSetupTests(unittest.TestCase):
                 payload["isolatedProviderSettings"]["providers"],
                 ["grepai-memory"],
             )
+            self.assertNotIn("isolatedCgcSettings", payload)
+            self.assertNotIn("isolatedGrepaiSettings", payload)
             clone = next(result for result in payload["results"] if result["action"] == "clone-db")
             self.assertTrue(clone["ok"])
             self.assertEqual(clone["strategy"], "database-clone-active-project-reconcile")

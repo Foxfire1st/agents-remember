@@ -24,6 +24,7 @@ from agents_remember.providers.lifecycle.docker_runtime import (
     docker_command,
     docker_container_networks,
     docker_container_running,
+    docker_container_state_summary,
     docker_image_exists,
     docker_inspect_container,
     docker_repo_digest,
@@ -91,6 +92,7 @@ def grepai_watcher_container_status(args: argparse.Namespace) -> dict[str, Any]:
         "dryRun": args.dry_run,
         "settingsFile": settings_path.as_posix(),
         "containerName": runner["containerName"],
+        "containerState": docker_container_state_summary(inspect_data),
         "image": runner["image"],
         "running": running,
         "network": {

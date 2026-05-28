@@ -84,12 +84,6 @@ def windows_process_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
-def python_executable(venv_root: Path) -> Path:
-    if os.name == "nt":
-        return venv_root / "Scripts" / "python.exe"
-    return venv_root / "bin" / "python"
-
-
 def process_cmdline(pid: int) -> str:
     proc_cmdline = Path("/proc") / str(pid) / "cmdline"
     if not proc_cmdline.exists():

@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.lifecycle.command_runner import run_command
@@ -111,6 +111,18 @@ def yaml_labels(labels: dict[str, Any], *, indent: int = 6) -> str:
     return "\n".join(
         f"{prefix}{key}: {yaml_scalar(value)}" for key, value in sorted(labels.items())
     )
+
+
+def required_ownership_labels(provider_settings: dict[str, Any], provider_id: str) -> dict[str, str]:
+    instance = provider_settings.get("instance")
+    if not isinstance(instance, dict):
+        raise ContextProviderError(f"{provider_id} settings must include instance.labels")
+    labels = instance.get("labels")
+    if not isinstance(labels, dict) or not labels:
+        raise ContextProviderError(f"{provider_id} settings must include instance.labels")
+    if not all(isinstance(key, str) and isinstance(value, str) for key, value in labels.items()):
+        raise ContextProviderError(f"{provider_id} instance.labels must be string key/value pairs")
+    return cast(dict[str, str], labels)
 
 
 def optional_yaml_line(name: str, value: str | None, *, indent: int = 4) -> str:

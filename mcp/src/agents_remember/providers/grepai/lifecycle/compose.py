@@ -16,6 +16,7 @@ from agents_remember.providers.lifecycle.compose_runtime import (
     provider_asset_path,
     provider_asset_text,
     render_template,
+    required_ownership_labels,
     yaml_environment,
     yaml_labels,
     yaml_port_mapping,
@@ -33,11 +34,7 @@ def grepai_compose_project(provider_settings: dict[str, Any]) -> str:
 
 
 def grepai_ownership_labels(provider_settings: dict[str, Any]) -> dict[str, str]:
-    instance = provider_settings.get("instance")
-    if not isinstance(instance, dict):
-        return {"agents-remember.legacy-provider-settings": "true"}
-    labels = instance.get("labels")
-    return labels if isinstance(labels, dict) else {"agents-remember.legacy-provider-settings": "true"}
+    return required_ownership_labels(provider_settings, "grepai-memory")
 
 
 def grepai_compose_render(

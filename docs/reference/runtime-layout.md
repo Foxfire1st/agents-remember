@@ -96,8 +96,8 @@ MCP-derived provider settings expand memory roots into workspace projects;
 managed mode mirrors those roots into `providers/runners/grepai/index-roots/`
 before launching GrepAI so its unavoidable per-project `.grepai/` config and
 symbol files stay under provider-owned runtime paths. GrepAI workspace config,
-runtime logs, state, cache, and mirrors live under `providers/runners/grepai/`,
-while user-facing logs live under `providers/logs/grepai/` and all roots share
+runtime state, cache, and mirrors live under `providers/runners/grepai/`,
+while user-facing logs live under `logs/providers/grepai/` and all roots share
 one lifecycle-owned PostgreSQL/pgvector Docker backend whose persistent data
 root is under `providers/data/grepai/postgres/`. For CodeGraphContext,
 MCP-derived provider settings build an `agents-remember/codegraphcontext:<pin>`
@@ -108,7 +108,7 @@ under `providers/runners/codegraphcontext/<repo-id>/.codegraphcontext/` so
 source repositories. Those repo instances share one lifecycle-owned FalkorDB
 Docker backend on the shared CGC Docker network whose persistent data root is
 under `providers/data/codegraphcontext/falkordb/`, and reinstall/update must
-preserve `providers/data/` and `providers/logs/` unless an explicit destructive
+preserve `providers/data/` and `logs/providers/` unless an explicit destructive
 lifecycle command is requested.
 
 The Python provider lifecycle, provider setup, and benchmark runner behavior

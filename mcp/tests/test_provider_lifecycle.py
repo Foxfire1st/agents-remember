@@ -123,6 +123,18 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             args.runtime_root = args.runtime_root.resolve()
         return args
 
+    def provider_instance(self, provider_id: str, coordination_root: Path) -> dict[str, object]:
+        return {
+            "id": "test",
+            "scope": "workspace",
+            "labels": {
+                "agents-remember.provider": provider_id,
+                "agents-remember.instance-id": "test",
+                "agents-remember.scope": "workspace",
+                "agents-remember.coordination-root": coordination_root.as_posix(),
+            },
+        }
+
     def service_config(self, root: Path) -> lifecycle_service.ProviderLifecycleServiceConfig:
         coordination_root = root / "coordination"
         repo = root / "workspace" / "repo-a"
@@ -138,9 +150,12 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                     "providers": {
                         "codegraphcontext-code": {
                             "enabled": True,
+                            "instance": self.provider_instance(
+                                "codegraphcontext-code",
+                                coordination_root,
+                            ),
                             "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                             "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-                            "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                             "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
                             "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                             "roots": [{"repoId": "repo-a", "path": repo.as_posix()}],
@@ -152,6 +167,10 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                         },
                         "grepai-memory": {
                             "enabled": True,
+                            "instance": self.provider_instance(
+                                "grepai-memory",
+                                coordination_root,
+                            ),
                             "runtimeRoot": "<coordination_root>/providers/runners/grepai",
                             "roots": [{"projectId": "memory-a", "path": memory.as_posix()}],
                         },
@@ -394,6 +413,8 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertIn('XDG_CACHE_HOME: "/grepai/runtime/cache/xdg"', render.override_yaml)
         self.assertIn('XDG_STATE_HOME: "/grepai/runtime/state/xdg"', render.override_yaml)
         self.assertNotIn(f'HOME: "{layout.home_root.as_posix()}"', render.override_yaml)
+        self.assertIn('agents-remember.provider: "grepai-memory"', render.override_yaml)
+        self.assertNotIn("legacy-provider-settings", render.override_yaml)
         if hasattr(os, "getuid") and hasattr(os, "getgid"):
             self.assertIn(
                 f'user: "{os.getuid()}:{os.getgid()}"',
@@ -404,6 +425,30 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertNotIn(":auto:", render.override_yaml)
         self.assertIn('name: "ar-grepai-memory"', render.override_yaml)
         self.assertEqual(len(render.override_sha256), 64)
+
+    def test_grepai_compose_rejects_missing_instance_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_grepai(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--dry-run",
+                ]
+            )
+            _, provider_settings, layout = lifecycle.grepai_layout_from_args(args)
+            provider_settings.pop("instance")
+            runner = lifecycle.grepai_runner_settings(provider_settings, layout)
+            backend = lifecycle.grepai_backend_settings(provider_settings, layout)
+
+            with self.assertRaisesRegex(
+                lifecycle.ContextProviderError,
+                "grepai-memory settings must include instance.labels",
+            ):
+                lifecycle.grepai_compose_render(provider_settings, layout, runner, backend)
 
     def test_cgc_compose_override_renders_repo_watchers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -432,9 +477,35 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertIn('FALKORDB_HOST: "ar-cgc-falkordb"', render.override_yaml)
         self.assertIn('"127.0.0.1::6379"', render.override_yaml)
         self.assertIn('"127.0.0.1::3000"', render.override_yaml)
+        self.assertIn('agents-remember.provider: "codegraphcontext-code"', render.override_yaml)
+        self.assertNotIn("legacy-provider-settings", render.override_yaml)
         self.assertNotIn(":auto:", render.override_yaml)
         self.assertIn(':ro"', render.override_yaml)
         self.assertEqual(len(render.override_sha256), 64)
+
+    def test_cgc_compose_rejects_missing_instance_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--repo-id",
+                    "repo-a",
+                    "--dry-run",
+                ]
+            )
+            _, provider_settings, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+            provider_settings.pop("instance")
+
+            with self.assertRaisesRegex(
+                lifecycle.ContextProviderError,
+                "codegraphcontext-code settings must include instance.labels",
+            ):
+                lifecycle.cgc_compose_render(provider_settings, layouts)
 
     def test_cgc_start_all_dry_run_reports_project_migration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

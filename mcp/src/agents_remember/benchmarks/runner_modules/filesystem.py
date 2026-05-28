@@ -148,8 +148,14 @@ def sync_runtime_assets(coordination_root: Path, dry_run: bool) -> None:
         "worktrees",
         "notes",
         "temp",
+        "logs",
+        "logs/mcp",
+        "logs/providers",
+        "logs/providers/codegraphcontext",
+        "logs/providers/grepai",
+        "logs/providers/setup",
+        "logs/providers/status",
         "providers/data",
-        "providers/logs",
         "providers/runners",
     ):
         path = coordination_root / folder

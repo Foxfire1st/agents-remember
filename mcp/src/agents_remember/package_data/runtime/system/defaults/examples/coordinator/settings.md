@@ -122,8 +122,9 @@ accepted by the installed CGC version.
 Provider reinstall/update is non-destructive to provider data by default.
 `providers/` contains a mix of package-owned defaults and live provider runtime
 state. MCP runtime reinstall may recreate Docker runner instances, image build
-roots, copied pins, and patches, while preserving `providers/data/` and
-`providers/logs/`. Durable provider databases live under
+roots, copied pins, and patches, while preserving `providers/data/`.
+Generated MCP/provider operator logs live under `logs/`, with provider setup
+summaries under `logs/providers/setup/`. Durable provider databases live under
 `providers/data/`; deleting FalkorDB data, graph namespaces, or repository
 indexes still requires an explicit destructive lifecycle command.
 

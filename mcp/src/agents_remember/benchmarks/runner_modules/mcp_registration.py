@@ -189,8 +189,8 @@ def benchmark_mcp_config(
             / provider_runtime_name(provider_id)
             / instance_id,
             log_root=coordination_root
-            / "providers"
             / "logs"
+            / "providers"
             / provider_runtime_name(provider_id)
             / instance_id,
             instance_id=instance_id,
@@ -202,7 +202,7 @@ def benchmark_mcp_config(
         config_path=coordination_root / ".benchmark-mcp-settings.generated.json",
         coordination_root=coordination_root.resolve(),
         workspace_root=workspace_root,
-        transcript_root=coordination_root / "providers" / "logs" / "mcp",
+        transcript_root=coordination_root / "logs" / "mcp",
         repositories={
             repo_id: RepositoryScope(
                 repo_id=repo_id,

@@ -104,7 +104,7 @@ watch settings internally.
   "version": 1,
   "coordinationRoot": "C:/absolute/path/to/ar-coordination",
   "workspaceRoot": "C:/absolute/path/to/workspace",
-  "transcriptRoot": "C:/absolute/path/to/ar-coordination/providers/logs/mcp",
+  "transcriptRoot": "C:/absolute/path/to/ar-coordination/logs/mcp",
   "repositories": {
     "agents-remember-md": {
       "memorySettingsIncludes": [],
@@ -144,7 +144,7 @@ empty unless the memory layer explicitly allows a cross-repo relationship.
 ids. It must be absolute.
 
 `transcriptRoot` is optional. If omitted, MCP logs default to
-`<coordinationRoot>/providers/logs/mcp`.
+`<coordinationRoot>/logs/mcp`.
 
 `harnessSkillRoot` is optional. By default, when the MCP settings file lives
 under `<registration-root>/mcp/`, `skills_install` copies packaged skills into

@@ -88,7 +88,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     workspace_root = required_absolute_path(data, "workspaceRoot")
     transcript_root = optional_absolute_path(data, "transcriptRoot", owner="MCP settings")
     if transcript_root is None:
-        transcript_root = coordination_root / "providers" / "logs" / "mcp"
+        transcript_root = coordination_root / "logs" / "mcp"
     harness_skill_root = optional_absolute_path(
         data,
         "harnessSkillRoot",
@@ -216,8 +216,8 @@ def parse_providers(
             ),
             log_root=(
                 coordination_root
-                / "providers"
                 / "logs"
+                / "providers"
                 / provider_name
                 / provider_config["instance_id"]
             ),

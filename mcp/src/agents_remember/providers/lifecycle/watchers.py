@@ -9,6 +9,7 @@ from typing import Any
 
 from agents_remember.providers.cgc.lifecycle import (
     cgc_all_layouts_from_settings,
+    cgc_backend_status,
     cgc_scoped_args,
     cgc_start_all,
     cgc_status,
@@ -113,6 +114,8 @@ def watcher_grepai_result(args: argparse.Namespace, action: str) -> dict[str, An
 
 def watcher_cgc_status_results(args: argparse.Namespace) -> dict[str, Any]:
     settings_file, _, layouts = cgc_all_layouts_from_settings(args)
+    backend = watcher_cgc_backend_status(args)
+    backend_ok = backend is None or backend.get("ok") is True
     cgc_results: list[dict[str, Any]] = []
     for layout in layouts:
         repo_scoped = cgc_scoped_args(args, layout.repo_id, "status")
@@ -136,11 +139,29 @@ def watcher_cgc_status_results(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "status-all",
-        "ok": all(result.get("ok") for result in cgc_results),
+        "ok": backend_ok and all(result.get("ok") for result in cgc_results),
         "settingsFile": settings_file.as_posix(),
+        "backend": backend,
         "count": len(cgc_results),
         "results": cgc_results,
     }
+
+
+def watcher_cgc_backend_status(args: argparse.Namespace) -> dict[str, Any] | None:
+    try:
+        return cgc_backend_status(args)
+    except (
+        ContextProviderError,
+        subprocess.TimeoutExpired,
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
+        return {
+            "provider": "codegraphcontext",
+            "action": "backend-status",
+            "ok": False,
+            "error": str(error),
+        }
 
 
 def watcher_cgc_result(args: argparse.Namespace, action: str) -> dict[str, Any]:

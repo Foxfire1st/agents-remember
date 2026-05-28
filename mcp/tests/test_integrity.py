@@ -18,6 +18,7 @@ from agents_remember.providers.integrity import (
     write_provider_runner_manifest,
 )
 from test_config import settings_payload, write_json
+from test_provider_current_state import ready_status_payload
 
 
 class ProviderIntegrityTests(unittest.TestCase):
@@ -76,20 +77,14 @@ class ProviderIntegrityTests(unittest.TestCase):
             runner.write_text("unrecorded\n", encoding="utf-8")
 
             original = provider_status._watchers_status
-            provider_status._watchers_status = lambda config: {
-                "ok": True,
-                "partial": False,
-                "enabled": {"codegraphcontext-code": True, "grepai-memory": False},
-                "results": [],
-                "recoveryActions": [],
-            }
+            provider_status._watchers_status = lambda config: ready_status_payload(root)
             try:
                 packet = provider_status.provider_status_packet(config)
             finally:
                 provider_status._watchers_status = original
 
             self.assertTrue(packet["ok"])
-            self.assertEqual(packet["state"], "checked")
+            self.assertEqual(packet["state"], "ready")
             self.assertEqual(packet["integrity"]["state"], "notInstalled")
 
 

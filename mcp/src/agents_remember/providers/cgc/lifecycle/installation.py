@@ -23,43 +23,20 @@ from agents_remember.providers.cgc.lifecycle.core import (
 from agents_remember.providers.cgc.lifecycle.runner import (
     cgc_runner_image_build,
     cgc_runner_image_status,
-    cgc_watcher_running,
+    cgc_watcher_inspect,
 )
 from agents_remember.providers.context import (
-    CGC_CGCIGNORE_PATCH_ID,
-    CGC_DELETE_PATCH_ID,
-    CGC_DISCOVERY_EXTENSIONS_PATCH_ID,
-    CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID,
-    CGC_VIZ_CLI_ROUTE_PATCH_ID,
-    CGC_VIZ_REPO_QUERY_PATCH_ID,
-    CGC_VIZ_SERVER_ROUTE_PATCH_ID,
     ContextProviderError,
-    apply_cgc_cgcignore_patch,
-    apply_cgc_delete_patch,
-    apply_cgc_discovery_extensions_patch,
-    apply_cgc_graph_builder_extensions_patch,
-    apply_cgc_viz_cli_route_patch,
-    apply_cgc_viz_repo_query_patch,
-    apply_cgc_viz_server_route_patch,
-    cgc_cgcignore_patch_applied,
-    cgc_delete_patch_applied,
-    cgc_discovery_extensions_patch_applied,
-    cgc_graph_builder_extensions_patch_applied,
-    cgc_viz_cli_route_patch_applied,
-    cgc_viz_repo_query_patch_applied,
-    cgc_viz_server_route_patch_applied,
     cleanup_cgc_runtime_artifacts,
     ensure_cgc_runtime_layout,
-    find_cgc_cgcignore_module,
-    find_cgc_cli_helpers_module,
-    find_cgc_discovery_module,
-    find_cgc_graph_builder_module,
-    find_cgc_viz_server_module,
-    find_cgc_writer_module,
     source_provider_artifacts,
     write_provider_state,
 )
 from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
+from agents_remember.providers.lifecycle.docker_runtime import (
+    docker_container_running,
+    docker_container_state_summary,
+)
 from agents_remember.providers.lifecycle.process_status import (
     process_namespace_status,
 )
@@ -242,13 +219,15 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
     layout = cgc_layout_from_args(args)
     artifacts = [path.as_posix() for path in source_provider_artifacts(layout.code_repo_root)]
     image = cgc_runner_image_status(args, layout)
-    running = cgc_watcher_running(args, layout)
+    inspect_data = cgc_watcher_inspect(args, layout)
+    running = docker_container_running(inspect_data)
     patch = {"module": None, "applied": image["exists"], "error": None, "mode": "docker-image"}
+    state = read_json(layout.state_file)
 
     return {
         "provider": "codegraphcontext",
         "action": "status",
-        "ok": image["exists"] and not artifacts,
+        "ok": image["exists"] and not artifacts and running,
         "repoId": layout.repo_id,
         "codeRepoRoot": layout.code_repo_root.as_posix(),
         "runtimeRoot": layout.runtime_root.as_posix(),
@@ -259,6 +238,8 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
         "backendDataRoot": layout.backend_data_root.as_posix(),
         "watchCwd": layout.watch_cwd.as_posix(),
         "watchLog": layout.watch_log_file.as_posix(),
+        "lastRefresh": state.get("lastRefresh"),
+        "indexingState": "unknown",
         "sourceArtifacts": artifacts,
         "patch": patch,
         "process": {
@@ -266,70 +247,9 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
             "alive": running,
             "mode": "docker-container-watch",
             "containerName": layout.watcher_container_name,
+            "containerState": docker_container_state_summary(inspect_data),
         },
         "processNamespace": process_namespace_status(),
-    }
-
-
-def cgc_empty_patch_status() -> dict[str, Any]:
-    return {
-        "module": None,
-        "applied": False,
-        "error": None,
-        "patches": {},
-    }
-
-
-def cgc_status_patch(layout: Any, cgc_executable: Path) -> dict[str, Any]:
-    patch = cgc_empty_patch_status()
-    if not cgc_executable.exists():
-        return patch
-    try:
-        return cgc_detected_patch_status(layout)
-    except ContextProviderError as error:
-        patch["error"] = str(error)
-        return patch
-
-
-def cgc_detected_patch_status(layout: Any) -> dict[str, Any]:
-    cgcignore_module = find_cgc_cgcignore_module(layout.venv_root)
-    writer_module = find_cgc_writer_module(layout.venv_root)
-    graph_builder_module = find_cgc_graph_builder_module(layout.venv_root)
-    discovery_module = find_cgc_discovery_module(layout.venv_root)
-    viz_server_module = find_cgc_viz_server_module(layout.venv_root)
-    cli_helpers_module = find_cgc_cli_helpers_module(layout.venv_root)
-    patch_rows = {
-        CGC_CGCIGNORE_PATCH_ID: (cgcignore_module, cgc_cgcignore_patch_applied(cgcignore_module)),
-        CGC_DELETE_PATCH_ID: (writer_module, cgc_delete_patch_applied(writer_module)),
-        CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID: (
-            graph_builder_module,
-            cgc_graph_builder_extensions_patch_applied(graph_builder_module),
-        ),
-        CGC_DISCOVERY_EXTENSIONS_PATCH_ID: (
-            discovery_module,
-            cgc_discovery_extensions_patch_applied(discovery_module),
-        ),
-        CGC_VIZ_REPO_QUERY_PATCH_ID: (
-            viz_server_module,
-            cgc_viz_repo_query_patch_applied(viz_server_module),
-        ),
-        CGC_VIZ_SERVER_ROUTE_PATCH_ID: (
-            viz_server_module,
-            cgc_viz_server_route_patch_applied(viz_server_module),
-        ),
-        CGC_VIZ_CLI_ROUTE_PATCH_ID: (
-            cli_helpers_module,
-            cgc_viz_cli_route_patch_applied(cli_helpers_module),
-        ),
-    }
-    return {
-        "module": cgcignore_module.as_posix(),
-        "applied": all(applied for _, applied in patch_rows.values()),
-        "error": None,
-        "patches": {
-            patch_id: {"module": module.as_posix(), "applied": applied}
-            for patch_id, (module, applied) in patch_rows.items()
-        },
     }
 
 
@@ -364,132 +284,6 @@ def cgc_init_layout(args: argparse.Namespace) -> dict[str, Any]:
         "imageLockFile": layout.image_lock_file.as_posix(),
         "stateFile": layout.state_file.as_posix(),
     }
-
-
-def cgc_patch_targets(layout: Any) -> list[tuple[str, Path, Any, Any]]:
-    cgcignore_module = find_cgc_cgcignore_module(layout.venv_root)
-    writer_module = find_cgc_writer_module(layout.venv_root)
-    graph_builder_module = find_cgc_graph_builder_module(layout.venv_root)
-    discovery_module = find_cgc_discovery_module(layout.venv_root)
-    viz_server_module = find_cgc_viz_server_module(layout.venv_root)
-    cli_helpers_module = find_cgc_cli_helpers_module(layout.venv_root)
-    return [
-        (
-            CGC_CGCIGNORE_PATCH_ID,
-            cgcignore_module,
-            cgc_cgcignore_patch_applied,
-            apply_cgc_cgcignore_patch,
-        ),
-        (CGC_DELETE_PATCH_ID, writer_module, cgc_delete_patch_applied, apply_cgc_delete_patch),
-        (
-            CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID,
-            graph_builder_module,
-            cgc_graph_builder_extensions_patch_applied,
-            apply_cgc_graph_builder_extensions_patch,
-        ),
-        (
-            CGC_DISCOVERY_EXTENSIONS_PATCH_ID,
-            discovery_module,
-            cgc_discovery_extensions_patch_applied,
-            apply_cgc_discovery_extensions_patch,
-        ),
-        (
-            CGC_VIZ_REPO_QUERY_PATCH_ID,
-            viz_server_module,
-            cgc_viz_repo_query_patch_applied,
-            apply_cgc_viz_repo_query_patch,
-        ),
-        (
-            CGC_VIZ_SERVER_ROUTE_PATCH_ID,
-            viz_server_module,
-            cgc_viz_server_route_patch_applied,
-            apply_cgc_viz_server_route_patch,
-        ),
-        (
-            CGC_VIZ_CLI_ROUTE_PATCH_ID,
-            cli_helpers_module,
-            cgc_viz_cli_route_patch_applied,
-            apply_cgc_viz_cli_route_patch,
-        ),
-    ]
-
-
-def cgc_apply_patch_target(
-    args: argparse.Namespace,
-    patch_id: str,
-    module: Path,
-    check_applied: Any,
-    apply_func: Any,
-) -> tuple[str, dict[str, Any]]:
-    already_applied = check_applied(module)
-    changed = cgc_patch_target_changed(args, module, already_applied, apply_func)
-    applied = cgc_patch_target_applied(args, module, already_applied, check_applied)
-    return patch_id, {
-        "module": module.as_posix(),
-        "alreadyApplied": already_applied,
-        "applied": applied,
-        "changed": changed,
-        "dryRunWouldChange": changed if args.dry_run else False,
-    }
-
-
-def cgc_patch_target_changed(
-    args: argparse.Namespace, module: Path, already_applied: bool, apply_func: Any
-) -> bool:
-    if args.dry_run:
-        return not already_applied
-    return False if already_applied else apply_func(module)
-
-
-def cgc_patch_target_applied(
-    args: argparse.Namespace, module: Path, already_applied: bool, check_applied: Any
-) -> bool:
-    return already_applied if args.dry_run else check_applied(module)
-
-
-def cgc_patch_results(args: argparse.Namespace, layout: Any) -> dict[str, dict[str, Any]]:
-    return dict(
-        cgc_apply_patch_target(args, patch_id, module, check_applied, apply_func)
-        for patch_id, module, check_applied, apply_func in cgc_patch_targets(layout)
-    )
-
-
-def cgc_patch_changed(patch_results: dict[str, dict[str, Any]]) -> bool:
-    return any(result["changed"] for result in patch_results.values())
-
-
-def cgc_patch_any_applied(patch_results: dict[str, dict[str, Any]]) -> bool:
-    return any(result["alreadyApplied"] or result["changed"] for result in patch_results.values())
-
-
-def cgc_patch_applied_ids(patch_results: dict[str, dict[str, Any]]) -> set[str]:
-    return {
-        patch_id
-        for patch_id, result in patch_results.items()
-        if result["applied"] or result["changed"]
-    }
-
-
-def cgc_update_patch_state(
-    layout: Any,
-    args: argparse.Namespace,
-    patch_results: dict[str, dict[str, Any]],
-) -> None:
-    state = read_json(layout.state_file)
-    existing = state.get("appliedPatches", [])
-    state.update(
-        {
-            "provider": "codegraphcontext",
-            "repoId": layout.repo_id,
-            "appliedPatches": sorted(set(existing) | cgc_patch_applied_ids(patch_results))
-            if cgc_patch_any_applied(patch_results)
-            else existing,
-            "patchVerification": patch_results,
-            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-    )
-    if not args.dry_run:
-        write_json(layout.state_file, state)
 
 
 def cgc_patch(args: argparse.Namespace) -> dict[str, Any]:

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers import setup_common
+from agents_remember.providers import setup_common, setup_reporting
 from agents_remember.providers.cgc import bundle as cgc_bundle
 from agents_remember.providers.cgc import seed as cgc_seed
 from agents_remember.providers.cgc import setup as cgc_setup
@@ -276,20 +276,20 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
     isolated = write_isolated_provider_settings(args, settings)
     results = _action_results(args, settings)
 
-    return {
-        "ok": all(result_ok_for_prepare(result, args) for result in results),
+    payload = {
         "action": args.action,
         "dryRun": args.dry_run,
         "coordinationRoot": args.coordination_root.as_posix(),
         "settingsFile": settings_path(args.coordination_root, args.from_settings).as_posix(),
         "isolatedProviderSettings": isolated,
-        "isolatedCgcSettings": _isolated_legacy_payload(isolated, cgc_setup.CGC_PROVIDER_ID),
-        "isolatedGrepaiSettings": _isolated_legacy_payload(
-            isolated, grepai_setup.GREPAI_PROVIDER_ID
-        ),
         "enabled": enabled,
         "results": results,
     }
+    return setup_reporting.finalize_setup_payload(
+        args,
+        payload,
+        result_ok=lambda result: result_ok_for_prepare(result, args),
+    )
 
 
 def write_isolated_provider_settings(
@@ -360,19 +360,6 @@ def _isolated_provider_settings_payload(providers: dict[str, Any]) -> dict[str, 
                 "sourceProofRequired": True,
             },
         },
-    }
-
-
-def _isolated_legacy_payload(
-    isolated: dict[str, Any] | None,
-    provider_id: str,
-) -> dict[str, Any] | None:
-    if isolated is None or provider_id not in isolated.get("providers", []):
-        return None
-    return {
-        "path": isolated["path"],
-        "dryRun": isolated["dryRun"],
-        "settings": isolated.get("settings"),
     }
 
 
@@ -459,11 +446,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def render_text(payload: dict[str, Any]) -> str:
     lines = [
-        f"provider setup {payload['action']}: {'ok' if payload.get('ok') else 'failed'}",
+        f"provider setup {payload['action']}: {payload.get('state') or _payload_status(payload)}",
         f"coordination root: {payload['coordinationRoot']}",
     ]
+    summary = payload.get("setupSummary")
+    if isinstance(summary, dict) and summary.get("written"):
+        lines.append(f"summary: {summary['last']}")
     lines.extend(_result_line(result) for result in payload.get("results", []))
     return "\n".join(lines)
+
+
+def _payload_status(payload: dict[str, Any]) -> str:
+    return "ok" if payload.get("ok") else "failed"
 
 
 def _result_line(result: dict[str, Any]) -> str:

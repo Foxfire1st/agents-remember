@@ -38,16 +38,18 @@ PROVIDER_DEPENDENCY_PATHS = {
 }
 PROVIDER_DATA_PATHS = {
     Path("data"),
-    Path("logs"),
 }
 PROVIDER_USER_DIRS = (
+    "logs",
+    "logs/mcp",
+    "logs/providers",
+    "logs/providers/codegraphcontext",
+    "logs/providers/grepai",
+    "logs/providers/setup",
+    "logs/providers/status",
     "providers/data",
     "providers/data/codegraphcontext",
     "providers/data/grepai",
-    "providers/logs",
-    "providers/logs/codegraphcontext",
-    "providers/logs/grepai",
-    "providers/logs/mcp",
     "providers/runners",
     "providers/runners/codegraphcontext",
     "providers/runners/grepai",

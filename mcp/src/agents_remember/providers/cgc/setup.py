@@ -107,8 +107,8 @@ def _isolated_cgc_base_fields(
     runtime_root = isolated_root / "providers" / "runners" / "codegraphcontext" / instance_id
     log_file = (
         isolated_root
-        / "providers"
         / "logs"
+        / "providers"
         / "codegraphcontext"
         / instance_id
         / "<repoId>"
@@ -134,9 +134,6 @@ def _isolated_cgc_base_fields(
         ],
         "runtimeRoot": runtime_root.as_posix(),
         "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-        "venvRoot": (
-            args.coordination_root / "providers" / "_venvs" / "codegraphcontext"
-        ).as_posix(),
         "requirementsFile": (
             args.coordination_root / "providers" / "requirements" / "codegraphcontext.txt"
         ).as_posix(),

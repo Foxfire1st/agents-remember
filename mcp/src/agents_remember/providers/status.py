@@ -7,6 +7,7 @@ from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
 from agents_remember.providers import lifecycle
+from agents_remember.providers.current_state import write_current_provider_state
 from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import write_lifecycle_settings
 
@@ -61,13 +62,16 @@ def provider_status_packet(
         }
 
     status = _watchers_status(config)
+    current_state = write_current_provider_state(config, status)
     return {
         "configured": True,
         "enabled": any(status.get("enabled", {}).values()),
-        "state": "checked",
+        "state": current_state["state"]["state"],
         "ok": status.get("ok"),
         "partial": status.get("partial", False),
         "settingsFile": status.get("settingsFile", ""),
+        "currentStateFile": current_state["path"],
+        "currentState": current_state["state"],
         "integrity": integrity,
         "processNamespace": status.get("processNamespace"),
         "items": _provider_items(config, status)[:detail_limit],

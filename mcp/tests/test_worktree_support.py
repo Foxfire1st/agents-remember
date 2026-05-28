@@ -2190,8 +2190,30 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 f"ar-grepai-postgres-{instance_id}",
             )
             self.assertEqual(
+                providers["grepai-memory"]["watch"]["logDir"],
+                (
+                    coordination_root
+                    / "logs"
+                    / "providers"
+                    / "grepai"
+                    / instance_id
+                ).as_posix(),
+            )
+            self.assertEqual(
                 providers["codegraphcontext-code"]["backend"]["containerName"],
                 f"ar-cgc-falkordb-{instance_id}",
+            )
+            self.assertEqual(
+                providers["codegraphcontext-code"]["watch"]["logFileTemplate"],
+                (
+                    coordination_root
+                    / "logs"
+                    / "providers"
+                    / "codegraphcontext"
+                    / instance_id
+                    / "<repoId>"
+                    / "watch.log"
+                ).as_posix(),
             )
 
     def test_benchmark_provider_setup_uses_generated_settings_file(self) -> None:

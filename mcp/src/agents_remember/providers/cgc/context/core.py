@@ -39,7 +39,6 @@ class CgcRuntimeLayout:
     providers_root: Path
     runtime_root: Path
     cgc_root: Path
-    venv_root: Path
     requirements_file: Path
     patches_root: Path
     image_build_root: Path
@@ -103,19 +102,12 @@ class CgcRuntimeLayout:
         }
         return env
 
-    def cgc_executable(self) -> Path:
-        if os.name == "nt":
-            return self.venv_root / "Scripts" / "cgc.exe"
-        return self.venv_root / "bin" / "cgc"
-
-
 def cgc_runtime_layout(
     *,
     coordination_root: Path,
     repo_id: str,
     code_repo_root: Path,
     runtime_root: Path | None = None,
-    venv_root: Path | None = None,
     requirements_file: Path | None = None,
     patches_root: Path | None = None,
     image_build_root: Path | None = None,
@@ -156,7 +148,6 @@ def cgc_runtime_layout(
         providers_root=providers_root,
         runtime_root=runtime_root,
         cgc_root=cgc_root,
-        venv_root=_resolve_optional_path(venv_root, providers_root / "_venvs" / CGC_PROVIDER),
         requirements_file=_resolve_optional_path(
             requirements_file,
             provider_requirements_file(coordination_root, CGC_PROVIDER),
@@ -210,6 +201,11 @@ def cgc_runtime_layout_from_provider_settings(
     """Build a CGC runtime layout from a codegraphcontext-code settings entry."""
 
     coordination_root = coordination_root.resolve()
+    if "venvRoot" in provider_settings:
+        raise ContextProviderError(
+            "codegraphcontext-code settings may not define venvRoot; "
+            "managed CGC execution uses the Docker runner image"
+        )
     repo_id = stable_provider_id(str(root_settings["repoId"]))
     base_variables = _cgc_base_variables(coordination_root)
     code_repo_root = _validated_cgc_code_repo_root(root_settings, base_variables)
@@ -250,17 +246,6 @@ def cgc_runtime_layout_from_provider_settings(
         repo_id=repo_id,
         code_repo_root=code_repo_root,
         runtime_root=instance_root,
-        venv_root=Path(
-            expand_template(
-                str(
-                    provider_settings.get(
-                        "venvRoot",
-                        "<coordination_root>/providers/_venvs/codegraphcontext",
-                    )
-                ),
-                base_variables,
-            )
-        ),
         requirements_file=Path(
             expand_template(
                 str(

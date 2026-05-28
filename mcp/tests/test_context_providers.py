@@ -67,12 +67,6 @@ from agents_remember.providers.context import (
     ensure_cgc_runtime_layout,
     ensure_grepai_requirements_file,
     ensure_grepai_runtime_layout,
-    find_cgc_cgcignore_module,
-    find_cgc_cli_helpers_module,
-    find_cgc_discovery_module,
-    find_cgc_graph_builder_module,
-    find_cgc_viz_server_module,
-    find_cgc_writer_module,
     grepai_root_provider_artifacts,
     grepai_runtime_layout,
     grepai_runtime_layout_from_provider_settings,
@@ -109,10 +103,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
             )
             self.assertEqual(layout.backend_data_root, layout.backend_root / "data")
             self.assertEqual(
-                layout.venv_root,
-                root / "ar-coordination" / "providers" / "_venvs" / "codegraphcontext",
-            )
-            self.assertEqual(
                 layout.requirements_file,
                 root / "ar-coordination" / "providers" / "requirements" / "codegraphcontext.txt",
             )
@@ -120,10 +110,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 layout.patches_root,
                 root / "ar-coordination" / "providers" / "patches" / "codegraphcontext",
             )
-            if sys.platform == "win32":
-                self.assertEqual(layout.cgc_executable(), layout.venv_root / "Scripts" / "cgc.exe")
-            else:
-                self.assertEqual(layout.cgc_executable(), layout.venv_root / "bin" / "cgc")
 
             env = layout.env()
             self.assertEqual(env["HOME"], (layout.run_root / "home").as_posix())
@@ -246,7 +232,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
             provider = {
                 "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                 "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-                "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                 "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
                 "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                 "stateFileTemplate": "<instanceRoot>/provider-state.json",
@@ -290,7 +275,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
             provider = {
                 "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                 "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-                "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                 "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
                 "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                 "stateFileTemplate": "<instanceRoot>/provider-state.json",
@@ -326,7 +310,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
             provider = {
                 "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                 "instanceRootTemplate": "<runtimeRoot>/<repoId>",
-                "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
                 "requirementsFile": "<coordination_root>/providers/requirements/codegraphcontext.txt",
                 "patchesRoot": "<coordination_root>/providers/patches/codegraphcontext",
                 "stateFileTemplate": "<instanceRoot>/provider-state.json",
@@ -337,6 +320,21 @@ class ContextProviderLayoutTests(unittest.TestCase):
                     coordination_root=root / "ar-coordination",
                     provider_settings=provider,
                     root_settings={"repoId": "missing-app", "path": str(root / "missing-app")},
+                )
+
+    def test_cgc_layout_rejects_removed_venv_root_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "my-app").mkdir()
+            provider = {
+                "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
+                "venvRoot": "<coordination_root>/providers/_venvs/codegraphcontext",
+            }
+            with self.assertRaisesRegex(ContextProviderError, "may not define venvRoot"):
+                cgc_runtime_layout_from_provider_settings(
+                    coordination_root=root / "ar-coordination",
+                    provider_settings=provider,
+                    root_settings={"repoId": "my-app", "path": str(root / "my-app")},
                 )
 
     def test_grepai_requirements_pin_is_created_and_readable(self) -> None:
@@ -388,7 +386,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 "requirementsFile": "<coordination_root>/providers/requirements/grepai.txt",
                 "stateFile": "<runtimeRoot>/state/provider-state.json",
                 "watch": {
-                    "logDir": "<coordination_root>/providers/logs/grepai",
+                    "logDir": "<coordination_root>/logs/providers/grepai",
                 },
                 "backend": {
                     "runtimeRoot": "<coordination_root>/providers/data/grepai/postgres",
@@ -439,7 +437,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres" / "data",
             )
             self.assertEqual(
-                layout.logs_root, root / "ar-coordination" / "providers" / "logs" / "grepai"
+                layout.logs_root, root / "ar-coordination" / "logs" / "providers" / "grepai"
             )
 
     def test_grepai_syncs_provider_owned_index_roots_from_memory_sources(self) -> None:
@@ -697,82 +695,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertIn('visualization_url = f"{backend_url}{default_route}"', text)
             self.assertIn("default_route=default_route", text)
             self.assertFalse(apply_cgc_viz_cli_route_patch(target))
-
-    def test_find_cgc_cli_helpers_module_accepts_windows_venv_layout(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = (
-                Path(tmp) / "Lib" / "site-packages" / "codegraphcontext" / "cli" / "cli_helpers.py"
-            )
-            target.parent.mkdir(parents=True)
-            target.write_text("# module\n", encoding="utf-8")
-
-            self.assertEqual(find_cgc_cli_helpers_module(Path(tmp)), target.resolve())
-
-    def test_find_cgc_cgcignore_module_accepts_windows_venv_layout(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = (
-                Path(tmp) / "Lib" / "site-packages" / "codegraphcontext" / "core" / "cgcignore.py"
-            )
-            target.parent.mkdir(parents=True)
-            target.write_text("# module\n", encoding="utf-8")
-
-            self.assertEqual(find_cgc_cgcignore_module(Path(tmp)), target.resolve())
-
-    def test_find_cgc_writer_module_accepts_windows_venv_layout(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = (
-                Path(tmp)
-                / "Lib"
-                / "site-packages"
-                / "codegraphcontext"
-                / "tools"
-                / "indexing"
-                / "persistence"
-                / "writer.py"
-            )
-            target.parent.mkdir(parents=True)
-            target.write_text("# module\n", encoding="utf-8")
-
-            self.assertEqual(find_cgc_writer_module(Path(tmp)), target.resolve())
-
-    def test_find_cgc_graph_builder_module_accepts_windows_venv_layout(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = (
-                Path(tmp)
-                / "Lib"
-                / "site-packages"
-                / "codegraphcontext"
-                / "tools"
-                / "graph_builder.py"
-            )
-            target.parent.mkdir(parents=True)
-            target.write_text("# module\n", encoding="utf-8")
-
-            self.assertEqual(find_cgc_graph_builder_module(Path(tmp)), target.resolve())
-
-    def test_find_cgc_discovery_module_accepts_windows_venv_layout(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = (
-                Path(tmp)
-                / "Lib"
-                / "site-packages"
-                / "codegraphcontext"
-                / "tools"
-                / "indexing"
-                / "discovery.py"
-            )
-            target.parent.mkdir(parents=True)
-            target.write_text("# module\n", encoding="utf-8")
-
-            self.assertEqual(find_cgc_discovery_module(Path(tmp)), target.resolve())
-
-    def test_find_cgc_viz_server_module_accepts_windows_venv_layout(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "Lib" / "site-packages" / "codegraphcontext" / "viz" / "server.py"
-            target.parent.mkdir(parents=True)
-            target.write_text("# module\n", encoding="utf-8")
-
-            self.assertEqual(find_cgc_viz_server_module(Path(tmp)), target.resolve())
 
     def test_patch_rejects_unexpected_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

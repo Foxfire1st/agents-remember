@@ -1,2 +1,2 @@
-# Managed provider binary pin for Agents Remember.
+# Managed GrepAI Docker runner pin for Agents Remember.
 grepai==0.35.0

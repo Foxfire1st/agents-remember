@@ -58,6 +58,9 @@ class InstallRuntimeTests(unittest.TestCase):
             )
             cgc_data = providers_root / "data" / "codegraphcontext" / "graph.db"
             cgc_log = providers_root / "logs" / "codegraphcontext" / "watch.log"
+            central_cgc_log = (
+                coordination_root / "logs" / "providers" / "codegraphcontext" / "watch.log"
+            )
             old_script = coordination_root / "scripts" / "install-skills.sh"
 
             write_file(providers_root / "_bin" / "grepai.exe", "legacy grepai\n")
@@ -66,6 +69,7 @@ class InstallRuntimeTests(unittest.TestCase):
             write_file(grepai_watch_log)
             write_file(cgc_data, "live graph\n")
             write_file(cgc_log, "live log\n")
+            write_file(central_cgc_log, "live central log\n")
             write_file(providers_root / "old.txt")
             write_file(old_script)
 
@@ -83,7 +87,8 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertTrue(cgc_state.exists())
             self.assertTrue(grepai_watch_log.exists())
             self.assertTrue(cgc_data.exists())
-            self.assertTrue(cgc_log.exists())
+            self.assertFalse(cgc_log.exists())
+            self.assertTrue(central_cgc_log.exists())
             self.assertFalse((providers_root / "old.txt").exists())
             self.assertTrue((providers_root / "requirements" / "grepai.txt").exists())
             self.assertFalse((coordination_root / "scripts").exists())
@@ -96,11 +101,15 @@ class InstallRuntimeTests(unittest.TestCase):
             providers_root = coordination_root / "providers"
             grepai_data = providers_root / "data" / "grepai" / "postgres.db"
             grepai_log = providers_root / "logs" / "grepai" / "watch.log"
+            central_grepai_log = (
+                coordination_root / "logs" / "providers" / "grepai" / "watch.log"
+            )
             old_venv = providers_root / "_venvs" / "old" / "python.exe"
             mcp_package = coordination_root / "src" / "agents_remember" / "mcp" / "__init__.py"
 
             write_file(grepai_data, "live data\n")
             write_file(grepai_log, "live log\n")
+            write_file(central_grepai_log, "live central log\n")
             write_file(old_venv, "old venv\n")
 
             summary = install_runtime.install_runtime(
@@ -113,13 +122,17 @@ class InstallRuntimeTests(unittest.TestCase):
 
             self.assertEqual(summary.dependency_runs, 0)
             self.assertTrue(grepai_data.exists())
-            self.assertTrue(grepai_log.exists())
+            self.assertFalse(grepai_log.exists())
+            self.assertTrue(central_grepai_log.exists())
             self.assertFalse(old_venv.exists())
             self.assertTrue((providers_root / "data" / "codegraphcontext").is_dir())
             self.assertTrue((providers_root / "data" / "grepai").is_dir())
-            self.assertTrue((providers_root / "logs" / "codegraphcontext").is_dir())
-            self.assertTrue((providers_root / "logs" / "grepai").is_dir())
-            self.assertTrue((providers_root / "logs" / "mcp").is_dir())
+            self.assertTrue((coordination_root / "logs" / "mcp").is_dir())
+            self.assertTrue(
+                (coordination_root / "logs" / "providers" / "codegraphcontext").is_dir()
+            )
+            self.assertTrue((coordination_root / "logs" / "providers" / "grepai").is_dir())
+            self.assertTrue((coordination_root / "logs" / "providers" / "setup").is_dir())
             self.assertTrue((providers_root / "runners" / "codegraphcontext").is_dir())
             self.assertTrue((providers_root / "runners" / "grepai").is_dir())
             self.assertTrue((providers_root / "requirements" / "codegraphcontext.txt").exists())

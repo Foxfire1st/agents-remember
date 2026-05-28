@@ -25,6 +25,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     run_drift_summary,
 )
 from agents_remember.providers import lifecycle_service
+from agents_remember.providers.current_state import write_current_provider_state
 from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import (
     lifecycle_settings_from_config,
@@ -218,7 +219,8 @@ def provider_watchers_tool(
         }
     if action == "refresh":
         return _provider_refresh(config, dry_run=dry_run)
-    return _provider_watchers_once(config, action, dry_run=dry_run)
+    effective_dry_run = False if action == "status" else dry_run
+    return _provider_watchers_once(config, action, dry_run=effective_dry_run)
 
 
 def grepai_search_tool(
@@ -1029,7 +1031,7 @@ def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseli
 def _provider_watchers_once(
     config: McpRuntimeConfig, action: str, *, dry_run: bool
 ) -> dict[str, Any]:
-    return _provider_operation_result(
+    payload = _provider_operation_result(
         config,
         operation="provider_watchers",
         dry_run=dry_run,
@@ -1039,6 +1041,12 @@ def _provider_watchers_once(
             action=action,
         ),
     )
+    if action == "status" and payload.get("provider") == "watchers":
+        current_state = write_current_provider_state(config, payload)
+        payload["currentStateFile"] = current_state["path"]
+        payload["currentState"] = current_state["state"]
+        payload["state"] = current_state["state"]["state"]
+    return payload
 
 
 def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, Any]:

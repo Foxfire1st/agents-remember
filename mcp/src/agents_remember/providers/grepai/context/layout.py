@@ -265,7 +265,7 @@ def grepai_runtime_layout_from_provider_settings(
         watch_settings = {}
     logs_root = Path(
         expand_template(
-            str(watch_settings.get("logDir", "<coordination_root>/providers/logs/grepai")),
+            str(watch_settings.get("logDir", "<coordination_root>/logs/providers/grepai")),
             {
                 "coordination_root": coordination_root.as_posix(),
                 "runtimeRoot": provider_runtime_root.as_posix(),

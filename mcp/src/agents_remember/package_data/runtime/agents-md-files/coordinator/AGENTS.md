@@ -22,7 +22,7 @@ heavy task workflow, a heavy task, or the full phased workflow.
 ---
 
 **IMPORTANT:** Do not change code without following one of the above workflows!
-Do not change task plan items without approval. 
+Do not change task plan items without approval.
 
 ---
 
@@ -35,10 +35,10 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- Do not rush on every dev statement to change the whole plan. Instead follow `tasks/AGENTS.md` doctrine 
-when designing and planning a task. Help the developer through back and forth discussion in chat, to reframe 
-their requests better, think through the problem, find deeper truths, and hidden variables. Do that until
-the developer beliefs that the design item is well enough defined to be written down.
+- Do not rush on every dev statement to change the whole plan. Instead follow `tasks/AGENTS.md` doctrine
+  when designing and planning a task. Help the developer through back and forth discussion in chat, to reframe
+  their requests better, think through the problem, find deeper truths, and hidden variables. Do that until
+  the developer beliefs that the design item is well enough defined to be written down.
 
 ### Onboarding Documentation
 
@@ -144,4 +144,6 @@ the more specific authority for its code repository.
 After C-08 resolves context, use the resolved memory layer's `system/tools.md`
 for repository-specific test, lint, typecheck, build, smoke-check, branch, and
 local command guidance. Use `system/coding-guidelines.md` when present for
-repo-specific coding rules.
+repo-specific coding rules. Use `system/code-quality-report-template.md`
+as a template for reporting code quality results after implementation work
+changes source code.

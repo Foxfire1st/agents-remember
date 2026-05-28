@@ -38,6 +38,7 @@ from agents_remember.mcp.tools import (
     memory_carryover_plan_payload,
     memory_init_payload,
     ping_payload,
+    provider_watchers_payload,
     route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
@@ -49,6 +50,7 @@ from agents_remember.providers.integrity import (
 )
 from agents_remember.providers.settings import lifecycle_settings_from_config
 from test_config import settings_payload
+from test_provider_current_state import ready_status_payload
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -134,8 +136,28 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["operation"], "context_packet")
             self.assertEqual(payload["contextPacketVersion"], 1)
             self.assertEqual(payload["repoId"], "agents-remember-md")
-            self.assertEqual(payload["providers"]["state"], "checked")
+            self.assertEqual(payload["providers"]["state"], "failed")
+            self.assertEqual(payload["providers"]["currentState"]["state"], "failed")
             self.assertEqual(payload["drift"], {"status": "notChecked"})
+
+    def test_provider_watchers_status_reports_current_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            with patch(
+                "agents_remember.controllers.skill_tools.lifecycle_service.run_watchers_lifecycle",
+                return_value=ready_status_payload(root),
+            ) as run_watchers:
+                payload = provider_watchers_payload(config, action="status")
+
+            service_config = run_watchers.call_args.args[0]
+            self.assertFalse(service_config.dry_run)
+            self.assertEqual(payload["state"], "ready")
+            self.assertEqual(payload["currentState"]["state"], "ready")
+            self.assertTrue(Path(payload["currentStateFile"]).exists())
 
     def test_runtime_install_tool_uses_configured_coordination_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

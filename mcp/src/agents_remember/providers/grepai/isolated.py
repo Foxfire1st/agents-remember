@@ -108,7 +108,7 @@ def _isolated_grepai_base_fields(
     instance_id: str,
 ) -> dict[str, Any]:
     runtime_root = isolated_root / "providers" / "runners" / "grepai" / instance_id
-    log_root = isolated_root / "providers" / "logs" / "grepai" / instance_id
+    log_root = isolated_root / "logs" / "providers" / "grepai" / instance_id
     return {
         "enabled": True,
         "instance": {

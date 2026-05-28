@@ -84,7 +84,7 @@ class McpConfigTests(unittest.TestCase):
             self.assertEqual(config.timeout_caps["toolSeconds"], 30)
             self.assertEqual(
                 config.transcript_root,
-                root / "ar-coordination" / "providers" / "logs" / "mcp",
+                root / "ar-coordination" / "logs" / "mcp",
             )
             self.assertEqual(config.harness_skill_root, root / ".codex" / "skills")
             self.assertEqual(
@@ -101,8 +101,8 @@ class McpConfigTests(unittest.TestCase):
                 config.providers["grepai-memory"].log_root,
                 root
                 / "ar-coordination"
-                / "providers"
                 / "logs"
+                / "providers"
                 / "grepai"
                 / config.providers["grepai-memory"].instance_id,
             )
