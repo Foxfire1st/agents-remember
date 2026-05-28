@@ -75,16 +75,22 @@ External-memory closeout order is:
 4. run C-02 memory quality control's drift check against `C2` to produce the full memory update worklist
 5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
 6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
-7. run MCP `memory_quality_check`; fix reported memory findings before continuing
-8. commit memory-content changes and capture `M2`
-9. prepend `C2 | M2` to `memory.md`
-10. commit the ledger update as `L2`
-11. for worktree-backed closeout, update the task contract closeout state
+7. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
+8. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
+9. run MCP `memory_quality_check`; fix reported memory findings before continuing
+10. commit memory-content changes and capture `M2`
+11. prepend `C2 | M2` to `memory.md`
+12. commit the ledger update as `L2`
+13. for worktree-backed closeout, update the task contract closeout state
 
 Entity fingerprints must be refreshed after the code commit and before the
 memory-content commit because `git-blob-set-v1` uses `HEAD:<path>` Git blobs.
 Reviewing the entity prose can happen before closeout, but the final
 fingerprint values must be written in the code-commit-to-memory-commit window.
+
+Route overview metadata and generated route indexes are memory-content changes.
+They must be refreshed before `memory_quality_check`, and `memory_quality_check`
+must be clean before creating the memory content commit.
 
 Push behavior is not automatic.
 
@@ -109,4 +115,5 @@ for that source file, then rerun the closeout preview.
 3. C-12 does not initialize memory roots; use `C-00-initialize-memory-repo`.
 4. C-12 must not commit without explicit commit approval after a closeout preview.
 5. C-12 must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
-6. C-12 must not push automatically.
+6. C-12 must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
+7. C-12 must not push automatically.

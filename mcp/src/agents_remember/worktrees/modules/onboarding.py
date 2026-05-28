@@ -6,11 +6,13 @@ from pathlib import Path
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
+ROUTE_OVERVIEW_DOC_TYPES = {"repo-overview", "route-local-overview"}
 
 
 def onboarding_metadata_row(
@@ -62,6 +64,129 @@ def markdown_table_cells(line: str) -> list[str]:
 
 def normalized_table_cell(cell: str) -> str:
     return re.sub(r"[^a-z0-9]", "", cell.lower())
+
+
+def table_metadata(path: Path) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for line in filesystem.read_text(path, encoding="utf-8").splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = markdown_table_cells(line)
+        if len(cells) < 2:
+            continue
+        field = cells[0].strip()
+        value = cells[1].strip().strip("`")
+        if not field or set(field) <= {"-"} or field.lower() == "field":
+            continue
+        metadata[field] = value
+    return metadata
+
+
+def normalize_route(route: str) -> str:
+    normalized = route.strip().strip("`").replace("\\", "/").strip("/")
+    if normalized in {"", ".", "<repo-root>"}:
+        return "."
+    return normalized
+
+
+def route_contains_changed_path(route: str, changed_paths: list[str]) -> bool:
+    if not changed_paths:
+        return False
+    normalized_route = normalize_route(route)
+    if normalized_route == ".":
+        return True
+    prefix = f"{normalized_route}/"
+    return any(path == normalized_route or path.startswith(prefix) for path in changed_paths)
+
+
+def route_overview_metadata_refresh_plan_for_context(
+    context, changed_paths: list[str]
+) -> dict[str, object]:
+    required: list[dict[str, str]] = []
+    missing_metadata: list[str] = []
+    for overview_path in sorted(context.onboarding_root.rglob("overview.md")):
+        if not filesystem.is_file(overview_path):
+            continue
+        metadata = table_metadata(overview_path)
+        if metadata.get("doc_type", "").strip("`") not in ROUTE_OVERVIEW_DOC_TYPES:
+            continue
+        source_route = normalize_route(metadata.get("sourceRoute", "."))
+        if not route_contains_changed_path(source_route, changed_paths):
+            continue
+        rel_path = overview_path.relative_to(context.onboarding_root).as_posix()
+        if "lastVerifiedCommitHash" not in metadata or "lastVerifiedCommitDate" not in metadata:
+            missing_metadata.append(rel_path)
+            continue
+        required.append(
+            {
+                "source_route": source_route,
+                "onboarding_file": overview_path.as_posix(),
+            }
+        )
+    return {
+        "required": required,
+        "missing_metadata": missing_metadata,
+    }
+
+
+def validate_route_overview_refresh_plan_for_context(
+    context, changed_paths: list[str]
+) -> dict[str, object]:
+    plan = route_overview_metadata_refresh_plan_for_context(context, changed_paths)
+    missing_metadata = plan["missing_metadata"]
+    if missing_metadata:
+        raise RuntimeError(
+            "external-memory closeout requires route overview verification metadata before memory commit; "
+            f"missing lastVerifiedCommitHash or lastVerifiedCommitDate in: {', '.join(missing_metadata)}. "
+            "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+        )
+    return plan
+
+
+def refresh_route_overview_metadata_for_context(
+    context,
+    changed_paths: list[str],
+    verified_commit: str,
+    verified_date: str,
+) -> list[dict[str, str]]:
+    plan = validate_route_overview_refresh_plan_for_context(context, changed_paths)
+    refreshed: list[dict[str, str]] = []
+    for item in plan["required"]:
+        overview_path = Path(item["onboarding_file"])
+        text = filesystem.read_text(overview_path, encoding="utf-8")
+        text, hash_found = onboarding_metadata_row(
+            text, "lastVerifiedCommitHash", verified_commit, code=True
+        )
+        text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
+        if not hash_found or not date_found:
+            raise RuntimeError(
+                "external-memory closeout requires route overview verification metadata before memory commit; "
+                f"{overview_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
+                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            )
+        filesystem.write_text(overview_path, text, encoding="utf-8")
+        refreshed.append(item)
+    return refreshed
+
+
+def refresh_route_indexes_for_context(context) -> dict[str, object]:
+    result = build_route_indexes(
+        code_root=context.code_repository_root,
+        onboarding_root=context.onboarding_root,
+        repository=context.code_repository_name,
+        dry_run=False,
+    )
+    return result.to_dict()
+
+
+def route_index_refresh_plan_for_context(context) -> dict[str, object]:
+    result = build_route_indexes(
+        code_root=context.code_repository_root,
+        onboarding_root=context.onboarding_root,
+        repository=context.code_repository_name,
+        dry_run=True,
+    )
+    return result.to_dict()
 
 
 def _fingerprint_table_header(lines: list[str]) -> tuple[dict[str, int], int] | None:
@@ -216,6 +341,22 @@ def entity_fingerprint_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> dict[str, object]:
     return entity_fingerprint_refresh_plan_for_context(contract_context(contract), changed_paths)
+
+
+def route_overview_metadata_refresh_plan(
+    contract: WorktreeContract, changed_paths: list[str]
+) -> dict[str, object]:
+    return route_overview_metadata_refresh_plan_for_context(
+        contract_context(contract), changed_paths
+    )
+
+
+def validate_route_overview_refresh_plan(
+    contract: WorktreeContract, changed_paths: list[str]
+) -> dict[str, object]:
+    return validate_route_overview_refresh_plan_for_context(
+        contract_context(contract), changed_paths
+    )
 
 
 def validate_onboarding_refresh_plan_for_context(

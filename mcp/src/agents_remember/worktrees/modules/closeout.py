@@ -4,6 +4,7 @@ import argparse
 from dataclasses import replace
 
 from agents_remember.kernel.memory_ledger import load_ledger, prepend_mapping, write_ledger
+from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.worktrees.modules.context import contract_context, resolve_context
 from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
@@ -28,8 +29,15 @@ from agents_remember.worktrees.modules.onboarding import (
     refresh_entity_fingerprints_for_context,
     refresh_onboarding_metadata,
     refresh_onboarding_metadata_for_context,
+    refresh_route_indexes_for_context,
+    refresh_route_overview_metadata_for_context,
+    route_index_refresh_plan_for_context,
+    route_overview_metadata_refresh_plan,
+    route_overview_metadata_refresh_plan_for_context,
     validate_onboarding_refresh_plan,
     validate_onboarding_refresh_plan_for_context,
+    validate_route_overview_refresh_plan,
+    validate_route_overview_refresh_plan_for_context,
 )
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 
@@ -59,11 +67,29 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
             "unsupported": [],
         }
     )
+    route_overview_refresh = (
+        route_overview_metadata_refresh_plan(contract, changed_paths)
+        if contract.memory_mode == "external"
+        else {
+            "required": [],
+            "missing_metadata": [],
+        }
+    )
+    route_index_refresh = (
+        route_index_refresh_plan_for_context(_closeout_contract_context(contract))
+        if contract.memory_mode == "external"
+        else {
+            "routes": 0,
+            "written": 0,
+            "unchanged": 0,
+            "indexes": [],
+        }
+    )
     return {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata and affected entity fingerprints to that code commit, then commit memory and ledger.",
+        "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, run memory_quality_check, then commit memory and ledger.",
         **next_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
@@ -80,6 +106,8 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
         "closeout_order": [
             "commit-code",
             "refresh-onboarding-metadata-and-entity-fingerprints",
+            "refresh-route-overview-metadata-and-indexes",
+            "run-memory-quality-check",
             "commit-memory-content",
             "update-ledger",
             "commit-ledger",
@@ -88,6 +116,8 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
         "changed_code_paths": changed_paths,
         "onboarding_metadata_refresh": metadata_refresh,
         "entity_fingerprint_refresh": entity_refresh,
+        "route_overview_metadata_refresh": route_overview_refresh,
+        "route_index_refresh": route_index_refresh,
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -95,11 +125,17 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
                 "worktree": contract.code_worktree.as_posix(),
             },
             "memory": {
-                "would_commit": memory_dirty,
+                "would_commit": memory_dirty
+                or bool(metadata_refresh["required"])
+                or bool(entity_refresh["required"])
+                or bool(route_overview_refresh["required"])
+                or route_index_refresh["written"] > 0,
                 "message": args.memory_commit_message,
                 "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
                 "metadata_refresh_after_code_commit": contract.memory_mode == "external",
                 "entity_fingerprint_refresh_after_code_commit": contract.memory_mode == "external",
+                "route_refresh_after_code_commit": contract.memory_mode == "external",
+                "memory_quality_check_before_commit": contract.memory_mode == "external",
             },
             "ledger": {
                 "would_update": contract.memory_mode == "external",
@@ -143,21 +179,76 @@ def _closeout_approval_note(args: argparse.Namespace) -> str:
     return approval_note
 
 
+def _closeout_contract_context(contract):
+    context = contract_context(contract)
+    return replace(context, code_repository_root=contract.code_worktree)
+
+
+def _memory_quality_failure_message(result: dict[str, object]) -> str:
+    finding_count = int(result.get("findingCount", 0))
+    findings = result.get("findings", [])
+    sample: list[str] = []
+    if isinstance(findings, list):
+        for finding in findings[:5]:
+            if not isinstance(finding, dict):
+                continue
+            path = str(finding.get("path") or finding.get("sourceFile") or "")
+            code = str(finding.get("code") or finding.get("check") or "memory_quality")
+            message = str(finding.get("message") or "")
+            sample.append(f"{code}{f' at {path}' if path else ''}: {message}")
+    details = "; ".join(sample)
+    if details:
+        details = f" Findings: {details}"
+    return (
+        "external-memory closeout requires a clean memory_quality_check before memory commit; "
+        f"findingCount={finding_count}.{details} Fix memory/onboarding issues, rerun "
+        "memory_quality_check, then rerun closeout."
+    )
+
+
+def _run_memory_quality_gate(context) -> dict[str, object]:
+    result = run_memory_quality_check(
+        context.onboarding_root,
+        drift_context=DriftCheckContext(
+            code_repository_root=context.code_repository_root,
+            context=context,
+            detail_limit=50,
+        ),
+    )
+    if not result.get("ok", False):
+        raise RuntimeError(_memory_quality_failure_message(result))
+    return result
+
+
 def _external_closeout_commits(
     contract,
     args: argparse.Namespace,
     changed_paths: list[str],
     code_commit: str,
     code_commit_date: str,
-) -> tuple[str, str, list[dict[str, str]], list[dict[str, object]]]:
+) -> tuple[
+    str,
+    str,
+    list[dict[str, str]],
+    list[dict[str, object]],
+    list[dict[str, str]],
+    dict[str, object],
+    dict[str, object],
+]:
     if contract.memory_worktree is None or contract.ledger_path is None:
         raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
+    context = _closeout_contract_context(contract)
     refreshed_onboarding = refresh_onboarding_metadata(
         contract, changed_paths, code_commit, code_commit_date
     )
-    refreshed_entities = refresh_entity_fingerprints_for_context(
-        contract_context(contract), changed_paths
+    refreshed_route_overviews = refresh_route_overview_metadata_for_context(
+        context, changed_paths, code_commit, code_commit_date
     )
+    refreshed_entities = refresh_entity_fingerprints_for_context(
+        context, changed_paths
+    )
+    route_index_refresh = refresh_route_indexes_for_context(context)
+    memory_quality = _run_memory_quality_gate(context)
     memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
     ledger = load_ledger(contract.ledger_path)
     write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
@@ -167,7 +258,15 @@ def _external_closeout_commits(
         args.ledger_commit_message
         or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
     )
-    return memory_commit, ledger_commit, refreshed_onboarding, refreshed_entities
+    return (
+        memory_commit,
+        ledger_commit,
+        refreshed_onboarding,
+        refreshed_entities,
+        refreshed_route_overviews,
+        route_index_refresh,
+        memory_quality,
+    )
 
 
 def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
@@ -180,14 +279,26 @@ def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
     changed_paths = changed_worktree_paths(contract.code_worktree)
     if contract.memory_mode == "external":
         validate_onboarding_refresh_plan(contract, changed_paths)
+        validate_route_overview_refresh_plan(contract, changed_paths)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory_commit = ""
     ledger_commit = ""
     refreshed_onboarding: list[dict[str, str]] = []
     refreshed_entities: list[dict[str, object]] = []
+    refreshed_route_overviews: list[dict[str, str]] = []
+    route_index_refresh: dict[str, object] = {}
+    memory_quality: dict[str, object] = {}
     if contract.memory_mode == "external":
-        memory_commit, ledger_commit, refreshed_onboarding, refreshed_entities = (
+        (
+            memory_commit,
+            ledger_commit,
+            refreshed_onboarding,
+            refreshed_entities,
+            refreshed_route_overviews,
+            route_index_refresh,
+            memory_quality,
+        ) = (
             _external_closeout_commits(contract, args, changed_paths, code_commit, code_commit_date)
         )
     updated = replace(
@@ -212,6 +323,9 @@ def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
             "ledger_commit": ledger_commit,
             "refreshed_onboarding": refreshed_onboarding,
             "refreshed_entities": refreshed_entities,
+            "refreshed_route_overviews": refreshed_route_overviews,
+            "route_index_refresh": route_index_refresh,
+            "memory_quality": memory_quality,
         },
     )
 
@@ -242,6 +356,10 @@ def direct_closeout_preview_payload(
     changed_paths = changed_worktree_paths(context.code_repository_root)
     metadata_refresh = onboarding_refresh_plan_for_context(context, changed_paths)
     entity_refresh = entity_fingerprint_refresh_plan_for_context(context, changed_paths)
+    route_overview_refresh = route_overview_metadata_refresh_plan_for_context(
+        context, changed_paths
+    )
+    route_index_refresh = route_index_refresh_plan_for_context(context)
     ledger_message = (
         args.ledger_commit_message
         or "[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
@@ -253,7 +371,7 @@ def direct_closeout_preview_payload(
         "code_repository_root": context.code_repository_root.as_posix(),
         "memory_repo": context.memory_root.as_posix(),
         "source_branch": source_branch,
-        "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata and affected entity fingerprints to that code commit, then commit memory and ledger.",
+        "summary": "Direct closeout preview only; no commits were created. The real command will commit code first, refresh onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, run memory_quality_check, then commit memory and ledger.",
         **next_guidance(
             "request_commit_approval",
             tool="direct_closeout_apply",
@@ -272,6 +390,8 @@ def direct_closeout_preview_payload(
         "closeout_order": [
             "commit-code",
             "refresh-onboarding-metadata-and-entity-fingerprints",
+            "refresh-route-overview-metadata-and-indexes",
+            "run-memory-quality-check",
             "commit-memory-content",
             "update-ledger",
             "commit-ledger",
@@ -279,6 +399,8 @@ def direct_closeout_preview_payload(
         "changed_code_paths": changed_paths,
         "onboarding_metadata_refresh": metadata_refresh,
         "entity_fingerprint_refresh": entity_refresh,
+        "route_overview_metadata_refresh": route_overview_refresh,
+        "route_index_refresh": route_index_refresh,
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -288,17 +410,23 @@ def direct_closeout_preview_payload(
             "memory": {
                 "would_commit": memory_dirty
                 or bool(metadata_refresh["required"])
-                or bool(entity_refresh["required"]),
+                or bool(entity_refresh["required"])
+                or bool(route_overview_refresh["required"])
+                or route_index_refresh["written"] > 0,
                 "message": args.memory_commit_message,
                 "worktree": context.memory_root.as_posix(),
                 "metadata_refresh_after_code_commit": True,
                 "entity_fingerprint_refresh_after_code_commit": True,
+                "route_refresh_after_code_commit": True,
+                "memory_quality_check_before_commit": True,
             },
             "ledger": {
                 "would_update": code_dirty
                 or memory_dirty
                 or bool(metadata_refresh["required"])
-                or bool(entity_refresh["required"]),
+                or bool(entity_refresh["required"])
+                or bool(route_overview_refresh["required"])
+                or route_index_refresh["written"] > 0,
                 "message": ledger_message,
                 "path": (context.memory_root / "memory.md").as_posix(),
             },
@@ -327,6 +455,7 @@ def direct_closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
     if not changed_paths and not memory_was_dirty:
         raise RuntimeError("direct closeout found no code or memory changes to commit")
     validate_onboarding_refresh_plan_for_context(context, changed_paths)
+    validate_route_overview_refresh_plan_for_context(context, changed_paths)
 
     code_commit = commit_if_dirty(context.code_repository_root, args.code_commit_message)
     code_commit_date = commit_date(context.code_repository_root, code_commit)
@@ -334,6 +463,11 @@ def direct_closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
         context, changed_paths, code_commit, code_commit_date
     )
     refreshed_entities = refresh_entity_fingerprints_for_context(context, changed_paths)
+    refreshed_route_overviews = refresh_route_overview_metadata_for_context(
+        context, changed_paths, code_commit, code_commit_date
+    )
+    route_index_refresh = refresh_route_indexes_for_context(context)
+    memory_quality = _run_memory_quality_gate(context)
     memory_commit = commit_if_dirty(context.memory_root, args.memory_commit_message)
     ledger_path = context.memory_root / "memory.md"
     ledger = load_ledger(ledger_path)
@@ -361,5 +495,8 @@ def direct_closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
             "ledger_commit": ledger_commit,
             "refreshed_onboarding": refreshed_onboarding,
             "refreshed_entities": refreshed_entities,
+            "refreshed_route_overviews": refreshed_route_overviews,
+            "route_index_refresh": route_index_refresh,
+            "memory_quality": memory_quality,
         },
     )

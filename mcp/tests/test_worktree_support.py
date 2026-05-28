@@ -287,7 +287,10 @@ def long_path_tempdir():
 
 
 def direct_external_memory_fixture(
-    root: Path, include_feature_onboarding: bool = True, include_entity_catalog: bool = False
+    root: Path,
+    include_feature_onboarding: bool = True,
+    include_entity_catalog: bool = False,
+    include_route_overview: bool = False,
 ):
     code_repo = root / "repo-a"
     init_repo(code_repo, "main")
@@ -296,6 +299,8 @@ def direct_external_memory_fixture(
     init_repo(memory_repo, "main")
     if include_feature_onboarding:
         write_file_onboarding(memory_repo / "onboarding", "repo-a", "feature.txt", code_base)
+        if include_route_overview:
+            write_route_overview(memory_repo / "onboarding", "repo-a", ".", code_base)
         if include_entity_catalog:
             fingerprint = drift.compute_git_blob_set_fingerprint(code_repo, ["feature.txt"])
             write_entity_catalog(
@@ -1076,6 +1081,93 @@ class WorktreeSupportTests(unittest.TestCase):
                     payload["memory_content_commit"],
                 ),
             )
+            self.assertTrue(payload["memory_quality"]["ok"])
+
+    def test_direct_closeout_refreshes_route_overview_and_indexes_before_memory_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, memory_repo, _code_base = direct_external_memory_fixture(
+                root, include_route_overview=True
+            )
+            args = Namespace(
+                code_repository_name="repo-a",
+                workspace_root=root,
+                code_repository_root=code_repo,
+                topology="external",
+                coordination_root=root / "ar-coordination",
+                contract_path=None,
+                task_name=None,
+                source_branch=None,
+                approved=True,
+                approval_note="developer approved direct commit preview",
+                code_commit_message="Update feature",
+                memory_commit_message="Update feature onboarding",
+                ledger_commit_message="Sync direct ledger",
+                dry_run=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_direct_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            overview = memory_repo / "onboarding" / "overview.md"
+            self.assertEqual(
+                read_onboarding_field(overview, "lastVerifiedCommitHash"),
+                payload["code_commit"],
+            )
+            self.assertEqual(payload["route_index_refresh"]["routes"], 1)
+            self.assertTrue((memory_repo / "onboarding" / "overview.index.json").exists())
+            committed_paths = git(
+                memory_repo,
+                "show",
+                "--name-only",
+                "--format=",
+                payload["memory_content_commit"],
+            )
+            self.assertIn("onboarding/overview.md", committed_paths)
+            self.assertIn("onboarding/overview.index.json", committed_paths)
+            self.assertTrue(payload["memory_quality"]["ok"])
+
+    def test_direct_closeout_blocks_memory_commit_when_memory_quality_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, memory_repo, code_base = direct_external_memory_fixture(root)
+            memory_head = git(memory_repo, "rev-parse", "HEAD")
+            args = Namespace(
+                code_repository_name="repo-a",
+                workspace_root=root,
+                code_repository_root=code_repo,
+                topology="external",
+                coordination_root=root / "ar-coordination",
+                contract_path=None,
+                task_name=None,
+                source_branch=None,
+                approved=True,
+                approval_note="developer approved direct commit preview",
+                code_commit_message="Update feature",
+                memory_commit_message="Update feature onboarding",
+                ledger_commit_message="Sync direct ledger",
+                dry_run=False,
+            )
+            failed_quality = {
+                "ok": False,
+                "findingCount": 1,
+                "findings": [
+                    {
+                        "code": "onboarding_drift_test",
+                        "path": "feature.txt.md",
+                        "message": "test drift",
+                    }
+                ],
+            }
+            with mock.patch(
+                "agents_remember.worktrees.modules.closeout.run_memory_quality_check",
+                return_value=failed_quality,
+            ), self.assertRaisesRegex(RuntimeError, "clean memory_quality_check"):
+                worktree_manager.command_direct_closeout(args)
+            self.assertNotEqual(git(code_repo, "rev-parse", "HEAD"), code_base)
+            self.assertEqual(git(memory_repo, "rev-parse", "HEAD"), memory_head)
+            ledger = parse_ledger_text((memory_repo / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(ledger.rows[0].code_commit, code_base)
 
     def test_direct_closeout_refreshes_entity_fingerprint_after_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
