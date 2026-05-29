@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.context.constants import (
-    CGC_ENV_FILE_EXCLUDED_KEYS,
     CGC_FALKORDB_CONTAINER_NAME,
     CGC_FALKORDB_DEFAULT_HOST,
     CGC_FALKORDB_DEFAULT_PORT,
@@ -18,15 +17,11 @@ from agents_remember.providers.cgc.context.constants import (
     CGC_REQUIREMENTS,
     CGC_RUNNER_IMAGE_REPOSITORY,
     CGC_WATCHER_CONTAINER_PREFIX,
-    DEFAULT_CGCIGNORE,
-    SOURCE_ARTIFACT_NAMES,
-    read_gitignore_patterns,
 )
 from agents_remember.providers.context.common import (
     ContextProviderError,
     expand_template,
     provider_requirements_file,
-    remove_runtime_path,
     stable_provider_id,
 )
 
@@ -525,144 +520,3 @@ def _cgc_watch_paths(
         variables,
     )
     return watch_cwd, watch_log_file, state_file
-
-
-def ensure_cgc_runtime_layout(layout: CgcRuntimeLayout) -> None:
-    """Create runtime directories and default CGC config files."""
-
-    for path in _cgc_runtime_directories(layout):
-        path.mkdir(parents=True, exist_ok=True)
-
-    if not layout.requirements_file.exists():
-        layout.requirements_file.write_text("\n".join(CGC_REQUIREMENTS) + "\n", encoding="utf-8")
-    layout.cgcignore_path.write_text(_cgcignore_text(layout), encoding="utf-8")
-    layout.config_file.write_text("database: falkordb-remote\n", encoding="utf-8")
-    layout.env_file.write_text(_cgc_env_text(layout), encoding="utf-8")
-
-
-def _cgc_runtime_directories(layout: CgcRuntimeLayout) -> list[Path]:
-    return [
-        layout.requirements_file.parent,
-        layout.patches_root,
-        layout.image_build_root,
-        layout.image_lock_file.parent,
-        layout.cgc_root,
-        layout.backend_data_root,
-        layout.backend_state_file.parent,
-        layout.run_root,
-        layout.run_root / "home",
-        layout.run_root / "appdata",
-        layout.run_root / "localappdata",
-        layout.logs_root,
-    ]
-
-
-def _cgcignore_text(layout: CgcRuntimeLayout) -> str:
-    cgcignore_lines: list[str] = []
-    cgcignore_lines.extend(DEFAULT_CGCIGNORE.rstrip("\n").splitlines())
-    gitignore_patterns = read_gitignore_patterns(layout.code_repo_root)
-    if gitignore_patterns:
-        cgcignore_lines.extend(["", "# Inherited from source .gitignore"])
-        cgcignore_lines.extend(gitignore_patterns)
-    if layout.cgcignore_patterns:
-        cgcignore_lines.extend(["", "# Repo-specific managed exclusions"])
-        cgcignore_lines.extend(layout.cgcignore_patterns)
-    return "\n".join(cgcignore_lines) + "\n"
-
-
-def _cgc_env_text(layout: CgcRuntimeLayout) -> str:
-    lines = ["# Managed by Agents Remember for CodeGraphContext"]
-    lines.extend(
-        f"{key}={value}"
-        for key, value in layout.env().items()
-        if key not in CGC_ENV_FILE_EXCLUDED_KEYS
-    )
-    return "\n".join(lines) + "\n"
-
-
-def source_provider_artifacts(code_repo_root: Path) -> list[Path]:
-    """Return provider-created artifacts that should not exist in source repos."""
-
-    root = code_repo_root.resolve()
-    return [root / name for name in SOURCE_ARTIFACT_NAMES if (root / name).exists()]
-
-
-def assert_no_source_provider_artifacts(code_repo_root: Path) -> None:
-    artifacts = source_provider_artifacts(code_repo_root)
-    if artifacts:
-        rendered = ", ".join(path.name for path in artifacts)
-        raise ContextProviderError(f"provider artifacts found in source repo: {rendered}")
-
-
-def cleanup_cgc_runtime_artifacts(
-    layouts: list[CgcRuntimeLayout], *, dry_run: bool = False
-) -> list[dict[str, str]]:
-    """Remove stale CGC runtime artifacts that are outside the desired layout."""
-
-    if not layouts:
-        return []
-
-    provider_root = layouts[0].runtime_root.parent.resolve()
-    configured_roots = {layout.runtime_root.resolve() for layout in layouts}
-    removals: list[dict[str, str]] = []
-    removals.extend(
-        _unconfigured_cgc_runtime_removals(
-            provider_root,
-            configured_roots,
-            dry_run=dry_run,
-        )
-    )
-    removals.extend(_obsolete_cgc_runtime_removals(layouts, dry_run=dry_run))
-    return removals
-
-
-def _unconfigured_cgc_runtime_removals(
-    provider_root: Path,
-    configured_roots: set[Path],
-    *,
-    dry_run: bool,
-) -> list[dict[str, str]]:
-    removals: list[dict[str, str]] = []
-    for child in sorted(provider_root.iterdir()) if provider_root.exists() else []:
-        if not _should_remove_cgc_runtime_child(child, configured_roots):
-            continue
-        _assert_cgc_child_under_provider_root(child, provider_root)
-        removals.append({"path": child.as_posix(), "reason": "unconfigured-cgc-instance"})
-        remove_runtime_path(child, dry_run)
-    return removals
-
-
-def _should_remove_cgc_runtime_child(child: Path, configured_roots: set[Path]) -> bool:
-    if not child.is_dir() or child.resolve() in configured_roots:
-        return False
-    return (
-        (child / ".codegraphcontext").exists()
-        or (child / "provider-state.json").exists()
-        or child.name.startswith("_")
-    )
-
-
-def _assert_cgc_child_under_provider_root(child: Path, provider_root: Path) -> None:
-    if not child.resolve().is_relative_to(provider_root):
-        raise ContextProviderError(f"refusing to remove CGC path outside provider root: {child}")
-
-
-def _obsolete_cgc_runtime_removals(
-    layouts: list[CgcRuntimeLayout],
-    *,
-    dry_run: bool,
-) -> list[dict[str, str]]:
-    removals: list[dict[str, str]] = []
-    for layout in layouts:
-        cgc_root = layout.cgc_root.resolve()
-        for name in ("db", "global", "kuzu", "kuzu.wal"):
-            target = (layout.cgc_root / name).resolve()
-            if not target.exists():
-                continue
-            if not target.is_relative_to(cgc_root):
-                raise ContextProviderError(
-                    f"refusing to remove CGC path outside instance root: {target}"
-                )
-            removals.append({"path": target.as_posix(), "reason": f"legacy-embedded-{name}"})
-            remove_runtime_path(target, dry_run)
-    return removals
