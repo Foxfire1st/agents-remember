@@ -19,10 +19,14 @@ logs, state, and cache stay under `providers/runners/grepai/` instead of using a
 global user install.
 
 ```text
-grepai_search(query="<query>", all_repos=true, limit=5, output_format="json", dry_run=false)
-grepai_search(query="<query>", repo_ids=["<repoId>", "<repoId>"], limit=5, output_format="json", dry_run=false)
-grepai_trace(trace_action="callers", symbol="<symbol>", output_format="json", dry_run=false)
+grepai_search(query="<query>", all_repos=true, limit=5, output_format="json")
+grepai_search(query="<query>", repo_ids=["<repoId>", "<repoId>"], limit=5, output_format="json")
+grepai_trace(trace_action="callers", symbol="<symbol>", output_format="json")
 ```
+
+These tools **return results by default** — just call them. `dry_run=true` is a
+debug-only affordance that returns the underlying provider command without
+executing it; do not pass it for normal queries.
 
 The managed workspace name comes from the MCP-generated GrepAI lifecycle
 settings. `repo_ids` accepts only repositories configured through MCP.
@@ -31,11 +35,11 @@ settings. `repo_ids` accepts only repositories configured through MCP.
 
 | Question | Command Pattern |
 | --- | --- |
-| Which memory project or route talks about this vague concept? | `grepai_search(query="<query>", all_repos=true, limit=<n>, output_format="json", dry_run=false)` |
-| I need machine-readable anchors. | `grepai_search(query="<query>", all_repos=true, limit=<n>, output_format="json", dry_run=false)` |
+| Which memory project or route talks about this vague concept? | `grepai_search(query="<query>", all_repos=true, limit=<n>, output_format="json")` |
+| I need machine-readable anchors. | `grepai_search(query="<query>", all_repos=true, limit=<n>, output_format="json")` |
 | I know the target memory project. | Add `repo_ids=["<repoId>"]`; repeat repo ids for a small configured set. |
 | I know the likely onboarding route or folder. | Search the configured repo, then open the selected paths with source/onboarding reads. |
-| I need a symbol neighborhood inside a GrepAI-indexed source project. | `grepai_trace(trace_action="callers"|"callees"|"graph", symbol="<symbol>", output_format="json", dry_run=false)`; prefer CGC when available for code relationships. |
+| I need a symbol neighborhood inside a GrepAI-indexed source project. | `grepai_trace(trace_action="callers"|"callees"|"graph", symbol="<symbol>", output_format="json")`; prefer CGC when available for code relationships. |
 | I need provider coverage/health, not retrieval. | `provider_status()` |
 
 ## Cross-Memory Semantic Routing
@@ -49,7 +53,6 @@ grepai_search(
   all_repos=true,
   limit=5,
   output_format="json",
-  dry_run=false,
 )
 ```
 
@@ -79,7 +82,6 @@ grepai_search(
   repo_ids=["<repoId>", "<repoId>"],
   limit=5,
   output_format="json",
-  dry_run=false,
 )
 ```
 
@@ -115,7 +117,6 @@ grepai_search(
   repo_ids=["<repoId>"],
   limit=3,
   output_format="json",
-  dry_run=false,
 )
 ```
 
@@ -154,7 +155,6 @@ grepai_trace(
   repo_ids=["<repoId>"],
   depth=2,
   output_format="json",
-  dry_run=false,
 )
 ```
 

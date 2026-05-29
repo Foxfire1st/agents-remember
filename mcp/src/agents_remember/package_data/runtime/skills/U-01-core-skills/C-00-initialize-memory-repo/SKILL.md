@@ -24,11 +24,15 @@ Use `C-08-ar-coordination-context-resolver` to inspect an existing repository's 
 Use the Agents Remember MCP setup tools as the normal installed runtime entry
 points:
 
+> **Preview first.** These setup tools now **apply by default** (`dry_run`
+> defaults to `false`). For any effectful run, call once with `dry_run=true` to
+> inspect the plan, confirm it, then run the real apply (omit `dry_run`).
+
 ```text
-memory_init(repo_id="<repo-id>", dry_run=true, initialize_git=true)
-memory_init(repo_id="<repo-id>", dry_run=false, initialize_git=true)
-runtime_install(dry_run=false, include_benchmarks=false, install_provider_deps=false)
-skills_install(layout="tree", dry_run=false, overwrite=true)
+memory_init(repo_id="<repo-id>", dry_run=true, initialize_git=true)   # preview
+memory_init(repo_id="<repo-id>", initialize_git=true)                 # apply
+runtime_install(include_benchmarks=false, install_provider_deps=false)
+skills_install(layout="tree", overwrite=true)
 ```
 
 Use `memory_init` for creating or repairing the configured memory root for a
@@ -70,10 +74,11 @@ Explicit external memory:
 <coordination-root>/memory-repos/
 ```
 
-4. If the runtime is missing, stop and ask the developer to request:
+4. If the runtime is missing, stop and ask the developer to request (preview
+   first with `runtime_install(dry_run=true)`):
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 5. Set `memory_root` to `<coordination-root>/memory-repos/ar-<code-repository-name>`.

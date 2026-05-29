@@ -72,7 +72,7 @@ def context_packet_payload(
 def runtime_install_payload(
     config: McpRuntimeConfig,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
     include_benchmarks: bool = False,
     install_provider_deps: bool = True,
 ) -> dict[str, Any]:
@@ -115,7 +115,7 @@ def skills_install_payload(
     config: McpRuntimeConfig,
     *,
     layout: str = "tree",
-    dry_run: bool = True,
+    dry_run: bool = False,
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:

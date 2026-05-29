@@ -213,7 +213,7 @@ def baseline_adopt(
     accept_drift: bool = False,
     source_branch: str | None = None,
     work_branch: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> tuple[int, dict[str, object]]:
     context = resolve_request_context(request)
     if context.topology != "external":

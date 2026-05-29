@@ -111,10 +111,11 @@ Existing onboarding is durable memory, not disposable generated output. Preserve
 Route indexes are generated availability metadata. Do not hand-maintain long
 missing-sidecar lists in overview prose.
 
-Use:
+Use (`route_index_refresh` applies by default; preview first with
+`route_index_refresh(repo_id="<repo-id>", dry_run=true)`):
 
 ```text
-route_index_refresh(repo_id="<repo-id>", dry_run=false)
+route_index_refresh(repo_id="<repo-id>")
 ```
 
 The generator:

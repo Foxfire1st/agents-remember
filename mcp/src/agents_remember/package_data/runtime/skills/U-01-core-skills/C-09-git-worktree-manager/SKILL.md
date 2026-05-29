@@ -17,14 +17,18 @@ contract path and integration/cleanup follow-up rules.
 Use the Agents Remember MCP worktree tools as the normal installed runtime
 entry point:
 
+> **Preview first.** `worktree_start`, `worktree_integrate`, and
+> `worktree_cleanup` now **apply by default**. Run each once with `dry_run=true`
+> to inspect the plan, confirm, then run the real apply (omit `dry_run`).
+
 ```text
-worktree_start(repo_id="<repo-id>", task_name="<task>", worktree_name="<name>", workflow_kind="light-task", dry_run=false)
+worktree_start(repo_id="<repo-id>", task_name="<task>", worktree_name="<name>", workflow_kind="light-task")
 worktree_attach(repo_id="<repo-id>", task_name="<task>")
 worktree_status(repo_id="<repo-id>", task_name="<task>")
 worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_integrate(contract_path="<contract.md>", strategy="ff-only", dry_run=false)
-worktree_cleanup(contract_path="<contract.md>", dry_run=false)
+worktree_integrate(contract_path="<contract.md>", strategy="ff-only")
+worktree_cleanup(contract_path="<contract.md>")
 ```
 
 Callers identify repositories by configured MCP `repo_id`. The MCP server owns

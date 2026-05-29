@@ -14,10 +14,14 @@ This skill does not decide that stale onboarding is true. It makes the trust bou
 Use the Agents Remember MCP memory baseline tools as the normal installed
 runtime entry point:
 
+> **Preview first.** `memory_baseline_adopt` now **applies by default**. Call it
+> once with `dry_run=true` to preview, confirm, then run the real apply (omit
+> `dry_run`).
+
 ```text
 memory_baseline_status(repo_id="<repo-id>")
-memory_baseline_adopt(repo_id="<repo-id>", accept_drift=false, dry_run=true)
-memory_baseline_adopt(repo_id="<repo-id>", accept_drift=true, dry_run=false)
+memory_baseline_adopt(repo_id="<repo-id>", accept_drift=false, dry_run=true)   # preview
+memory_baseline_adopt(repo_id="<repo-id>", accept_drift=true)                  # apply
 ```
 
 Use `memory_baseline_status` first. Use `memory_baseline_adopt` only after the

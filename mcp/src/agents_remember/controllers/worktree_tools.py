@@ -23,7 +23,7 @@ def worktree_start_tool(
     memory_mode: str | None = None,
     memory_choice: str | None = None,
     skip_provider_setup: bool = False,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
     settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
@@ -195,7 +195,7 @@ def worktree_integrate_tool(
     contract_path: str,
     strategy: str = "ff-only",
     ledger_commit_message: str = "",
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     args = argparse.Namespace(
         contract_path=_coord_path(config, contract_path, "contract_path"),
@@ -211,7 +211,7 @@ def worktree_cleanup_tool(
     config: McpRuntimeConfig,
     *,
     contract_path: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     args = argparse.Namespace(
         contract_path=_coord_path(config, contract_path, "contract_path"),

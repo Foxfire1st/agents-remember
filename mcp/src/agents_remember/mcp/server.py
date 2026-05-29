@@ -74,7 +74,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def runtime_install(
-        dry_run: bool = True,
+        dry_run: bool = False,
         include_benchmarks: bool = False,
         install_provider_deps: bool = True,
     ) -> dict[str, Any]:
@@ -120,13 +120,13 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
-    def route_index_refresh(repo_id: str, dry_run: bool = True) -> dict[str, Any]:
+    def route_index_refresh(repo_id: str, dry_run: bool = False) -> dict[str, Any]:
         return route_index_refresh_payload(config, repo_id, dry_run=dry_run)
 
     @server.tool()
     def memory_init(
         repo_id: str,
-        dry_run: bool = True,
+        dry_run: bool = False,
         initialize_git: bool = True,
     ) -> dict[str, Any]:
         return memory_init_payload(
@@ -139,7 +139,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     @server.tool()
     def skills_install(
         layout: str = "tree",
-        dry_run: bool = True,
+        dry_run: bool = False,
         overwrite: bool = False,
         archive_existing: bool = False,
     ) -> dict[str, Any]:
@@ -160,7 +160,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         return provider_diagnostics_payload(config, detail_limit=detail_limit)
 
     @server.tool()
-    def provider_watchers(action: str, dry_run: bool = True) -> dict[str, Any]:
+    def provider_watchers(action: str, dry_run: bool = False) -> dict[str, Any]:
         return provider_watchers_payload(config, action=action, dry_run=dry_run)
 
     @server.tool()
@@ -170,7 +170,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         all_repos: bool = True,
         limit: int = 10,
         output_format: str = "json",
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return grepai_search_payload(
@@ -192,7 +192,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         all_repos: bool = True,
         depth: int | None = None,
         output_format: str = "json",
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return grepai_trace_payload(
@@ -211,7 +211,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def cgc_symbol_search(
         repo_id: str,
         name: str,
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return cgc_symbol_search_payload(
@@ -227,7 +227,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         function: str,
         file: str | None = None,
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return cgc_callers_payload(
@@ -243,7 +243,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def cgc_callees(
         repo_id: str,
         function: str,
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return cgc_callees_payload(
@@ -258,7 +258,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def cgc_dependencies(
         repo_id: str,
         module: str,
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return cgc_dependencies_payload(
@@ -273,7 +273,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def cgc_complexity(
         repo_id: str,
         function: str | None = None,
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return cgc_complexity_payload(
@@ -289,7 +289,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         port: int = 8000,
         context: str | None = None,
-        dry_run: bool = True,
+        dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
         return cgc_visualize_payload(
@@ -312,7 +312,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         memory_mode: str | None = None,
         memory_choice: str | None = None,
         skip_provider_setup: bool = False,
-        dry_run: bool = True,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         return worktree_start_payload(
             config,
@@ -435,7 +435,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         contract_path: str,
         strategy: str = "ff-only",
         ledger_commit_message: str = "",
-        dry_run: bool = True,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         return worktree_integrate_payload(
             config,
@@ -446,7 +446,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
-    def worktree_cleanup(contract_path: str, dry_run: bool = True) -> dict[str, Any]:
+    def worktree_cleanup(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
         return worktree_cleanup_payload(config, contract_path, dry_run=dry_run)
 
     @server.tool()
@@ -459,7 +459,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         accept_drift: bool = False,
         source_branch: str | None = None,
         work_branch: str | None = None,
-        dry_run: bool = True,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         return memory_baseline_adopt_payload(
             config,

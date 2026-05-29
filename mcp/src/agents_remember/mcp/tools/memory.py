@@ -53,7 +53,7 @@ def route_index_refresh_payload(
     config: McpRuntimeConfig,
     repo_id: str,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "route_index_refresh",
@@ -65,7 +65,7 @@ def memory_init_payload(
     config: McpRuntimeConfig,
     repo_id: str,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
     initialize_git: bool = True,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -93,7 +93,7 @@ def memory_baseline_adopt_payload(
     accept_drift: bool = False,
     source_branch: str | None = None,
     work_branch: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "memory_baseline_adopt",

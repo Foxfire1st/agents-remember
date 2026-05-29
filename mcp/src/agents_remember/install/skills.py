@@ -49,7 +49,7 @@ def install_skills(
     *,
     install_root: Path,
     layout: str = "tree",
-    dry_run: bool = True,
+    dry_run: bool = False,
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:

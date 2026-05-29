@@ -81,7 +81,7 @@ def route_index_refresh_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
     if repo.memory_root is None:
@@ -105,7 +105,7 @@ def memory_init_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
     initialize_git: bool = True,
 ) -> dict[str, Any]:
     return initialize_memory(
@@ -129,7 +129,7 @@ def memory_baseline_adopt_tool(
     accept_drift: bool = False,
     source_branch: str | None = None,
     work_branch: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = _repo(config, repo_id)
     returncode, payload = baseline.baseline_adopt(

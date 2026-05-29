@@ -509,7 +509,7 @@ def install_runtime(
 def install_runtime_from_config(
     config: McpRuntimeConfig,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
     include_benchmarks: bool = False,
     install_provider_deps: bool = True,
     provider_deps_timeout: int | None = None,

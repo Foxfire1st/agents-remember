@@ -8,13 +8,17 @@ into training-style examples.
 Request CGC through the Agents Remember MCP provider tools:
 
 ```text
-cgc_symbol_search(repo_id="<repoId>", name="<symbol>", dry_run=false)
-cgc_callers(repo_id="<repoId>", function="<function>", file="<optional path>", dry_run=false)
-cgc_callees(repo_id="<repoId>", function="<function>", dry_run=false)
-cgc_dependencies(repo_id="<repoId>", module="<module>", dry_run=false)
-cgc_complexity(repo_id="<repoId>", function="<optional function>", dry_run=false)
-cgc_visualize(repo_id="<repoId>", port=8000, dry_run=false)
+cgc_symbol_search(repo_id="<repoId>", name="<symbol>")
+cgc_callers(repo_id="<repoId>", function="<function>", file="<optional path>")
+cgc_callees(repo_id="<repoId>", function="<function>")
+cgc_dependencies(repo_id="<repoId>", module="<module>")
+cgc_complexity(repo_id="<repoId>", function="<optional function>")
+cgc_visualize(repo_id="<repoId>", port=8000)
 ```
+
+These tools **return results by default** — just call them. `dry_run=true` is a
+debug-only affordance that returns the underlying provider command without
+executing it; do not pass it for normal queries.
 
 Provider authority comes from MCP settings. The MCP intentionally exposes typed
 CGC operations instead of a generic native CLI pass-through.
@@ -48,7 +52,6 @@ where the symbol exists.
 cgc_symbol_search(
   repo_id="<repoId>",
   name="dispatchCommand",
-  dry_run=false,
 )
 ```
 
@@ -72,7 +75,6 @@ what it invokes next.
 cgc_callees(
   repo_id="<repoId>",
   function="handleRequest",
-  dry_run=false,
 )
 ```
 
@@ -103,7 +105,6 @@ cgc_callers(
   repo_id="<repoId>",
   function="dispatchCommand",
   file="<repo>/src/app/command-router.ts",
-  dry_run=false,
 )
 ```
 
@@ -133,7 +134,6 @@ string.
 cgc_dependencies(
   repo_id="<repoId>",
   module="../shared/validation",
-  dry_run=false,
 )
 ```
 
@@ -159,7 +159,6 @@ complexity report.
 cgc_complexity(
   repo_id="<repoId>",
   function="renderDashboard",
-  dry_run=false,
 )
 ```
 

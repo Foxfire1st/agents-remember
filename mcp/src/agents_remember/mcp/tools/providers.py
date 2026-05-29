@@ -44,7 +44,7 @@ def provider_watchers_payload(
     config: McpRuntimeConfig,
     *,
     action: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "provider_watchers",
@@ -60,7 +60,7 @@ def grepai_search_payload(
     all_repos: bool = True,
     limit: int = 10,
     output_format: str = "json",
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -87,7 +87,7 @@ def grepai_trace_payload(
     all_repos: bool = True,
     depth: int | None = None,
     output_format: str = "json",
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -111,7 +111,7 @@ def cgc_symbol_search_payload(
     repo_id: str,
     name: str,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -132,7 +132,7 @@ def cgc_callers_payload(
     function: str,
     *,
     file: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -153,7 +153,7 @@ def cgc_callees_payload(
     repo_id: str,
     function: str,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -173,7 +173,7 @@ def cgc_dependencies_payload(
     repo_id: str,
     module: str,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -193,7 +193,7 @@ def cgc_complexity_payload(
     repo_id: str,
     *,
     function: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -214,7 +214,7 @@ def cgc_visualize_payload(
     *,
     port: int = 8000,
     context: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(

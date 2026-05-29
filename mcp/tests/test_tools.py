@@ -370,7 +370,7 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue((request.benchmarks_root / "cases").is_dir())
             self.assertIn("package_data", request.benchmarks_root.as_posix())
 
-    def test_skills_install_payload_is_copy_only_and_dry_run_by_default(self) -> None:
+    def test_skills_install_payload_is_copy_only_and_applies_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             path = root / ".codex" / "mcp" / "settings.json"
@@ -381,13 +381,13 @@ class McpToolTests(unittest.TestCase):
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "skills_install")
-            self.assertTrue(payload["dryRun"])
+            self.assertFalse(payload["dryRun"])
             self.assertEqual(payload["layout"], "tree")
             self.assertEqual(
                 payload["installRoot"],
                 (root / ".codex" / "skills").as_posix(),
             )
-            self.assertTrue(payload["planned"])
+            self.assertTrue(payload["installed"])
 
     def test_skills_install_payload_replaces_legacy_symlink_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -446,13 +446,13 @@ class McpToolTests(unittest.TestCase):
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "memory_init")
-            self.assertTrue(payload["dryRun"])
+            self.assertFalse(payload["dryRun"])
             self.assertEqual(
                 payload["memoryRoot"],
                 (root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md").as_posix(),
             )
 
-    def test_route_index_refresh_payload_runs_in_dry_run_mode(self) -> None:
+    def test_route_index_refresh_payload_applies_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
@@ -464,7 +464,7 @@ class McpToolTests(unittest.TestCase):
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "route_index_refresh")
-            self.assertTrue(payload["dryRun"])
+            self.assertFalse(payload["dryRun"])
             self.assertEqual(payload["routes"], 0)
 
     def test_typed_cgc_payloads_build_fixed_native_commands(self) -> None:
@@ -479,12 +479,15 @@ class McpToolTests(unittest.TestCase):
                 "agents_remember.providers.lifecycle_service.lifecycle.main",
                 side_effect=AssertionError("MCP provider tools must use lifecycle services"),
             ):
+                # dry_run=True returns the planned provider command without
+                # executing it — that command shape is exactly what this test pins.
                 cases = [
                     (
                         cgc_symbol_search_payload(
                             config,
                             "agents-remember-md",
                             "resolve_context",
+                            dry_run=True,
                         ),
                         ["find", "name", "resolve_context"],
                     ),
@@ -494,6 +497,7 @@ class McpToolTests(unittest.TestCase):
                             "agents-remember-md",
                             "resolve_context",
                             file="mcp/src/agents_remember/mcp/tools.py",
+                            dry_run=True,
                         ),
                         [
                             "analyze",
@@ -508,6 +512,7 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember-md",
                             "resolve_context",
+                            dry_run=True,
                         ),
                         ["analyze", "calls", "resolve_context"],
                     ),
@@ -516,6 +521,7 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember-md",
                             "agents_remember.mcp",
+                            dry_run=True,
                         ),
                         ["analyze", "dependencies", "agents_remember.mcp"],
                     ),
@@ -524,11 +530,12 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember-md",
                             function="resolve_context",
+                            dry_run=True,
                         ),
                         ["analyze", "complexity", "resolve_context"],
                     ),
                     (
-                        cgc_complexity_payload(config, "agents-remember-md"),
+                        cgc_complexity_payload(config, "agents-remember-md", dry_run=True),
                         ["analyze", "complexity"],
                     ),
                 ]

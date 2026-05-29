@@ -21,8 +21,10 @@ heavy task workflow, a heavy task, or the full phased workflow.
 
 ---
 
-**IMPORTANT:** Do not change code without following one of the above workflows!
+**IMPORTANT:**
+Do not change code without following one of the above workflows!
 Do not change task plan items without approval.
+Do not randomly commit. Use the `C12-closeout` procedure instead!
 
 ---
 
@@ -101,6 +103,7 @@ report no providers.
 - After C-08 resolves a `memory_root`, read that memory layer's `system/settings.md`
   and `system/tools.md`; also read `system/sources.md` and
   `system/coding-guidelines.md` when present.
+- Before committing read the `C12-closeout` procedure!
 
 ### Memory Repo User Settings, Instructions, and Guidelines
 

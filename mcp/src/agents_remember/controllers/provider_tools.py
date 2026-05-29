@@ -40,7 +40,7 @@ def provider_watchers_tool(
     config: McpRuntimeConfig,
     *,
     action: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     if action not in {"status", "start", "stop", "restart", "refresh", "shutdown-all"}:
         raise ValueError("action must be status, start, stop, restart, refresh, or shutdown-all")
@@ -68,7 +68,7 @@ def grepai_search_tool(
     all_repos: bool = True,
     limit: int = 10,
     output_format: str = "json",
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     selection = _grepai_project_selection(
@@ -110,7 +110,7 @@ def grepai_trace_tool(
     all_repos: bool = True,
     depth: int | None = None,
     output_format: str = "json",
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     action = _grepai_trace_action(trace_action)
@@ -152,7 +152,7 @@ def cgc_symbol_search_tool(
     *,
     repo_id: str,
     name: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
@@ -171,7 +171,7 @@ def cgc_callers_tool(
     repo_id: str,
     function: str,
     file: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     native_args = ["analyze", "callers", _required_text(function, "function")]
@@ -192,7 +192,7 @@ def cgc_callees_tool(
     *,
     repo_id: str,
     function: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
@@ -210,7 +210,7 @@ def cgc_dependencies_tool(
     *,
     repo_id: str,
     module: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
@@ -228,7 +228,7 @@ def cgc_complexity_tool(
     *,
     repo_id: str,
     function: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     native_args = ["analyze", "complexity"]
@@ -250,7 +250,7 @@ def cgc_visualize_tool(
     repo_id: str,
     port: int = 8000,
     context: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     _repo(config, repo_id)
@@ -530,7 +530,7 @@ def _provider_operation_result(
     config: McpRuntimeConfig,
     *,
     operation: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
     timeout: int | None = None,
     run: ProviderLifecycleRunner,
 ) -> dict[str, Any]:

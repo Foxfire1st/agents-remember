@@ -20,8 +20,9 @@ Use this after the prerequisites are in place:
 
 1. The Agents Remember MCP server is wired and reachable (the developer did this
    and restarted the harness).
-2. `runtime_install(dry_run=false)` installed the coordinator runtime scaffold.
-3. `skills_install(dry_run=false)` exposed the packaged skills to the harness.
+2. `runtime_install()` installed the coordinator runtime scaffold (it applies by
+   default; preview first with `runtime_install(dry_run=true)`).
+3. `skills_install()` exposed the packaged skills to the harness.
 
 If those are not done, do not improvise around them — guide the developer through
 the pre-C-13 runbook first: get and wire the MCP server, author valid MCP
@@ -60,7 +61,8 @@ Check, in order:
    to restart the harness, then retry.
 2. **Scaffolding present.** Confirm `runtime_install` ran (coordinator `AGENTS.md`,
    `skills/`, `tasks/`, `memory-repos/` exist under the coordination root). If
-   missing, ask the developer to request `runtime_install(dry_run=false)`.
+   missing, ask the developer to request `runtime_install()` (it applies by
+   default; preview first with `runtime_install(dry_run=true)`).
 3. **Settings sane.** Confirm `server_info` reports the expected `coordinationRoot`,
    `workspaceRoot`, allowed repos, and providers. A wrong path here is the usual
    cause of later resolver errors; surface the resolved absolute paths.
@@ -174,9 +176,10 @@ configured providers start indexing the code and its memory:
 
 1. Confirm the target repo is in the MCP provider scope (it is the `repo_id` in
    the MCP settings; providers index the configured repos).
-2. Start the watchers: `provider_watchers(action="start", dry_run=false)` (use
+2. Start the watchers: `provider_watchers(action="start")` — applies by default;
+   preview first with `provider_watchers(action="start", dry_run=true)`. Use
    `action="refresh"` to re-seed an already-running provider after the repo or
-   memory changed).
+   memory changed.
 3. Verify with `provider_status` (or `context_packet(repo_id=..., include_providers=true)`)
    that each provider is `ready`, its watcher is up, and it targets the repo. Use
    `provider_diagnostics` for raw detail when a provider is degraded.

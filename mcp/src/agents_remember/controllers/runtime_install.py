@@ -11,7 +11,7 @@ from agents_remember.mcp.config import McpRuntimeConfig
 
 @dataclass(frozen=True)
 class RuntimeInstallRequest:
-    dry_run: bool = True
+    dry_run: bool = False
     include_benchmarks: bool = False
     install_provider_deps: bool = True
 

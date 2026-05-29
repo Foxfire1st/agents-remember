@@ -23,8 +23,14 @@ Choose one work format before changing files:
 3. Use `W-01-heavy-task-workflow` only when the developer explicitly asks for a
    heavy task or the full phased workflow.
 
+---
+
+**IMPORTANT:**
 Do not change code or documentation without following one of these workflows.
 Do not change task plan items without approval. Think before acting.
+Do not randomly commit. Use the `C12-closeout` procedure instead!
+
+---
 
 ## Memory And Onboarding
 

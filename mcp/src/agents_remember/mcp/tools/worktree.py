@@ -32,7 +32,7 @@ def worktree_start_payload(
     memory_mode: str | None = None,
     memory_choice: str | None = None,
     skip_provider_setup: bool = False,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_start",
@@ -190,7 +190,7 @@ def worktree_integrate_payload(
     *,
     strategy: str = "ff-only",
     ledger_commit_message: str = "",
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_integrate",
@@ -208,7 +208,7 @@ def worktree_cleanup_payload(
     config: McpRuntimeConfig,
     contract_path: str,
     *,
-    dry_run: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_cleanup",

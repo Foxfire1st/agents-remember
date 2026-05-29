@@ -64,7 +64,7 @@ def initialize_memory(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
-    dry_run: bool = True,
+    dry_run: bool = False,
     initialize_git: bool = True,
 ) -> dict[str, Any]:
     repo = config.repositories.get(repo_id)

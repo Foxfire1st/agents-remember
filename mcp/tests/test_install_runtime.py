@@ -4,11 +4,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.install import runtime as install_runtime
+from agents_remember.install import skills as install_skills
 from agents_remember.install.assets import packaged_source_root
 
 
@@ -138,6 +140,153 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertTrue((providers_root / "requirements" / "codegraphcontext.txt").exists())
             self.assertFalse((coordination_root / "mcp").exists())
             self.assertFalse(mcp_package.exists())
+
+
+class ProviderDependencyHelperTests(unittest.TestCase):
+    def test_any_provider_enabled_branches(self) -> None:
+        self.assertFalse(install_runtime.any_provider_enabled({}))
+        self.assertFalse(
+            install_runtime.any_provider_enabled({"contextProviders": {"enabled": False}})
+        )
+        self.assertFalse(
+            install_runtime.any_provider_enabled(
+                {"contextProviders": {"enabled": True, "providers": "not-a-dict"}}
+            )
+        )
+        self.assertFalse(
+            install_runtime.any_provider_enabled(
+                {
+                    "contextProviders": {
+                        "enabled": True,
+                        "providers": {"grepai-memory": {"enabled": False}},
+                    }
+                }
+            )
+        )
+        self.assertTrue(
+            install_runtime.any_provider_enabled(
+                {
+                    "contextProviders": {
+                        "enabled": True,
+                        "providers": {"grepai-memory": {"enabled": True}},
+                    }
+                }
+            )
+        )
+
+    def test_configured_provider_enabled_branches(self) -> None:
+        self.assertFalse(install_runtime.configured_provider_enabled({}, "grepai-memory"))
+        self.assertFalse(
+            install_runtime.configured_provider_enabled(
+                {"contextProviders": {"enabled": True, "providers": "not-a-dict"}},
+                "grepai-memory",
+            )
+        )
+        settings = {
+            "contextProviders": {
+                "enabled": True,
+                "providers": {
+                    "grepai-memory": {"enabled": True},
+                    "codegraphcontext-code": {"enabled": False},
+                },
+            }
+        }
+        self.assertTrue(install_runtime.configured_provider_enabled(settings, "grepai-memory"))
+        self.assertFalse(
+            install_runtime.configured_provider_enabled(settings, "codegraphcontext-code")
+        )
+
+    def test_provider_dependencies_skip_when_none_configured(self) -> None:
+        summary = install_runtime.InstallSummary()
+        results = install_runtime.install_provider_dependencies_from_settings(
+            Path("/unused-coordination-root"),
+            {"contextProviders": {"enabled": True, "providers": {}}},
+            summary,
+            dry_run=True,
+            timeout=1,
+        )
+        self.assertEqual(results, [])
+        self.assertEqual(summary.dependency_runs, 0)
+
+    def test_provider_dependencies_run_enabled_providers(self) -> None:
+        summary = install_runtime.InstallSummary()
+        settings = {
+            "contextProviders": {
+                "enabled": True,
+                "providers": {
+                    "grepai-memory": {"enabled": True},
+                    "codegraphcontext-code": {"enabled": True},
+                },
+            }
+        }
+        with (
+            patch.object(
+                install_runtime.lifecycle, "grepai_install", return_value={"ok": True}
+            ) as grepai_install,
+            patch.object(
+                install_runtime.lifecycle, "cgc_install_all", return_value={"ok": True}
+            ) as cgc_install_all,
+        ):
+            results = install_runtime.install_provider_dependencies_from_settings(
+                Path("/unused-coordination-root"),
+                settings,
+                summary,
+                dry_run=True,
+                timeout=1,
+            )
+        self.assertEqual(len(results), 2)
+        self.assertEqual(summary.dependency_runs, 2)
+        grepai_install.assert_called_once()
+        cgc_install_all.assert_called_once()
+
+    def test_provider_dependencies_raise_on_failure(self) -> None:
+        summary = install_runtime.InstallSummary()
+        settings = {
+            "contextProviders": {
+                "enabled": True,
+                "providers": {"grepai-memory": {"enabled": True}},
+            }
+        }
+        with (
+            patch.object(
+                install_runtime.lifecycle,
+                "grepai_install",
+                return_value={"ok": False, "error": "boom"},
+            ),
+            self.assertRaisesRegex(RuntimeError, "provider dependency install failed"),
+        ):
+            install_runtime.install_provider_dependencies_from_settings(
+                Path("/unused-coordination-root"),
+                settings,
+                summary,
+                dry_run=True,
+                timeout=1,
+            )
+
+
+class ReadSkillNameTests(unittest.TestCase):
+    def _write(self, root: Path, content: str) -> Path:
+        path = root / "SKILL.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_reads_name_from_frontmatter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = self._write(
+                Path(tmp_dir),
+                "---\nname: c-04-retrieval\ndescription: x\n---\n# Body\n",
+            )
+            self.assertEqual(install_skills._read_skill_name(path), "c-04-retrieval")
+
+    def test_returns_empty_when_frontmatter_has_no_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = self._write(Path(tmp_dir), "---\ndescription: x\n---\nname: too-late\n")
+            self.assertEqual(install_skills._read_skill_name(path), "")
+
+    def test_returns_empty_when_no_frontmatter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = self._write(Path(tmp_dir), "# Just a heading\nname: nope\n")
+            self.assertEqual(install_skills._read_skill_name(path), "")
 
 
 if __name__ == "__main__":
