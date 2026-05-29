@@ -37,60 +37,13 @@ The default setup stores durable memory in the target repository under `ar-memor
 
 This is the short path for a new workspace. The detailed walkthrough lives in [Getting Started](docs/getting-started.md).
 
-1. Agents Remember runs from the published `agents-remember-mcp` package — your
-   agent harness launches it on demand with `uvx`, so there is **no repo to
-   clone**. Keep an `ar-coordination/` workspace beside the projects you want to
-   onboard:
+Ask your agent to:
 
-   ```text
-   projects/
-     my-app/
-     another-service/
-     ar-coordination/
-   ```
+Wire the MCP server — Register Agents Remember MCP with this harness using uvx, help you author the settings file, then restart the harness so it loads the server.
+Install Agents Remember — Run runtime_install, then skills_install (scaffolding, skills, and provider images when providers are enabled).
+Onboard your project — Run C-13-install-and-onboard. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
 
-2. Configure the MCP server with `coordinationRoot` pointing at `ar-coordination`, then request the MCP runtime install tool.
-
-   ```text
-   runtime_install()
-   ```
-
-   Reinstall reconciles package-owned runtime scaffold files from the MCP
-   package. Provider dependencies and provider runner reinstall are MCP-owned
-   operations driven from MCP settings outside the coordinator root.
-
-   Benchmark fixtures are optional. To install or refresh them too:
-
-   ```text
-   runtime_install(include_benchmarks=true)
-   ```
-
-3. Expose the packaged skills to your agent harness.
-
-   When the MCP settings file lives under a harness registration folder such as
-   `.codex/mcp/`, the install target is inferred as the sibling `skills/`
-   folder. Then request:
-
-   ```text
-   skills_install()
-   ```
-
-   Use `layout="flat"` only for harnesses that require direct
-   `<skill-name>/SKILL.md` folders. The MCP tool copies skills; it does not
-   create symlinks.
-
-4. Add workspace instructions that point agents at the installed runtime.
-
-   ```markdown
-   # Workspace Agent Instructions
-
-   Read and follow `ar-coordination/AGENTS.md` before working in any sibling project.
-   Treat these rules as workspace instructions!
-
-   @ar-coordination/AGENTS.md
-   ```
-
-5. Ask the agent to initialize memory for a target repository with `C-00-initialize-memory-repo`, then bootstrap initial onboarding with `C-03-repo-bootstrap`.
+The only hands-on steps for you is to restart once after step 1, and then continue from there.
 
 After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
