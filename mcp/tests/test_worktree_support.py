@@ -35,6 +35,7 @@ from agents_remember.memory import carryover as memory_carryover
 from agents_remember.providers.identity import provider_instance_id
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
+from agents_remember.worktrees.modules.onboarding import require_updated_sidecar_content
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
     load_contract,
@@ -2685,6 +2686,48 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             exposed = workspace / ".codex" / "skills" / benchmark_runner.SKILLS_EXPOSURE_NAMESPACE
             self.assertTrue(
                 (exposed / "U-01-core-skills" / "C-00-test-skill" / "SKILL.md").is_file()
+            )
+
+
+class RequireUpdatedSidecarContentTests(unittest.TestCase):
+    def _setup(self, tmp: Path) -> tuple[Path, Path, dict[str, object]]:
+        memory_repo = tmp / "memory"
+        init_repo(memory_repo)
+        onboarding_root = memory_repo / "onboarding"
+        write_file_onboarding(onboarding_root, "demo-repo", "src/app.py", "0" * 40)
+        git(memory_repo, "add", "-A")
+        git(memory_repo, "commit", "-m", "Add sidecar")
+        sidecar = onboarding_root / "src" / "app.py.md"
+        plan: dict[str, object] = {
+            "required": [{"source_path": "src/app.py", "onboarding_file": sidecar.as_posix()}],
+            "missing": [],
+            "unsupported": [],
+        }
+        return memory_repo, sidecar, plan
+
+    def test_blocks_when_changed_source_sidecar_not_updated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, _sidecar, plan = self._setup(Path(tmp_dir))
+            # Sidecar is committed and untouched: a metadata-only refresh would be stale.
+            with self.assertRaises(RuntimeError) as caught:
+                require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertIn("src/app.py", str(caught.exception))
+
+    def test_passes_when_sidecar_content_updated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
+            sidecar.write_text(
+                sidecar.read_text(encoding="utf-8") + "\nUpdated body.\n", encoding="utf-8"
+            )
+            require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+
+    def test_noop_when_no_required_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, _sidecar, _plan = self._setup(Path(tmp_dir))
+            require_updated_sidecar_content(
+                None,
+                {"required": [], "missing": [], "unsupported": []},
+                memory_tree=memory_repo,
             )
 
 

@@ -8,7 +8,7 @@ from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.worktrees.modules.context import contract_context
-from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.git import changed_worktree_paths, require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
@@ -359,8 +359,56 @@ def validate_route_overview_refresh_plan(
     )
 
 
+def require_updated_sidecar_content(
+    context, plan: dict[str, object], *, memory_tree: Path | None = None
+) -> None:
+    """Fail closeout when a changed source file's existing sidecar was not updated.
+
+    Refreshing only verification metadata on an unchanged sidecar silently
+    defeats the commit-hash-based drift check, so a changed source file must be
+    paired with a changed sidecar body before its metadata is advanced. The
+    check is a no-op when no sidecar onboarding is required for the changed
+    files, and it safely skips sidecars that do not resolve under the memory
+    tree rather than reporting a false stale finding.
+    """
+
+    required = plan.get("required")
+    if not isinstance(required, list) or not required:
+        return
+    tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
+    if tree is None:
+        return
+    memory_root = Path(tree).resolve()
+    changed_memory = set(changed_worktree_paths(memory_root))
+    stale: list[str] = []
+    for item in required:
+        if not isinstance(item, dict):
+            continue
+        onboarding_file = item.get("onboarding_file")
+        source_path = item.get("source_path")
+        if not isinstance(onboarding_file, str) or not isinstance(source_path, str):
+            continue
+        onboarding_path = Path(onboarding_file).resolve()
+        try:
+            relative = onboarding_path.relative_to(memory_root).as_posix()
+        except ValueError:
+            continue
+        if relative not in changed_memory:
+            stale.append(source_path)
+    if stale:
+        raise RuntimeError(
+            "external-memory closeout requires updated onboarding content for changed source "
+            "files, not only refreshed verification metadata; the following changed sources have "
+            "an unmodified sidecar body: "
+            + ", ".join(stale)
+            + ". Update each sidecar through C-05 to the approved current state and record the "
+            "change in its Update History before closeout. Advancing lastVerifiedCommitHash on "
+            "stale content is a prohibited metadata-only refresh."
+        )
+
+
 def validate_onboarding_refresh_plan_for_context(
-    context, changed_paths: list[str]
+    context, changed_paths: list[str], *, memory_tree: Path | None = None
 ) -> dict[str, object]:
     plan = onboarding_refresh_plan_for_context(context, changed_paths)
     missing = plan["missing"]
@@ -376,6 +424,7 @@ def validate_onboarding_refresh_plan_for_context(
             + "; ".join(details)
             + ". Run C-05 create-or-update-onboarding-files, then rerun closeout."
         )
+    require_updated_sidecar_content(context, plan, memory_tree=memory_tree)
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
         text = filesystem.read_text(onboarding_path, encoding="utf-8")
@@ -391,7 +440,9 @@ def validate_onboarding_refresh_plan_for_context(
 def validate_onboarding_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> dict[str, object]:
-    return validate_onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
+    return validate_onboarding_refresh_plan_for_context(
+        contract_context(contract), changed_paths, memory_tree=contract.memory_worktree
+    )
 
 
 def refresh_onboarding_metadata_for_context(

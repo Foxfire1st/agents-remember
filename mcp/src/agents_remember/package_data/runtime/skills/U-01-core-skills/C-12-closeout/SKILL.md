@@ -65,6 +65,13 @@ onboarding, create those sidecars through C-05 before committing code. After
 the code commit exists, refresh the new sidecars' verification metadata to that
 commit during the normal post-code-commit memory refresh.
 
+Changed (already-onboarded) source files have a parallel requirement: their
+sidecar content must be updated to approved current state before closeout. The
+closeout gate rejects any changed source file whose existing sidecar body was
+not modified in the current task, because advancing verification metadata over
+stale content defeats the commit-hash-based drift check. Update changed sidecars
+during implementation, not at the metadata-refresh step.
+
 ## External-Memory Order
 
 External-memory closeout order is:
@@ -73,7 +80,7 @@ External-memory closeout order is:
 2. create missing onboarding for newly added eligible source files before committing code
 3. commit code changes and capture `C2` plus its commit date
 4. run C-02 memory quality control's drift check against `C2` to produce the full memory update worklist
-5. refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`
+5. verify each changed source file's sidecar content was updated in this task, then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
 6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
 7. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
 8. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
@@ -101,6 +108,10 @@ verification metadata is missing, external memory is not resolved, the code and
 memory checkouts are on different selected branches, or no code or memory
 changes exist.
 
+Closeout also fails without mutation when a changed source file's existing
+sidecar body was not updated in the current task, so verification metadata is
+never advanced over stale onboarding content.
+
 Worktree closeout also fails when the recorded code or external-memory source
 branch moved since task start.
 
@@ -117,3 +128,4 @@ for that source file, then rerun the closeout preview.
 5. C-12 must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
 6. C-12 must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
 7. C-12 must not push automatically.
+8. C-12 must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
