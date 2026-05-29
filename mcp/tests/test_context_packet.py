@@ -53,7 +53,7 @@ class ContextPacketTests(unittest.TestCase):
             self.assertNotIn("crossRepo", packet)
             self.assertEqual(
                 packet["paths"]["taskRoot"],
-                str(root / "ar-coordination" / "tasks" / "agents-remember-md"),
+                (root / "ar-coordination" / "tasks" / "agents-remember-md").as_posix(),
             )
             self.assertEqual(packet["memory"]["mode"], "external")
             self.assertIn("pathRules", packet["memory"]["storage"])

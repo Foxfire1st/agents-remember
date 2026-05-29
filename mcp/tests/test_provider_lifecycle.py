@@ -14,12 +14,13 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import lifecycle, lifecycle_service
+from agents_remember.providers.cgc.context.core import to_container_path
 from agents_remember.providers.cgc.lifecycle import query as cgc_query
 from agents_remember.providers.cgc.lifecycle import refresh as cgc_refresh_lifecycle
 from agents_remember.providers.cgc.lifecycle.runner import cgc_runner_patch_script
-from agents_remember.providers.grepai.lifecycle import actions as grepai_actions
 from agents_remember.providers.grepai.lifecycle import backend as grepai_backend
 from agents_remember.providers.grepai.lifecycle import core as grepai_core
+from agents_remember.providers.lifecycle import compose_runtime
 from agents_remember.providers.lifecycle import process_status as lifecycle_process_status
 from agents_remember.providers.lifecycle import watchers as watcher_lifecycle
 
@@ -282,8 +283,11 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertNotIn("command", result)
 
     def test_grepai_settings_backed_run_uses_docker_without_host_binary(self) -> None:
-        original = grepai_actions.docker_command
-        grepai_actions.docker_command = lambda: "docker"
+        # command[0] is resolved by compose_runtime.docker_command (via
+        # compose_plan/run_compose), so patch that symbol rather than the
+        # re-exported grepai_actions.docker_command, which is never consulted.
+        original = compose_runtime.docker_command
+        compose_runtime.docker_command = lambda: "docker"
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 service_config = self.service_config(Path(tmp_dir))
@@ -301,12 +305,12 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                     ],
                 )
         finally:
-            grepai_actions.docker_command = original
+            compose_runtime.docker_command = original
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "docker")
         command = result["command"]["command"]
-        self.assertEqual(Path(command[0]).name, "docker")
+        self.assertEqual(Path(command[0]).stem.lower(), "docker")
         self.assertIn("compose", command)
         self.assertEqual(command[-10:-7], ["exec", "-T", "watcher"])
         self.assertEqual(command[-7], "grepai")
@@ -805,12 +809,14 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertEqual(result["action"], "visualize")
         self.assertEqual(result["url"], "http://127.0.0.1:8123")
         command = result["command"]["command"]
-        self.assertEqual(Path(command[0]).name, "docker")
+        self.assertEqual(Path(command[0]).stem.lower(), "docker")
         self.assertIn("compose", command)
         self.assertEqual(command[-10:-5], ["run", "--rm", "-p", "127.0.0.1:8123:8123", "runner"])
         self.assertEqual(
             command[-5:-1],
-            ["visualize", "--repo", repo.resolve().as_posix(), "--port"],
+            # --repo is the in-container mount path (drive stripped on Windows),
+            # not the host path; matches as_posix() on POSIX hosts.
+            ["visualize", "--repo", to_container_path(repo.resolve()), "--port"],
         )
         self.assertEqual(command[-1], "8123")
         self.assertEqual(result["command"]["overrideMode"], "stdin")

@@ -5,6 +5,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
 from .tools import (
     cgc_callees_payload,
@@ -47,6 +48,7 @@ from .tools import (
 
 
 def create_server(config: McpRuntimeConfig) -> Any:
+    install_compact_content()
     server = FastMCP("Agents Remember")
 
     @server.tool()
