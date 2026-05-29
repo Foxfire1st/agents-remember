@@ -17,17 +17,15 @@ The core rules are:
 
 Chat, light task, and heavy task are different weights of the same discipline.
 
-### Why path-derived memory instead of retrieval?
+### How does an agent find the right memory?
 
-Retrieval systems are useful when the question is "what might be related?" Agents Remember is built for a narrower question: "what context applies to this file?"
+Three ways, matched to what the agent already knows:
 
-When an agent opens `src/foo/bar.ts`, the matching onboarding path is deterministic:
+- **By path** — when it has the file in hand, the note is at a deterministic path (`src/foo/bar.ts` → `ar-memory/onboarding/src/foo/bar.ts.md`). No ranking, embedding threshold, or index step — the path is the address, so reads stay predictable.
+- **By meaning** — when it knows the concept but not the file, semantic search over the memory returns candidate notes.
+- **By relationship** — when it knows an anchor but not its connections, a code graph answers callers, callees, and dependencies.
 
-```text
-ar-memory/onboarding/src/foo/bar.ts.md
-```
-
-No ranking, embedding threshold, top-k cutoff, or index is needed. That makes reads predictable and keeps unrelated but semantically similar material out of context.
+By-path needs nothing extra; meaning and relationship are opt-in providers. See [Concepts](concepts.md) and [Providers](guides/providers.md).
 
 ### Is this just documentation?
 
@@ -39,7 +37,7 @@ READMEs and architecture docs orient people. File-level onboarding answers a dif
 
 ### Does memory get slower as it grows?
 
-Not in the same way as a retrieval corpus. File-level onboarding is loaded by path, so the cost is proportional to the files in scope for the task, not the size of the repository.
+File-level onboarding is loaded by path, so the cost of *reading* it is proportional to the files in scope for a task, not the size of the repository. The optional semantic index grows with the memory like any corpus, but it only helps *find* notes — the notes themselves are still read by path.
 
 Large repos can still accumulate a lot of memory, but the agent does not need to read all of it. It reads the repo overview, relevant route-local overview when one exists, and onboarding for the files it is touching.
 
@@ -117,19 +115,16 @@ Task workflow systems organize work. Agents Remember primarily preserves codebas
 
 ### How is this different from vector memory or graph memory?
 
-Vector and graph memory usually answer "what is related?" Agents Remember answers "what applies to this path, and has it been verified against current source?"
-
-That tradeoff is deliberate. It is less flexible than broad retrieval, but it is easier to audit, review, diff, and trust.
+It isn't an alternative to them — it uses them. Semantic search over the memory and a code-relationship graph are first-class (opt-in) substrates for *finding* memory. What's distinctive is what memory *is*: durable notes that are versioned, reviewable, diffable, drift-checked against source, and updated only after approved work lands — independent of how they were found.
 
 ## What This Is Not
 
-Agents Remember is not:
+The durable memory of record is not:
 
 - a hosted service
-- a database
+- a database you query instead of reading files
 - a general knowledge base
 - a replacement for READMEs, docstrings, or architecture docs
-- a semantic retrieval engine
 - a reason to skip human approval
 
-It is a Markdown and Git based memory convention with skills that help agents follow it consistently.
+It is a Markdown and Git based memory convention with skills that help agents follow it consistently. The optional providers (semantic search, code graph) build derived indexes *over* that memory and code to help find it — they do not replace it as the source of truth.

@@ -43,9 +43,15 @@ ar-coordination/
 
 It owns installed skills, installed `AGENTS.md` templates, task files, notes, worktrees, temporary drift reports, and external memory repo checkouts.
 
-## Path-Derived Memory
+## How Agents Find Memory
 
-Agents Remember does not use embeddings, semantic search, or top-k retrieval for file-level onboarding. The path of the source file determines the path of the onboarding file. That keeps the read surface small and avoids pulling in related-looking but irrelevant material.
+Agents reach memory through three substrates, matched to what they already know.
+
+- **By path** — when an agent has a file in hand, its note is located directly from the path: `src/foo/bar.ts` → `ar-memory/onboarding/src/foo/bar.ts.md`. No lookup, ranking, or index step — the path *is* the address. Reads stay predictable, and unrelated-but-similar material stays out of context.
+- **By meaning** — when the concept is known but the file is not, semantic search over the memory finds candidate notes. This is the reverse of `code → onboarding`: a vague description leads to an onboarding note, whose path then names the code file, with pointers to the surrounding logic.
+- **By relationship** — when an anchor is known but its connections are not, a code-relationship graph answers callers, callees, and dependencies.
+
+By-path notes are the core and need nothing extra; meaning and relationship are opt-in providers. The router that chooses among them is described next (it names the three *Intent*, *Semantics*, and *Relationship*). Whatever the route, what becomes *durable* memory is still drift-checked and approval-gated — finding is not the same as trusting.
 
 ## Retrieval Strategy Substrates
 

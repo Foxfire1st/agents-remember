@@ -1,27 +1,31 @@
 # Agents Remember
 
-Path-derived, git-verified memory for coding agents.
+Durable, git-verified repo memory for coding agents.
 
-Agents Remember helps coding agents carry project knowledge across sessions without relying on a vector store, a hidden service, or one giant context dump. The core idea is simple: when an agent touches a source file, it can find the matching onboarding note from the source path, verify that note against Git, and update it only after approved work lands.
+**Agents Remember makes hard-earned repo knowledge first-class infrastructure** — the local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts that live in people's heads, old PRs, and team habits, exactly where coding agents miss them. It keeps that knowledge as versioned Markdown beside the code, drift-checked against Git and updated only after approved work lands.
 
 ```text
 src/orchestrator/core_editor.py
 ar-memory/onboarding/src/orchestrator/core_editor.py.md
 ```
 
-That gives agents the context they usually lose: local invariants, cross-repo contracts, migration history, naming rules, and "this looks safe but is not" knowledge that rarely fits in a README or a docstring.
+Agents reach that memory three ways:
 
-![Agents Remember system overview](agents-remember-infographic.png)
+- **By path** — a source file's own note, found directly from its path (as above). Needs nothing extra.
+- **By meaning** — semantic search across the memory when you know the concept but not the file.
+- **By relationship** — a code graph for callers, callees, and dependencies.
+
+The by-path notes are the core; meaning and relationship are opt-in providers (see [Concepts](docs/concepts.md) and [Providers](docs/guides/providers.md)).
 
 ## Why It Exists
 
 Modern coding agents can make clean, plausible edits while missing the project-specific rules that make those edits safe. A top-level instruction file can help, but it does not naturally reappear when the agent is deep in a file and deciding what to change.
 
-Agents Remember makes that missing context local and verifiable. Instead of asking the agent to rediscover architecture from scratch, the repo carries small onboarding units that are versioned in Git and read beside the code they describe.
+Agents Remember fixes that: the matching note is reachable at the moment of the edit — most often by the very path the agent is already working in — so project rules surface exactly when a change is being made, not buried in a top-level file.
 
 ## Core Model
 
-Agents Remember has three moving pieces:
+The memory layer rests on a small, strict discipline:
 
 - **Onboarding units:** Markdown notes derived from source paths. A file such as `src/foo/bar.ts` maps to `ar-memory/onboarding/src/foo/bar.ts.md` in the default repo-local mode.
 - **Memory quality control:** Before an agent trusts onboarding, `C-02-memory-quality-control` checks whether the source changed since the onboarding was verified. During closeout it also covers new-file onboarding and final memory quality checks.

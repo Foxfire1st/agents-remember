@@ -99,6 +99,18 @@ C-08 resolves a target repository by checking:
 
 If neither supported memory location exists, C-08 fails and asks the caller to initialize memory instead of inventing an empty context.
 
+## Retrieval Substrates
+
+Once memory is resolved, agents reach into memory and code through three substrates, routed by `C-04`:
+
+- **By path (Intent)** — a known file's onboarding note, located directly from its path. Always available; needs no provider.
+- **By meaning (Semantics)** — semantic search over the memory, for when the concept is known but the file is not.
+- **By relationship (Relationship)** — a code-relationship graph for callers, callees, and dependencies.
+
+The meaning and relationship substrates are served by **opt-in providers** — GrepAI for semantic memory search, CodeGraphContext for the code graph. They run as local Docker services under `ar-coordination/providers/` (shown above) and index code and memory in the background.
+
+These providers are accelerators for *finding* knowledge; they are not the source of truth. Durable memory stays Markdown + Git, drift-checked and approval-gated, regardless of which substrate surfaced it. `runtime_install` builds the provider images and `provider_watchers` drive indexing — see the [Providers guide](guides/providers.md) and [MCP tool reference](reference/mcp-tools.md).
+
 ## Ownership Boundaries
 
 Runtime install owns package assets under `ar-coordination`.
@@ -114,3 +126,5 @@ C-08 owns context resolution facts only.
 C-09 owns worktree lifecycle, integration, and cleanup.
 
 C-12 owns the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks.
+
+Provider lifecycle — building images, watchers, and indexing — is owned by the MCP provider tools and `runtime_install`, not by the memory or workflow skills.
