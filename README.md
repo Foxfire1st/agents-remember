@@ -39,9 +39,9 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
 
 Ask your agent to:
 
-Wire the MCP server — Register Agents Remember MCP with this harness using uvx, help you author the settings file, then restart the harness so it loads the server.
-Install Agents Remember — Run runtime_install, then skills_install (scaffolding, skills, and provider images when providers are enabled).
-Onboard your project — Run C-13-install-and-onboard. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
+1. **Wire the MCP server** — Register Agents Remember MCP with this harness using `uvx`, help you author the settings file, then **restart the harness** so it loads the server.
+2. **Install Agents Remember** — Run `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled).
+3. **Onboard your project** — Run `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
 
 The only hands-on steps for you is to restart once after step 1, and then continue from there.
 
