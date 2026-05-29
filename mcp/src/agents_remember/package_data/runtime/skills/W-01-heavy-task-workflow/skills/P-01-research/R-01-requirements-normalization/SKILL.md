@@ -1,9 +1,13 @@
 ---
 name: r-01-requirements-normalization
-description: "Read raw requirement candidates together with onboarding and code, then normalize them into the normalized list in requirement_change_candidates.md."
+description: "W-01 heavy-task-workflow only — Phase P-01 Research (step R-01). Do not use in chat (W-03) or light (W-02) workflows. Read raw requirement candidates together with onboarding and code, then normalize them into the normalized list in requirement_change_candidates.md."
 ---
 
 # R-01 Requirements Normalization
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-01 Research**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 This skill is the first operational step in Research.
 

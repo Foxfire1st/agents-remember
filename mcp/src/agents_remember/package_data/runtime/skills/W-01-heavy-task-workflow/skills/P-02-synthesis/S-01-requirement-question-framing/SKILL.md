@@ -1,9 +1,13 @@
 ---
 name: s-01-requirement-question-framing
-description: "Convert Research findings into the requirement-facing question set that D-01 must settle first."
+description: "W-01 heavy-task-workflow only — Phase P-02 Synthesis (step S-01). Do not use in chat (W-03) or light (W-02) workflows. Convert Research findings into the requirement-facing question set that D-01 must settle first."
 ---
 
 # S-01 Requirement Question Framing
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-02 Synthesis**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 Use:
 

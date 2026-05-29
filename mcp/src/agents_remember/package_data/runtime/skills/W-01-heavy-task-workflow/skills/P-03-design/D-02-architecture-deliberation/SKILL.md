@@ -1,9 +1,13 @@
 ---
 name: d-02-architecture-deliberation
-description: "Ask architecture-facing Design questions one by one, record the developer's answers, and prepare architecture decisions for projection."
+description: "W-01 heavy-task-workflow only — Phase P-03 Design (step D-02). Do not use in chat (W-03) or light (W-02) workflows. Ask architecture-facing Design questions one by one, record the developer's answers, and prepare architecture decisions for projection."
 ---
 
 # D-02 Architecture Deliberation
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-03 Design**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 Use:
 

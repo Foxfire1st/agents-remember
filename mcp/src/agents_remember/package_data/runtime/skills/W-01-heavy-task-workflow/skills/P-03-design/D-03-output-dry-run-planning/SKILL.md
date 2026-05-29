@@ -1,9 +1,13 @@
 ---
 name: d-03-output-dry-run-planning
-description: "Plan the target-state output documentation pass from approved Design direction and mapped input coverage."
+description: "W-01 heavy-task-workflow only — Phase P-03 Design (step D-03). Do not use in chat (W-03) or light (W-02) workflows. Plan the target-state output documentation pass from approved Design direction and mapped input coverage."
 ---
 
 # D-03 Output Dry Run Planning
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-03 Design**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 This entrypoint should route:
 

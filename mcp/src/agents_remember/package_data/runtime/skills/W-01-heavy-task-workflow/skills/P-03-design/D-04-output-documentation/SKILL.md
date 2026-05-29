@@ -1,9 +1,13 @@
 ---
 name: d-04-output-documentation
-description: "Project the approved Design direction into per-file target-state output docs with representative projected code examples and one root overview for CP3 and Planning."
+description: "W-01 heavy-task-workflow only — Phase P-03 Design (step D-04). Do not use in chat (W-03) or light (W-02) workflows. Project the approved Design direction into per-file target-state output docs with representative projected code examples and one root overview for CP3 and Planning."
 ---
 
 # D-04 Output Documentation
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-03 Design**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 Companion files:
 

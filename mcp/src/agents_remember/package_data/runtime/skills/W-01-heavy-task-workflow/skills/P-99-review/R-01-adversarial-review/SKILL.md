@@ -1,9 +1,13 @@
 ---
 name: r-01-adversarial-review
-description: "Run an adversarial checkpoint review against the canonical cumulative task artifact chain and write one review-only artifact under P-99-review."
+description: "W-01 heavy-task-workflow only — Phase P-99 Review (step R-01). Do not use in chat (W-03) or light (W-02) workflows. Run an adversarial checkpoint review against the canonical cumulative task artifact chain and write one review-only artifact under P-99-review."
 ---
 
 # R-01 Adversarial Review
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-99 Review**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 This skill keeps checkpoint review independent from the producing skill. The reviewer grades completed phase outputs against the canonical runtime artifact chain and writes one review-only artifact under `P-99-review/`.
 

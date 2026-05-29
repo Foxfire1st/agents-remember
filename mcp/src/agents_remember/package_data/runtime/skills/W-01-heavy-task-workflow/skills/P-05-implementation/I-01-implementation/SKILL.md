@@ -1,9 +1,13 @@
 ---
 name: i-01-implementation
-description: "Execute the approved implementation plan sequentially from first unchecked step to completion, recording issues without silently reopening design."
+description: "W-01 heavy-task-workflow only — Phase P-05 Implementation (step I-01). Do not use in chat (W-03) or light (W-02) workflows. Execute the approved implementation plan sequentially from first unchecked step to completion, recording issues without silently reopening design."
 ---
 
 # I-01 Implementation
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-05 Implementation**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 Read:
 

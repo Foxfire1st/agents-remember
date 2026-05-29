@@ -1,9 +1,13 @@
 ---
 name: c-01-task-folder-creation
-description: "Create the task folder after explicit developer naming choice and initialize the orchestrator-owned root artifacts without normalizing or approving intake."
+description: "W-01 heavy-task-workflow only — Phase P-00 Creation (step C-01). Do not use in chat (W-03) or light (W-02) workflows. Create the task folder after explicit developer naming choice and initialize the orchestrator-owned root artifacts without normalizing or approving intake."
 ---
 
 # C-01 Task Folder Creation
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-00 Creation**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 This entrypoint stays lean.
 

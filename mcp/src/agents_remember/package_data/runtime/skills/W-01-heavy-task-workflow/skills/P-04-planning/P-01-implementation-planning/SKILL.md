@@ -1,9 +1,13 @@
 ---
 name: p-01-implementation-planning
-description: "Write or revise a scheduling-only implementation plan from approved requirements, approved architecture, output documentation, and code, pulling any concrete code examples directly from D-04."
+description: "W-01 heavy-task-workflow only — Phase P-04 Planning (step P-01). Do not use in chat (W-03) or light (W-02) workflows. Write or revise a scheduling-only implementation plan from approved requirements, approved architecture, output documentation, and code, pulling any concrete code examples directly from D-04."
 ---
 
 # P-01 Implementation Planning
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-04 Planning**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 Companion files:
 

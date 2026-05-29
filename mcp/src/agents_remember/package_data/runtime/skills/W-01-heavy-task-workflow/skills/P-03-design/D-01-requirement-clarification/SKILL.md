@@ -1,9 +1,13 @@
 ---
 name: d-01-requirement-clarification
-description: "Ask requirement-facing Design questions one by one, record the developer's answers, and prepare requirement promotion."
+description: "W-01 heavy-task-workflow only — Phase P-03 Design (step D-01). Do not use in chat (W-03) or light (W-02) workflows. Ask requirement-facing Design questions one by one, record the developer's answers, and prepare requirement promotion."
 ---
 
 # D-01 Requirement Clarification
+
+## Scope
+
+Phase-local step of the **W-01 heavy task workflow**, Phase **P-03 Design**. Invoked only by the `w-01-heavy-task-workflow` orchestrator at its checkpoint — never standalone, and not in the `w-02` light or `w-03` chat workflows.
 
 This entrypoint should route:
 
