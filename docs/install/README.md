@@ -5,7 +5,7 @@ These pages explain how to expose the installed Agents Remember runtime to speci
 Configure the Agents Remember MCP server first, then install the runtime:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Then choose the guide for your tool:

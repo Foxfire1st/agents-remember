@@ -28,7 +28,7 @@ Add both the coordination runtime and target repository to the workspace when po
 Install the runtime through the MCP server:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Antigravity discovers skills in a workspace `.agents/skills/<skill-name>/SKILL.md` folder and in the global `~/.gemini/skills/<skill-name>/SKILL.md` folder. Its MCP configuration lives under `~/.gemini` rather than a `<root>/mcp/<settings>.json` sibling of the skills folder, so set `harnessSkillRoot` to the skills root you want (or register the MCP settings under a `.agents/mcp/` workspace folder so the sibling `.agents/skills/` is inferred).
@@ -36,7 +36,7 @@ Antigravity discovers skills in a workspace `.agents/skills/<skill-name>/SKILL.m
 Use the flat layout, because Antigravity expects the folder containing `SKILL.md` to match the skill's lowercase `name`:
 
 ```text
-skills_install(layout="flat", dry_run=false)
+skills_install(layout="flat")
 ```
 
 Antigravity can invoke skills automatically or on request once they are discovered.

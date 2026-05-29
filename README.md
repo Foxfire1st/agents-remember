@@ -37,19 +37,22 @@ The default setup stores durable memory in the target repository under `ar-memor
 
 This is the short path for a new workspace. The detailed walkthrough lives in [Getting Started](docs/getting-started.md).
 
-1. Clone this repository beside the projects you want to onboard.
+1. Agents Remember runs from the published `agents-remember-mcp` package — your
+   agent harness launches it on demand with `uvx`, so there is **no repo to
+   clone**. Keep an `ar-coordination/` workspace beside the projects you want to
+   onboard:
 
    ```text
    projects/
-     agents-remember-md/
      my-app/
+     another-service/
      ar-coordination/
    ```
 
 2. Configure the MCP server with `coordinationRoot` pointing at `ar-coordination`, then request the MCP runtime install tool.
 
    ```text
-   runtime_install(dry_run=false)
+   runtime_install()
    ```
 
    Reinstall reconciles package-owned runtime scaffold files from the MCP
@@ -59,7 +62,7 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
    Benchmark fixtures are optional. To install or refresh them too:
 
    ```text
-   runtime_install(dry_run=false, include_benchmarks=true)
+   runtime_install(include_benchmarks=true)
    ```
 
 3. Expose the packaged skills to your agent harness.
@@ -69,7 +72,7 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
    folder. Then request:
 
    ```text
-   skills_install(dry_run=false)
+   skills_install()
    ```
 
    Use `layout="flat"` only for harnesses that require direct

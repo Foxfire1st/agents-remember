@@ -93,7 +93,7 @@ as a degraded fallback, not an equivalent to the hook.
 Install the runtime through the MCP server:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Place the MCP settings under the Claude Code registration folder, such as
@@ -101,7 +101,7 @@ Place the MCP settings under the Claude Code registration folder, such as
 folder. Then expose packaged skills:
 
 ```text
-skills_install(dry_run=false)
+skills_install()
 ```
 
 Claude Code supports project and personal skill folders and discovers nested `.claude/skills` directories. The default namespace layout is usually enough:

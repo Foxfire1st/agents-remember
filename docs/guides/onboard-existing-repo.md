@@ -7,7 +7,7 @@ You do not need full coverage before Agents Remember becomes useful. Start small
 Configure the Agents Remember MCP server, then request:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Expose skills for your harness using the relevant [install guide](../README.md#install-guides).

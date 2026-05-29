@@ -29,7 +29,7 @@ Use `HERMES.md` if you want Hermes-specific priority over shared context files.
 Install the runtime through the MCP server:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Hermes local skills commonly live under `~/.hermes/skills/`. Place the MCP
@@ -38,7 +38,7 @@ settings under `~/.hermes/mcp/` to infer `~/.hermes/skills/`, or set
 so each visible skill folder matches the skill name:
 
 ```text
-skills_install(layout="flat", dry_run=false)
+skills_install(layout="flat")
 ```
 
 You can also use `harnessSkillRoot` for a shared skills directory and add it to

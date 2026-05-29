@@ -79,7 +79,7 @@ class McpToolTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["server"], "agents-remember")
-        self.assertEqual(payload["version"], "0.2.0")
+        self.assertEqual(payload["version"], "0.3.0")
         self.assertEqual(payload["transport"], "stdio")
         self.assertEqual(payload["tokens"], 0)
 

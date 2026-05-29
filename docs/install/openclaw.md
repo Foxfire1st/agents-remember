@@ -27,7 +27,7 @@ OpenClaw workspaces may contain other standing instruction files. Keep Agents Re
 Install the runtime through the MCP server:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 OpenClaw commonly uses global skills under `~/.openclaw/skills/` and workspace skills under `<workspace>/skills/`, with workspace skills taking precedence.
@@ -41,7 +41,7 @@ OpenClaw requires direct `<skill-name>/SKILL.md` folders.
 Install skills with the default nested layout:
 
 ```text
-skills_install(dry_run=false)
+skills_install()
 ```
 
 ## Long-running Turns

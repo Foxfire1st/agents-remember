@@ -10,7 +10,7 @@ Official references:
 ## Install Runtime
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 ## Expose Skills
@@ -20,7 +20,7 @@ VS Code discovers project skills from `.github/skills`, `.claude/skills`, and `.
 For a workspace-local cross-agent install:
 
 ```text
-skills_install(dry_run=false)
+skills_install()
 ```
 
 If you prefer to point VS Code directly at the installed runtime, add the installed skill roots in the workspace settings:

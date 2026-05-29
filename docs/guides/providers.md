@@ -42,7 +42,7 @@ Omit a provider (or the whole block) to run without it. See the
 (it installs provider dependencies by default):
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 This builds the images but does **not** start indexing on its own.
@@ -53,8 +53,8 @@ Start the watchers so the providers index the configured repos and memory, then
 confirm they are healthy:
 
 ```text
-provider_watchers(action="start", dry_run=false)   # start watchers
-provider_watchers(action="refresh", dry_run=false)  # re-seed after repo/memory changes
+provider_watchers(action="start")   # start watchers
+provider_watchers(action="refresh")  # re-seed after repo/memory changes
 provider_status()                                   # compact readiness summary
 provider_diagnostics()                              # raw provider-native detail
 ```
@@ -82,7 +82,7 @@ See the [MCP tool reference](../reference/mcp-tools.md) for arguments.
   exact gap. Usual causes: Docker not running, or (grepai) Ollama/model not
   available.
 - **"run runtime_install before provider operations"** — the provider runner
-  integrity check failed; run `runtime_install(dry_run=false)` first.
+  integrity check failed; run `runtime_install()` first.
 - **Changed repo or memory not reflected** — `provider_watchers(action="refresh")`.
 
 Providers are optional: Agents Remember's memory, onboarding, drift, and task

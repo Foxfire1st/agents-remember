@@ -65,21 +65,21 @@ The settings file must be absolute and must live **outside** the `ar-coordinatio
 With the server loaded, request:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 The runtime installer reconciles package-owned runtime files into `ar-coordination`: installed `AGENTS.md` templates, skills, provider defaults, and runtime folders. It does not create memory repos, run onboarding bootstrap, overwrite live settings, or modify tasks, notes, worktrees, memory content, or temporary artifacts. Preview with `runtime_install(dry_run=true)`.
 
 When providers are enabled in the settings, `runtime_install` also builds or pulls their Docker images. It does **not** start indexing on its own — `C-13` (or the [Providers guide](guides/providers.md)) does that.
 
-Benchmark fixtures are optional and not installed by default. Install or refresh them with `runtime_install(dry_run=false, include_benchmarks=true)`. The benchmark package is idempotent and preserves local outputs under `ar-coordination/benchmarks/user-runs/`.
+Benchmark fixtures are optional and not installed by default. Install or refresh them with `runtime_install(include_benchmarks=true)`. The benchmark package is idempotent and preserves local outputs under `ar-coordination/benchmarks/user-runs/`.
 
 ## Expose Skills To Your Harness
 
 Some agent tools read skills from a folder in the workspace; others require skills in a specific registration folder. Use the MCP `skills_install` tool instead of copying skill folders by hand:
 
 ```text
-skills_install(dry_run=false)
+skills_install()
 ```
 
 The install target is normally inferred from the MCP settings location: settings under `<registration-root>/mcp/<settings>.json` install into `<registration-root>/skills/`. For recursive skill scanners such as Codex and Claude Code, this creates one copied namespace tree:
@@ -91,7 +91,7 @@ The install target is normally inferred from the MCP settings location: settings
 For harnesses that require the folder containing `SKILL.md` to match the skill's lowercase `name` (direct skill-folder scanners), use the flat layout:
 
 ```text
-skills_install(layout="flat", dry_run=false)
+skills_install(layout="flat")
 ```
 
 See the harness-specific pages under [install](install/README.md) for exact locations, and the [Skills reference](reference/skills.md) for the full skill list.
@@ -145,7 +145,7 @@ For a new memory repo, `C-13` runs `C-03-repo-bootstrap` for the target reposito
 If you enabled `codegraphcontext-code` or `grepai-memory`, `C-13` starts the watchers so the providers index your configured code and memory. You can also do this directly:
 
 ```text
-provider_watchers(action="start", dry_run=false)
+provider_watchers(action="start")
 provider_status()
 ```
 

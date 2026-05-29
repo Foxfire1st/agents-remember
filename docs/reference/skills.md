@@ -52,7 +52,7 @@ Those skills handle research, synthesis, design, planning, implementation, and a
 Use:
 
 ```text
-skills_install(dry_run=false)
+skills_install()
 ```
 
 The install target is normally inferred from the MCP settings location:

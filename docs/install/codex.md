@@ -25,7 +25,7 @@ Use an absolute path in the `@...` include when the coordination runtime is outs
 Install the runtime first through the MCP server:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Place the MCP settings under the Codex registration folder, such as
@@ -33,7 +33,7 @@ Place the MCP settings under the Codex registration folder, such as
 folder. Then expose the packaged skill tree:
 
 ```text
-skills_install(dry_run=false)
+skills_install()
 ```
 
 The default tree layout copies:

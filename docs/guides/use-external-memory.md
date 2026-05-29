@@ -39,7 +39,7 @@ ar-coordination/memory-repos/ar-<repo-name>/
 Install the runtime first through the MCP server:
 
 ```text
-runtime_install(dry_run=false)
+runtime_install()
 ```
 
 Then ask the agent to run `C-00-initialize-memory-repo` in external-memory mode for the target repository. External mode should be explicit; C-00 defaults to internal memory.
