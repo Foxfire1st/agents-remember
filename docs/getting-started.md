@@ -91,7 +91,7 @@ Treat these rules as workspace instructions!
 @ar-coordination/AGENTS.md
 ```
 
-Claude Code uses the same pattern in `CLAUDE.md`. Cursor can use a project rule. OpenClaw usually uses the `AGENTS.md` file in its dedicated agent workspace.
+Claude Code should load the directive with a SessionStart hook so it is treated as authoritative; a `CLAUDE.md` import works only as a degraded optional fallback — see [Install for Claude Code](install/claude-code.md). Cursor can use a project rule. OpenClaw usually uses the `AGENTS.md` file in its dedicated agent workspace.
 
 ## Initialize Memory
 
