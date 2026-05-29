@@ -65,4 +65,4 @@ Cite the actual online, intranet, library, or product documentation that directl
 
 ## Update History
 
-<!-- newest entry by date and time is appended at the top of the list; append-only; preserve earlier entries and add later entries for corrections, superseded notes, or follow-up clarification -->
+<!-- newest entry by date and time is prepended at the top of the list; prepend-only; preserve earlier entries and add later entries for corrections, superseded notes, or follow-up clarification -->
