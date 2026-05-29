@@ -147,6 +147,6 @@ def rule_includes_source(rule: StorageRule, relative_source: str) -> bool:
 
 def rule_excludes_source(rule: StorageRule, relative_source: str) -> bool:
     excludes = rule_patterns(rule, "excludes", [])
-    return (excludes and matches_any(excludes, relative_source)) or excludes_file_type(
+    return (bool(excludes) and matches_any(excludes, relative_source)) or excludes_file_type(
         rule, relative_source
     )

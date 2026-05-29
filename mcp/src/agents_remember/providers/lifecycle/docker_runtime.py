@@ -9,7 +9,7 @@ import shutil
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.lifecycle.command_runner import run_command
@@ -271,7 +271,7 @@ def docker_ping_ok(result: dict[str, Any]) -> bool:
     return result["returncode"] == 0 and "PONG" in result["stdout"]
 
 
-def raise_docker_ping_timeout(last_result: dict[str, Any] | None) -> None:
+def raise_docker_ping_timeout(last_result: dict[str, Any] | None) -> NoReturn:
     if last_result is None:
         raise ContextProviderError("timed out waiting for FalkorDB container health check")
     raise ContextProviderError(

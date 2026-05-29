@@ -3,12 +3,20 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
+from typing import Any
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import changed_worktree_paths, require_git
+from agents_remember.worktrees.modules.models import (
+    EntityFingerprintRefreshPlan,
+    EntityFingerprintRequiredItem,
+    EntityFingerprintRow,
+    OnboardingRefreshPlan,
+    RouteOverviewRefreshPlan,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
@@ -28,7 +36,9 @@ def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
     return onboarding_root / f"{source_path}.md"
 
 
-def onboarding_refresh_plan_for_context(context, changed_paths: list[str]) -> dict[str, object]:
+def onboarding_refresh_plan_for_context(
+    context, changed_paths: list[str]
+) -> OnboardingRefreshPlan:
     required: list[dict[str, str]] = []
     missing: list[str] = []
     unsupported: list[str] = []
@@ -101,7 +111,7 @@ def route_contains_changed_path(route: str, changed_paths: list[str]) -> bool:
 
 def route_overview_metadata_refresh_plan_for_context(
     context, changed_paths: list[str]
-) -> dict[str, object]:
+) -> RouteOverviewRefreshPlan:
     required: list[dict[str, str]] = []
     missing_metadata: list[str] = []
     for overview_path in sorted(context.onboarding_root.rglob("overview.md")):
@@ -131,7 +141,7 @@ def route_overview_metadata_refresh_plan_for_context(
 
 def validate_route_overview_refresh_plan_for_context(
     context, changed_paths: list[str]
-) -> dict[str, object]:
+) -> RouteOverviewRefreshPlan:
     plan = route_overview_metadata_refresh_plan_for_context(context, changed_paths)
     missing_metadata = plan["missing_metadata"]
     if missing_metadata:
@@ -169,7 +179,7 @@ def refresh_route_overview_metadata_for_context(
     return refreshed
 
 
-def refresh_route_indexes_for_context(context) -> dict[str, object]:
+def refresh_route_indexes_for_context(context) -> dict[str, Any]:
     result = build_route_indexes(
         code_root=context.code_repository_root,
         onboarding_root=context.onboarding_root,
@@ -179,7 +189,7 @@ def refresh_route_indexes_for_context(context) -> dict[str, object]:
     return result.to_dict()
 
 
-def route_index_refresh_plan_for_context(context) -> dict[str, object]:
+def route_index_refresh_plan_for_context(context) -> dict[str, Any]:
     result = build_route_indexes(
         code_root=context.code_repository_root,
         onboarding_root=context.onboarding_root,
@@ -201,7 +211,7 @@ def _fingerprint_table_header(lines: list[str]) -> tuple[dict[str, int], int] | 
     return None
 
 
-def _fingerprint_row(line: str, index: int, header: dict[str, int]) -> dict[str, object] | None:
+def _fingerprint_row(line: str, index: int, header: dict[str, int]) -> EntityFingerprintRow | None:
     if not line.lstrip().startswith("|"):
         return None
     cells = markdown_table_cells(line)
@@ -218,7 +228,7 @@ def _fingerprint_row(line: str, index: int, header: dict[str, int]) -> dict[str,
     }
 
 
-def parse_entity_fingerprint_rows(catalog_path: Path) -> list[dict[str, object]]:
+def parse_entity_fingerprint_rows(catalog_path: Path) -> list[EntityFingerprintRow]:
     if not filesystem.exists(catalog_path):
         return []
     lines = filesystem.read_text(catalog_path, encoding="utf-8").splitlines()
@@ -227,7 +237,7 @@ def parse_entity_fingerprint_rows(catalog_path: Path) -> list[dict[str, object]]
         return []
     header, start_index = table
 
-    rows: list[dict[str, object]] = []
+    rows: list[EntityFingerprintRow] = []
     for index in range(start_index, len(lines)):
         line = lines[index]
         if not line.strip() or line.lstrip().startswith("#"):
@@ -240,10 +250,10 @@ def parse_entity_fingerprint_rows(catalog_path: Path) -> list[dict[str, object]]
 
 def entity_fingerprint_refresh_plan_for_context(
     context, changed_paths: list[str]
-) -> dict[str, object]:
+) -> EntityFingerprintRefreshPlan:
     changed = set(changed_paths)
     catalog_path = context.onboarding_root / "entities.md"
-    required: list[dict[str, object]] = []
+    required: list[EntityFingerprintRequiredItem] = []
     unsupported: list[dict[str, str]] = []
     for row in parse_entity_fingerprint_rows(catalog_path):
         evidence_paths = list(row["evidence_paths"])
@@ -333,19 +343,19 @@ def refresh_entity_fingerprints_for_context(
 
 def onboarding_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
-) -> dict[str, object]:
+) -> OnboardingRefreshPlan:
     return onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
 
 
 def entity_fingerprint_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
-) -> dict[str, object]:
+) -> EntityFingerprintRefreshPlan:
     return entity_fingerprint_refresh_plan_for_context(contract_context(contract), changed_paths)
 
 
 def route_overview_metadata_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
-) -> dict[str, object]:
+) -> RouteOverviewRefreshPlan:
     return route_overview_metadata_refresh_plan_for_context(
         contract_context(contract), changed_paths
     )
@@ -353,14 +363,14 @@ def route_overview_metadata_refresh_plan(
 
 def validate_route_overview_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
-) -> dict[str, object]:
+) -> RouteOverviewRefreshPlan:
     return validate_route_overview_refresh_plan_for_context(
         contract_context(contract), changed_paths
     )
 
 
 def require_updated_sidecar_content(
-    context, plan: dict[str, object], *, memory_tree: Path | None = None
+    context, plan: OnboardingRefreshPlan, *, memory_tree: Path | None = None
 ) -> None:
     """Fail closeout when a changed source file's existing sidecar was not updated.
 
@@ -409,7 +419,7 @@ def require_updated_sidecar_content(
 
 def validate_onboarding_refresh_plan_for_context(
     context, changed_paths: list[str], *, memory_tree: Path | None = None
-) -> dict[str, object]:
+) -> OnboardingRefreshPlan:
     plan = onboarding_refresh_plan_for_context(context, changed_paths)
     missing = plan["missing"]
     unsupported = plan["unsupported"]
@@ -439,7 +449,7 @@ def validate_onboarding_refresh_plan_for_context(
 
 def validate_onboarding_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
-) -> dict[str, object]:
+) -> OnboardingRefreshPlan:
     return validate_onboarding_refresh_plan_for_context(
         contract_context(contract), changed_paths, memory_tree=contract.memory_worktree
     )

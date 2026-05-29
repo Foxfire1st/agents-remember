@@ -558,7 +558,8 @@ def _cgc_runtime_directories(layout: CgcRuntimeLayout) -> list[Path]:
 
 
 def _cgcignore_text(layout: CgcRuntimeLayout) -> str:
-    cgcignore_lines = DEFAULT_CGCIGNORE.rstrip("\n").splitlines()
+    cgcignore_lines: list[str] = []
+    cgcignore_lines.extend(DEFAULT_CGCIGNORE.rstrip("\n").splitlines())
     gitignore_patterns = read_gitignore_patterns(layout.code_repo_root)
     if gitignore_patterns:
         cgcignore_lines.extend(["", "# Inherited from source .gitignore"])

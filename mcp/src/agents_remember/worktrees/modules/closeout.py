@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from typing import Any
 
-from agents_remember.kernel.memory_ledger import load_ledger, prepend_mapping, write_ledger
+from agents_remember.kernel.memory_ledger import (
+    MemoryLedger,
+    load_ledger,
+    prepend_mapping,
+    write_ledger,
+)
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.worktrees.modules.context import contract_context, resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -20,7 +26,12 @@ from agents_remember.worktrees.modules.guidance import (
     next_guidance,
     status_payload,
 )
-from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.models import (
+    EntityFingerprintRefreshPlan,
+    OnboardingRefreshPlan,
+    RouteOverviewRefreshPlan,
+    WorktreeCommandResult,
+)
 from agents_remember.worktrees.modules.onboarding import (
     entity_fingerprint_refresh_plan,
     entity_fingerprint_refresh_plan_for_context,
@@ -50,7 +61,7 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
     code_dirty = worktree_dirty(contract.code_worktree)
     memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
     changed_paths = changed_worktree_paths(contract.code_worktree)
-    metadata_refresh = (
+    metadata_refresh: OnboardingRefreshPlan = (
         onboarding_refresh_plan(contract, changed_paths)
         if contract.memory_mode == "external"
         else {
@@ -59,7 +70,7 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
             "unsupported": [],
         }
     )
-    entity_refresh = (
+    entity_refresh: EntityFingerprintRefreshPlan = (
         entity_fingerprint_refresh_plan(contract, changed_paths)
         if contract.memory_mode == "external"
         else {
@@ -67,7 +78,7 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
             "unsupported": [],
         }
     )
-    route_overview_refresh = (
+    route_overview_refresh: RouteOverviewRefreshPlan = (
         route_overview_metadata_refresh_plan(contract, changed_paths)
         if contract.memory_mode == "external"
         else {
@@ -75,7 +86,7 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
             "missing_metadata": [],
         }
     )
-    route_index_refresh = (
+    route_index_refresh: dict[str, Any] = (
         route_index_refresh_plan_for_context(_closeout_contract_context(contract))
         if contract.memory_mode == "external"
         else {
@@ -184,7 +195,7 @@ def _closeout_contract_context(contract):
     return replace(context, code_repository_root=contract.code_worktree)
 
 
-def _memory_quality_failure_message(result: dict[str, object]) -> str:
+def _memory_quality_failure_message(result: dict[str, Any]) -> str:
     finding_count = int(result.get("findingCount", 0))
     findings = result.get("findings", [])
     sample: list[str] = []
@@ -206,7 +217,7 @@ def _memory_quality_failure_message(result: dict[str, object]) -> str:
     )
 
 
-def _run_memory_quality_gate(context) -> dict[str, object]:
+def _run_memory_quality_gate(context) -> dict[str, Any]:
     result = run_memory_quality_check(
         context.onboarding_root,
         drift_context=DriftCheckContext(
@@ -330,7 +341,7 @@ def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
     )
 
 
-def validate_direct_external_context(context, source_branch: str) -> object:
+def validate_direct_external_context(context, source_branch: str) -> MemoryLedger:
     if context.memory_mode != "external":
         raise RuntimeError("direct closeout currently requires external memory mode")
     if not context.memory_root.exists() or not (context.memory_root / ".git").exists():

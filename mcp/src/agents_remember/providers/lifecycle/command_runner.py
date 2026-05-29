@@ -6,7 +6,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agents_remember.providers.lifecycle.runtime_environment import subprocess_env
 
@@ -120,7 +120,9 @@ def popen_detached_command(
         popen_kwargs["creationflags"] |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
     else:
         popen_kwargs["start_new_session"] = True
-    return subprocess.Popen(
+    # No text/encoding kwargs are set, so this is a bytes-mode Popen; the
+    # ``**popen_kwargs`` spread defeats Popen's text-vs-bytes overload selection.
+    process = subprocess.Popen(
         command,
         cwd=str(cwd),
         env=merged_env,
@@ -129,3 +131,4 @@ def popen_detached_command(
         stderr=stderr,
         **popen_kwargs,
     )
+    return cast("subprocess.Popen[bytes]", process)

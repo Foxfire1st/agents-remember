@@ -289,10 +289,10 @@ def cgc_parallel_layout_action_results(
 def cgc_backend_all_error(
     args: argparse.Namespace,
     settings_path: Path,
-    backend: dict[str, Any],
+    backend: dict[str, Any] | None,
     action: str,
 ) -> dict[str, Any] | None:
-    if backend.get("ok"):
+    if backend is None or backend.get("ok"):
         return None
     return {
         "provider": "codegraphcontext",

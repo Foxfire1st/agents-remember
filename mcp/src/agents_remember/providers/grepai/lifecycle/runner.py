@@ -176,7 +176,7 @@ def grepai_watcher_dry_run_start_result(
     runner: dict[str, Any],
     network_result: dict[str, Any],
     image: dict[str, Any],
-    commands: list[list[str]],
+    commands: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "provider": "grepai",

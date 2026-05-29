@@ -91,10 +91,9 @@ class McpConfigTests(unittest.TestCase):
                 config.repositories["agents-remember-md"].path,
                 root / "workspace" / "agents-remember-md",
             )
-            self.assertEqual(
-                config.repositories["agents-remember-md"].memory_root.name,
-                "ar-agents-remember-md",
-            )
+            memory_root = config.repositories["agents-remember-md"].memory_root
+            assert memory_root is not None
+            self.assertEqual(memory_root.name, "ar-agents-remember-md")
             self.assertEqual(config.providers["grepai-memory"].scope, "workspace")
             self.assertEqual(config.providers["grepai-memory"].instance_id, "workspace")
             self.assertEqual(
@@ -300,10 +299,9 @@ class McpConfigTests(unittest.TestCase):
 
             config = load_config(path)
 
-            self.assertEqual(
-                config.repositories["agents-remember-md"].contract_path.name,
-                "contract.md",
-            )
+            contract_path = config.repositories["agents-remember-md"].contract_path
+            assert contract_path is not None
+            self.assertEqual(contract_path.name, "contract.md")
 
     def test_memory_settings_include_cannot_escape_repo_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

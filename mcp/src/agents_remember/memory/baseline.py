@@ -10,6 +10,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.memory_ledger import (
@@ -28,8 +29,14 @@ class BaselineRequest:
     workspace_root: Path
     code_repository_root: Path | None = None
     coordination_root: Path | None = None
-    topology: str | None = "external"
+    topology: Literal["internal", "external"] | None = "external"
     report: Path | None = None
+
+
+def _normalize_topology(value: str | None) -> Literal["internal", "external"] | None:
+    if value in ("internal", "external"):
+        return value
+    return None
 
 
 def request_from_args(args: argparse.Namespace) -> BaselineRequest:
@@ -38,7 +45,7 @@ def request_from_args(args: argparse.Namespace) -> BaselineRequest:
         workspace_root=args.workspace_root,
         code_repository_root=args.code_repository_root,
         coordination_root=args.coordination_root,
-        topology=args.topology,
+        topology=_normalize_topology(args.topology),
         report=args.report,
     )
 
@@ -57,7 +64,7 @@ def resolve_context(args: argparse.Namespace):
     return resolve_request_context(request_from_args(args))
 
 
-def run_drift(context, report_path: Path | None):
+def run_drift(context, report_path: Path | None) -> tuple[list[drift.DriftRow], Path]:
     if not context.onboarding_root.exists():
         raise RuntimeError(f"onboarding root does not exist: {context.onboarding_root}")
     rows = [
@@ -85,11 +92,11 @@ def run_drift(context, report_path: Path | None):
     return rows, report
 
 
-def drift_summary(rows: list[object]) -> dict[str, int]:
+def drift_summary(rows: list[drift.DriftRow]) -> dict[str, int]:
     return drift.counts(rows)
 
 
-def actionable_rows(rows: list[object]) -> list[object]:
+def actionable_rows(rows: list[drift.DriftRow]) -> list[drift.DriftRow]:
     return [row for row in rows if row.classification in drift.ACTIONABLE_CLASSIFICATIONS]
 
 
@@ -169,7 +176,7 @@ def ledger_status(path: Path) -> dict[str, object]:
     }
 
 
-def base_payload(context, rows: list[object], report: Path) -> dict[str, object]:
+def base_payload(context, rows: list[drift.DriftRow], report: Path) -> dict[str, object]:
     ledger = ledger_status(context.ledger_path)
     actionable = actionable_rows(rows)
     state = "ready"
@@ -211,11 +218,13 @@ def baseline_adopt(
     context = resolve_request_context(request)
     if context.topology != "external":
         raise RuntimeError("adoption requires external topology")
+    if context.ledger_path is None:
+        raise RuntimeError("external memory context is missing a ledger path")
     rows, report = run_drift(context, request.report)
     payload = base_payload(context, rows, report)
-    if payload["ledger"]["exists"]:
+    if ledger_status(context.ledger_path)["exists"]:
         return 0, payload
-    if payload["drift"]["actionable"] and not accept_drift:
+    if actionable_rows(rows) and not accept_drift:
         payload["message"] = (
             "actionable drift blocks adoption; refresh onboarding with C-05 or rerun with --accept-drift"
         )

@@ -83,7 +83,7 @@ def grepai_seed_source_extra_args(
 
 def grepai_clone_bundle(args: Any, target_settings: dict[str, Any]) -> dict[str, Any]:
     context = _resolve_clone_context(args, target_settings)
-    if _is_clone_skip(context):
+    if not isinstance(context, GrepaiCloneContext):
         return context
     source_start = _source_backend_start(args, context)
     target_start = _target_backend_start(args, context)
@@ -327,10 +327,6 @@ def _clone_success_payload(
         "targetBackend": target_start,
         "clone": clone,
     }
-
-
-def _is_clone_skip(value: Any) -> bool:
-    return isinstance(value, dict) and value.get("skipped") is True and value.get("ok") is False
 
 
 def _clone_skip(reason: str) -> dict[str, Any]:

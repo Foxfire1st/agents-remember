@@ -11,14 +11,17 @@ from agents_remember.models.providers import (
     CGCWatcherState,
     ContextProviderItem,
     GrepAIWatcherState,
+    ProviderCapability,
     ProviderDiagnosticsItem,
     ProviderDiagnosticsResponse,
     ProviderIdentity,
     ProviderRawStatus,
+    ProviderRuntime,
     ProviderState,
     ProviderStatusResponse,
     ProviderSummary,
     ProviderTargetRepo,
+    WatcherState,
 )
 from agents_remember.providers import lifecycle
 from agents_remember.providers.current_state import write_current_provider_state
@@ -364,7 +367,7 @@ def _cgc_watcher_state(repo_id: str, watcher: dict[str, Any]) -> CGCWatcherState
     )
 
 
-def _watcher_state_from_up(watcher_up: Any) -> str:
+def _watcher_state_from_up(watcher_up: Any) -> WatcherState:
     if watcher_up is True:
         return "running"
     if watcher_up is False:
@@ -411,13 +414,13 @@ def _provider_state(value: Any) -> ProviderState:
     return cast(ProviderState, state)
 
 
-def _provider_capability(provider_id: str) -> str:
+def _provider_capability(provider_id: str) -> ProviderCapability:
     if provider_id == "grepai-memory":
         return "semantic-memory-search"
     return "code-relationship-search"
 
 
-def _provider_runtime(provider_id: str) -> str:
+def _provider_runtime(provider_id: str) -> ProviderRuntime:
     if provider_id in {"grepai-memory", "codegraphcontext-code"}:
         return "docker"
     return "unknown"

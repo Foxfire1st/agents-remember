@@ -5,7 +5,12 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
+from agents_remember.kernel.memory_ledger import (
+    LedgerError,
+    MemoryLedger,
+    find_mapping,
+    load_ledger,
+)
 from agents_remember.providers import provider_setup
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -525,7 +530,7 @@ def _dirty_memory_source_state(args: argparse.Namespace) -> dict[str, object]:
 
 def _load_memory_ledger(
     contract: WorktreeContract, args: argparse.Namespace
-) -> object | dict[str, object]:
+) -> MemoryLedger | dict[str, object]:
     assert contract.memory_repo_path is not None
     try:
         return load_ledger(contract.memory_repo_path / "memory.md")

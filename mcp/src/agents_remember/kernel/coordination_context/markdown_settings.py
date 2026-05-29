@@ -194,6 +194,8 @@ class _MarkdownSettingsParser:
             target.append(value)
 
     def global_target_list(self) -> list[str] | None:
+        if self.current_list is None:
+            return None
         return {
             "includes": self.include_paths,
             "excludes": self.exclude_paths,
@@ -253,13 +255,13 @@ class _MarkdownSettingsParser:
             self.append_current_rule_value(clean_scalar(stripped[2:]))
 
     def try_apply_storage_rule_value(self, indent: int, stripped: str) -> bool:
-        if indent != 8 or not stripped.startswith("storage:"):
+        if indent != 8 or not stripped.startswith("storage:") or self.current_rule is None:
             return False
         self.current_rule["storage"] = clean_scalar(stripped.split(":", 1)[1])
         return True
 
     def try_select_storage_rule_list(self, indent: int, stripped: str) -> bool:
-        if indent != 8 or stripped not in {"includes:", "excludes:"}:
+        if indent != 8 or stripped not in {"includes:", "excludes:"} or self.current_rule is None:
             return False
         self.current_list = "includes" if stripped == "includes:" else "excludes"
         self.current_rule[self.current_list] = []

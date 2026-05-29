@@ -313,7 +313,9 @@ def selected_candidates(
     plan: dict[str, object], include_review_required: set[str]
 ) -> list[dict[str, object]]:
     selected = []
-    for candidate in plan["candidates"]:
+    candidates = plan["candidates"]
+    assert isinstance(candidates, list)
+    for candidate in candidates:
         assert isinstance(candidate, dict)
         if candidate["decision"] == "auto-carry" or (
             candidate["decision"] == "review-required"

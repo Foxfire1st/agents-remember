@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,8 @@ def process_alive(pid: int) -> bool:
 
 
 def windows_process_alive(pid: int) -> bool:
+    if sys.platform != "win32":
+        return False
     kernel32 = ctypes.windll.kernel32
     process_query_limited_information = 0x1000
     still_active = 259

@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import stat
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -138,10 +139,10 @@ def _exists_or_link(path: Path) -> bool:
 def _is_link(path: Path) -> bool:
     if path.is_symlink() or os.path.islink(path):
         return True
+    if sys.platform != "win32":
+        return False
     try:
         attrs = path.lstat().st_file_attributes
-    except AttributeError:
-        return False
     except FileNotFoundError:
         return False
     return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)

@@ -192,7 +192,7 @@ def git_head(repo_root: Path) -> str | None:
 
 def cgc_seed_bundle(args: Any, settings: dict[str, Any]) -> dict[str, Any]:
     context = _resolve_seed_context(args, settings)
-    if _is_seed_skip(context):
+    if not isinstance(context, CgcSeedContext):
         return context
 
     paths = _seed_bundle_paths(args, context)
@@ -222,14 +222,16 @@ def _resolve_seed_context(args: Any, settings: dict[str, Any]) -> CgcSeedContext
         return source_settings
 
     target, source = _seed_roots(args, settings, source_settings, source_coordination_root)
-    root_failure = _first_seed_skip(target, source)
-    if root_failure is not None:
-        return root_failure
+    if isinstance(target, dict):
+        return target
+    if isinstance(source, dict):
+        return source
     target_runtime = _seed_runtime_root(args.coordination_root, settings, target[0])
+    if isinstance(target_runtime, dict):
+        return target_runtime
     source_runtime = _seed_runtime_root(source_coordination_root, source_settings, source[0])
-    runtime_failure = _first_seed_skip(target_runtime, source_runtime)
-    if runtime_failure is not None:
-        return runtime_failure
+    if isinstance(source_runtime, dict):
+        return source_runtime
     return _validated_seed_context(
         args,
         source_coordination_root,
@@ -272,10 +274,6 @@ def _seed_roots(
         "source",
     )
     return target, source
-
-
-def _first_seed_skip(*values: Any) -> dict[str, Any] | None:
-    return next((value for value in values if _is_seed_skip(value)), None)
 
 
 def _is_seed_skip(value: Any) -> bool:

@@ -59,7 +59,7 @@ def cgc_install_commands(args: argparse.Namespace, layout: Any) -> tuple[Path, l
     ]
 
 
-def cgc_install_dry_run_result(layout: Any, commands: list[list[str]]) -> dict[str, Any]:
+def cgc_install_dry_run_result(layout: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "install",
@@ -123,7 +123,7 @@ def cgc_write_install_state(
 
 
 def cgc_install_preflight(
-    args: argparse.Namespace, layout: Any, commands: list[list[str]]
+    args: argparse.Namespace, layout: Any, commands: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
         return [], cgc_install_dry_run_result(layout, commands), None

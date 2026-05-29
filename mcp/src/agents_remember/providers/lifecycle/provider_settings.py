@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.lifecycle.state_files import read_json
@@ -41,7 +41,7 @@ def provider_enabled(data: dict[str, Any], provider_id: str) -> bool:
     return isinstance(provider, dict) and provider.get("enabled") is True
 
 
-def context_providers_enabled(context: Any) -> bool:
+def context_providers_enabled(context: Any) -> TypeGuard[dict[str, Any]]:
     return isinstance(context, dict) and context.get("enabled") is True
 
 

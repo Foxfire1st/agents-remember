@@ -85,7 +85,7 @@ def cgc_write_refresh_state(layout: Any, result: dict[str, Any]) -> None:
 
 
 def cgc_refresh_preflight(
-    args: argparse.Namespace, layout: Any, command: list[str]
+    args: argparse.Namespace, layout: Any, command: dict[str, Any]
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
         return cgc_refresh_dry_result(layout, command), None

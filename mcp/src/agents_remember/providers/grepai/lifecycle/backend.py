@@ -7,7 +7,7 @@ import argparse
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from agents_remember.providers.context import (
     ContextProviderError,
@@ -99,7 +99,7 @@ def docker_postgres_success_result(
     }
 
 
-def raise_postgres_timeout(last_result: dict[str, Any] | None) -> None:
+def raise_postgres_timeout(last_result: dict[str, Any] | None) -> NoReturn:
     if last_result is None:
         raise ContextProviderError("timed out waiting for GrepAI PostgreSQL health check")
     raise ContextProviderError(
@@ -386,7 +386,7 @@ def grepai_backend_dry_run_result(
     layout: Any,
     backend: dict[str, Any],
     network_result: dict[str, Any],
-    commands: list[list[str]],
+    commands: list[dict[str, Any]],
     postgres_port: int,
     compose: dict[str, Any] | None = None,
     migration: dict[str, Any] | None = None,

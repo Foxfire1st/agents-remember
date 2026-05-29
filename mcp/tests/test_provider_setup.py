@@ -411,7 +411,7 @@ class ProviderSetupTests(unittest.TestCase):
             }
 
             isolated = provider_setup.isolated_cgc_settings(args, settings)
-            self.assertIsNotNone(isolated)
+            assert isolated is not None
             cgc = isolated["contextProviders"]["providers"]["codegraphcontext-code"]
             instance_id = provider_instance_id(
                 "worktree",
@@ -515,7 +515,7 @@ class ProviderSetupTests(unittest.TestCase):
             }
 
             isolated = provider_setup.isolated_grepai_settings(args, settings)
-            self.assertIsNotNone(isolated)
+            assert isolated is not None
             grepai = isolated["contextProviders"]["providers"]["grepai-memory"]
             instance_id = provider_instance_id(
                 "worktree",

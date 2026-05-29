@@ -297,7 +297,7 @@ def grepai_embedder_dry_run_result(
     settings_path: Path,
     embedder: dict[str, Any],
     network_result: dict[str, Any],
-    commands: list[list[str]],
+    commands: list[dict[str, Any]],
     http_port: int,
     compose: dict[str, Any] | None = None,
     migration: dict[str, Any] | None = None,

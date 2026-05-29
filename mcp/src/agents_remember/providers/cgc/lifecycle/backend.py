@@ -316,7 +316,7 @@ def cgc_backend_dry_run_result(
     settings_path: Path,
     layout: Any,
     backend: dict[str, Any],
-    commands: list[list[str]],
+    commands: list[dict[str, Any]],
     falkordb_port: int,
     browser_port: int,
     network: dict[str, Any],

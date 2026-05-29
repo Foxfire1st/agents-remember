@@ -13,6 +13,7 @@ from argparse import Namespace
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -35,6 +36,7 @@ from agents_remember.memory import carryover as memory_carryover
 from agents_remember.providers.identity import provider_instance_id
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
+from agents_remember.worktrees.modules.models import OnboardingRefreshPlan
 from agents_remember.worktrees.modules.onboarding import require_updated_sidecar_content
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
@@ -238,6 +240,7 @@ def open_external_contract_fixture(root: Path):
         memory_work_branch="ar/commit-approval-thing",
         memory_base_commit=memory_base,
     )
+    assert contract.memory_worktree is not None
     git(
         code_repo,
         "worktree",
@@ -354,6 +357,7 @@ def closed_external_contract_fixture(
         memory_work_branch="ar/integrate-thing",
         memory_base_commit=memory_base,
     )
+    assert contract.memory_worktree is not None
     git(
         code_repo,
         "worktree",
@@ -528,7 +532,7 @@ class WorktreeSupportTests(unittest.TestCase):
                     seed_source_coordination_root=coordination_root,
                 ),
             )
-            captured: dict[str, object] = {}
+            captured: dict[str, Any] = {}
 
             def fake_run_provider_setup(request):
                 captured["request"] = request
@@ -599,7 +603,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_work_branch="ar/fix-thing",
                 memory_base_commit="m1",
             )
-            result = worktree_manager.prepare_memory_for_start(
+            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, Namespace(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "compatible")
@@ -633,7 +637,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_work_branch="ar/fix-thing",
                 memory_base_commit=memory_seed,
             )
-            result = worktree_manager.prepare_memory_for_start(
+            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, Namespace(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "blocked")
@@ -662,7 +666,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_work_branch="ar/fix-thing",
                 memory_base_commit="m1",
             )
-            result = worktree_manager.prepare_memory_for_start(
+            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, Namespace(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "compatible")
@@ -683,7 +687,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_base_commit="c1",
                 worktree_name="fix-thing",
             )
-            result = worktree_manager.prepare_memory_for_start(
+            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, Namespace(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "internal")
@@ -709,6 +713,7 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             write_contract(contract.contract_path, contract)
             loaded = load_contract(contract.contract_path)
+            assert loaded.memory_worktree is not None
             self.assertEqual(
                 loaded.task_root,
                 root / "ar-coordination" / "tasks" / "device-management" / "fix-platform-status",
@@ -913,6 +918,7 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = dirty_open_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
             onboarding_file = contract.memory_worktree / "onboarding" / "feature.txt.md"
             args = Namespace(
                 contract_path=contract.contract_path,
@@ -1253,6 +1259,8 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            assert contract.memory_repo_path is not None
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -1316,6 +1324,7 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
+            assert contract.memory_repo_path is not None
             parallel_code = commit_file(
                 contract.code_repo_path, "parallel.txt", "parallel\n", "Parallel code change"
             )
@@ -1364,6 +1373,7 @@ class WorktreeSupportTests(unittest.TestCase):
             contract = closed_external_contract_fixture(
                 root, code_path="README.md", code_content="# Task\n"
             )
+            assert contract.memory_repo_path is not None
             parallel_code = commit_file(
                 contract.code_repo_path, "README.md", "# Parallel\n", "Parallel conflicting change"
             )
@@ -1886,7 +1896,7 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             context = adopt_baseline.resolve_context(args)
             rows, report = adopt_baseline.run_drift(context, None)
-            payload = adopt_baseline.base_payload(context, rows, report)
+            payload: dict[str, Any] = adopt_baseline.base_payload(context, rows, report)
             self.assertEqual(
                 report,
                 workspace
@@ -2006,10 +2016,10 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",
             )
-            plan = memory_carryover.build_plan(args)
+            plan: dict[str, Any] = memory_carryover.build_plan(args)
             self.assertEqual(plan["counts"], {"auto-carry": 1})
 
-            payload = memory_carryover.apply_carryover(args)
+            payload: dict[str, Any] = memory_carryover.apply_carryover(args)
             official_onboarding = official_memory / "onboarding" / "feature.py.md"
             ledger = parse_ledger_text((official_memory / "memory.md").read_text(encoding="utf-8"))
             self.assertEqual(payload["state"], "carried-over")
@@ -2061,10 +2071,10 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",
             )
-            plan = memory_carryover.build_plan(args)
+            plan: dict[str, Any] = memory_carryover.build_plan(args)
             self.assertEqual(plan["candidates"][0]["decision"], "review-required")
             self.assertEqual(plan["candidates"][0]["evidence"], "same-path-changed")
-            payload = memory_carryover.apply_carryover(args)
+            payload: dict[str, Any] = memory_carryover.apply_carryover(args)
             self.assertEqual(payload["state"], "nothing-to-carryover")
             self.assertFalse((official_memory / "onboarding" / "feature.py.md").exists())
 
@@ -2094,7 +2104,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_repository_name="repo-a",
                 replace_existing=False,
             )
-            plan = memory_carryover.build_plan(args)
+            plan: dict[str, Any] = memory_carryover.build_plan(args)
             self.assertEqual(plan["candidates"][0]["decision"], "reject")
             self.assertEqual(plan["candidates"][0]["evidence"], "not-landed")
 
@@ -2325,7 +2335,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     "workspace": {"fixturePath": "workspaces/case-a"},
                 },
             )
-            captured: dict[str, object] = {}
+            captured: dict[str, Any] = {}
 
             def fake_run_provider_setup(
                 request: benchmark_runner.provider_setup.ProviderSetupRequest,
@@ -2382,7 +2392,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     "workspace": {"fixturePath": "workspaces/case-a"},
                 },
             )
-            captured: dict[str, object] = {}
+            captured: dict[str, Any] = {}
 
             def fake_run_provider_setup(
                 request: benchmark_runner.provider_setup.ProviderSetupRequest,
@@ -2533,7 +2543,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 command: list[str],
                 *,
                 input: str,
-                stdout: object,
+                stdout: Any,
                 stderr: object,
                 text: bool,
                 check: bool,
@@ -2690,7 +2700,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
 
 
 class RequireUpdatedSidecarContentTests(unittest.TestCase):
-    def _setup(self, tmp: Path) -> tuple[Path, Path, dict[str, object]]:
+    def _setup(self, tmp: Path) -> tuple[Path, Path, OnboardingRefreshPlan]:
         memory_repo = tmp / "memory"
         init_repo(memory_repo)
         onboarding_root = memory_repo / "onboarding"
@@ -2698,7 +2708,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
         git(memory_repo, "add", "-A")
         git(memory_repo, "commit", "-m", "Add sidecar")
         sidecar = onboarding_root / "src" / "app.py.md"
-        plan: dict[str, object] = {
+        plan: OnboardingRefreshPlan = {
             "required": [{"source_path": "src/app.py", "onboarding_file": sidecar.as_posix()}],
             "missing": [],
             "unsupported": [],
