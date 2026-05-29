@@ -31,9 +31,11 @@ agents-remember-md/mcp/src/agents_remember/package_data/runtime/skills/
 | `C-04-retrieval-strategy-router` | Choose Semantics, Relationship, or Intent retrieval, using providers for discovery and onboarding/source as proof. |
 | `C-05-create-or-update-onboarding-files` | Create and maintain file-level onboarding and entity catalogs. |
 | `C-08-ar-coordination-context-resolver` | Resolve memory, coordination, task, temp, and cross-repo facts. |
-| `C-09-git-worktree-manager` | Manage worktree lifecycle, direct closeout, integration, and cleanup gates. |
+| `C-09-git-worktree-manager` | Manage worktree lifecycle, integration, and cleanup gates. |
 | `C-10-adopt-memory-baseline` | Adopt existing external-memory onboarding into the first ledgered baseline. |
 | `C-11-memory-carryover-from-branch` | Carry richer memory forward after matching code lands. |
+| `C-12-closeout` | Own the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks. |
+| `C-13-install-and-onboard` | Lead first-run setup: preflight checks, start hook (or instruction placement), memory repo, onboarding bootstrap, and provider indexing. |
 
 ## Heavy Workflow Phase Skills
 

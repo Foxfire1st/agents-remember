@@ -111,4 +111,6 @@ C-05 owns file-level onboarding and repo entity catalog maintenance.
 
 C-08 owns context resolution facts only.
 
-C-09 owns worktree lifecycle, direct closeout, and approved commit sequencing.
+C-09 owns worktree lifecycle, integration, and cleanup.
+
+C-12 owns the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks.

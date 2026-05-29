@@ -5,65 +5,103 @@ Agents Remember. It lets an MCP-capable coding harness call Agents Remember
 operations from the host instead of asking the model to edit or execute
 coordinator scripts directly.
 
-Source checkout: [github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st/agents-remember-md)
+Source: [github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st/agents-remember-md)
 
-The full project documentation lives one directory up in the source checkout:
+## Quickstart
 
-- [Agents Remember README](../README.md)
-- [Getting Started](../docs/getting-started.md)
-- [Settings Reference](../docs/reference/settings-json.md)
+Setup is agent-driven. Ask your agent to:
+
+1. **Install and wire Agents Remember MCP** — set it to run via
+   `uvx agents-remember-mcp --config <absolute-path>/agents-remember-settings.json`,
+   help you fill in that settings file (starter below), and register it with this
+   harness. **Then restart the harness** so it loads the server.
+2. **Install Agents Remember** — run `runtime_install`, then `skills_install`
+   (scaffolding, skills, and — if providers are enabled and Docker is running —
+   the provider images).
+3. **Onboard your project** — run the `C-13-install-and-onboard` skill: it
+   pre-checks the setup, installs the start hook (or places the directive for
+   harnesses without one), sets up the memory repo (it will ask: scaffold a new
+   one or use an existing one), bootstraps onboarding, and starts the providers
+   indexing your code and memory.
+
+The only hands-on steps for you: ask, restart once after step 1, and answer the
+new-vs-existing memory question in step 3.
 
 ## Requirements
 
 - Python 3.11 or newer
 - an MCP-capable coding harness
+- [uv](https://docs.astral.sh/uv/) (for `uvx`) or pip
 - Git for repository and memory ledger operations
-- Docker when provider tools are enabled
+- Docker when provider tools are enabled (plus Ollama for the grepai embedder)
 
-## Install
+## Install And Run
 
-Install from PyPI:
+The simplest path is `uvx`, which fetches and runs the server on demand — no
+manual virtualenv or PATH setup:
+
+```text
+uvx agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
+```
+
+Or install with pip and use the console command:
 
 ```text
 python -m pip install agents-remember-mcp
-```
-
-The installed console command is:
-
-```text
 agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
 ```
 
-The config path must be absolute. The MCP authority settings file must live
-outside the `ar-coordination/` runtime folder. A starter settings file is
-available in the source checkout at
-`examples/mcp/settings.example.json`.
+The config path must be absolute, and the settings file must live outside the
+`ar-coordination/` runtime folder.
 
-## Harness Setup
+## Settings
 
-Register the MCP server with your harness by pointing it at the installed
-command and the trusted settings file:
+A minimal starter `agents-remember-settings.json` (your agent can fill this in):
 
 ```json
 {
-  "command": "agents-remember-mcp",
+  "version": 1,
+  "coordinationRoot": "/absolute/path/to/ar-coordination",
+  "workspaceRoot": "/absolute/path/to/workspace",
+  "repositories": {
+    "<your-repo-name>": {}
+  },
+  "providers": {
+    "codegraphcontext-code": {},
+    "grepai-memory": {}
+  }
+}
+```
+
+`coordinationRoot` is where the runtime and memory repos live (populated by
+`runtime_install`). `workspaceRoot` holds your code repos. List each repo you
+want Agents Remember to manage under `repositories`. Omit or empty the
+`providers` block if you do not want the Docker-backed providers. Full field
+reference:
+[settings-json.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/settings-json.md).
+
+## Harness Setup
+
+Register the MCP server with your harness by pointing it at `uvx` (or the
+installed console command) and the absolute settings path:
+
+```json
+{
+  "command": "uvx",
   "args": [
+    "agents-remember-mcp",
     "--config",
     "/absolute/path/to/agents-remember-settings.json"
   ]
 }
 ```
 
-After installing or changing the MCP server registration, restart the harness
-so it reloads the server and discovers the tool list.
-
-Once the MCP server is running, ask your model to use Agents Remember. Normal
-use should be agent-driven through MCP tool calls; manual tool calls are mainly
-for setup and troubleshooting.
+After installing or changing the MCP server registration, restart the harness so
+it reloads the server and discovers the tool list.
 
 ## First Operations
 
-For a new workspace, the usual first MCP calls are:
+For a new workspace, the usual first MCP calls (Quickstart step 2) are:
 
 ```text
 server_info()
@@ -72,8 +110,9 @@ skills_install(dry_run=false)
 context_packet(repo_id="<repo-id>", include_providers=true)
 ```
 
-Then ask the model to initialize memory for the target repository and bootstrap
-onboarding through the installed Agents Remember skills.
+Then run the installed `C-13-install-and-onboard` skill (Quickstart step 3) to
+install the start hook, set up the memory repo, bootstrap onboarding, and start
+provider indexing.
 
 ## Tool Surface
 
@@ -87,4 +126,11 @@ The server exposes tools for:
 - benchmark preparation and execution
 
 Provider tools only work when the MCP settings enable the provider and the
-required Docker services are available.
+required Docker services are available. Full tool list:
+[MCP Tool Reference](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/mcp-tools.md).
+
+## More
+
+- [Project README](https://github.com/Foxfire1st/agents-remember-md/blob/main/README.md)
+- [Getting Started](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/getting-started.md)
+- [Settings Reference](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/settings-json.md)

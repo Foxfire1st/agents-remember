@@ -103,7 +103,7 @@ Most users should start with internal memory under `<repo>/ar-memory/`. External
 
 ### What is `memory.md`?
 
-`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. C-09 uses it during worktree closeout and integration so code and memory do not drift apart silently.
+`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. C-12 writes it during closeout and C-09 uses it during worktree integration, so code and memory do not drift apart silently.
 
 ### Can a workspace mix internal and external memory?
 

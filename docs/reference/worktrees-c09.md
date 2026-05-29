@@ -1,6 +1,9 @@
 # C-09 Worktrees And Closeout
 
-`C-09-git-worktree-manager` owns worktree lifecycle and approved closeout sequencing.
+`C-09-git-worktree-manager` owns worktree lifecycle, integration, and cleanup.
+Closeout sequencing and the commit approval gate belong to `C-12-closeout`
+(see [Skills](skills.md)); C-09 only supplies the worktree contract path that
+C-12's closeout consumes.
 
 ## When To Use C-09
 
@@ -31,12 +34,16 @@ new code worktree.
 
 ## Closeout Order
 
-For external-memory closeout, C-09 keeps code and memory aligned:
+Closeout is run by `C-12-closeout`. For worktree-backed tasks, C-09
+hands C-12 the task `contract.md`; C-12 keeps code and memory aligned:
 
 1. commit code
 2. refresh affected onboarding metadata to the code commit
 3. commit memory content
 4. update and commit `memory.md`
+
+C-12 records the closeout commits back into the contract, and C-09 owns the
+later integration and cleanup of those committed branches.
 
 ## Integration
 
@@ -44,6 +51,6 @@ C-09 integration lands reviewed task work back onto source branches. It can use 
 
 ## Approval Gates
 
-Implementation approval is not commit approval. For worktree-backed tasks, the agent should run a dry-run closeout preview and ask for explicit commit approval before C-09 creates commits.
+Implementation approval is not commit approval. For worktree-backed tasks, the agent should run a dry-run closeout preview and ask for explicit commit approval before C-12 creates the closeout commits.
 
 Cleanup happens only after successful integration and explicit approval.

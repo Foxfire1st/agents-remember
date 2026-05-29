@@ -2,14 +2,17 @@
 
 This guide sets up Agents Remember in a workspace that contains one or more code repositories.
 
-The short version is:
+Setup is agent-driven. Once the MCP server is wired in, you ask your agent to do the work and answer one question along the way.
 
-1. configure the Agents Remember MCP server
-2. install the runtime into `ar-coordination` through `runtime_install`
-3. expose packaged skills to your agent harness through `skills_install`
-4. point workspace instructions at `ar-coordination/AGENTS.md`
-5. initialize memory for a target repository
-6. bootstrap initial onboarding
+## The Short Version
+
+Ask your agent to:
+
+1. **Wire the MCP server** — Register Agents Remember MCP with this harness using `uvx`, help you author the settings file, then **restart the harness** so it loads the server.
+2. **Install Agents Remember** — Run `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled).
+3. **Onboard your project** — Run `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
+
+The only hands-on steps for you is to restart once after step 1, and then continue from there.
 
 ## Example Workspace
 
@@ -23,64 +26,84 @@ projects/
 
 `agents-remember-md` is the source checkout. `ar-coordination` is the installed runtime and local coordination area. `my-app` is the repository you want agents to work on.
 
+## Manual Wire Of The MCP Server
+
+The agent should now how to setup the mcp. But if it doesn't work out here is how to do it manually. The simplest path is `uvx`, which fetches and runs the server on demand — no manual virtualenv or PATH setup. Register it with your harness by pointing the command at `uvx` and an **absolute** settings path:
+
+```json
+{
+  "command": "uvx",
+  "args": [
+    "agents-remember-mcp",
+    "--config",
+    "/absolute/path/to/agents-remember-settings.json"
+  ]
+}
+```
+
+A minimal starter `agents-remember-settings.json`:
+
+```json
+{
+  "version": 1,
+  "coordinationRoot": "/absolute/path/to/ar-coordination",
+  "workspaceRoot": "/absolute/path/to/workspace",
+  "repositories": {
+    "<your-repo-name>": {}
+  },
+  "providers": {
+    "codegraphcontext-code": {},
+    "grepai-memory": {}
+  }
+}
+```
+
+The settings file must be absolute and must live **outside** the `ar-coordination/` runtime folder. See the [settings.json reference](reference/settings-json.md) for every field. After registering or changing the server, **restart the harness** so it discovers the tool list.
+
 ## Install The Runtime
 
-Configure the Agents Remember MCP server with trusted settings that point
-`coordinationRoot` at `ar-coordination`. Then request:
+With the server loaded, request:
 
 ```text
 runtime_install(dry_run=false)
 ```
 
-The MCP runtime installer reconciles package-owned runtime files into `ar-coordination`: installed `AGENTS.md` templates, skills, provider defaults, and runtime folders. It does not create memory repos, run onboarding bootstrap, overwrite live settings, or modify tasks, notes, worktrees, memory content, or temporary artifacts.
+The runtime installer reconciles package-owned runtime files into `ar-coordination`: installed `AGENTS.md` templates, skills, provider defaults, and runtime folders. It does not create memory repos, run onboarding bootstrap, overwrite live settings, or modify tasks, notes, worktrees, memory content, or temporary artifacts. Preview with `runtime_install(dry_run=true)`.
 
-To preview an install:
+When providers are enabled in the settings, `runtime_install` also builds or pulls their Docker images. It does **not** start indexing on its own — `C-13` (or the [Providers guide](guides/providers.md)) does that.
 
-```text
-runtime_install(dry_run=true)
-```
-
-Benchmark fixtures are optional and are not installed by default. Install or refresh them with:
-
-```text
-runtime_install(dry_run=false, include_benchmarks=true)
-```
-
-The benchmark package is idempotent. Reinstalling refreshes package-owned benchmark cases, templates, prompts, and author results while preserving local outputs under `ar-coordination/benchmarks/user-runs/`. Benchmark preparation generates resettable case workspaces and clones pinned code and memory repositories into them.
+Benchmark fixtures are optional and not installed by default. Install or refresh them with `runtime_install(dry_run=false, include_benchmarks=true)`. The benchmark package is idempotent and preserves local outputs under `ar-coordination/benchmarks/user-runs/`.
 
 ## Expose Skills To Your Harness
 
-Some agent tools can read skills from a repository in the workspace. Others require skills to live in a specific folder. Use the MCP `skills_install` tool instead of copying skill folders by hand.
-
-For recursive skill scanners such as Codex and Claude Code, place the MCP
-settings under the harness registration folder. For Codex, use a path such as
-`/absolute/path/to/.codex/mcp/`, and run:
+Some agent tools read skills from a folder in the workspace; others require skills in a specific registration folder. Use the MCP `skills_install` tool instead of copying skill folders by hand:
 
 ```text
 skills_install(dry_run=false)
 ```
 
-This creates one copied namespace tree:
+The install target is normally inferred from the MCP settings location: settings under `<registration-root>/mcp/<settings>.json` install into `<registration-root>/skills/`. For recursive skill scanners such as Codex and Claude Code, this creates one copied namespace tree:
 
 ```text
 .codex/skills/agents-remember-md/
 ```
 
-For direct skill-folder scanners such as Cursor or Windsurf, place the MCP
-settings under the matching harness registration folder, such as
-`/absolute/path/to/.windsurf/mcp/`, then run:
+For harnesses that require the folder containing `SKILL.md` to match the skill's lowercase `name` (direct skill-folder scanners), use the flat layout:
 
 ```text
 skills_install(layout="flat", dry_run=false)
 ```
 
-This creates one copied folder per skill using the lowercase `name` from each `SKILL.md`.
+See the harness-specific pages under [install](install/README.md) for exact locations, and the [Skills reference](reference/skills.md) for the full skill list.
 
-See the harness-specific pages under [install](install/) for exact locations.
+## Install The Hook Or Workspace Instructions
 
-## Add Workspace Instructions
+Agents Remember works best when its coordinator directive is loaded authoritatively at the start of every session. `C-13-install-and-onboard` does this for you, choosing per harness:
 
-At the root of the shared projects folder, add the instruction file your harness reads. For Codex, Pi.dev, Windsurf, and many compatible tools, use `AGENTS.md`:
+- **Harnesses with a session/chat start hook** (Claude Code, Codex, Pi.dev, Antigravity, OpenClaw) — install a start hook that injects `ar-coordination/AGENTS.md` as authoritative context. Start hooks are first-class here because instruction-following is far more reliable when the directive is injected than when it merely sits in an optional import.
+- **Harnesses without a start hook** (Cursor, GitHub Copilot, Hermes) — place the directive in the harness's native instruction location (a Cursor project rule, a Copilot instructions file, Hermes priority context).
+
+If you set this up by hand instead, the workspace-root instruction file most harnesses read is `AGENTS.md`:
 
 ```markdown
 # Workspace Agent Instructions
@@ -91,13 +114,13 @@ Treat these rules as workspace instructions!
 @ar-coordination/AGENTS.md
 ```
 
-Claude Code should load the directive with a SessionStart hook so it is treated as authoritative; a `CLAUDE.md` import works only as a degraded optional fallback — see [Install for Claude Code](install/claude-code.md). Cursor can use a project rule. OpenClaw usually uses the `AGENTS.md` file in its dedicated agent workspace.
+For Claude Code specifically, prefer the SessionStart hook so the directive is authoritative; a `CLAUDE.md` import works only as a degraded optional fallback. See [Install for Claude Code](install/claude-code.md) and the other [install pages](install/README.md).
 
-## Initialize Memory
+## Set Up Memory
 
-Ask the agent to run `C-00-initialize-memory-repo` for the target code repository.
+`C-13` asks whether to **scaffold a new memory repo** or **use an existing one** — it does not assume you always want a fresh one. If you answer "scaffold," it runs `C-00-initialize-memory-repo` for the target repository.
 
-By default this creates repo-local internal memory:
+By default `C-00` creates repo-local internal memory:
 
 ```text
 my-app/
@@ -111,11 +134,22 @@ my-app/
       tools.md
 ```
 
-Use external memory only when you intentionally want a separate memory repo under `ar-coordination/memory-repos/ar-<repo>/`.
+Use external memory only when you intentionally want a separate memory repo under `ar-coordination/memory-repos/ar-<repo>/`. See [Use External Memory](guides/use-external-memory.md).
 
 ## Bootstrap Onboarding
 
-Ask the agent to run `C-03-repo-bootstrap` for the target repository. A thin `overview.md` is enough to start. Larger repositories can grow route-local overviews and file-level onboarding as work touches new areas.
+For a new memory repo, `C-13` runs `C-03-repo-bootstrap` for the target repository. A thin `overview.md` is enough to start. Larger repositories can grow route-local overviews and file-level onboarding as work touches new areas. For token-conscious bootstraps of large repos, see [Cost-aware Bootstrap](guides/cost-aware-bootstrap.md).
+
+## Start Providers (Optional)
+
+If you enabled `codegraphcontext-code` or `grepai-memory`, `C-13` starts the watchers so the providers index your configured code and memory. You can also do this directly:
+
+```text
+provider_watchers(action="start", dry_run=false)
+provider_status()
+```
+
+Providers are optional — memory, onboarding, drift, and task workflows all work without them. See [Providers](guides/providers.md).
 
 ## Start Working
 

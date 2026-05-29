@@ -13,7 +13,7 @@ Then choose the guide for your tool:
 - [Codex](codex.md)
 - [Claude Code](claude-code.md)
 - [Cursor](cursor.md)
-- [Windsurf](windsurf.md)
+- [Antigravity](antigravity.md)
 - [VS Code + GitHub Copilot](vscode-copilot.md)
 - [Hermes.md](hermes.md)
 - [Pi.dev](pi.md)

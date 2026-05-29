@@ -18,7 +18,7 @@ Use chat mode by default.
 
 Chat mode fits tasks that can finish in the current session and do not need a durable task file. The agent reads onboarding, proposes the intended change, waits for approval, implements, updates onboarding if needed, and verifies.
 
-Small external-memory edits in the current checkout can use `C-09-git-worktree-manager direct-closeout` after approval. Direct closeout commits code first, refreshes onboarding metadata to that code commit, commits memory, then updates the ledger.
+Small external-memory edits in the current checkout can use `C-12-closeout` direct closeout after approval. Direct closeout commits code first, refreshes onboarding metadata to that code commit, commits memory, then updates the ledger.
 
 ## Light Task
 
@@ -42,9 +42,9 @@ Heavy workflow is for migrations, cross-repo contracts, and changes where a plau
 
 ## Worktree-Backed Tasks
 
-C-09 can create task worktrees when parallel work, external-memory closeout, or explicit lifecycle tracking is needed. A worktree-backed task has a `contract.md` beside the task file.
+C-09 can create task worktrees when parallel work, external-memory closeout, or explicit lifecycle tracking is needed. A worktree-backed task has a `contract.md` beside the task file. C-09 owns the worktree lifecycle, integration, and cleanup; `C-12-closeout` runs the closeout itself.
 
-Closeout and commit approval are separate from implementation approval. The agent should present a dry-run preview before any C-09 closeout creates commits.
+Closeout and commit approval are separate from implementation approval. The agent should present a dry-run preview before any C-12 closeout creates commits.
 
 ## Choosing A Workflow
 

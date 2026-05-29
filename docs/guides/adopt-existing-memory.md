@@ -27,4 +27,4 @@ When ready, ask the agent to run C-10 adoption. C-10 delegates the Git mutation 
 
 ## After Adoption
 
-Future external-memory work can use C-09 worktrees or direct closeout. The ledger gives those flows a known baseline for code-memory compatibility.
+Future external-memory work can use C-09 worktrees or C-12 direct closeout. The ledger gives those flows a known baseline for code-memory compatibility.

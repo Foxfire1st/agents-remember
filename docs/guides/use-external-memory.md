@@ -9,7 +9,7 @@ External memory is useful when:
 - code and memory should be reviewed or permissioned separately
 - several code repositories share one coordination root
 - long-running branches need matching code and memory versions
-- C-09 worktree closeout should record code-memory ledger mappings
+- C-12 worktree closeout should record code-memory ledger mappings
 
 ## Layout
 
@@ -87,7 +87,7 @@ An external memory repo does not force sibling repositories into external mode. 
 
 ## Closeout
 
-External-memory changes need code and memory to stay mapped. C-09 handles that sequence for worktree-backed tasks and direct closeout:
+External-memory changes need code and memory to stay mapped. `C-12-closeout` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
 
 1. commit code
 2. refresh onboarding metadata against the code commit

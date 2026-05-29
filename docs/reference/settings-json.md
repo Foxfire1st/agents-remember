@@ -124,7 +124,11 @@ watch settings internally.
 
 ## Memory Fields
 
-`version` identifies the settings shape.
+`version` identifies the settings shape, not a release number. Internal
+(`repo-sidecar`) memory uses `version` 1; external (`memory-repo`) memory uses
+`version` 2, which adds the `crossRepo` block. The version difference reflects
+the different schema each storage mode needs, so the internal and external
+examples above are both current.
 
 `onboarding.storage.mode` selects storage for eligible onboarding. Current
 public modes are `repo-sidecar`, `memory-repo`, and explicit inline mode where

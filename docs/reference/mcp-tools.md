@@ -7,6 +7,14 @@ tools take a `repo_id` that must be an allowed repo in the MCP settings.
 This page is a map of the surface; behavior detail lives in the linked skill and
 reference pages.
 
+**Skills vs tools.** Many skills wrap one or more of these tools and add the
+procedure, gates, and ordering around them: `C-00` drives `memory_init`, `C-02`
+drives `drift_check` / `memory_quality_check`, `C-09` drives the `worktree_*`
+tools, and `C-12` drives the `*_closeout_*` tools. When the docs say "run `C-0x`,"
+the agent runs the skill, which calls the matching tool with the right
+preconditions. Call the raw tool directly only when you do not need the skill's
+surrounding procedure. See the [Skills reference](skills.md).
+
 ## Server & context
 
 | Tool | Purpose | Key args |
