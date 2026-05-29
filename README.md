@@ -100,7 +100,7 @@ Different tools discover instructions and skills differently. Use the install pa
 | Codex | [docs/install/codex.md](docs/install/codex.md) |
 | Claude Code | [docs/install/claude-code.md](docs/install/claude-code.md) |
 | Cursor | [docs/install/cursor.md](docs/install/cursor.md) |
-| Windsurf | [docs/install/windsurf.md](docs/install/windsurf.md) |
+| Antigravity | [docs/install/antigravity.md](docs/install/antigravity.md) |
 | VS Code + GitHub Copilot | [docs/install/vscode-copilot.md](docs/install/vscode-copilot.md) |
 | Hermes.md | [docs/install/hermes.md](docs/install/hermes.md) |
 | Pi.dev | [docs/install/pi.md](docs/install/pi.md) |
