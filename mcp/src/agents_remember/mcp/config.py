@@ -118,6 +118,45 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     )
 
 
+def _parse_repository_entry(
+    repo_id: str,
+    value: object,
+    coordination_root: Path,
+    workspace_root: Path,
+) -> RepositoryScope:
+    if not isinstance(value, dict):
+        raise ConfigError(f"repository settings for {repo_id!r} must be an object")
+
+    repo_path = workspace_root / repo_id
+    memory_root = default_memory_root(repo_path, coordination_root, repo_id)
+    contract_path = optional_coordination_path(
+        value,
+        "contractPath",
+        owner=f"repository {repo_id}",
+        coordination_root=coordination_root,
+    )
+    if contract_path is not None and not path_is_relative_to(contract_path, coordination_root):
+        raise ConfigError(f"repository {repo_id} contractPath must be inside the coordinator root")
+    includes = parse_path_list(
+        value.get("memorySettingsIncludes", []),
+        owner=f"repository {repo_id} memorySettingsIncludes",
+    )
+    allowed_roots = (repo_path, memory_root)
+    for include_path in includes:
+        if not any(path_is_relative_to(include_path, root) for root in allowed_roots):
+            raise ConfigError(
+                f"repository {repo_id} include points outside configured repo "
+                f"boundaries: {include_path}"
+            )
+    return RepositoryScope(
+        repo_id=repo_id,
+        path=repo_path,
+        memory_root=memory_root,
+        memory_settings_includes=tuple(includes),
+        contract_path=contract_path,
+    )
+
+
 def parse_repositories(
     raw: object,
     coordination_root: Path,
@@ -130,39 +169,8 @@ def parse_repositories(
     for repo_id, value in raw.items():
         if not isinstance(repo_id, str) or not repo_id:
             raise ConfigError("repository ids must be non-empty strings")
-        if not isinstance(value, dict):
-            raise ConfigError(f"repository settings for {repo_id!r} must be an object")
-
-        repo_path = workspace_root / repo_id
-        memory_root = default_memory_root(repo_path, coordination_root, repo_id)
-        contract_path = optional_coordination_path(
-            value,
-            "contractPath",
-            owner=f"repository {repo_id}",
-            coordination_root=coordination_root,
-        )
-        if contract_path is not None and not path_is_relative_to(contract_path, coordination_root):
-            raise ConfigError(
-                f"repository {repo_id} contractPath must be inside the coordinator root"
-            )
-        includes = parse_path_list(
-            value.get("memorySettingsIncludes", []),
-            owner=f"repository {repo_id} memorySettingsIncludes",
-        )
-        allowed_roots = (repo_path, memory_root)
-        for include_path in includes:
-            if not any(path_is_relative_to(include_path, root) for root in allowed_roots):
-                raise ConfigError(
-                    f"repository {repo_id} include points outside configured repo "
-                    f"boundaries: {include_path}"
-                )
-
-        repositories[repo_id] = RepositoryScope(
-            repo_id=repo_id,
-            path=repo_path,
-            memory_root=memory_root,
-            memory_settings_includes=tuple(includes),
-            contract_path=contract_path,
+        repositories[repo_id] = _parse_repository_entry(
+            repo_id, value, coordination_root, workspace_root
         )
     return repositories
 

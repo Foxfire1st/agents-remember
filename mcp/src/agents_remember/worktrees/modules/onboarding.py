@@ -382,8 +382,8 @@ def require_updated_sidecar_content(
     tree rather than reporting a false stale finding.
     """
 
-    required = plan.get("required")
-    if not isinstance(required, list) or not required:
+    required = plan["required"]
+    if not required:
         return
     tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
     if tree is None:
@@ -392,19 +392,13 @@ def require_updated_sidecar_content(
     changed_memory = set(changed_worktree_paths(memory_root))
     stale: list[str] = []
     for item in required:
-        if not isinstance(item, dict):
-            continue
-        onboarding_file = item.get("onboarding_file")
-        source_path = item.get("source_path")
-        if not isinstance(onboarding_file, str) or not isinstance(source_path, str):
-            continue
-        onboarding_path = Path(onboarding_file).resolve()
+        onboarding_path = Path(item["onboarding_file"]).resolve()
         try:
             relative = onboarding_path.relative_to(memory_root).as_posix()
         except ValueError:
             continue
         if relative not in changed_memory:
-            stale.append(source_path)
+            stale.append(item["source_path"])
     if stale:
         raise RuntimeError(
             "external-memory closeout requires updated onboarding content for changed source "

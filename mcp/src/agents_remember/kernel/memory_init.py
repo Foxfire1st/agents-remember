@@ -3,9 +3,61 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig
+
+
+def _create_missing_dirs(paths: list[Path], *, dry_run: bool) -> list[str]:
+    created: list[str] = []
+    for path in paths:
+        if path.exists():
+            continue
+        created.append(path.as_posix())
+        if not dry_run:
+            path.mkdir(parents=True, exist_ok=True)
+    return created
+
+
+def _create_missing_files(files: dict[Path, str], *, dry_run: bool) -> list[str]:
+    created: list[str] = []
+    for path, content in files.items():
+        if path.exists():
+            continue
+        created.append(path.as_posix())
+        if not dry_run:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+    return created
+
+
+def _git_init_result(memory_root: Path, *, dry_run: bool, initialize_git: bool) -> dict[str, Any]:
+    git: dict[str, Any] = {"requested": initialize_git, "ran": False}
+    if not initialize_git:
+        return git
+    if dry_run:
+        git["planned"] = True
+        return git
+    if (memory_root / ".git").exists():
+        return git
+    result = subprocess.run(
+        ["git", "init"],
+        cwd=memory_root,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    git.update(
+        {
+            "ran": True,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    )
+    return git
 
 
 def initialize_memory(
@@ -35,53 +87,19 @@ def initialize_memory(
         memory_root / "system" / "sources.md": f"# {repo_id} Sources\n",
     }
 
-    created_dirs: list[str] = []
-    created_files: list[str] = []
-    for path in paths:
-        if path.exists():
-            continue
-        created_dirs.append(path.as_posix())
-        if not dry_run:
-            path.mkdir(parents=True, exist_ok=True)
-    for path, content in files.items():
-        if path.exists():
-            continue
-        created_files.append(path.as_posix())
-        if not dry_run:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-
-    git: dict[str, Any] = {"requested": initialize_git, "ran": False}
-    if initialize_git:
-        if dry_run:
-            git["planned"] = True
-        elif not (memory_root / ".git").exists():
-            result = subprocess.run(
-                ["git", "init"],
-                cwd=memory_root,
-                text=True,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                check=False,
-            )
-            git.update(
-                {
-                    "ran": True,
-                    "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                }
-            )
-            if result.returncode != 0:
-                return {
-                    "ok": False,
-                    "operation": "memory_init",
-                    "repoId": repo_id,
-                    "memoryRoot": memory_root.as_posix(),
-                    "createdDirs": created_dirs,
-                    "createdFiles": created_files,
-                    "git": git,
-                }
+    created_dirs = _create_missing_dirs(paths, dry_run=dry_run)
+    created_files = _create_missing_files(files, dry_run=dry_run)
+    git = _git_init_result(memory_root, dry_run=dry_run, initialize_git=initialize_git)
+    if git.get("returncode", 0) != 0:
+        return {
+            "ok": False,
+            "operation": "memory_init",
+            "repoId": repo_id,
+            "memoryRoot": memory_root.as_posix(),
+            "createdDirs": created_dirs,
+            "createdFiles": created_files,
+            "git": git,
+        }
 
     return {
         "ok": True,

@@ -196,6 +196,33 @@ def classify_source(
     )
 
 
+def _collect_drift_rows(
+    onboarding_root: Path, code_repository_root: Path, settings: StorageSettings
+) -> list[DriftRow]:
+    rows = [
+        row
+        for path in discover_onboarding_files(onboarding_root)
+        for row in classify_sidecar_onboarding_units(
+            path, code_repository_root, onboarding_root, settings
+        )
+    ]
+    rows.extend(
+        classify_inline_source(path, code_repository_root)
+        for path in discover_inline_onboarding_sources(code_repository_root, settings)
+    )
+    rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
+    return rows
+
+
+def _print_drift_rows(rows: list[DriftRow], output_format: str, onboarding_root: Path) -> None:
+    if output_format == "json":
+        print_json(rows, onboarding_root)
+    elif output_format == "csv":
+        print_csv(rows, onboarding_root)
+    else:
+        print_text(rows, onboarding_root)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -263,18 +290,7 @@ def main(argv: list[str] | None = None) -> int:
             f"code repository root is not a git repository: {code_repository_root}\n{git_check.stderr.strip()}"
         )
     settings = context.storage
-    rows = [
-        row
-        for path in discover_onboarding_files(context.onboarding_root)
-        for row in classify_sidecar_onboarding_units(
-            path, code_repository_root, context.onboarding_root, settings
-        )
-    ]
-    rows.extend(
-        classify_inline_source(path, code_repository_root)
-        for path in discover_inline_onboarding_sources(code_repository_root, settings)
-    )
-    rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
+    rows = _collect_drift_rows(context.onboarding_root, code_repository_root, settings)
 
     write_markdown_report(
         rows,
@@ -289,12 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         context.onboarding_root,
     )
 
-    if args.format == "json":
-        print_json(rows, context.onboarding_root)
-    elif args.format == "csv":
-        print_csv(rows, context.onboarding_root)
-    else:
-        print_text(rows, context.onboarding_root)
+    _print_drift_rows(rows, args.format, context.onboarding_root)
 
     if args.fail_on_actionable and any(
         row.classification in ACTIONABLE_CLASSIFICATIONS for row in rows

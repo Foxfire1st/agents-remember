@@ -53,6 +53,21 @@ from agents_remember.worktrees.modules.onboarding import (
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 
 
+def _refresh_plans_have_work(
+    metadata_refresh: OnboardingRefreshPlan,
+    entity_refresh: EntityFingerprintRefreshPlan,
+    route_overview_refresh: RouteOverviewRefreshPlan,
+    route_index_refresh: dict[str, Any],
+) -> bool:
+    """True when any onboarding/entity/route refresh would change memory content."""
+    return (
+        bool(metadata_refresh["required"])
+        or bool(entity_refresh["required"])
+        or bool(route_overview_refresh["required"])
+        or route_index_refresh["written"] > 0
+    )
+
+
 def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, object]:
     ledger_message = (
         args.ledger_commit_message
@@ -137,10 +152,9 @@ def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, ob
             },
             "memory": {
                 "would_commit": memory_dirty
-                or bool(metadata_refresh["required"])
-                or bool(entity_refresh["required"])
-                or bool(route_overview_refresh["required"])
-                or route_index_refresh["written"] > 0,
+                or _refresh_plans_have_work(
+                    metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
+                ),
                 "message": args.memory_commit_message,
                 "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
                 "metadata_refresh_after_code_commit": contract.memory_mode == "external",
@@ -195,18 +209,23 @@ def _closeout_contract_context(contract):
     return replace(context, code_repository_root=contract.code_worktree)
 
 
+def _format_memory_quality_finding(finding: dict[str, Any]) -> str:
+    path = str(finding.get("path") or finding.get("sourceFile") or "")
+    code = str(finding.get("code") or finding.get("check") or "memory_quality")
+    message = str(finding.get("message") or "")
+    return f"{code}{f' at {path}' if path else ''}: {message}"
+
+
 def _memory_quality_failure_message(result: dict[str, Any]) -> str:
     finding_count = int(result.get("findingCount", 0))
     findings = result.get("findings", [])
     sample: list[str] = []
     if isinstance(findings, list):
-        for finding in findings[:5]:
-            if not isinstance(finding, dict):
-                continue
-            path = str(finding.get("path") or finding.get("sourceFile") or "")
-            code = str(finding.get("code") or finding.get("check") or "memory_quality")
-            message = str(finding.get("message") or "")
-            sample.append(f"{code}{f' at {path}' if path else ''}: {message}")
+        sample = [
+            _format_memory_quality_finding(finding)
+            for finding in findings[:5]
+            if isinstance(finding, dict)
+        ]
     details = "; ".join(sample)
     if details:
         details = f" Findings: {details}"
@@ -420,10 +439,9 @@ def direct_closeout_preview_payload(
             },
             "memory": {
                 "would_commit": memory_dirty
-                or bool(metadata_refresh["required"])
-                or bool(entity_refresh["required"])
-                or bool(route_overview_refresh["required"])
-                or route_index_refresh["written"] > 0,
+                or _refresh_plans_have_work(
+                    metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
+                ),
                 "message": args.memory_commit_message,
                 "worktree": context.memory_root.as_posix(),
                 "metadata_refresh_after_code_commit": True,
@@ -434,10 +452,9 @@ def direct_closeout_preview_payload(
             "ledger": {
                 "would_update": code_dirty
                 or memory_dirty
-                or bool(metadata_refresh["required"])
-                or bool(entity_refresh["required"])
-                or bool(route_overview_refresh["required"])
-                or route_index_refresh["written"] > 0,
+                or _refresh_plans_have_work(
+                    metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
+                ),
                 "message": ledger_message,
                 "path": (context.memory_root / "memory.md").as_posix(),
             },

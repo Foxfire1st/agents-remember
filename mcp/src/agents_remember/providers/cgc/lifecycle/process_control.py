@@ -370,6 +370,29 @@ def cgc_start_all_dry_results(
     return command, results
 
 
+def _cgc_start_all_live(
+    args: argparse.Namespace,
+    layouts: list[Any],
+    render: Any,
+    migrations: dict[str, Any],
+    backend: dict[str, Any],
+) -> tuple[Any, list[dict[str, Any]]]:
+    command = cgc_start_all_watch_process(args, layouts, render)
+    results = [
+        cgc_start_result(
+            layout,
+            process=command,
+            render=render,
+            migration=migrations.get(layout.repo_id),
+            backend_result=backend,
+        )
+        for layout in layouts
+    ]
+    for layout in layouts:
+        cgc_write_start_state(layout, command)
+    return command, results
+
+
 def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     if args.repo_id is not None:
         raise ContextProviderError(
@@ -394,19 +417,7 @@ def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         command, results = cgc_start_all_dry_results(layouts, render, migrations, backend)
     else:
-        command = cgc_start_all_watch_process(args, layouts, render)
-        results = [
-            cgc_start_result(
-                layout,
-                process=command,
-                render=render,
-                migration=migrations.get(layout.repo_id),
-                backend_result=backend,
-            )
-            for layout in layouts
-        ]
-        for layout in layouts:
-            cgc_write_start_state(layout, command)
+        command, results = _cgc_start_all_live(args, layouts, render, migrations, backend)
     result = cgc_all_result(
         args,
         settings_path=settings_path,

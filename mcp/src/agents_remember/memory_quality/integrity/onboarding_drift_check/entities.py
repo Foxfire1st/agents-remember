@@ -40,6 +40,32 @@ def split_evidence_paths(value: str) -> list[str]:
     return paths
 
 
+def _is_table_separator_row(cells: list[str]) -> bool:
+    return all(set(cell) <= {"-", ":"} for cell in cells)
+
+
+def _normalized_header_cells(cells: list[str]) -> list[str]:
+    return [re.sub(r"\s+", "", cell).lower() for cell in cells]
+
+
+def _entity_fingerprint_from_row(
+    headers: list[str], cells: list[str]
+) -> EntityFingerprint | None:
+    row = {
+        header: cells[index] if index < len(cells) else ""
+        for index, header in enumerate(headers)
+    }
+    entity = clean_scalar(row.get("entity", "")).strip()
+    if not entity:
+        return None
+    return EntityFingerprint(
+        entity=entity,
+        algorithm=clean_scalar(row.get("algorithm", "")).strip("`"),
+        fingerprint=clean_scalar(row.get("fingerprint", "")).strip("`"),
+        evidence_paths=split_evidence_paths(row.get("evidencepaths", "")),
+    )
+
+
 def parse_entity_fingerprint_rows(path: Path) -> list[EntityFingerprint]:
     lines = path.read_text(encoding="utf-8").splitlines()
     in_section = False
@@ -58,31 +84,17 @@ def parse_entity_fingerprint_rows(path: Path) -> list[EntityFingerprint]:
                 break
             continue
         cells = split_table_row(stripped)
-        if all(set(cell) <= {"-", ":"} for cell in cells):
+        if _is_table_separator_row(cells):
             continue
-        normalized_cells = [re.sub(r"\s+", "", cell).lower() for cell in cells]
+        normalized_cells = _normalized_header_cells(cells)
         if {"entity", "algorithm", "fingerprint", "evidencepaths"}.issubset(set(normalized_cells)):
             headers = normalized_cells
             continue
         if not headers:
             continue
-        row = {
-            header: cells[index] if index < len(cells) else ""
-            for index, header in enumerate(headers)
-        }
-        entity = clean_scalar(row.get("entity", "")).strip()
-        algorithm = clean_scalar(row.get("algorithm", "")).strip("`")
-        fingerprint = clean_scalar(row.get("fingerprint", "")).strip("`")
-        evidence_paths = split_evidence_paths(row.get("evidencepaths", ""))
-        if entity:
-            rows.append(
-                EntityFingerprint(
-                    entity=entity,
-                    algorithm=algorithm,
-                    fingerprint=fingerprint,
-                    evidence_paths=evidence_paths,
-                )
-            )
+        fingerprint = _entity_fingerprint_from_row(headers, cells)
+        if fingerprint is not None:
+            rows.append(fingerprint)
     return rows
 
 
@@ -116,51 +128,61 @@ def classify_entity_fingerprint(
 ) -> DriftRow:
     onboarding_ref = rel(onboarding_file, onboarding_root)
     source_ref = f"entity:{row.entity}"
-    if row.algorithm != GIT_BLOB_SET_ALGORITHM:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_ref,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=row.fingerprint,
-            last_verified_date=last_updated,
-            classification="unsupported",
-            trust="low",
-            affected_sections=f"entity catalog; {row.entity}",
-            note=f"Unsupported entity fingerprint algorithm '{row.algorithm}'.",
-        )
-    if not row.fingerprint or not row.evidence_paths:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_ref,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=row.fingerprint,
-            last_verified_date=last_updated,
-            classification="missing verification",
-            trust="medium",
-            affected_sections=f"entity catalog; {row.entity}",
-            note="Entity fingerprint row is missing a fingerprint value or evidence paths.",
-        )
-    missing_paths = [
-        source_path for source_path in row.evidence_paths if not (repo_root / source_path).exists()
-    ]
-    if missing_paths:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_ref,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=row.fingerprint,
-            last_verified_date=last_updated,
-            classification="drifted",
-            trust="low",
-            affected_sections=f"entity catalog; {row.entity}; source evidence",
-            note=(
-                f"Entity evidence path missing: {', '.join(missing_paths)}. "
-                "Check whether the entity was removed, renamed, or moved before deleting or replacing the fingerprint evidence."
-            ),
-        )
+
+    def _early_classification() -> DriftRow | None:
+        """Classify structurally-invalid rows before the HEAD comparison."""
+        if row.algorithm != GIT_BLOB_SET_ALGORITHM:
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_ref,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=row.fingerprint,
+                last_verified_date=last_updated,
+                classification="unsupported",
+                trust="low",
+                affected_sections=f"entity catalog; {row.entity}",
+                note=f"Unsupported entity fingerprint algorithm '{row.algorithm}'.",
+            )
+        if not row.fingerprint or not row.evidence_paths:
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_ref,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=row.fingerprint,
+                last_verified_date=last_updated,
+                classification="missing verification",
+                trust="medium",
+                affected_sections=f"entity catalog; {row.entity}",
+                note="Entity fingerprint row is missing a fingerprint value or evidence paths.",
+            )
+        missing_paths = [
+            source_path
+            for source_path in row.evidence_paths
+            if not (repo_root / source_path).exists()
+        ]
+        if missing_paths:
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_ref,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=row.fingerprint,
+                last_verified_date=last_updated,
+                classification="drifted",
+                trust="low",
+                affected_sections=f"entity catalog; {row.entity}; source evidence",
+                note=(
+                    f"Entity evidence path missing: {', '.join(missing_paths)}. "
+                    "Check whether the entity was removed, renamed, or moved before deleting or replacing the fingerprint evidence."
+                ),
+            )
+        return None
+
+    early = _early_classification()
+    if early is not None:
+        return early
     try:
         current = compute_git_blob_set_fingerprint(repo_root, row.evidence_paths)
     except RuntimeError as error:

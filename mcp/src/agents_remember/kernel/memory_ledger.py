@@ -103,6 +103,22 @@ def parse_ledger_text(text: str) -> MemoryLedger:
     return ledger
 
 
+def _ledger_rows_from(row_lines: list[str]) -> list[LedgerRow]:
+    rows: list[LedgerRow] = []
+    for row_line in row_lines:
+        row_cells = _table_cells(row_line)
+        if not row_cells:
+            if rows:
+                break
+            continue
+        if len(row_cells) != 2:
+            raise LedgerError("memory.md ledger table rows must have exactly two columns")
+        rows.append(LedgerRow(row_cells[0], row_cells[1]))
+    if not rows:
+        raise LedgerError("memory.md ledger table must contain at least one mapping row")
+    return rows
+
+
 def parse_ledger_rows(text: str) -> list[LedgerRow]:
     lines = text.splitlines()
     for index, line in enumerate(lines):
@@ -111,19 +127,7 @@ def parse_ledger_rows(text: str) -> list[LedgerRow]:
             continue
         if index + 1 >= len(lines) or not _is_separator_row(lines[index + 1]):
             raise LedgerError("memory.md ledger table header is not followed by a separator row")
-        rows: list[LedgerRow] = []
-        for row_line in lines[index + 2 :]:
-            row_cells = _table_cells(row_line)
-            if not row_cells:
-                if rows:
-                    break
-                continue
-            if len(row_cells) != 2:
-                raise LedgerError("memory.md ledger table rows must have exactly two columns")
-            rows.append(LedgerRow(row_cells[0], row_cells[1]))
-        if not rows:
-            raise LedgerError("memory.md ledger table must contain at least one mapping row")
-        return rows
+        return _ledger_rows_from(lines[index + 2 :])
     raise LedgerError("memory.md is missing the `Code commit | Memory commit` table")
 
 

@@ -148,48 +148,53 @@ def classify_overview_onboarding(
     last_date = metadata.get("lastVerifiedCommitDate", "")
     onboarding_ref = rel(onboarding_file, onboarding_root)
 
-    if not last_hash or not last_date:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_route,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
-            classification="missing verification",
-            trust="medium",
-            affected_sections="metadata; verification",
-            note=f"{doc_type or 'overview'} is missing lastVerifiedCommitHash or lastVerifiedCommitDate.",
-        )
+    def _early_classification() -> DriftRow | None:
+        """Classify missing/orphaned/unavailable-commit overviews before the diff."""
+        if not last_hash or not last_date:
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_route,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=last_hash,
+                last_verified_date=last_date,
+                classification="missing verification",
+                trust="medium",
+                affected_sections="metadata; verification",
+                note=f"{doc_type or 'overview'} is missing lastVerifiedCommitHash or lastVerifiedCommitDate.",
+            )
+        if source_route != "." and not (repo_root / source_route).exists():
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_route,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=last_hash,
+                last_verified_date=last_date,
+                classification="orphaned",
+                trust="low",
+                affected_sections="all; source route missing",
+                note="Overview sourceRoute no longer exists.",
+            )
+        exists = run_git(repo_root, ["cat-file", "-e", f"{last_hash}^{{commit}}"])
+        if exists.returncode != 0:
+            return DriftRow(
+                onboarding_file=onboarding_ref,
+                source_file=source_route,
+                repository=repository,
+                storage_mode=settings.mode,
+                last_verified_hash=last_hash,
+                last_verified_date=last_date,
+                classification="drifted",
+                trust="medium",
+                affected_sections="overview; metadata",
+                note="Recorded overview verification commit is not available in git history.",
+            )
+        return None
 
-    if source_route != "." and not (repo_root / source_route).exists():
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_route,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
-            classification="orphaned",
-            trust="low",
-            affected_sections="all; source route missing",
-            note="Overview sourceRoute no longer exists.",
-        )
-
-    exists = run_git(repo_root, ["cat-file", "-e", f"{last_hash}^{{commit}}"])
-    if exists.returncode != 0:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_route,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
-            classification="drifted",
-            trust="medium",
-            affected_sections="overview; metadata",
-            note="Recorded overview verification commit is not available in git history.",
-        )
+    early = _early_classification()
+    if early is not None:
+        return early
 
     diff = run_git(repo_root, ["diff", "--quiet", last_hash, "HEAD", "--", source_route])
     if diff.returncode == 0:

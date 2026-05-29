@@ -144,27 +144,32 @@ def unlink_file(path: Path) -> None:
         path.unlink()
 
 
+def _remove_with_retry(path: Path, target: Path) -> PermissionError | None:
+    """Remove ``target`` with retries; return the last PermissionError or None."""
+    last_error: PermissionError | None = None
+    for attempt in range(MAX_REMOVE_ATTEMPTS):
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(target, onerror=remove_readonly)
+            else:
+                unlink_file(target)
+            return None
+        except PermissionError as error:
+            last_error = error
+            if attempt == MAX_REMOVE_ATTEMPTS - 1:
+                raise RuntimeError(
+                    f"cannot remove {path}; a provider process, editor, "
+                    "or file explorer may still be using it"
+                ) from error
+            time.sleep(0.5)
+    return last_error
+
+
 def remove_path(path: Path, summary: InstallSummary, dry_run: bool) -> None:
     if not path.exists() and not path.is_symlink():
         return
     if not dry_run:
-        target = removable_path(path)
-        last_error: PermissionError | None = None
-        for attempt in range(MAX_REMOVE_ATTEMPTS):
-            try:
-                if path.is_dir() and not path.is_symlink():
-                    shutil.rmtree(target, onerror=remove_readonly)
-                else:
-                    unlink_file(target)
-                break
-            except PermissionError as error:
-                last_error = error
-                if attempt == MAX_REMOVE_ATTEMPTS - 1:
-                    raise RuntimeError(
-                        f"cannot remove {path}; a provider process, editor, "
-                        "or file explorer may still be using it"
-                    ) from error
-                time.sleep(0.5)
+        last_error = _remove_with_retry(path, removable_path(path))
         if last_error is not None and (path.exists() or path.is_symlink()):
             raise RuntimeError(
                 f"cannot remove {path}; a provider process, editor, "

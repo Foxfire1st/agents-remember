@@ -40,12 +40,17 @@ def write_provider_runner_manifest(config: McpRuntimeConfig) -> dict[str, Any]:
     }
 
 
-def check_provider_runner_integrity(config: McpRuntimeConfig) -> dict[str, Any]:
-    path = manifest_path_for_config(config)
-    current = _hash_provider_files(config.coordination_root)
+def _recorded_manifest_or_early(
+    path: Path, current: dict[str, str]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Load the recorded manifest files, or return an early integrity result.
+
+    Returns ``(recorded, None)`` on success, or ``(None, result)`` when the
+    manifest is absent, unreadable, or structurally invalid.
+    """
     if not path.exists():
         if not current:
-            return {
+            return None, {
                 "ok": True,
                 "state": "notInstalled",
                 "manifestPath": path.as_posix(),
@@ -53,7 +58,7 @@ def check_provider_runner_integrity(config: McpRuntimeConfig) -> dict[str, Any]:
                 "changed": [],
                 "missing": [],
             }
-        return {
+        return None, {
             "ok": False,
             "state": "manifestMissing",
             "manifestPath": path.as_posix(),
@@ -62,11 +67,10 @@ def check_provider_runner_integrity(config: McpRuntimeConfig) -> dict[str, Any]:
             "missing": [],
             "unrecorded": sorted(current),
         }
-
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        return {
+        return None, {
             "ok": False,
             "state": "manifestUnreadable",
             "manifestPath": path.as_posix(),
@@ -74,21 +78,29 @@ def check_provider_runner_integrity(config: McpRuntimeConfig) -> dict[str, Any]:
             "changed": [],
             "missing": [],
         }
-
     recorded = manifest.get("files", {})
     if not isinstance(recorded, dict):
-        return {
+        return None, {
             "ok": False,
             "state": "manifestInvalid",
             "manifestPath": path.as_posix(),
             "changed": [],
             "missing": [],
         }
-    recorded = {
+    return {
         relative: expected
         for relative, expected in recorded.items()
         if not _ignored_recorded_provider_path(relative)
-    }
+    }, None
+
+
+def check_provider_runner_integrity(config: McpRuntimeConfig) -> dict[str, Any]:
+    path = manifest_path_for_config(config)
+    current = _hash_provider_files(config.coordination_root)
+    recorded, early = _recorded_manifest_or_early(path, current)
+    if early is not None:
+        return early
+    assert recorded is not None
 
     changed = sorted(
         relative

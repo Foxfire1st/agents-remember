@@ -34,6 +34,17 @@ class SkillsInstallSummary:
         }
 
 
+def _validate_install_skills_args(
+    *, install_root: Path, layout: str, overwrite: bool, archive_existing: bool
+) -> None:
+    if not install_root.is_absolute():
+        raise ValueError("install_root must be an absolute path")
+    if layout not in {"tree", "flat"}:
+        raise ValueError("layout must be 'tree' or 'flat'")
+    if overwrite and archive_existing:
+        raise ValueError("overwrite and archive_existing are mutually exclusive")
+
+
 def install_skills(
     *,
     install_root: Path,
@@ -42,12 +53,12 @@ def install_skills(
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:
-    if not install_root.is_absolute():
-        raise ValueError("install_root must be an absolute path")
-    if layout not in {"tree", "flat"}:
-        raise ValueError("layout must be 'tree' or 'flat'")
-    if overwrite and archive_existing:
-        raise ValueError("overwrite and archive_existing are mutually exclusive")
+    _validate_install_skills_args(
+        install_root=install_root,
+        layout=layout,
+        overwrite=overwrite,
+        archive_existing=archive_existing,
+    )
 
     with packaged_source_root() as source_root:
         skills_root = source_root / "runtime" / "skills"
