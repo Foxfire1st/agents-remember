@@ -31,6 +31,24 @@ from agents_remember.providers.context.common import (
 )
 
 
+def to_container_path(path: Path | str) -> str:
+    """Map a host path to the POSIX path seen inside a Linux provider container.
+
+    Bind mounts and in-container arguments require POSIX paths. On Windows a
+    resolved path renders as ``C:/ew/x`` via :meth:`Path.as_posix`, whose drive
+    colon both breaks Docker's ``host:container`` mount parsing ("too many
+    colons") and is not a valid Linux path. Stripping the leading ``<drive>:``
+    yields ``/ew/x``. On POSIX hosts there is no drive letter, so the value is
+    returned unchanged and Linux/macOS behavior is preserved exactly.
+    """
+
+    posix = path.as_posix() if isinstance(path, Path) else str(path).replace("\\", "/")
+    if len(posix) >= 2 and posix[0].isalpha() and posix[1] == ":":
+        remainder = posix[2:]
+        return remainder if remainder.startswith("/") else f"/{remainder}"
+    return posix
+
+
 @dataclass(frozen=True)
 class CgcRuntimeLayout:
     coordination_root: Path
@@ -61,23 +79,44 @@ class CgcRuntimeLayout:
     watch_cwd: Path
     watch_log_file: Path
 
-    def env(self) -> dict[str, str]:
-        """Return the environment required to keep CGC under the runtime root."""
+    @property
+    def container_runtime_root(self) -> str:
+        """Runtime root as seen inside the provider container (POSIX path)."""
+
+        return to_container_path(self.runtime_root)
+
+    @property
+    def container_code_repo_root(self) -> str:
+        """Code repository root as seen inside the provider container (POSIX path)."""
+
+        return to_container_path(self.code_repo_root)
+
+    def env(self, *, for_container: bool = False) -> dict[str, str]:
+        """Return the environment required to keep CGC under the runtime root.
+
+        When ``for_container`` is set, filesystem paths are rendered as the
+        POSIX paths visible inside the Linux provider container (drive letter
+        stripped on Windows) and host-only Windows variables are omitted. On
+        POSIX hosts this matches the host environment exactly.
+        """
+
+        def render_path(path: Path) -> str:
+            return to_container_path(path) if for_container else path.as_posix()
 
         defaults = {
-            "HOME": (self.run_root / "home").as_posix(),
+            "HOME": render_path(self.run_root / "home"),
             "CGC_RUNTIME_DB_TYPE": "falkordb-remote",
             "DEFAULT_DATABASE": "falkordb-remote",
             "FALKORDB_HOST": CGC_FALKORDB_DEFAULT_HOST,
             "FALKORDB_PORT": CGC_FALKORDB_DEFAULT_PORT,
             "FALKORDB_GRAPH_NAME": f"cgc_{self.repo_id.replace('-', '_')}",
-            "LOG_FILE_PATH": (self.logs_root / "cgc.log").as_posix(),
-            "DEBUG_LOG_PATH": (self.logs_root / "debug.log").as_posix(),
+            "LOG_FILE_PATH": render_path(self.logs_root / "cgc.log"),
+            "DEBUG_LOG_PATH": render_path(self.logs_root / "debug.log"),
             "ENABLE_AUTO_WATCH": "false",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
         }
-        if os.name == "nt":
+        if not for_container and os.name == "nt":
             defaults.update(
                 {
                     "USERPROFILE": str(self.run_root / "home"),
@@ -91,10 +130,10 @@ class CgcRuntimeLayout:
         variables = {
             "repoId": self.repo_id,
             "repoGraphId": self.repo_id.replace("-", "_"),
-            "runtimeRoot": self.runtime_root.parent.as_posix(),
-            "instanceRoot": self.runtime_root.as_posix(),
-            "backendRuntimeRoot": self.backend_root.as_posix(),
-            "backendDataRoot": self.backend_data_root.as_posix(),
+            "runtimeRoot": render_path(self.runtime_root.parent),
+            "instanceRoot": render_path(self.runtime_root),
+            "backendRuntimeRoot": render_path(self.backend_root),
+            "backendDataRoot": render_path(self.backend_data_root),
         }
         env = {
             key: expand_template(str(value), variables)

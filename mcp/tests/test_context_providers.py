@@ -76,6 +76,7 @@ from agents_remember.providers.context import (
     source_provider_artifacts,
     stable_provider_id,
     sync_grepai_index_roots,
+    to_container_path,
     write_grepai_workspace_config,
 )
 
@@ -122,6 +123,61 @@ class ContextProviderLayoutTests(unittest.TestCase):
             if sys.platform == "win32":
                 self.assertEqual(env["USERPROFILE"], str(layout.run_root / "home"))
             self.assertTrue(env["LOG_FILE_PATH"].endswith("/.codegraphcontext/logs/cgc.log"))
+
+    def test_to_container_path_strips_windows_drive(self) -> None:
+        self.assertEqual(to_container_path("C:/ew/foo"), "/ew/foo")
+        self.assertEqual(to_container_path("C:\\ew\\foo"), "/ew/foo")
+        self.assertEqual(to_container_path("D:/x"), "/x")
+        self.assertEqual(to_container_path("C:/"), "/")
+        # POSIX paths are returned unchanged (no-op on Linux/macOS).
+        self.assertEqual(to_container_path("/ew/foo"), "/ew/foo")
+        self.assertEqual(to_container_path(Path("/ew/foo")), "/ew/foo")
+
+    def test_cgc_container_paths_are_driveless_posix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            layout = cgc_runtime_layout(
+                coordination_root=root / "ar-coordination",
+                repo_id="My App",
+                code_repo_root=root / "repos" / "My App",
+            )
+
+            self.assertEqual(
+                layout.container_runtime_root, to_container_path(layout.runtime_root)
+            )
+            self.assertEqual(
+                layout.container_code_repo_root, to_container_path(layout.code_repo_root)
+            )
+            # Container mount targets must never carry a Windows drive-letter colon,
+            # which is what triggered Docker's "too many colons" mount error.
+            self.assertNotIn(":", layout.container_runtime_root)
+            self.assertNotIn(":", layout.container_code_repo_root)
+
+    def test_cgc_container_env_is_posix_and_omits_windows_vars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            layout = cgc_runtime_layout(
+                coordination_root=root / "ar-coordination",
+                repo_id="My App",
+                code_repo_root=root / "repos" / "My App",
+            )
+
+            container_env = layout.env(for_container=True)
+
+            # Path-valued entries are driveless POSIX paths inside the container.
+            self.assertNotIn(":", container_env["HOME"])
+            self.assertNotIn(":", container_env["LOG_FILE_PATH"])
+            self.assertEqual(
+                container_env["HOME"], to_container_path(layout.run_root / "home")
+            )
+            # Host-only Windows variables must not be injected into a Linux container.
+            for key in ("USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+                self.assertNotIn(key, container_env)
+            # Non-path values match the host environment.
+            self.assertEqual(
+                container_env["FALKORDB_GRAPH_NAME"],
+                layout.env()["FALKORDB_GRAPH_NAME"],
+            )
 
     def test_cgc_layout_ignores_host_falkordb_environment_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

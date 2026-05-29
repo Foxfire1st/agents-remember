@@ -1,7 +1,11 @@
+FROM debian:bookworm-slim
+
+# Build args are declared inside the build stage (after FROM) so they are in
+# scope for the RUN below. ARGs declared before FROM are only visible to the
+# FROM line itself, which this image does not parameterize; referencing them in
+# RUN would expand to empty and `set -u` would abort the download step.
 ARG GREPAI_VERSION
 ARG GREPAI_ARCH
-
-FROM debian:bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tar \

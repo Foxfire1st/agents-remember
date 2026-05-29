@@ -118,7 +118,7 @@ def cgc_visualize_command(
         "runner",
         "visualize",
         "--repo",
-        layout.code_repo_root.as_posix(),
+        layout.container_code_repo_root,
         "--port",
         str(args.port),
     ]

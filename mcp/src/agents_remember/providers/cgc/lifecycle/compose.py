@@ -67,12 +67,12 @@ def cgc_compose_render(
         ),
         "RUNNER_USER_BLOCK": cgc_user_block(),
         "SERVICE_LABELS": yaml_labels(cgc_ownership_labels(provider_settings)),
-        "RUNNER_WORKING_DIR": yaml_scalar(layout.runtime_root.as_posix()),
+        "RUNNER_WORKING_DIR": yaml_scalar(layout.container_runtime_root),
         "RUNNER_RUNTIME_VOLUME": yaml_scalar(
-            f"{layout.runtime_root.as_posix()}:{layout.runtime_root.as_posix()}"
+            f"{layout.runtime_root.as_posix()}:{layout.container_runtime_root}"
         ),
         "RUNNER_REPO_VOLUME": yaml_scalar(
-            f"{layout.code_repo_root.as_posix()}:{layout.code_repo_root.as_posix()}:ro"
+            f"{layout.code_repo_root.as_posix()}:{layout.container_code_repo_root}:ro"
         ),
         "RUNNER_ENVIRONMENT": yaml_environment(cgc_compose_env(layout)),
         "WATCHER_SERVICES": watcher_services,
@@ -94,7 +94,7 @@ def cgc_watcher_service_name(layout: Any) -> str:
 
 
 def cgc_compose_env(layout: Any) -> dict[str, str]:
-    env = layout.env()
+    env = layout.env(for_container=True)
     env["FALKORDB_HOST"] = layout.backend_container_name
     return env
 
@@ -118,15 +118,15 @@ def cgc_watcher_service_yaml(provider_settings: dict[str, Any], layout: Any) -> 
         "WATCHER_CONTAINER_NAME": yaml_scalar(layout.watcher_container_name),
         "WATCHER_USER_BLOCK": cgc_user_block(),
         "SERVICE_LABELS": yaml_labels(cgc_ownership_labels(provider_settings)),
-        "WATCHER_WORKING_DIR": yaml_scalar(layout.runtime_root.as_posix()),
+        "WATCHER_WORKING_DIR": yaml_scalar(layout.container_runtime_root),
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(
-            f"{layout.runtime_root.as_posix()}:{layout.runtime_root.as_posix()}"
+            f"{layout.runtime_root.as_posix()}:{layout.container_runtime_root}"
         ),
         "WATCHER_REPO_VOLUME": yaml_scalar(
-            f"{layout.code_repo_root.as_posix()}:{layout.code_repo_root.as_posix()}:ro"
+            f"{layout.code_repo_root.as_posix()}:{layout.container_code_repo_root}:ro"
         ),
         "WATCHER_ENVIRONMENT": yaml_environment(cgc_compose_env(layout)),
-        "WATCHER_REPO_PATH": yaml_scalar(layout.code_repo_root.as_posix()),
+        "WATCHER_REPO_PATH": yaml_scalar(layout.container_code_repo_root),
     }
     return render_template(template, values).rstrip()
 

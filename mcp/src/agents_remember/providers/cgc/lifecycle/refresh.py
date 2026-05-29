@@ -41,7 +41,7 @@ def cgc_refresh_command(args: argparse.Namespace, layout: Any) -> dict[str, Any]
         "--no-deps",
         "runner",
         "index",
-        layout.code_repo_root.as_posix(),
+        layout.container_code_repo_root,
         "--force",
     ]
     return compose_plan(render, command_args, cwd=layout.coordination_root)
@@ -120,7 +120,7 @@ def cgc_refresh(args: argparse.Namespace) -> dict[str, Any]:
             "--no-deps",
             "runner",
             "index",
-            layout.code_repo_root.as_posix(),
+            layout.container_code_repo_root,
             "--force",
         ],
         cwd=layout.coordination_root,
@@ -150,7 +150,7 @@ def cgc_refresh_with_started_watchers(args: argparse.Namespace) -> dict[str, Any
             "--no-deps",
             "runner",
             "index",
-            layout.code_repo_root.as_posix(),
+            layout.container_code_repo_root,
             "--force",
         ],
         cwd=layout.coordination_root,

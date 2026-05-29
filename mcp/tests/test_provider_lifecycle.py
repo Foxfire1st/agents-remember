@@ -619,7 +619,11 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             all(call[:5] == ["run", "--rm", "--no-deps", "runner", "index"] for call in index_calls)
         )
         for repo_path, override_yaml in runner_renders.items():
-            self.assertIn(f'{repo_path}:{repo_path}:ro"', override_yaml)
+            # The index argument and bind-mount target are the POSIX container
+            # path (no Windows drive letter), mounted read-only as
+            # host:container:ro. On POSIX hosts host == container.
+            self.assertNotIn(":", repo_path)
+            self.assertIn(f':{repo_path}:ro"', override_yaml)
             self.assertIn("watcher-repo-a:", override_yaml)
             self.assertIn("watcher-repo-b:", override_yaml)
 
