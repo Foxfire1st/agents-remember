@@ -45,11 +45,11 @@ Ask your agent to:
    uvx agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
    ```
 
-   Have your agent follow the PyPI link for setup details and help you author the settings file, then **restart the harness** so it loads the server.
-2. **Install Agents Remember** — Run `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled).
-3. **Onboard your project** — Run `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
+   Have your agent follow the PyPI link for setup details and help you author the settings file. Then **restart the harness** so it loads the server.
+2. **Install Agents Remember** — Run the mcp tool `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled). Then **restart the harness** again so it discovers the skills `skills_install` just wrote (some harnesses hot-reload skills and skip this; restarting is the safe default).
+3. **Onboard your project** — Run the skill `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
 
-The only hands-on step for you is to restart the harness once after step 1; from there your agent continues.
+Those two restarts are the only hands-on steps; between and after them, your agent continues on its own.
 
 After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
@@ -77,10 +77,10 @@ agents-remember-md/
       runtime/
         agents-md-files/            # installed AGENTS.md templates
         skills/                     # installed skill source tree
+        providers/                  # provider runtime assets (images, runners)
         system/defaults/examples/   # scaffold examples used by initialization
       benchmarks/                   # optional benchmark package source
   docs/                             # user-facing documentation
-  roadmap/                          # design notes and historical planning
 ```
 
 The installed runtime lives in `ar-coordination/`, not in the source checkout:
@@ -91,6 +91,7 @@ ar-coordination/
   skills/
   system/
   memory-repos/
+  providers/                        # provider runtimes (images, runners, indexes)
   benchmarks/                       # optional, installed with --include-benchmarks
   tasks/
   notes/
@@ -100,7 +101,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is an active greenfield project. The public docs describe the current intended setup: install the runtime into `ar-coordination`, expose installed skills to your harness, and let repository memory live either in repo-local `ar-memory/` or in selected external memory repos.
+Agents Remember is at `0.9.0` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Contributing
 
