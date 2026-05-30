@@ -58,9 +58,9 @@ Ask your agent to:
 
    Have your agent follow the PyPI link for setup details and help you author the settings file. Then **restart the harness** so it loads the server.
 2. **Install Agents Remember** — Run the mcp tool `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled). Then **restart the harness** again so it discovers the skills `skills_install` just wrote (some harnesses hot-reload skills and skip this; restarting is the safe default).
-3. **Onboard your project** — Run the skill `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
+3. **Onboard your project** — Run the skill `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing. If it installed a session-start hook, **restart the harness once more** so the hook activates (hooks load at session start).
 
-Those two restarts are the only hands-on steps; between and after them, your agent continues on its own.
+Those three restarts (load the server, discover the skills, activate the hook) are the only hands-on steps; between and after them, your agent continues on its own.
 
 After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
@@ -112,7 +112,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `0.9.3` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `0.9.4` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Contributing
 

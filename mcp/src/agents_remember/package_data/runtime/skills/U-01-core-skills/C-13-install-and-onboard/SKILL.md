@@ -144,6 +144,13 @@ to the instructions file and tell the developer.
 After installing, report exactly what was written and where, and whether it is a
 true hook (authoritative) or an instructions-file fallback.
 
+If you installed a context-injecting start hook, tell the developer it activates
+on the **next** session start, not the current one (harnesses load session hooks
+at startup, and many snapshot them as a security measure). Ask them to restart so
+the hook takes effect, and confirm on the next session that the directive appears
+as injected context. This is a distinct restart from the post-`skills_install`
+one.
+
 ## Stage 2 — Memory Repo: Ask Scaffold Vs Existing
 
 Do not assume the developer wants a fresh memory repo. Ask which case applies:
@@ -201,7 +208,9 @@ Summarize, per stage:
 4. providers: which are indexing the code and memory, and any degraded state.
 
 End by telling the developer the project is ready for normal work, or list the
-remaining manual step if a stage needed something only they can do.
+remaining manual step if a stage needed something only they can do. If you
+installed a context-injecting start hook this run, the final remaining step is
+the developer's: restart the harness so the hook activates on the next session.
 
 ## Boundaries
 

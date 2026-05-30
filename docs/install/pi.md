@@ -19,6 +19,8 @@ Treat these rules as workspace instructions!
 
 Pi also supports global context under `~/.pi/agent/AGENTS.md`.
 
+Pi can also inject the directive via a `session_start` / `before_agent_start` hook, which `C-13-install-and-onboard` installs when available (more authoritative than the `AGENTS.md` import). If it installs a hook, restart Pi afterward — a newly-added start hook only takes effect on the **next** session.
+
 ## Skills
 
 Install the runtime through the MCP server:

@@ -30,11 +30,13 @@ Setup is agent-driven. Ask your agent to:
    harnesses without one), sets up the memory repo (it will ask: scaffold a new
    one or use an existing one), bootstraps onboarding, and **starts the providers
    indexing last** (this is when indexing begins; image builds already happened in
-   step 2).
+   step 2). If it installs a session-start hook, **restart once more** so the hook
+   activates — hooks are loaded at session start, not mid-session.
 
-The hands-on steps for you: ask your agent for the steps above, **restart twice**
-(after step 1 so the harness loads the server, and after step 2 so it discovers
-the installed skills), and answer the new-vs-existing memory question in step 3.
+The hands-on steps for you: ask your agent for the steps above, **restart three
+times** (after step 1 so the harness loads the server, after step 2 so it
+discovers the installed skills, and after step 3 so a newly-installed session
+hook activates), and answer the new-vs-existing memory question in step 3.
 
 ## Requirements
 

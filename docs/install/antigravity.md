@@ -10,6 +10,8 @@ Reference:
 
 Because Antigravity supports start hooks, the preferred setup is a hook that injects `ar-coordination/AGENTS.md` as authoritative context at the start of every session. `C-13-install-and-onboard` installs that hook for you (it picks the hook for hook-capable harnesses and falls back to instruction placement otherwise).
 
+A newly-installed session hook takes effect on the **next** session, not the one it was installed in — restart Antigravity after installing it, then confirm the directive appears as injected context.
+
 If you set it up by hand, place an `AGENTS.md` at the workspace root as the fallback:
 
 ```markdown

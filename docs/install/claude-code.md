@@ -67,6 +67,12 @@ coordinator first action reliably run before any sibling-repo work.
 `$CLAUDE_PROJECT_DIR` resolves to the folder that holds `.claude`; an absolute
 path to the directive file works too.
 
+**Restart after installing the hook.** Claude Code snapshots `settings.json`
+hooks at session start (so an external edit cannot make it run a new command
+mid-session), so a freshly-added `SessionStart` hook only takes effect on the
+**next** session. After writing these two files, restart the harness; confirm the
+directive appears as injected session context on the new session.
+
 ### Fallback Without The Hook
 
 If you cannot install `jq` or run a hook, add the same import to a root

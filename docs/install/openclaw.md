@@ -22,6 +22,8 @@ Treat these rules as workspace instructions!
 
 OpenClaw workspaces may contain other standing instruction files. Keep Agents Remember focused on repository memory and task workflow rules; do not put secrets in workspace docs.
 
+OpenClaw can also inject the directive via a `session_start` / `before_prompt_build` hook, which `C-13-install-and-onboard` installs when available (more authoritative than the workspace instruction file). If it installs a hook, restart the gateway afterward — a newly-added session hook only takes effect on the **next** session. (This is separate from the timeout-settings restart below.)
+
 ## Skills
 
 Install the runtime through the MCP server:
