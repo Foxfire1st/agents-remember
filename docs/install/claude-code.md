@@ -100,12 +100,23 @@ Place the MCP settings under the Claude Code registration folder, such as
 `.claude/mcp/`. The skill target is inferred as the sibling `.claude/skills/`
 folder. Then expose packaged skills:
 
+Claude Code is a **direct** skill-folder scanner: it discovers a skill only when
+`SKILL.md` sits one level under the skill root, in a folder whose name matches the
+skill's lowercase `name`. Use the **flat** layout so each skill lands at
+`.claude/skills/<name>/SKILL.md`:
+
 ```text
-skills_install()
+skills_install(layout="flat")
 ```
 
-Claude Code supports project and personal skill folders and discovers nested `.claude/skills` directories. The default namespace layout is usually enough:
+This produces, for example:
 
 ```text
-.claude/skills/agents-remember-md/
+.claude/skills/c-13-install-and-onboard/SKILL.md
+.claude/skills/w-02-light-task-workflow/SKILL.md
 ```
+
+Do **not** use the default `tree` layout here. Tree nests skills under a namespace
+directory (`.claude/skills/agents-remember-md/U-01-core-skills/…/SKILL.md`), which
+Claude Code does **not** discover — it does not scan recursively. (The `tree`
+layout is for recursive scanners such as Codex.)

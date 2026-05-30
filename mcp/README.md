@@ -153,6 +153,28 @@ it reloads the server and discovers the tool list. Register the server under the
 harness folder described in [Settings file location](#settings-file-location) so
 `skills_install` can infer the skill target.
 
+### Per-harness setup pages
+
+Harnesses differ in where settings/skills go **and in the skills layout they
+discover** — so follow your harness's page, don't guess:
+
+| Harness | Setup guide |
+| --- | --- |
+| Claude Code | [docs/install/claude-code.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/claude-code.md) |
+| Codex | [docs/install/codex.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/codex.md) |
+| Cursor | [docs/install/cursor.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/cursor.md) |
+| Antigravity | [docs/install/antigravity.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/antigravity.md) |
+| VS Code + Copilot | [docs/install/vscode-copilot.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/vscode-copilot.md) |
+| Hermes | [docs/install/hermes.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/hermes.md) |
+| Pi.dev | [docs/install/pi.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/pi.md) |
+| OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/openclaw.md) |
+
+**Skill layout is harness-specific.** `skills_install` defaults to `tree`
+(namespaced, for recursive scanners like Codex). Direct skill-folder scanners —
+**Claude Code and Cursor** — need `skills_install(layout="flat")` so each skill
+lands at `<skill-root>/<name>/SKILL.md`; the `tree` layout's nested folders are
+not discovered there. Your harness page states which to use.
+
 ## Install Order And First Operations
 
 Setup runs in a strict order: **scaffolding → skills → providers last.** Preview
@@ -162,7 +184,7 @@ each step with `dry_run=true` before applying (`dry_run=false`, the default).
 server_info()                      # confirm resolved roots / allowed providers
 runtime_install(dry_run=true)      # preview, then apply:
 runtime_install(dry_run=false)     # scaffold coordinator; build provider images if enabled
-skills_install(dry_run=true)       # preview, then apply:
+skills_install(dry_run=true)       # preview (add layout="flat" for Claude Code/Cursor)
 skills_install(dry_run=false)      # copy skills into the harness skill folder
 # --- restart the harness here so it discovers the installed skills ---
 context_packet(repo_id="<repo-id>", include_providers=true)
@@ -179,7 +201,8 @@ Why this order:
    manifest, so `provider_watchers` run **before** `runtime_install` fails fast
    with `runnerIntegrityFailed`.
 2. **Skills second**, so `C-13` and the rest are available for the final step.
-   (Most harnesses only discover newly-installed skills after a restart.)
+   (Most harnesses only discover newly-installed skills after a restart.) Use the
+   layout your harness page specifies — `flat` for Claude Code and Cursor.
 3. **Providers last.** They are heavy (Docker, plus Ollama for grepai),
    per-repo, and optional. Note the split: `runtime_install` *builds* provider
    images during step 2 (with `install_provider_deps=true`, the default), but
