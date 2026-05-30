@@ -27,6 +27,14 @@ Implementation sections use checkbox-based steps and nested checkbox items. Keep
 
 ---
 
+## Design
+
+<Settled design for this task; depth scales with its nature — follow the Task
+Collaboration Doctrine (`tasks/AGENTS.md`). Implementation Steps derive from this.
+Straightforward change → "No design reasoning needed.">
+
+---
+
 ## Implementation Steps
 
 ### S1 — <title>
@@ -103,3 +111,4 @@ Why this example is included: <reason>
 11. Use the light-task status values: `planning`, `inProgress`, `Completed`.
 12. Use `YYYY-MM-DDTHH:MM` anywhere the template records task-local dates or timestamps, including metadata, decision logs, progress notes, and review outcomes.
 13. Treat `## Decision Log` as append-only: preserve superseded entries and add later rows that override, reject, or clarify earlier decisions.
+14. Size the `## Design` section to the request per `tasks/AGENTS.md`; for a straightforward change, state that no design reasoning is needed rather than leaving the section blank.

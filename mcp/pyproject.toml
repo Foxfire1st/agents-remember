@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agents-remember-mcp"
-version = "0.9.5"
+version = "0.9.6"
 description = "Model Context Protocol server for Agents Remember."
 readme = "README.md"
 requires-python = ">=3.11"

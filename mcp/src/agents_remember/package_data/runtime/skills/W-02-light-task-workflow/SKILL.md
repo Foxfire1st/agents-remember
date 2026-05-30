@@ -74,6 +74,7 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 9. After approval, onboarding is updated through `C-05-create-or-update-onboarding-files` and the listed checks in the C-08 resolved `system/tools.md` are run.
 10. Durable current-state findings discovered during implementation are routed through `C-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
 11. Significant mid-implementation changes update the task file before edits continue.
+12. When the Task Collaboration Doctrine (`tasks/AGENTS.md`) warrants it, the settled design is recorded in the task file's `## Design` section and the implementation steps derive from it.
 
 ## Relationship To Other Instructions
 

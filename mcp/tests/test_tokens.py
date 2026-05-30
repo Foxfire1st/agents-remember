@@ -108,7 +108,7 @@ class FinalizePayloadTokensTests(unittest.TestCase):
 class ResponsePayloadTests(unittest.TestCase):
     def test_serializes_model_and_adds_token_metadata(self) -> None:
         response = PingResponse(
-            ok=True, server="agents-remember", version="0.9.5", transport="stdio"
+            ok=True, server="agents-remember", version="0.9.6", transport="stdio"
         )
         payload = response_payload(response)
         self.assertEqual(payload["server"], "agents-remember")
@@ -118,7 +118,7 @@ class ResponsePayloadTests(unittest.TestCase):
 
     def test_dump_with_token_count_is_response_payload_alias(self) -> None:
         response = PingResponse(
-            ok=True, server="agents-remember", version="0.9.5", transport="stdio"
+            ok=True, server="agents-remember", version="0.9.6", transport="stdio"
         )
         self.assertEqual(dump_with_token_count(response), response_payload(response))
 

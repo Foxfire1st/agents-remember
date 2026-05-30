@@ -63,7 +63,16 @@ Before planning:
 3. check `<onboarding-root>/` for any repo whose behavior or terminology the artifact touches
 4. use supporting search or docs tools only when the task domain needs them
 
-### 6. Write `task.md`
+### 6. Reframe and design before writing the plan
+
+Before writing implementation steps, apply the Task Collaboration Doctrine in
+`tasks/AGENTS.md`. Let the nature of the request set the depth: the doctrine
+defines when reframing and design thinking are worth it and what to surface.
+When they are, do that thinking with the developer in chat, then record the
+settled result in the task file's `## Design` section so the implementation
+steps derive from it rather than replace it.
+
+### 7. Write `task.md`
 
 Use `template.md` as the canonical scaffold and write it to `<task-wrapper>/task.md`.
 
@@ -73,11 +82,12 @@ The file must include:
 
 1. objective
 2. requirements
-3. implementation steps with one checkbox per line and nested checkbox items indented by two spaces under the parent step
-4. proposed code examples for each distinct implementation change when code changes are in scope
-5. decision log
-6. open questions
-7. references
+3. design sized to the request per `tasks/AGENTS.md`, or a note that no design reasoning is needed
+4. implementation steps with one checkbox per line and nested checkbox items indented by two spaces under the parent step
+5. proposed code examples for each distinct implementation change when code changes are in scope
+6. decision log
+7. open questions
+8. references
 
 Use `YYYY-MM-DDTHH:MM` for task-local timestamps such as `Created`, decision log entries, progress notes, and review outcomes.
 
@@ -89,7 +99,7 @@ Status values should align with the repository rules:
 2. `inProgress`
 3. `Completed`
 
-### 7. Present the plan and stop for approval
+### 8. Present the plan and stop for approval
 
 Present a concise summary in chat:
 
