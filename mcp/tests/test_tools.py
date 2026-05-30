@@ -22,6 +22,7 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.controllers.runtime_install import RuntimeInstallRequest
 from agents_remember.mcp.config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.mcp.tools import (
@@ -81,9 +82,11 @@ class McpToolTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["server"], "agents-remember")
-        self.assertEqual(payload["version"], "0.9.4")
+        self.assertEqual(payload["version"], "0.9.5")
         self.assertEqual(payload["transport"], "stdio")
-        self.assertEqual(payload["tokens"], 0)
+        self.assertGreater(payload["tokens"], 0)
+        self.assertEqual(payload["tokenizer"], "tiktoken:o200k_base")
+        self.assertIs(payload["tokenCountExact"], True)
 
     def test_server_info_payload_reports_safe_config_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -249,9 +252,9 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            captured: dict[str, object] = {}
+            captured: dict[str, RuntimeInstallRequest] = {}
 
-            def fake_run(cfg, request):
+            def fake_run(cfg: object, request: RuntimeInstallRequest) -> dict[str, object]:
                 captured["request"] = request
                 return {"ok": True, "operation": "runtime_install"}
 

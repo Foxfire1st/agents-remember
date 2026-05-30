@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 import tiktoken
 
-from agents_remember.models.base import ToolResponse
+from agents_remember.models.base import ResponseModel
 
 
 class ResponseTokenCounter(Protocol):
@@ -92,14 +92,19 @@ def _finalize_token_count(
     return payload["tokens"]
 
 
-def response_payload(
-    response: ToolResponse,
+def finalize_payload_tokens(
+    payload: dict[str, Any],
     *,
     token_counter: ResponseTokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> dict[str, Any]:
-    """Serialize a tool response and add token accounting metadata."""
+    """Stamp token accounting metadata onto an already-serialized response dict.
 
-    payload = response.model_dump(mode="json", exclude_none=True)
+    Sets ``tokenizer`` and ``tokenCountExact`` from the counter, then resolves
+    ``tokens`` to a stable count that includes the token metadata fields. Mutates
+    and returns ``payload`` so callers that already hold a serialized dict (such
+    as the MCP dispatch path) do not need a model instance.
+    """
+
     payload["tokens"] = 0
     payload["tokenizer"] = token_counter.name
     payload["tokenCountExact"] = token_counter.exact
@@ -107,8 +112,24 @@ def response_payload(
     return payload
 
 
+def response_payload(
+    response: ResponseModel,
+    *,
+    token_counter: ResponseTokenCounter = DEFAULT_TOKEN_COUNTER,
+) -> dict[str, Any]:
+    """Serialize a response model and add token accounting metadata.
+
+    Accepts any ``ResponseModel`` (not only operation-bearing ``ToolResponse``
+    envelopes) because the token fields live on the shared base and the dispatch
+    path stamps tokens onto responses such as ``ping`` that carry no operation.
+    """
+
+    payload = response.model_dump(mode="json", exclude_none=True)
+    return finalize_payload_tokens(payload, token_counter=token_counter)
+
+
 def dump_with_token_count(
-    response: ToolResponse,
+    response: ResponseModel,
     *,
     counter: ResponseTokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> dict[str, Any]:

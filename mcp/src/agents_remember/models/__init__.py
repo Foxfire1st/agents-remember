@@ -58,6 +58,7 @@ from agents_remember.models.tokens import (
     TiktokenTokenCounter,
     count_response_tokens,
     dump_with_token_count,
+    finalize_payload_tokens,
     response_payload,
 )
 from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
@@ -160,5 +161,6 @@ __all__ = [
     "WorktreeSummary",
     "count_response_tokens",
     "dump_with_token_count",
+    "finalize_payload_tokens",
     "response_payload",
 ]
