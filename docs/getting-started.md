@@ -74,6 +74,21 @@ When providers are enabled in the settings, `runtime_install` also builds or pul
 
 Benchmark fixtures are optional and not installed by default. Install or refresh them with `runtime_install(include_benchmarks=true)`. The benchmark package is idempotent and preserves local outputs under `ar-coordination/benchmarks/user-runs/`.
 
+## Choose Your Agent
+
+Different tools discover instructions and skills differently. Use the install page for your harness:
+
+| Harness | Setup guide |
+| --- | --- |
+| Codex | [docs/install/codex.md](docs/install/codex.md) |
+| Claude Code | [docs/install/claude-code.md](docs/install/claude-code.md) |
+| Cursor | [docs/install/cursor.md](docs/install/cursor.md) |
+| Antigravity | [docs/install/antigravity.md](docs/install/antigravity.md) |
+| VS Code + GitHub Copilot | [docs/install/vscode-copilot.md](docs/install/vscode-copilot.md) |
+| Hermes.md | [docs/install/hermes.md](docs/install/hermes.md) |
+| Pi.dev | [docs/install/pi.md](docs/install/pi.md) |
+| OpenClaw | [docs/install/openclaw.md](docs/install/openclaw.md) |
+
 ## Expose Skills To Your Harness
 
 Some agent tools read skills from a folder in the workspace; others require skills in a specific registration folder. Use the MCP `skills_install` tool instead of copying skill folders by hand:

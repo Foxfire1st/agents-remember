@@ -39,28 +39,19 @@ This is the short path for a new workspace. The detailed walkthrough lives in [G
 
 Ask your agent to:
 
-1. **Wire the MCP server** — Register Agents Remember MCP with this harness using `uvx`, help you author the settings file, then **restart the harness** so it loads the server.
+1. **Wire the MCP server** — Install Agents Remember MCP from [PyPI](https://pypi.org/project/agents-remember-mcp/) with `uvx`:
+
+   ```text
+   uvx agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
+   ```
+
+   Have your agent follow the PyPI link for setup details and help you author the settings file, then **restart the harness** so it loads the server.
 2. **Install Agents Remember** — Run `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled).
 3. **Onboard your project** — Run `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
 
-The only hands-on steps for you is to restart once after step 1, and then continue from there.
+The only hands-on step for you is to restart the harness once after step 1; from there your agent continues.
 
 After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
-
-## Choose Your Agent
-
-Different tools discover instructions and skills differently. Use the install page for your harness:
-
-| Harness | Setup guide |
-| --- | --- |
-| Codex | [docs/install/codex.md](docs/install/codex.md) |
-| Claude Code | [docs/install/claude-code.md](docs/install/claude-code.md) |
-| Cursor | [docs/install/cursor.md](docs/install/cursor.md) |
-| Antigravity | [docs/install/antigravity.md](docs/install/antigravity.md) |
-| VS Code + GitHub Copilot | [docs/install/vscode-copilot.md](docs/install/vscode-copilot.md) |
-| Hermes.md | [docs/install/hermes.md](docs/install/hermes.md) |
-| Pi.dev | [docs/install/pi.md](docs/install/pi.md) |
-| OpenClaw | [docs/install/openclaw.md](docs/install/openclaw.md) |
 
 ## Documentation
 
