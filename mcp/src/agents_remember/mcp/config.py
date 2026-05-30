@@ -13,6 +13,10 @@ from agents_remember.providers.identity import (
 )
 
 
+DEFAULT_PROVIDER_SETUP_SECONDS = 1800
+DEFAULT_DOCKER_CONTROL_SECONDS = 120
+
+
 class ConfigError(ValueError):
     """Raised when MCP authority settings are missing or unsafe."""
 
@@ -269,13 +273,18 @@ def provider_runtime_name(provider_id: str) -> str:
 def parse_timeout_caps(raw: object) -> dict[str, int]:
     if not isinstance(raw, dict):
         raise ConfigError("timeoutCaps must be an object")
+    if "providerSeconds" in raw:
+        raise ConfigError(
+            "timeoutCaps.providerSeconds was renamed to providerSetupSeconds; "
+            "indexing and seed are now always uncapped"
+        )
 
     parsed: dict[str, int] = {}
     for key, value in raw.items():
         if not isinstance(key, str) or not key:
             raise ConfigError("timeout cap names must be non-empty strings")
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ConfigError(f"timeout cap {key!r} must be a positive integer")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ConfigError(f"timeout cap {key!r} must be a non-negative integer")
         parsed[key] = value
     return parsed
 

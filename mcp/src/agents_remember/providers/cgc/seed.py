@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
+from agents_remember.providers.lifecycle.command_runner import UNLIMITED_TIMEOUT
 from agents_remember.providers.setup_common import (
     context_providers,
     expand_template,
@@ -431,7 +432,7 @@ def _seed_export(args: Any, context: CgcSeedContext, source_bundle: Path) -> dic
         context.source_coordination_root,
         "cgc",
         "run",
-        timeout=args.timeout,
+        timeout=UNLIMITED_TIMEOUT,
         dry_run=args.dry_run,
         extra_args=[
             *cgc_seed_source_extra_args(
@@ -475,7 +476,7 @@ def _seed_load(args: Any, context: CgcSeedContext, rewritten_bundle: Path) -> di
         context.target_coordination_root,
         "cgc",
         "run",
-        timeout=args.timeout,
+        timeout=UNLIMITED_TIMEOUT,
         dry_run=args.dry_run,
         extra_args=[*cgc_extra_args(args), "--repo-id", str(context.target_repo_id)],
         native_args=["--", "bundle", "import", rewritten_bundle.as_posix()],

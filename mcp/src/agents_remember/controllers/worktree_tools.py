@@ -6,7 +6,12 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope, path_is_relative_to
+from agents_remember.mcp.config import (
+    DEFAULT_DOCKER_CONTROL_SECONDS,
+    McpRuntimeConfig,
+    RepositoryScope,
+    path_is_relative_to,
+)
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
 
@@ -49,7 +54,7 @@ def worktree_start_tool(
         custom_instruction=None,
         skip_provider_setup=skip_provider_setup,
         provider_setup_config=provider_setup_config,
-        provider_timeout=config.timeout_caps.get("providerSeconds", 120),
+        provider_timeout=DEFAULT_DOCKER_CONTROL_SECONDS,
         dry_run=dry_run,
     )
     try:

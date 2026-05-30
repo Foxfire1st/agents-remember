@@ -220,7 +220,7 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
             stdout=dump_file,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            timeout=args.timeout,
+            timeout=None,  # clone scales with index size; never capped
             check=False,
         )
         if dump.returncode != 0:
@@ -232,7 +232,7 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
             cwd=context.target_coordination_root,
             stdin=dump_file,
             capture_output=True,
-            timeout=args.timeout,
+            timeout=None,  # clone scales with index size; never capped
             check=False,
         )
         if restore.returncode != 0:

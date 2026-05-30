@@ -24,6 +24,7 @@ from agents_remember.providers.cgc.lifecycle.process_control import (
     cgc_parallel_layout_action_results,
     cgc_start_all,
 )
+from agents_remember.providers.lifecycle.command_runner import UNLIMITED_TIMEOUT
 from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
@@ -124,7 +125,7 @@ def cgc_refresh(args: argparse.Namespace) -> dict[str, Any]:
             "--force",
         ],
         cwd=layout.coordination_root,
-        timeout=args.timeout,
+        timeout=UNLIMITED_TIMEOUT,
     )
     cgc_write_refresh_state(layout, result)
     return {
@@ -154,7 +155,7 @@ def cgc_refresh_with_started_watchers(args: argparse.Namespace) -> dict[str, Any
             "--force",
         ],
         cwd=layout.coordination_root,
-        timeout=args.timeout,
+        timeout=UNLIMITED_TIMEOUT,
     )
     cgc_write_refresh_state(layout, result)
     return {

@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.mcp.config import DEFAULT_PROVIDER_SETUP_SECONDS, McpRuntimeConfig
 from agents_remember.providers import lifecycle
 from agents_remember.providers.integrity import write_provider_runner_manifest
 from agents_remember.providers.settings import lifecycle_settings_from_config
@@ -515,7 +515,9 @@ def install_runtime_from_config(
     provider_deps_timeout: int | None = None,
     source_root: Path | None = None,
 ) -> dict[str, Any]:
-    timeout = provider_deps_timeout or config.timeout_caps.get("providerSeconds", 1800)
+    timeout = provider_deps_timeout or config.timeout_caps.get(
+        "providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS
+    )
     provider_settings = lifecycle_settings_from_config(config)
     if source_root is not None:
         summary = install_runtime(

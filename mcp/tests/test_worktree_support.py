@@ -2470,7 +2470,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 config.allowed_provider_ids,
                 ("codegraphcontext-code", "grepai-memory"),
             )
-            self.assertEqual(config.timeout_caps["providerSeconds"], 123)
+            self.assertEqual(config.timeout_caps["providerSetupSeconds"], 123)
             self.assertEqual(config.providers["grepai-memory"].scope, "benchmark")
             self.assertEqual(
                 config.providers["grepai-memory"].instance_id,

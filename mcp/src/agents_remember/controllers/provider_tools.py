@@ -6,7 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.mcp.config import (
+    DEFAULT_DOCKER_CONTROL_SECONDS,
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.providers import lifecycle_service
 from agents_remember.providers.current_state import write_current_provider_state
 from agents_remember.providers.integrity import check_provider_runner_integrity
@@ -544,7 +548,7 @@ def _provider_operation_result(
             coordination_root=config.coordination_root,
             settings_path=settings_path,
             dry_run=dry_run,
-            timeout=timeout or config.timeout_caps.get("providerSeconds", 120),
+            timeout=timeout or DEFAULT_DOCKER_CONTROL_SECONDS,
         )
         data = run(service_config)
         return {"operation": operation, "ok": bool(data.get("ok")), **data}

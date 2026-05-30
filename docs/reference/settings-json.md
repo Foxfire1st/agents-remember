@@ -117,7 +117,7 @@ watch settings internally.
   },
   "timeoutCaps": {
     "toolSeconds": 30,
-    "providerSeconds": 120
+    "providerSetupSeconds": 1800
   }
 }
 ```
@@ -173,4 +173,9 @@ contract file. It must not point outside the coordinator root.
 must be empty objects because runtime roots, data roots, logs, requirements,
 patches, backend container names, and watch settings are derived by the server.
 
-`timeoutCaps` contains positive integer timeout caps for MCP operations.
+`timeoutCaps` holds non-negative integer caps for MCP operations. `toolSeconds`
+caps MCP tool operations. `providerSetupSeconds` caps provider image build and
+dependency install (default 1800). Docker control operations such as
+start, stop, and status use a fixed internal cap and are not configurable.
+Indexing and database seed or clone are never capped because they scale with
+repository size. A value of `0` means unlimited for any cap.

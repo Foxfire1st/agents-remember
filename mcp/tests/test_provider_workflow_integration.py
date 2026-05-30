@@ -92,7 +92,7 @@ def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:
             "grepai-memory": {"instanceId": instance_id},
             "codegraphcontext-code": {"instanceId": instance_id},
         },
-        "timeoutCaps": {"providerSeconds": _provider_timeout()},
+        "timeoutCaps": {"providerSetupSeconds": _provider_timeout()},
     }
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

@@ -101,7 +101,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `0.9.0` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `0.9.1` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Contributing
 

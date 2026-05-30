@@ -33,7 +33,7 @@ def settings_payload(root: Path) -> dict:
         },
         "timeoutCaps": {
             "toolSeconds": 30,
-            "providerSeconds": 120,
+            "providerSetupSeconds": 1800,
         },
     }
 
@@ -372,7 +372,31 @@ class McpConfigTests(unittest.TestCase):
             path = root / "mcp-settings.json"
             write_json(path, payload)
 
-            with self.assertRaisesRegex(ConfigError, "positive integer"):
+            with self.assertRaisesRegex(ConfigError, "non-negative integer"):
+                load_config(path)
+
+    def test_provider_setup_seconds_zero_means_unlimited(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            payload["timeoutCaps"]["providerSetupSeconds"] = 0
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            config = load_config(path)
+
+            self.assertEqual(config.timeout_caps["providerSetupSeconds"], 0)
+
+    def test_legacy_provider_seconds_is_rejected_with_rename_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            del payload["timeoutCaps"]["providerSetupSeconds"]
+            payload["timeoutCaps"]["providerSeconds"] = 120
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            with self.assertRaisesRegex(ConfigError, "renamed to providerSetupSeconds"):
                 load_config(path)
 
 

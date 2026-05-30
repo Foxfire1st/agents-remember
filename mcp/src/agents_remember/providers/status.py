@@ -6,7 +6,11 @@ import argparse
 from dataclasses import dataclass
 from typing import Any, cast
 
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
+from agents_remember.mcp.config import (
+    DEFAULT_DOCKER_CONTROL_SECONDS,
+    McpRuntimeConfig,
+    ProviderScope,
+)
 from agents_remember.models.providers import (
     CGCWatcherState,
     ContextProviderItem,
@@ -196,7 +200,7 @@ def _watchers_status(config: McpRuntimeConfig) -> dict[str, Any]:
             coordination_root=config.coordination_root,
             from_settings=settings_path,
             dry_run=False,
-            timeout=config.timeout_caps.get("providerSeconds", 120),
+            timeout=DEFAULT_DOCKER_CONTROL_SECONDS,
             json=True,
         )
         return lifecycle.watchers_run(args, "status")

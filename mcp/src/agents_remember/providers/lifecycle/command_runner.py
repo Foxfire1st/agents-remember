@@ -10,6 +10,8 @@ from typing import Any, cast
 
 from agents_remember.providers.lifecycle.runtime_environment import subprocess_env
 
+UNLIMITED_TIMEOUT = 0
+
 
 def run_command(
     command: list[str],
@@ -34,7 +36,7 @@ def run_command(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout,
+            timeout=(None if timeout <= 0 else timeout),
             check=False,
             **stdin_kwargs,
         )

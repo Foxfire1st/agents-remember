@@ -73,7 +73,7 @@ def benchmark_mcp_settings_payload(
         "providers": {provider_id: dict(provider_settings) for provider_id in provider_ids},
         "timeoutCaps": {
             "toolSeconds": 30,
-            "providerSeconds": provider_timeout,
+            "providerSetupSeconds": provider_timeout,
         },
     }
 

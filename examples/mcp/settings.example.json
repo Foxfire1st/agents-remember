@@ -15,6 +15,6 @@
   },
   "timeoutCaps": {
     "toolSeconds": 30,
-    "providerSeconds": 120
+    "providerSetupSeconds": 1800
   }
 }
