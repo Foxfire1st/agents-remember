@@ -52,6 +52,20 @@ Please make sure your change is scoped and intentional.
 
 For larger workflow changes, open a discussion or draft pull request early instead of landing a surprise rewrite.
 
+## Quality gates
+
+CI runs the project-owned quality suite on every push and pull request and fails
+the build on any finding — ruff (lint), Pyright (types), the full pytest suite,
+and CRAP (complexity x coverage). Run the same gate locally before pushing:
+
+1. Install the dev environment once: `pip install -e "mcp[dev]"`
+2. Enable the shared pre-push hook once per clone: `git config core.hooksPath .githooks`
+
+The hook (`.githooks/pre-push`) runs
+`python -m agents_remember.code_quality.check --fail-on-crap-threshold` and blocks
+the push on any finding. Use `git push --no-verify` only to bypass it
+intentionally; CI still enforces the same checks.
+
 ## Writing guidelines
 
 Write for both humans and agents.
