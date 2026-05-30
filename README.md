@@ -33,6 +33,17 @@ The memory layer rests on a small, strict discipline:
 
 The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`.
 
+## Requirements
+
+Before the Quickstart, make sure the host has:
+
+- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.11+** — the agent runs the MCP server with `uvx`, which picks a compatible interpreter.
+- **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
+- **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
+- **`jq`**, only for the Claude Code `SessionStart` hook: `apt install jq` (Debian/Ubuntu), `brew install jq` (macOS), `pacman -S jq` (Arch), `dnf install jq` (Fedora), or `apk add jq` (Alpine). Without it the hook installs but silently injects nothing.
+
+Providers, Docker, Ollama, and `jq` are only needed for the optional Docker-backed providers and the Claude Code hook; the core by-path memory works without them. Full detail and troubleshooting live in the [MCP package README](https://pypi.org/project/agents-remember-mcp/).
+
 ## Quickstart
 
 This is the short path for a new workspace. The detailed walkthrough lives in [Getting Started](docs/getting-started.md).
@@ -101,7 +112,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `0.9.1` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `0.9.2` (pre-1.0) and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. Interfaces below that core (MCP tool names and arguments, skill set, runtime layout, and the optional semantic/relationship providers) may still change between releases, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Contributing
 

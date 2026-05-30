@@ -239,6 +239,74 @@ class ProviderDependencyHelperTests(unittest.TestCase):
         grepai_install.assert_called_once()
         cgc_install_all.assert_called_once()
 
+    def test_provider_dependencies_thread_no_cache_to_provider_args(self) -> None:
+        summary = install_runtime.InstallSummary()
+        settings = {
+            "contextProviders": {
+                "enabled": True,
+                "providers": {
+                    "grepai-memory": {"enabled": True},
+                    "codegraphcontext-code": {"enabled": True},
+                },
+            }
+        }
+        captured: dict[str, object] = {}
+
+        def fake_grepai_install(args):
+            captured["grepai_no_cache"] = getattr(args, "no_cache", None)
+            return {"ok": True}
+
+        def fake_cgc_install_all(args):
+            captured["cgc_no_cache"] = getattr(args, "no_cache", None)
+            return {"ok": True}
+
+        with (
+            patch.object(
+                install_runtime.lifecycle, "grepai_install", side_effect=fake_grepai_install
+            ),
+            patch.object(
+                install_runtime.lifecycle,
+                "cgc_install_all",
+                side_effect=fake_cgc_install_all,
+            ),
+        ):
+            install_runtime.install_provider_dependencies_from_settings(
+                Path("/unused-coordination-root"),
+                settings,
+                summary,
+                dry_run=True,
+                timeout=1,
+                no_cache=True,
+            )
+        self.assertTrue(captured["grepai_no_cache"])
+        self.assertTrue(captured["cgc_no_cache"])
+
+    def test_provider_dependencies_default_no_cache_is_false(self) -> None:
+        summary = install_runtime.InstallSummary()
+        settings = {
+            "contextProviders": {
+                "enabled": True,
+                "providers": {"grepai-memory": {"enabled": True}},
+            }
+        }
+        captured: dict[str, object] = {}
+
+        def fake_grepai_install(args):
+            captured["grepai_no_cache"] = getattr(args, "no_cache", None)
+            return {"ok": True}
+
+        with patch.object(
+            install_runtime.lifecycle, "grepai_install", side_effect=fake_grepai_install
+        ):
+            install_runtime.install_provider_dependencies_from_settings(
+                Path("/unused-coordination-root"),
+                settings,
+                summary,
+                dry_run=True,
+                timeout=1,
+            )
+        self.assertFalse(captured["grepai_no_cache"])
+
     def test_provider_dependencies_raise_on_failure(self) -> None:
         summary = install_runtime.InstallSummary()
         settings = {

@@ -991,6 +991,82 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             ],
         )
 
+    def _cgc_build_args(self, root: Path, *, no_cache: bool | None):
+        service_config = self.service_config(root)
+        argv = [
+            "install-all",
+            "--coordination-root",
+            str(service_config.coordination_root),
+            "--from-settings",
+            str(service_config.settings_path),
+            "--dry-run",
+        ]
+        if no_cache:
+            argv.append("--no-cache")
+        return self.parse_cgc(argv)
+
+    def _grepai_build_args(self, root: Path, *, no_cache: bool | None):
+        service_config = self.service_config(root)
+        argv = [
+            "install",
+            "--coordination-root",
+            str(service_config.coordination_root),
+            "--from-settings",
+            str(service_config.settings_path),
+            "--dry-run",
+        ]
+        if no_cache:
+            argv.append("--no-cache")
+        return self.parse_grepai(argv)
+
+    def test_cgc_runner_image_build_no_cache_inserts_flag_in_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            args = self._cgc_build_args(Path(tmp_dir), no_cache=True)
+            _, _, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+
+            result = lifecycle.cgc_runner_image_build(args, layouts[0])
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dryRun"])
+        command = result["command"]["command"]
+        self.assertIn("--no-cache", command)
+        self.assertEqual(command[-1], "runner")
+
+    def test_cgc_runner_image_build_without_no_cache_has_no_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            args = self._cgc_build_args(Path(tmp_dir), no_cache=False)
+            _, _, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+
+            result = lifecycle.cgc_runner_image_build(args, layouts[0])
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("--no-cache", result["command"]["command"])
+
+    def test_grepai_runner_image_build_no_cache_inserts_flag_in_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            args = self._grepai_build_args(Path(tmp_dir), no_cache=True)
+            _, provider_settings, layout = lifecycle.grepai_layout_from_args(args)
+            runner = lifecycle.grepai_runner_settings(provider_settings, layout)
+
+            result = lifecycle.grepai_runner_image_build(args, runner=runner)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dryRun"])
+        command = result["command"]["command"]
+        self.assertIn("--no-cache", command)
+        self.assertEqual(command[-1], "watcher")
+
+    def test_grepai_runner_image_build_without_no_cache_has_no_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            args = self._grepai_build_args(Path(tmp_dir), no_cache=False)
+            _, provider_settings, layout = lifecycle.grepai_layout_from_args(args)
+            runner = lifecycle.grepai_runner_settings(provider_settings, layout)
+
+            result = lifecycle.grepai_runner_image_build(args, runner=runner)
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("--no-cache", result["command"]["command"])
+
 
 if __name__ == "__main__":
     unittest.main()

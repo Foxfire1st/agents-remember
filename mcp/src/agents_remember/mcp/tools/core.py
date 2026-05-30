@@ -75,6 +75,7 @@ def runtime_install_payload(
     dry_run: bool = False,
     include_benchmarks: bool = False,
     install_provider_deps: bool = True,
+    no_cache: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "runtime_install",
@@ -84,6 +85,7 @@ def runtime_install_payload(
                 dry_run=dry_run,
                 include_benchmarks=include_benchmarks,
                 install_provider_deps=install_provider_deps,
+                no_cache=no_cache,
             ),
         ),
     )

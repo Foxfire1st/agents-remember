@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import subprocess
@@ -46,6 +47,7 @@ from agents_remember.mcp.tools import (
     server_info_payload,
     skills_install_payload,
 )
+from agents_remember.mcp.tools import core as core_tools
 from agents_remember.providers.integrity import (
     check_provider_runner_integrity,
     manifest_path_for_config,
@@ -79,7 +81,7 @@ class McpToolTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["server"], "agents-remember")
-        self.assertEqual(payload["version"], "0.9.1")
+        self.assertEqual(payload["version"], "0.9.2")
         self.assertEqual(payload["transport"], "stdio")
         self.assertEqual(payload["tokens"], 0)
 
@@ -121,6 +123,24 @@ class McpToolTests(unittest.TestCase):
             server = create_server(config)
 
             self.assertIsNotNone(server)
+
+    def test_every_public_tool_has_a_description(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            server = create_server(config)
+            tools = asyncio.run(server.list_tools())
+
+            self.assertEqual({tool.name for tool in tools}, set(PUBLIC_TOOLS))
+            missing = [
+                tool.name
+                for tool in tools
+                if not (tool.description and tool.description.strip())
+            ]
+            self.assertEqual(missing, [], f"tools missing a description: {missing}")
 
     def test_context_packet_tool_delegates_to_controller(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -221,6 +241,29 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertTrue(payload["includeBenchmarks"])
             self.assertGreater(payload["summary"]["copiedFiles"], 0)
+
+    def test_runtime_install_payload_carries_no_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            captured: dict[str, object] = {}
+
+            def fake_run(cfg, request):
+                captured["request"] = request
+                return {"ok": True, "operation": "runtime_install"}
+
+            with patch.object(core_tools, "run_runtime_install", side_effect=fake_run):
+                runtime_install_payload(config, dry_run=True, no_cache=True)
+
+            self.assertTrue(captured["request"].no_cache)
+
+    def test_runtime_install_payload_exposes_no_cache_param(self) -> None:
+        sig = inspect.signature(runtime_install_payload)
+        self.assertIn("no_cache", sig.parameters)
+        self.assertIs(sig.parameters["no_cache"].default, False)
 
     def test_phase_04_tools_are_reported(self) -> None:
         expected = {

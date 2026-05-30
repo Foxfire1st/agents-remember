@@ -68,6 +68,12 @@ def add_cgc_common_args(parser: argparse.ArgumentParser) -> None:
         "--repo-id", default=argparse.SUPPRESS, help="Stable provider id for this code repository."
     )
     parser.add_argument("--code-repo-root", type=Path, default=argparse.SUPPRESS)
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Force image rebuild without Docker cache.",
+    )
 
 
 def add_cgc_action_parser(
@@ -86,6 +92,7 @@ def normalize_cgc_args(args: argparse.Namespace) -> None:
         "from_settings": None,
         "repo_id": None,
         "code_repo_root": None,
+        "no_cache": False,
     }.items():
         if not hasattr(args, key):
             setattr(args, key, value)
@@ -122,6 +129,12 @@ def add_grepai_common_args(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help="Provider runtime root. Defaults to <coordination-root>/providers/runners/grepai.",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Force image rebuild without Docker cache.",
+    )
 
 
 def add_grepai_action_parser(
@@ -141,6 +154,7 @@ def normalize_grepai_args(args: argparse.Namespace) -> None:
         "force": False,
         "root": None,
         "runtime_root": None,
+        "no_cache": False,
     }.items():
         if not hasattr(args, key):
             setattr(args, key, value)

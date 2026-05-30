@@ -12,7 +12,6 @@ from agents_remember.providers.identity import (
     provider_instance_id,
 )
 
-
 DEFAULT_PROVIDER_SETUP_SECONDS = 1800
 DEFAULT_DOCKER_CONTROL_SECONDS = 120
 

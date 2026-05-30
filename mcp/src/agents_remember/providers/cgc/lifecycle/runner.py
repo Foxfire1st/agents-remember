@@ -38,7 +38,8 @@ def cgc_runner_patch_script() -> str:
 def cgc_runner_image_build(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
-    command_args = ["build", "runner"]
+    no_cache = bool(getattr(args, "no_cache", False))
+    command_args = ["build", "--no-cache", "runner"] if no_cache else ["build", "runner"]
     dockerfile = provider_asset_path("docker", "codegraphcontext", "Dockerfile")
     patch_script = provider_asset_path("docker", "codegraphcontext", "patch_cgc.py")
     if args.dry_run:
@@ -52,7 +53,9 @@ def cgc_runner_image_build(args: argparse.Namespace, layout: Any) -> dict[str, A
             "compose": cgc_compose_summary(render),
             "command": compose_plan(render, command_args, cwd=layout.coordination_root),
         }
-    if docker_image_exists(layout.runner_image, cwd=layout.coordination_root, timeout=args.timeout):
+    if not no_cache and docker_image_exists(
+        layout.runner_image, cwd=layout.coordination_root, timeout=args.timeout
+    ):
         return {"ok": True, "image": layout.runner_image, "alreadyExists": True}
     result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
     image_digest = docker_repo_digest(

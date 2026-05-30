@@ -14,6 +14,7 @@ class RuntimeInstallRequest:
     dry_run: bool = False
     include_benchmarks: bool = False
     install_provider_deps: bool = True
+    no_cache: bool = False
 
 
 def run_runtime_install(
@@ -25,4 +26,5 @@ def run_runtime_install(
         dry_run=request.dry_run,
         include_benchmarks=request.include_benchmarks,
         install_provider_deps=request.install_provider_deps,
+        no_cache=request.no_cache,
     )

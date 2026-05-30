@@ -31,7 +31,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, skills, provider defaults, runtime folders) into the coordinator; optionally install provider deps and benchmark fixtures. | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true` |
+| `runtime_install` | Reconcile package-owned runtime (AGENTS.md templates, skills, provider defaults, runtime folders) into the coordinator; optionally install provider deps and benchmark fixtures. **Preserves** user data (`memory-repos/`, `providers/data/`, `providers/runners/`) and **replaces** the managed scaffold (`skills/`, provider compose/shape). With `install_provider_deps=true` it builds provider images but **skips** any image whose tag already exists; pass `no_cache=true` to force a from-scratch rebuild (bypasses that skip and adds `--no-cache`). | `dry_run=false`, `include_benchmarks=false`, `install_provider_deps=true`, `no_cache=false` |
 | `skills_install` | Copy packaged skills into the harness skill root (`tree` or `flat` layout). | `layout="tree"`, `dry_run=false`, `overwrite=false`, `archive_existing=false` |
 
 ## Memory & onboarding

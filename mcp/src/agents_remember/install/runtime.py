@@ -355,6 +355,7 @@ def install_provider_dependencies(
     summary: InstallSummary,
     dry_run: bool,
     timeout: int,
+    no_cache: bool = False,
 ) -> None:
     if not any_provider_enabled(settings):
         if dry_run:
@@ -367,6 +368,7 @@ def install_provider_dependencies(
         summary,
         dry_run=dry_run,
         timeout=timeout,
+        no_cache=no_cache,
     )
 
 
@@ -377,6 +379,7 @@ def install_provider_dependencies_from_settings(
     *,
     dry_run: bool,
     timeout: int,
+    no_cache: bool = False,
 ) -> list[dict[str, Any]]:
     settings_path = write_temp_provider_settings(settings)
     results: list[dict[str, Any]] = []
@@ -392,6 +395,7 @@ def install_provider_dependencies_from_settings(
                 force=False,
                 root=None,
                 runtime_root=None,
+                no_cache=no_cache,
             )
             results.append(lifecycle.grepai_install(grepai_args))
         if configured_provider_enabled(settings, "codegraphcontext-code"):
@@ -404,6 +408,7 @@ def install_provider_dependencies_from_settings(
                 json=True,
                 repo_id=None,
                 code_repo_root=None,
+                no_cache=no_cache,
             )
             results.append(lifecycle.cgc_install_all(cgc_args))
     finally:
@@ -436,6 +441,7 @@ def install_runtime(
     install_provider_deps: bool = True,
     provider_deps_timeout: int = 1800,
     provider_settings: dict[str, Any],
+    no_cache: bool = False,
 ) -> InstallSummary:
     runtime_root = source_root / "runtime"
     require_runtime_tree(runtime_root)
@@ -501,6 +507,7 @@ def install_runtime(
             summary,
             dry_run,
             provider_deps_timeout,
+            no_cache=no_cache,
         )
 
     return summary
@@ -514,6 +521,7 @@ def install_runtime_from_config(
     install_provider_deps: bool = True,
     provider_deps_timeout: int | None = None,
     source_root: Path | None = None,
+    no_cache: bool = False,
 ) -> dict[str, Any]:
     timeout = provider_deps_timeout or config.timeout_caps.get(
         "providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS
@@ -528,6 +536,7 @@ def install_runtime_from_config(
             install_provider_deps=install_provider_deps,
             provider_deps_timeout=timeout,
             provider_settings=provider_settings,
+            no_cache=no_cache,
         )
     else:
         with packaged_source_root() as packaged_root:
@@ -539,6 +548,7 @@ def install_runtime_from_config(
                 install_provider_deps=install_provider_deps,
                 provider_deps_timeout=timeout,
                 provider_settings=provider_settings,
+                no_cache=no_cache,
             )
     integrity = None
     if not dry_run:

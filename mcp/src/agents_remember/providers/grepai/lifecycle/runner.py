@@ -47,7 +47,8 @@ def grepai_runner_image_build(
     _, provider_settings, layout = grepai_layout_from_args(args)
     backend = grepai_backend_settings(provider_settings, layout)
     render = grepai_compose_render(provider_settings, layout, runner, backend)
-    command_args = ["build", "watcher"]
+    no_cache = bool(getattr(args, "no_cache", False))
+    command_args = ["build", "--no-cache", "watcher"] if no_cache else ["build", "watcher"]
     dockerfile = provider_asset_path("docker", "grepai", "Dockerfile")
     if args.dry_run:
         return {
@@ -59,7 +60,9 @@ def grepai_runner_image_build(
             "compose": grepai_compose_summary(render),
             "command": compose_plan(render, command_args, cwd=layout.coordination_root),
         }
-    if docker_image_exists(runner["image"], cwd=layout.coordination_root, timeout=args.timeout):
+    if not no_cache and docker_image_exists(
+        runner["image"], cwd=layout.coordination_root, timeout=args.timeout
+    ):
         return {"ok": True, "image": runner["image"], "alreadyExists": True}
     result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
     image_digest = docker_repo_digest(

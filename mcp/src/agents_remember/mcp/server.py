@@ -53,10 +53,14 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def ping() -> dict[str, Any]:
+        """Liveness check. Returns server name, version, and transport. Read-only; no side effects."""
         return ping_payload()
 
     @server.tool()
     def server_info() -> dict[str, Any]:
+        """Report the resolved configuration: coordination/workspace/transcript roots, allowed
+        repo ids, allowed provider ids, and the full tool list. Read-only; reflects the settings
+        loaded at startup (settings-file edits need a harness restart to take effect)."""
         return server_info_payload(config)
 
     @server.tool()
@@ -65,6 +69,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         include_providers: bool = True,
         include_drift: bool = False,
     ) -> dict[str, Any]:
+        """Bundle a repository's current state into one packet: repo/git state, resolved paths,
+        memory mode/storage, worktree state, and (optionally) provider status and drift. Read-only.
+        Preferred single call to orient at task start."""
         return context_packet_payload(
             config,
             repo_id,
@@ -77,12 +84,26 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         include_benchmarks: bool = False,
         install_provider_deps: bool = True,
+        no_cache: bool = False,
     ) -> dict[str, Any]:
+        """Install/refresh the packaged coordinator runtime into the coordination root. Safe to
+        re-run over an existing install.
+
+        PRESERVES user data: memory-repos/ (onboarding), providers/data/ (DBs, Ollama model,
+        FalkorDB graph), and providers/runners/. REPLACES managed scaffold: skills/, AGENTS.md
+        templates, and provider compose/docker/requirements ("shape"). Removes the legacy
+        scripts/ dir.
+
+        With install_provider_deps=true (default) it also builds provider images, but SKIPS any
+        image whose tag already exists. Pass no_cache=true to force a true from-scratch rebuild
+        (bypasses that skip AND adds --no-cache to docker build). include_benchmarks=true also
+        installs benchmark fixtures. ALWAYS preview with dry_run=true first."""
         return runtime_install_payload(
             config,
             dry_run=dry_run,
             include_benchmarks=include_benchmarks,
             install_provider_deps=install_provider_deps,
+            no_cache=no_cache,
         )
 
     @server.tool()
@@ -93,6 +114,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         worktree_name: str | None = None,
         topology: str | None = None,
     ) -> dict[str, Any]:
+        """Resolve a repository's coordination/memory context: topology (internal/external), code
+        and memory roots, settings paths, storage mode, and path rules. Read-only. Use this (or
+        context_packet) before relying on onboarding, task files, or provider tools."""
         return resolve_context_payload(
             config,
             repo_id,
@@ -104,6 +128,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def drift_check(repo_id: str, detail_limit: int = 50) -> dict[str, Any]:
+        """Task-start gate: classify how far onboarding has drifted from the code since it was last
+        verified. Read-only (writes only a temp drift report). A nonzero actionable count is
+        expected after code changes, not a failure."""
         return drift_check_payload(config, repo_id, detail_limit=detail_limit)
 
     @server.tool()
@@ -112,6 +139,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         checks: list[str] | None = None,
         detail_limit: int = 50,
     ) -> dict[str, Any]:
+        """Closeout memory-quality gate: runs drift-integrity and style checks over onboarding.
+        Read-only. ok=false means findings exist (e.g. drifted onboarding), not that the tool
+        failed. Pass `checks` to run a subset; default runs all."""
         return memory_quality_check_payload(
             config,
             repo_id,
@@ -121,6 +151,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def route_index_refresh(repo_id: str, dry_run: bool = False) -> dict[str, Any]:
+        """Regenerate the overview.index.json route indexes so they match the current onboarding
+        tree. Writes index files under the memory root; does not touch source or onboarding
+        content. Preview with dry_run=true."""
         return route_index_refresh_payload(config, repo_id, dry_run=dry_run)
 
     @server.tool()
@@ -129,6 +162,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         initialize_git: bool = True,
     ) -> dict[str, Any]:
+        """Initialize or repair a repository's memory root (scaffold system/ files, onboarding
+        layout, optionally `git init`). Does not overwrite existing onboarding content. Preview
+        with dry_run=true. Usually driven by the C-00 skill."""
         return memory_init_payload(
             config,
             repo_id,
@@ -143,6 +179,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         overwrite: bool = False,
         archive_existing: bool = False,
     ) -> dict[str, Any]:
+        """Copy the packaged skills into the harness skill root (e.g. .claude/skills) so the harness
+        can discover them. layout 'tree' (default) or 'flat'. overwrite replaces existing skill
+        files; archive_existing backs them up first. Most harnesses only discover newly-installed
+        skills after a restart. Preview with dry_run=true."""
         return skills_install_payload(
             config,
             layout=layout,
@@ -153,14 +193,22 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def provider_status(detail_limit: int = 20) -> dict[str, Any]:
+        """Compact provider readiness summary (per-provider state ready/degraded/stopped, watcher
+        up, indexing state). Read-only. Returns noProviders when none are enabled in settings."""
         return provider_status_payload(config, detail_limit=detail_limit)
 
     @server.tool()
     def provider_diagnostics(detail_limit: int = 20) -> dict[str, Any]:
+        """Raw provider-native diagnostic detail (container states, ports, backend/embedder health,
+        ping output). Read-only. Use when provider_status reports degraded and you need the cause."""
         return provider_diagnostics_payload(config, detail_limit=detail_limit)
 
     @server.tool()
     def provider_watchers(action: str, dry_run: bool = False) -> dict[str, Any]:
+        """Control provider watchers. action: 'start' (recreate containers from current compose and
+        begin indexing), 'stop'/'shutdown-all', 'refresh' (re-seed/re-index after repo or memory
+        changed), or 'status'. Mutating except status. Indexing runs in the watcher and is never
+        time-capped. Preview with dry_run=true."""
         return provider_watchers_payload(config, action=action, dry_run=dry_run)
 
     @server.tool()
@@ -173,6 +221,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """Semantic search over memory/onboarding via the grepai provider. Read-only; needs the
+        grepai-memory provider enabled, running, and indexed. dry_run=true returns the planned
+        provider command without running it."""
         return grepai_search_payload(
             config,
             query,
@@ -195,6 +246,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """Trace relationships (callers/callees/graph) in the grepai semantic graph for a symbol.
+        Read-only; needs grepai-memory enabled and indexed. dry_run=true returns the planned
+        command."""
         return grepai_trace_payload(
             config,
             trace_action,
@@ -214,6 +268,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """Find a symbol in the CodeGraphContext code graph. Read-only; needs the
+        codegraphcontext-code provider enabled, running, and the repo indexed. dry_run=true returns
+        the planned command."""
         return cgc_symbol_search_payload(
             config,
             repo_id,
@@ -230,6 +287,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """List the callers of a function from the CodeGraphContext graph. Read-only; needs the cgc
+        provider indexed. Optional `file` disambiguates same-named functions."""
         return cgc_callers_payload(
             config,
             repo_id,
@@ -246,6 +305,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """List what a function calls (its callees) from the CodeGraphContext graph. Read-only;
+        needs the cgc provider indexed."""
         return cgc_callees_payload(
             config,
             repo_id,
@@ -261,6 +322,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """Report a module's dependencies from the CodeGraphContext graph. Read-only; needs the cgc
+        provider indexed."""
         return cgc_dependencies_payload(
             config,
             repo_id,
@@ -276,6 +339,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """Report complexity metrics from the CodeGraphContext graph (whole repo, or one function
+        if given). Read-only; needs the cgc provider indexed."""
         return cgc_complexity_payload(
             config,
             repo_id,
@@ -292,6 +357,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
+        """Produce a CodeGraphContext graph visualization (serves a browser view on `port`). Needs
+        the cgc provider running and indexed. dry_run=true returns the planned command."""
         return cgc_visualize_payload(
             config,
             repo_id,
@@ -314,6 +381,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         skip_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        """Create or load a task contract plus code (and external-memory) git worktrees. Mutating:
+        creates branches/worktrees on disk. Preview with dry_run=true. Driven by the C-09 worktree
+        workflow; pick workflow_kind to match the task format."""
         return worktree_start_payload(
             config,
             repo_id,
@@ -334,6 +404,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         task_name: str | None = None,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
+        """Re-attach to an existing task contract without mutating git. Read-only; resume a task by
+        task_name or contract_path."""
         return worktree_attach_payload(
             config,
             repo_id,
@@ -347,6 +419,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         task_name: str | None = None,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
+        """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only."""
         return worktree_status_payload(
             config,
             repo_id,
@@ -361,6 +434,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         memory_commit_message: str = "",
         ledger_commit_message: str = "",
     ) -> dict[str, Any]:
+        """Non-mutating preview of a worktree-backed closeout (what code/memory/ledger commits would
+        be made). Nothing is committed. Pair with worktree_closeout_apply."""
         return worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -378,6 +453,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        """Apply a worktree closeout: commits code, then memory, then ledger. MUTATING and
+        commit-gated — only after explicit developer commit approval; preview first
+        (worktree_closeout_preview or dry_run=true). Requires intent_note."""
         return worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -397,6 +475,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         memory_commit_message: str = "",
         ledger_commit_message: str = "",
     ) -> dict[str, Any]:
+        """Non-mutating preview of a direct (current-checkout, no worktree) closeout. Nothing is
+        committed. Pair with direct_closeout_apply."""
         return direct_closeout_preview_payload(
             config,
             repo_id,
@@ -418,6 +498,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        """Apply a direct closeout on the current checkout: commits code, then memory, then ledger.
+        MUTATING and commit-gated — only after explicit developer commit approval; preview first
+        (direct_closeout_preview or dry_run=true). Requires intent_note."""
         return direct_closeout_apply_payload(
             config,
             repo_id,
@@ -437,6 +520,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        """Land a closed task branch back onto its source branch (strategy 'ff-only' or 'replay').
+        MUTATING: moves branch refs. Do not move protected branches without explicit approval.
+        Preview with dry_run=true."""
         return worktree_integrate_payload(
             config,
             contract_path,
@@ -447,10 +533,15 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def worktree_cleanup(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
+        """Remove a task's worktrees and merged task branches after integration. MUTATING and
+        destructive (deletes worktrees/branches) — run only after worktree_integrate. Preview with
+        dry_run=true."""
         return worktree_cleanup_payload(config, contract_path, dry_run=dry_run)
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:
+        """Report drift and ledger state to decide whether an external-memory baseline can be
+        adopted. Read-only."""
         return memory_baseline_status_payload(config, repo_id)
 
     @server.tool()
@@ -461,6 +552,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         work_branch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        """Create the first ledgered memory baseline for an external memory repo. Mutating: writes
+        the ledger and commits memory. Gated on clean drift unless accept_drift=true. Preview with
+        dry_run=true. Usually driven by the C-10 skill."""
         return memory_baseline_adopt_payload(
             config,
             repo_id,
@@ -479,6 +573,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         old_base: str,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
+        """Plan (non-mutating) carrying richer onboarding from a source/feature branch into official
+        memory once code has landed. Returns a plan to review; apply with memory_carryover_apply."""
         return memory_carryover_plan_payload(
             config,
             repo_id,
@@ -502,6 +598,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         memory_commit_message: str = "Carry over landed branch memory",
         ledger_commit_message: str = "Record branch memory carryover",
     ) -> dict[str, Any]:
+        """Apply an approved carryover plan: writes onboarding and commits memory + ledger. Mutating
+        and approval-gated — run memory_carryover_plan first and only apply after the code has landed
+        officially. Requires intent_note."""
         return memory_carryover_apply_payload(
             config,
             repo_id,
@@ -526,6 +625,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         skill_exposure_mode: str = "copy",
         provider_timeout: int = 1800,
     ) -> dict[str, Any]:
+        """Prepare resettable benchmark case workspaces (clones repos, materializes coordination).
+        Defaults to dry_run=true because a real prepare clones repos and writes workspaces. Set
+        dry_run=false to actually prepare."""
         return codex_benchmark_prepare_payload(
             config,
             target=target,
@@ -553,6 +655,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         provider_timeout: int = 1800,
         codex_sandbox: str = "danger-full-access",
     ) -> dict[str, Any]:
+        """Run a Codex benchmark case (executes Codex agents, may use a full-access sandbox).
+        Defaults to dry_run=true because a real run clones repos and runs agents. Set dry_run=false
+        to actually run; review codex_sandbox before doing so."""
         return codex_benchmark_run_payload(
             config,
             target=target,
