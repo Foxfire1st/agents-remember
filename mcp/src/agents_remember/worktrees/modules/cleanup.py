@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import argparse
 from dataclasses import replace
 from pathlib import Path
 
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_exists, run_git
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
@@ -132,9 +132,10 @@ def _kept_branches(branches: dict[str, dict[str, object]]) -> dict[str, dict[str
     }
 
 
-def cleanup_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if not args.approved and not args.dry_run:
         raise RuntimeError("cleanup requires --approved after successful integration")
+    assert args.contract_path is not None
     contract = load_contract(args.contract_path)
     if contract.integration_status != "completed":
         raise RuntimeError("cleanup requires integration.status completed")

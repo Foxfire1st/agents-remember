@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context.models import (
     CrossRepoAllowEntry,
     CrossRepoSettings,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 
-
-def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo_root.as_posix()}", *args],
-        cwd=repo_root,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
+__all__ = [
+    "git_branch",
+    "git_head_or_empty",
+    "resolve_cross_repo_entry",
+    "resolve_cross_repo_settings",
+    "run_git",
+]
 
 
 def git_branch(repo_root: Path) -> str:
@@ -28,7 +25,9 @@ def git_branch(repo_root: Path) -> str:
     return result.stdout.strip()
 
 
-def git_head(repo_root: Path) -> str:
+def git_head_or_empty(repo_root: Path) -> str:
+    """Return the HEAD commit, or an empty string when git fails."""
+
     result = run_git(repo_root, ["rev-parse", "HEAD"])
     if result.returncode != 0:
         return ""
@@ -98,7 +97,7 @@ def code_repository_info(code_path: Path) -> dict[str, str]:
     return {
         "path": code_path.as_posix(),
         "branch": git_branch(code_path),
-        "head": git_head(code_path),
+        "head": git_head_or_empty(code_path),
     }
 
 

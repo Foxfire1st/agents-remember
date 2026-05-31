@@ -19,10 +19,8 @@ from agents_remember.providers.identity import provider_instance_id
 
 class ProviderSetupTests(unittest.TestCase):
     def test_settings_path_requires_explicit_provider_settings(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            with self.assertRaisesRegex(RuntimeError, "requires an explicit settings path"):
-                provider_setup.settings_path(root, None)
+        with self.assertRaisesRegex(RuntimeError, "requires an explicit settings path"):
+            provider_setup.settings_path(None)
 
     def test_parser_requires_from_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

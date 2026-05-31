@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from agents_remember.providers.cgc.lifecycle.core import cgc_backend_settings
+from agents_remember.providers.cgc.lifecycle.core import (
+    CgcRuntimeLayout,
+    cgc_backend_settings,
+)
 from agents_remember.providers.lifecycle.compose_runtime import (
     ComposeRender,
-    optional_yaml_line,
+    host_user_block,
     provider_asset_path,
     provider_asset_text,
     render_template,
@@ -35,7 +37,7 @@ def cgc_ownership_labels(provider_settings: dict[str, Any]) -> dict[str, str]:
 
 def cgc_compose_render(
     provider_settings: dict[str, Any],
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     *,
     falkordb_port: int | str | None = None,
     browser_port: int | str | None = None,
@@ -65,7 +67,7 @@ def cgc_compose_render(
         "RUNNER_BUILD_CONTEXT": yaml_scalar(
             provider_asset_path("docker", "codegraphcontext").as_posix()
         ),
-        "RUNNER_USER_BLOCK": cgc_user_block(),
+        "RUNNER_USER_BLOCK": host_user_block(),
         "SERVICE_LABELS": yaml_labels(cgc_ownership_labels(provider_settings)),
         "RUNNER_WORKING_DIR": yaml_scalar(layout.container_runtime_root),
         "RUNNER_RUNTIME_VOLUME": yaml_scalar(
@@ -89,34 +91,23 @@ def cgc_compose_render(
     )
 
 
-def cgc_watcher_service_name(layout: Any) -> str:
+def cgc_watcher_service_name(layout: CgcRuntimeLayout) -> str:
     return f"watcher-{layout.repo_id}"
 
 
-def cgc_compose_env(layout: Any) -> dict[str, str]:
+def cgc_compose_env(layout: CgcRuntimeLayout) -> dict[str, str]:
     env = layout.env(for_container=True)
     env["FALKORDB_HOST"] = layout.backend_container_name
     return env
 
 
-def cgc_user() -> str | None:
-    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
-        return None
-    return f"{os.getuid()}:{os.getgid()}"
-
-
-def cgc_user_block() -> str:
-    user = cgc_user()
-    return optional_yaml_line("user", user, indent=4)
-
-
-def cgc_watcher_service_yaml(provider_settings: dict[str, Any], layout: Any) -> str:
+def cgc_watcher_service_yaml(provider_settings: dict[str, Any], layout: CgcRuntimeLayout) -> str:
     template = provider_asset_text("compose", "codegraphcontext.watcher.yaml.tmpl")
     values = {
         "WATCHER_SERVICE": cgc_watcher_service_name(layout),
         "RUNNER_IMAGE": yaml_scalar(layout.runner_image),
         "WATCHER_CONTAINER_NAME": yaml_scalar(layout.watcher_container_name),
-        "WATCHER_USER_BLOCK": cgc_user_block(),
+        "WATCHER_USER_BLOCK": host_user_block(),
         "SERVICE_LABELS": yaml_labels(cgc_ownership_labels(provider_settings)),
         "WATCHER_WORKING_DIR": yaml_scalar(layout.container_runtime_root),
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(

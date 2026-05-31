@@ -90,7 +90,7 @@ def docker_ensure_ollama_model(
 
 def grepai_embedder_health(
     args: argparse.Namespace,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     embedder: dict[str, Any],
     *,
     running: bool,
@@ -218,7 +218,7 @@ def grepai_embedder_backend_status(args: argparse.Namespace) -> dict[str, Any]:
 
 def grepai_embedder_start_context(
     args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], Any, dict[str, Any], str]:
+) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout, dict[str, Any], str]:
     settings_path, provider_settings, layout = grepai_layout_from_args(args)
     embedder = grepai_embedder_backend_settings(provider_settings, layout)
     return settings_path, provider_settings, layout, embedder, grepai_network_name(provider_settings)
@@ -247,7 +247,7 @@ def grepai_embedder_prepare_storage(args: argparse.Namespace, embedder: dict[str
 
 def grepai_embedder_remove_mismatched_container(
     args: argparse.Namespace,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     embedder: dict[str, Any],
     inspect_data: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
@@ -352,7 +352,7 @@ def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def grepai_embedder_inspect(
-    args: argparse.Namespace, layout: Any, embedder: dict[str, Any]
+    args: argparse.Namespace, layout: GrepaiRuntimeLayout, embedder: dict[str, Any]
 ) -> dict[str, Any] | None:
     if args.dry_run:
         return None
@@ -368,7 +368,7 @@ def grepai_embedder_create_start_result(
     provider_settings: dict[str, Any],
     embedder: dict[str, Any],
     inspect_data: dict[str, Any] | None,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     network_result: dict[str, Any],
     forced_remove_result: dict[str, Any] | None,
     migration: dict[str, Any] | None,

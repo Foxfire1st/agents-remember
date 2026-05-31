@@ -14,11 +14,16 @@ from pathlib import Path
 PACKAGE_DATA_ROOT = "package_data"
 
 
-def long_path(path: Path) -> Path:
+def long_path(path: Path, *, resolve: bool = True) -> Path:
     if sys.platform != "win32":
         return path
 
-    resolved = path.resolve()
+    if resolve:
+        resolved = path.resolve()
+    elif path.is_absolute():
+        resolved = path
+    else:
+        resolved = Path.cwd() / path
     text = str(resolved)
     if text.startswith("\\\\?\\"):
         return resolved

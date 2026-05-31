@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
+from agents_remember.controllers._guards import require_repo, require_within_coordination
 from agents_remember.kernel.coordination_context_resolver import (
     resolve_coordination_context,
 )
 from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.route_index import build_route_indexes
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope, path_is_relative_to
+from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory import baseline, carryover
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
@@ -24,7 +24,7 @@ def drift_check_tool(
     repo_id: str,
     detail_limit: int = 50,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     context = resolve_coordination_context(
         code_repository_name=repo.repo_id,
         workspace_root=config.workspace_root,
@@ -48,7 +48,7 @@ def memory_quality_check_tool(
     checks: list[str] | None = None,
     detail_limit: int = 50,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     if repo.memory_root is None:
         raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
     onboarding_root = repo.memory_root / "onboarding"
@@ -83,7 +83,7 @@ def route_index_refresh_tool(
     repo_id: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     if repo.memory_root is None:
         raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
     result = build_route_indexes(
@@ -117,9 +117,13 @@ def memory_init_tool(
 
 
 def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
-    return {"ok": True, "operation": "memory_baseline_status", **payload}
+    return {
+        "ok": payload.get("state") != "blocked-drift",
+        "operation": "memory_baseline_status",
+        **payload,
+    }
 
 
 def memory_baseline_adopt_tool(
@@ -131,7 +135,7 @@ def memory_baseline_adopt_tool(
     work_branch: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     returncode, payload = baseline.baseline_adopt(
         _baseline_request(config, repo),
         accept_drift=accept_drift,
@@ -197,26 +201,6 @@ def memory_carryover_apply_tool(
     return {"ok": True, "operation": "memory_carryover_apply", **payload}
 
 
-def _repo(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:
-    try:
-        return config.repositories[repo_id]
-    except KeyError as error:
-        allowed = ", ".join(config.allowed_repo_ids) or "<none>"
-        raise ValueError(
-            f"repo_id {repo_id!r} is not allowed by MCP settings; allowed: {allowed}"
-        ) from error
-
-
-def _coord_path(config: McpRuntimeConfig, value: str, label: str) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
-        path = config.coordination_root / path
-    path = path.resolve()
-    if not path_is_relative_to(path, config.coordination_root):
-        raise ValueError(f"{label} must stay inside coordination_root")
-    return path
-
-
 def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseline.BaselineRequest:
     return baseline.BaselineRequest(
         code_repository_name=repo.repo_id,
@@ -237,10 +221,10 @@ def _carryover_request(
     old_base: str,
     replace_existing: bool,
 ) -> carryover.CarryoverRequest:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     if repo.memory_root is None:
         raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
-    source_memory_path = _coord_path(config, source_memory, "source_memory")
+    source_memory_path = require_within_coordination(config, source_memory, "source_memory")
     return carryover.CarryoverRequest(
         code_repository_root=repo.path,
         official_code_ref=official_code_ref,

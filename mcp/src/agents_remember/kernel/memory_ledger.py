@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
+
+from agents_remember.errors import AgentsRememberError
 
 LEDGER_SCHEMA = "ar-memory-ledger/v1"
 LEGACY_LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
@@ -36,7 +37,7 @@ class MemoryLedger:
     schema: str = LEDGER_SCHEMA
 
 
-class LedgerError(ValueError):
+class LedgerError(AgentsRememberError):
     """Raised when a memory ledger is missing or invalid."""
 
 
@@ -228,18 +229,3 @@ def create_initial_ledger(
         rows=[LedgerRow(code_commit, memory_commit)],
     )
 
-
-def find_ledger_anchor_commit(
-    memory_repo: Path, code_commit: str, memory_commit: str
-) -> str | None:
-    row_text = f"| {code_commit} | {memory_commit} |"
-    result = subprocess.run(
-        ["git", "-C", str(memory_repo), "log", "--format=%H", "-S", row_text, "--", "memory.md"],
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    return result.stdout.splitlines()[0].strip() if result.stdout.splitlines() else None

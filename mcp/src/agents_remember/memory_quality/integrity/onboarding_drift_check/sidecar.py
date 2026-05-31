@@ -6,9 +6,9 @@ from pathlib import Path
 
 from agents_remember.kernel.coordination_context_resolver import (
     StorageSettings,
+    is_sidecar_storage,
     normalize_rel_path,
     resolve_storage_for_source,
-    sidecar_storage_label,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     mirror_onboarding_path,
@@ -307,7 +307,7 @@ def classify_sidecar_onboarding_units(
                 note="Source path is excluded by pathRules.",
             )
         ]
-    if not sidecar_storage_label(storage_mode):
+    if not is_sidecar_storage(storage_mode):
         return [
             DriftRow(
                 onboarding_file=onboarding_ref,

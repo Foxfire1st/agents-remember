@@ -36,14 +36,6 @@ def parse_table_metadata(path: Path) -> dict[str, str]:
     return metadata
 
 
-def is_file_level_onboarding(path: Path) -> bool:
-    try:
-        metadata = parse_table_metadata(path)
-    except UnicodeDecodeError:
-        return False
-    return metadata.get("doc_type") == "file-level-onboarding"
-
-
 def is_supported_sidecar_onboarding(path: Path) -> bool:
     try:
         metadata = parse_table_metadata(path)

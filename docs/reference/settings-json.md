@@ -118,9 +118,16 @@ watch settings internally.
   "timeoutCaps": {
     "toolSeconds": 30,
     "providerSetupSeconds": 1800
-  }
+  },
+  "benchmarksEnabled": false
 }
 ```
+
+`benchmarksEnabled` (optional, default `false`) gates the `codex_benchmark_prepare`
+and `codex_benchmark_run` tools. They are refused unless this is `true`, because a
+real run clones third-party repositories and executes the Codex CLI against them.
+Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pass
+`"danger-full-access"` only for trusted local runs.
 
 ## Memory Fields
 

@@ -19,35 +19,20 @@ from agents_remember.providers.cgc.setup import IsolatedCgcOptions
 from agents_remember.providers.grepai import setup as grepai_setup
 from agents_remember.providers.grepai.setup import GrepaiSeedOptions, IsolatedGrepaiOptions
 
-command_display = setup_common.command_display
-context_providers = setup_common.context_providers
-expand_template = setup_common.expand_template
-load_json = setup_common.load_json
 load_settings = setup_common.load_settings
-parse_json_stdout = setup_common.parse_json_stdout
 provider_enabled = setup_common.provider_enabled
 require_settings_path = setup_common.require_settings_path
 run_command = setup_common.run_command
 run_lifecycle = setup_common.run_lifecycle
 selected_provider_enabled = setup_common.selected_provider_enabled
 settings_path = setup_common.settings_path
-stable_provider_id = setup_common.stable_provider_id
 subprocess = setup_common.subprocess
-subprocess_env = setup_common.subprocess_env
 
 cgc_extra_args = cgc_seed.cgc_extra_args
 cgc_seed_bundle = cgc_seed.cgc_seed_bundle
-cgc_seed_source_extra_args = cgc_seed.cgc_seed_source_extra_args
-cgc_seed_source_settings_path = cgc_seed.cgc_seed_source_settings_path
-configured_cgc_repo_root = cgc_seed.configured_cgc_repo_root
-git_head = cgc_seed.git_head
 isolated_cgc_settings = cgc_setup.isolated_cgc_settings
 isolated_grepai_settings = grepai_setup.isolated_grepai_settings
-write_isolated_cgc_settings = cgc_setup.write_isolated_cgc_settings
-path_replacements = cgc_bundle.path_replacements
 rewrite_cgc_bundle_paths = cgc_bundle.rewrite_cgc_bundle_paths
-rewrite_json_value = cgc_bundle.rewrite_json_value
-rewrite_string = cgc_bundle.rewrite_string
 
 
 @dataclass(frozen=True)
@@ -268,7 +253,7 @@ def action_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    settings = load_settings(args.coordination_root, args.from_settings)
+    settings = load_settings(args.from_settings)
     if settings is None:
         return _missing_settings_payload(args)
 
@@ -280,7 +265,7 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "action": args.action,
         "dryRun": args.dry_run,
         "coordinationRoot": args.coordination_root.as_posix(),
-        "settingsFile": settings_path(args.coordination_root, args.from_settings).as_posix(),
+        "settingsFile": settings_path(args.from_settings).as_posix(),
         "isolatedProviderSettings": isolated,
         "enabled": enabled,
         "results": results,
@@ -368,7 +353,7 @@ def _missing_settings_payload(args: argparse.Namespace) -> dict[str, Any]:
         "ok": True,
         "action": args.action,
         "coordinationRoot": args.coordination_root.as_posix(),
-        "settingsFile": settings_path(args.coordination_root, args.from_settings).as_posix(),
+        "settingsFile": settings_path(args.from_settings).as_posix(),
         "enabled": {},
         "results": [],
         "note": "settings.json is missing; no providers configured",

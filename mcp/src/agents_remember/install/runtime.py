@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -18,7 +17,6 @@ from typing import Any
 from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.mcp.config import DEFAULT_PROVIDER_SETUP_SECONDS, McpRuntimeConfig
 from agents_remember.providers import lifecycle
-from agents_remember.providers.integrity import write_provider_runner_manifest
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 AGENTS_MD_TARGETS = {
@@ -115,19 +113,6 @@ def copy_file(source: Path, destination: Path, summary: InstallSummary, dry_run:
     summary.copied_files += 1
 
 
-def removable_path(path: Path) -> Path:
-    if sys.platform != "win32":
-        return path
-
-    resolved = path.resolve()
-    text = str(resolved)
-    if text.startswith("\\\\?\\"):
-        return resolved
-    if text.startswith("\\\\"):
-        return Path("\\\\?\\UNC\\" + text.lstrip("\\"))
-    return Path("\\\\?\\" + text)
-
-
 def remove_readonly(function, path: str, exc_info) -> None:
     error = exc_info[1]
     if not isinstance(error, PermissionError):
@@ -144,37 +129,29 @@ def unlink_file(path: Path) -> None:
         path.unlink()
 
 
-def _remove_with_retry(path: Path, target: Path) -> PermissionError | None:
-    """Remove ``target`` with retries; return the last PermissionError or None."""
-    last_error: PermissionError | None = None
+def _remove_with_retry(path: Path, target: Path) -> None:
+    """Remove ``target`` with retries, raising on persistent failure."""
     for attempt in range(MAX_REMOVE_ATTEMPTS):
         try:
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(target, onerror=remove_readonly)
             else:
                 unlink_file(target)
-            return None
+            return
         except PermissionError as error:
-            last_error = error
             if attempt == MAX_REMOVE_ATTEMPTS - 1:
                 raise RuntimeError(
                     f"cannot remove {path}; a provider process, editor, "
                     "or file explorer may still be using it"
                 ) from error
             time.sleep(0.5)
-    return last_error
 
 
 def remove_path(path: Path, summary: InstallSummary, dry_run: bool) -> None:
     if not path.exists() and not path.is_symlink():
         return
     if not dry_run:
-        last_error = _remove_with_retry(path, removable_path(path))
-        if last_error is not None and (path.exists() or path.is_symlink()):
-            raise RuntimeError(
-                f"cannot remove {path}; a provider process, editor, "
-                "or file explorer may still be using it"
-            ) from last_error
+        _remove_with_retry(path, long_path(path))
     summary.removed_paths += 1
 
 
@@ -550,9 +527,6 @@ def install_runtime_from_config(
                 provider_settings=provider_settings,
                 no_cache=no_cache,
             )
-    integrity = None
-    if not dry_run:
-        integrity = write_provider_runner_manifest(config)
     return {
         "ok": True,
         "operation": "runtime_install",
@@ -568,5 +542,4 @@ def install_runtime_from_config(
             "removedPaths": summary.removed_paths,
             "dependencyRuns": summary.dependency_runs,
         },
-        "integrity": integrity,
     }

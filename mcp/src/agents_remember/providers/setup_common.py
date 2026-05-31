@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -14,11 +13,9 @@ from typing import Any
 from agents_remember.mcp.command_capture import run_package_main
 from agents_remember.providers import lifecycle
 
-
-def stable_provider_id(value: str) -> str:
-    lowered = value.strip().lower()
-    slug = re.sub(r"[^a-z0-9._-]+", "-", lowered).strip(".-_")
-    return slug or "repo"
+# Re-exported for ``from agents_remember.providers.setup_common import stable_provider_id``;
+# canonical source is ``providers.identity``.
+from agents_remember.providers.identity import stable_provider_id  # noqa: F401
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -40,15 +37,12 @@ def require_settings_path(from_settings: Path | None) -> Path:
     return from_settings.resolve()
 
 
-def settings_path(coordination_root: Path, from_settings: Path | None = None) -> Path:
-    _ = coordination_root
+def settings_path(from_settings: Path | None = None) -> Path:
     return require_settings_path(from_settings)
 
 
-def load_settings(
-    coordination_root: Path, from_settings: Path | None = None
-) -> dict[str, Any] | None:
-    path = settings_path(coordination_root, from_settings)
+def load_settings(from_settings: Path | None = None) -> dict[str, Any] | None:
+    path = settings_path(from_settings)
     if not path.exists():
         return None
     return load_json(path)
@@ -60,6 +54,13 @@ def context_providers(settings: dict[str, Any]) -> dict[str, Any]:
         return {}
     providers = context.get("providers")
     return providers if isinstance(providers, dict) else {}
+
+
+def provider_settings(settings: dict[str, Any], provider_id: str) -> dict[str, Any] | None:
+    """Return the settings block for ``provider_id`` when it is a dict, else None."""
+
+    provider = context_providers(settings).get(provider_id)
+    return provider if isinstance(provider, dict) else None
 
 
 def provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:

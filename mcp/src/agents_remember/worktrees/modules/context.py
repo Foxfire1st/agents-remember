@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import argparse
 from dataclasses import replace
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
-def resolve_context(args: argparse.Namespace):
+def resolve_context(args: WorktreeArgs):
     return resolver.resolve_coordination_context(
         code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,

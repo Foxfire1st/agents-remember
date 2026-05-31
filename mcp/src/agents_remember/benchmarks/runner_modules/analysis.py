@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agents_remember.benchmarks.runner_modules.constants import TOKEN_KEYS
+from agents_remember.benchmarks.runner_modules.constants import USAGE_TOKEN_KEYS
 from agents_remember.benchmarks.runner_modules.manifest import load_json
 
 
@@ -31,28 +31,40 @@ def collect_strings(value: Any, keys: set[str]) -> list[str]:
     return found
 
 
-def update_token_metrics(event: Any, metrics: dict[str, Any]) -> None:
-    for current in walk_values(event):
-        if not isinstance(current, dict):
-            continue
-        for key, value in current.items():
-            update_token_metric(metrics, key, value)
+def record_usage(metrics: dict[str, Any], usage: Any) -> None:
+    # Codex reports cumulative token usage per turn in `turn.completed.usage`.
+    # Sum across turns so multi-turn runs are accounted correctly.
+    if not isinstance(usage, dict):
+        return
+    for key in USAGE_TOKEN_KEYS:
+        value = usage.get(key)
+        if isinstance(value, int):
+            metrics[key] = int(metrics.get(key, 0)) + value
 
 
-def update_token_metric(metrics: dict[str, Any], key: str, value: Any) -> None:
-    metric_key = TOKEN_KEYS.get(key)
-    if metric_key and isinstance(value, int):
-        metrics[metric_key] = max(int(metrics.get(metric_key, 0)), value)
+def record_item(metrics: dict[str, Any], item: dict[str, Any]) -> None:
+    # Codex items are `item.completed` events; commands are `command_execution`
+    # and the assistant's reply is `agent_message` (the last one is the answer).
+    item_type = item.get("type")
+    if item_type == "command_execution":
+        metrics["command_event_count"] += 1
+    elif item_type == "agent_message":
+        text = item.get("text")
+        if isinstance(text, str):
+            metrics["final_answer"] = text
 
 
 def empty_jsonl_metrics(path: Path) -> dict[str, Any]:
-    return {
+    metrics: dict[str, Any] = {
         "jsonl_size_bytes": path.stat().st_size,
         "event_count": 0,
         "command_event_count": 0,
         "errors": [],
         "final_answer": "",
     }
+    for key in USAGE_TOKEN_KEYS:
+        metrics[key] = 0
+    return metrics
 
 
 def iter_jsonl_events(path: Path, metrics: dict[str, Any]) -> list[Any]:
@@ -67,26 +79,18 @@ def iter_jsonl_events(path: Path, metrics: dict[str, Any]) -> list[Any]:
     return events
 
 
-def event_has_command_marker(event: Any) -> bool:
-    raw = json.dumps(event, sort_keys=True)
-    return any(marker in raw for marker in ("exec_command", "tool_call", '"cmd"', '"command"'))
-
-
-def update_final_answer(metrics: dict[str, Any], event: Any) -> None:
-    for candidate in collect_strings(event, {"content", "text", "message"}):
-        if len(candidate) > len(str(metrics.get("final_answer", ""))):
-            metrics["final_answer"] = candidate
-
-
 def update_event_metrics(metrics: dict[str, Any], event: Any) -> None:
     metrics["event_count"] += 1
-    if event_has_command_marker(event):
-        metrics["command_event_count"] += 1
-    update_token_metrics(event, metrics)
+    if not isinstance(event, dict):
+        return
+    event_type = event.get("type")
+    if event_type == "turn.completed":
+        record_usage(metrics, event.get("usage"))
+    elif event_type == "item.completed" and isinstance(event.get("item"), dict):
+        record_item(metrics, event["item"])
     metrics["errors"].extend(
         error for error in collect_strings(event, {"error", "stderr"}) if error
     )
-    update_final_answer(metrics, event)
 
 
 def analyze_jsonl(path: Path) -> dict[str, Any]:
@@ -149,9 +153,9 @@ def summary_numeric_keys() -> list[str]:
         "event_count",
         "command_event_count",
         "input_tokens",
-        "fresh_input_tokens",
+        "cached_input_tokens",
         "output_tokens",
-        "reasoning_tokens",
+        "reasoning_output_tokens",
         "jsonl_size_bytes",
     ]
 

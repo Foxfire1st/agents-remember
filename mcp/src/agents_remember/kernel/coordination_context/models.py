@@ -4,8 +4,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TypedDict
 
+from agents_remember.errors import AgentsRememberError
 
-class MissingMemoryError(ValueError):
+
+class MissingMemoryError(AgentsRememberError):
     """Raised when neither supported durable memory location exists."""
 
     def __init__(

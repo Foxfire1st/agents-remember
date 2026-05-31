@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.controllers._guards import require_within_coordination
 from agents_remember.install.assets import packaged_source_root
-from agents_remember.mcp.config import McpRuntimeConfig, path_is_relative_to
+from agents_remember.mcp.config import McpRuntimeConfig
 
 
 def codex_benchmark_prepare_tool(
@@ -23,6 +24,8 @@ def codex_benchmark_prepare_tool(
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
 ) -> dict[str, Any]:
+    if not config.benchmarks_enabled:
+        return _benchmarks_disabled("codex_benchmark_prepare")
     with _benchmark_root_context(config, benchmarks_root) as resolved_benchmarks_root:
         return benchmark_runner.prepare_benchmarks(
             benchmark_runner.BenchmarkPrepareRequest(
@@ -54,6 +57,8 @@ def codex_benchmark_run_tool(
     provider_timeout: int = 1800,
     codex_sandbox: str = benchmark_runner.CODEX_BENCHMARK_SANDBOX,
 ) -> dict[str, Any]:
+    if not config.benchmarks_enabled:
+        return _benchmarks_disabled("codex_benchmark_run")
     try:
         codex_executable = benchmark_runner.resolve_codex_executable()
     except benchmark_runner.CodexExecutableNotFound as error:
@@ -94,20 +99,10 @@ def codex_benchmark_run_tool(
     return result
 
 
-def _coord_path(config: McpRuntimeConfig, value: str, label: str) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
-        path = config.coordination_root / path
-    path = path.resolve()
-    if not path_is_relative_to(path, config.coordination_root):
-        raise ValueError(f"{label} must stay inside coordination_root")
-    return path
-
-
 @contextmanager
 def _benchmark_root_context(config: McpRuntimeConfig, value: str | None) -> Iterator[Path]:
     if value:
-        yield _coord_path(config, value, "benchmarks_root")
+        yield require_within_coordination(config, value, "benchmarks_root")
         return
 
     coordinator_benchmarks = config.coordination_root / "benchmarks"
@@ -117,3 +112,14 @@ def _benchmark_root_context(config: McpRuntimeConfig, value: str | None) -> Iter
 
     with packaged_source_root() as source_root:
         yield source_root / "benchmarks"
+
+
+def _benchmarks_disabled(operation: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "operation": operation,
+        "error": (
+            'benchmark tools are disabled; set "benchmarksEnabled": true in the MCP '
+            "settings to enable them"
+        ),
+    }

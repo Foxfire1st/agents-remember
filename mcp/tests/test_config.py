@@ -35,6 +35,7 @@ def settings_payload(root: Path) -> dict:
             "toolSeconds": 30,
             "providerSetupSeconds": 1800,
         },
+        "benchmarksEnabled": True,
     }
 
 
@@ -373,6 +374,17 @@ class McpConfigTests(unittest.TestCase):
             write_json(path, payload)
 
             with self.assertRaisesRegex(ConfigError, "non-negative integer"):
+                load_config(path)
+
+    def test_timeout_caps_reject_unknown_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            payload["timeoutCaps"]["bogusSeconds"] = 120
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            with self.assertRaisesRegex(ConfigError, "unsupported timeout cap"):
                 load_config(path)
 
     def test_provider_setup_seconds_zero_means_unlimited(self) -> None:

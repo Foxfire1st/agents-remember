@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agents_remember.errors import AuthorityError
 from agents_remember.kernel.coordination_context_resolver import (
     context_to_dict,
     resolve_coordination_context,
@@ -32,7 +33,7 @@ from agents_remember.worktrees.status import worktree_status_packet
 CONTEXT_PACKET_VERSION = 2
 
 
-class ContextPacketError(ValueError):
+class ContextPacketError(AuthorityError):
     """Raised when the context packet request violates MCP authority settings."""
 
 

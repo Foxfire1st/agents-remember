@@ -4,22 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shutil
 from pathlib import Path
 from typing import Any
 
+from agents_remember.errors import AgentsRememberError
 
-class ContextProviderError(ValueError):
+# Re-exported for ``from agents_remember.providers.context import stable_provider_id``
+# (and the ``import *`` facade in ``context/__init__.py``); canonical source is identity.
+from agents_remember.providers.identity import stable_provider_id  # noqa: F401
+
+
+class ContextProviderError(AgentsRememberError):
     """Raised when a provider layout or patch check fails."""
-
-
-def stable_provider_id(value: str) -> str:
-    """Return a stable provider id component."""
-
-    lowered = value.strip().lower()
-    slug = re.sub(r"[^a-z0-9._-]+", "-", lowered).strip(".-_")
-    return slug or "repo"
 
 
 def expand_template(value: str, variables: dict[str, str]) -> str:

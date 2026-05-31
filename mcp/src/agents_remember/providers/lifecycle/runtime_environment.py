@@ -7,10 +7,6 @@ import sys
 from pathlib import Path
 
 
-def runtime_root_from_script() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
 def configure_utf8_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

@@ -31,7 +31,7 @@ from agents_remember.providers.lifecycle.process_status import process_namespace
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
-def grepai_root_artifacts(layout: Any) -> list[str]:
+def grepai_root_artifacts(layout: GrepaiRuntimeLayout) -> list[str]:
     return [
         path.as_posix()
         for root in layout.roots
@@ -40,7 +40,7 @@ def grepai_root_artifacts(layout: Any) -> list[str]:
     ]
 
 
-def grepai_roots_payload(layout: Any) -> list[dict[str, Any]]:
+def grepai_roots_payload(layout: GrepaiRuntimeLayout) -> list[dict[str, Any]]:
     return [
         {
             "projectId": root.project_id,
@@ -55,7 +55,7 @@ def grepai_docker_status(
     args: argparse.Namespace,
     *,
     settings_path: Path,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     backend_status = grepai_backend_status(args)
@@ -119,7 +119,7 @@ def grepai_docker_run_command(
     *,
     settings_path: Path,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     backend = grepai_backend_settings(provider_settings, layout)
@@ -160,7 +160,7 @@ def grepai_docker_run_command(
 def grepai_docker_workspace_state(
     args: argparse.Namespace,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     backend = grepai_backend_settings(provider_settings, layout)
@@ -186,7 +186,7 @@ def grepai_docker_start(
     args: argparse.Namespace,
     *,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     backend_result = grepai_backend_start(args)
@@ -234,7 +234,7 @@ def grepai_docker_start(
 def grepai_docker_stop(
     args: argparse.Namespace,
     *,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     watcher_result = grepai_watcher_container_stop(args)
@@ -264,7 +264,7 @@ def grepai_docker_refresh(
     args: argparse.Namespace,
     *,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
 ) -> dict[str, Any]:
     stop_result = grepai_docker_stop(args, layout=layout, runner=runner)
@@ -292,7 +292,7 @@ def grepai_run_docker(
     *,
     settings_path: Path,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
 ) -> dict[str, Any]:
     runner = grepai_runner_settings(provider_settings, layout)
     if not args.dry_run:
@@ -365,7 +365,7 @@ def grepai_install_workspace(
     args: argparse.Namespace,
     *,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
     backend_result: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
@@ -387,7 +387,7 @@ def grepai_docker_install_result(
     *,
     requirements_file: Path,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     version: str,
 ) -> dict[str, Any]:
     runner = grepai_runner_settings(provider_settings, layout, version=version)
@@ -455,7 +455,7 @@ def grepai_unsupported_install_result(
     args: argparse.Namespace,
     *,
     requirements_file: Path,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     version: str,
 ) -> dict[str, Any]:
     return {
@@ -526,7 +526,7 @@ def require_supported_grepai_action(action: str) -> None:
 
 
 def grepai_unsupported_settings_result(
-    args: argparse.Namespace, action: str, settings_path: Path, layout: Any
+    args: argparse.Namespace, action: str, settings_path: Path, layout: GrepaiRuntimeLayout
 ) -> dict[str, Any]:
     return {
         "provider": "grepai",

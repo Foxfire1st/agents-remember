@@ -156,7 +156,7 @@ def docker_verify_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) 
 
 
 def grepai_backend_state(
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any],
     *,
     settings_path: Path,
@@ -195,7 +195,7 @@ def grepai_backend_state(
 
 def grepai_backend_health_checks(
     args: argparse.Namespace,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any],
     *,
     running: bool,
@@ -214,7 +214,7 @@ def grepai_backend_health_checks(
 
 
 def grepai_backend_runtime_details(
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any],
     network_name: str,
     state: dict[str, Any],
@@ -323,7 +323,7 @@ def grepai_backend_status(args: argparse.Namespace) -> dict[str, Any]:
 
 def grepai_backend_start_context(
     args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], Any, dict[str, Any], str]:
+) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout, dict[str, Any], str]:
     settings_path, provider_settings, layout = grepai_layout_from_args(args)
     if not args.dry_run:
         ensure_grepai_runtime_layout(layout)
@@ -335,7 +335,7 @@ def grepai_backend_start_context(
 
 def grepai_backend_remove_mismatched_container(
     args: argparse.Namespace,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
@@ -383,7 +383,7 @@ def grepai_backend_host_port(
 def grepai_backend_dry_run_result(
     *,
     settings_path: Path,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any],
     network_result: dict[str, Any],
     commands: list[dict[str, Any]],
@@ -439,7 +439,7 @@ def grepai_backend_start(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def grepai_backend_inspect(
-    args: argparse.Namespace, layout: Any, backend: dict[str, Any]
+    args: argparse.Namespace, layout: GrepaiRuntimeLayout, backend: dict[str, Any]
 ) -> dict[str, Any] | None:
     if args.dry_run:
         return None
@@ -453,7 +453,7 @@ def grepai_backend_create_start_result(
     *,
     settings_path: Path,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
     network_result: dict[str, Any],
@@ -529,7 +529,7 @@ def grepai_backend_create_start_result(
 def grepai_project_migration(
     args: argparse.Namespace,
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     backend: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     backend = backend or grepai_backend_settings(provider_settings, layout)

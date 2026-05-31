@@ -23,6 +23,7 @@ sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.controllers.runtime_install import RuntimeInstallRequest
+from agents_remember.mcp import SERVER_VERSION
 from agents_remember.mcp.config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.mcp.tools import (
@@ -49,10 +50,6 @@ from agents_remember.mcp.tools import (
     skills_install_payload,
 )
 from agents_remember.mcp.tools import core as core_tools
-from agents_remember.providers.integrity import (
-    check_provider_runner_integrity,
-    manifest_path_for_config,
-)
 from agents_remember.providers.settings import lifecycle_settings_from_config
 from test_config import settings_payload
 from test_provider_current_state import ready_status_payload
@@ -82,7 +79,7 @@ class McpToolTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["server"], "agents-remember")
-        self.assertEqual(payload["version"], "0.9.6")
+        self.assertEqual(payload["version"], SERVER_VERSION)
         self.assertEqual(payload["transport"], "stdio")
         self.assertGreater(payload["tokens"], 0)
         self.assertEqual(payload["tokenizer"], "tiktoken:o200k_base")
@@ -328,10 +325,8 @@ class McpToolTests(unittest.TestCase):
             self.assertEqual(payload["executable"], "codex")
             self.assertEqual(payload["resolution"], "PATH")
             self.assertEqual(payload["codexExecutionPolicy"]["resolution"], "PATH")
-            self.assertEqual(payload["codexExecutionPolicy"]["sandbox"], "danger-full-access")
-            self.assertEqual(
-                payload["codexExecutionPolicy"]["sandboxArgument"], "danger-full-access"
-            )
+            self.assertEqual(payload["codexExecutionPolicy"]["sandbox"], "default")
+            self.assertEqual(payload["codexExecutionPolicy"]["sandboxArgument"], "omitted")
             self.assertTrue(payload["codexExecutionPolicy"]["benchmarkOnly"])
 
             with patch(
@@ -340,13 +335,36 @@ class McpToolTests(unittest.TestCase):
                     "codex executable was not found on PATH"
                 ),
             ):
-                default_payload = codex_benchmark_run_payload(
+                danger_payload = codex_benchmark_run_payload(
                     config,
-                    codex_sandbox="default",
+                    codex_sandbox="danger-full-access",
                 )
 
-            self.assertEqual(default_payload["codexExecutionPolicy"]["sandbox"], "default")
-            self.assertEqual(default_payload["codexExecutionPolicy"]["sandboxArgument"], "omitted")
+            self.assertEqual(
+                danger_payload["codexExecutionPolicy"]["sandbox"], "danger-full-access"
+            )
+            self.assertEqual(
+                danger_payload["codexExecutionPolicy"]["sandboxArgument"], "danger-full-access"
+            )
+
+    def test_codex_benchmark_tools_refuse_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            payload["benchmarksEnabled"] = False
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+            config = load_config(path)
+
+            run = codex_benchmark_run_payload(config)
+            self.assertFalse(run["ok"])
+            self.assertEqual(run["operation"], "codex_benchmark_run")
+            self.assertIn("disabled", run["error"])
+
+            prepare = codex_benchmark_prepare_payload(config)
+            self.assertFalse(prepare["ok"])
+            self.assertEqual(prepare["operation"], "codex_benchmark_prepare")
+            self.assertIn("disabled", prepare["error"])
 
     def test_command_style_artifacts_are_not_exposed_for_service_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -718,65 +736,6 @@ class McpToolTests(unittest.TestCase):
                 "agents-remember-md",
             ],
         )
-
-    def test_provider_integrity_ignores_legacy_cgc_venv_in_docker_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            provider_venv = (
-                root / "ar-coordination" / "providers" / "_venvs" / "codegraphcontext" / "bin"
-            )
-            provider_venv.mkdir(parents=True)
-            (provider_venv / "cgc").write_text("changed", encoding="utf-8")
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            payload = check_provider_runner_integrity(config)
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["state"], "notInstalled")
-        self.assertEqual(payload["fileCount"], 0)
-
-    def test_provider_integrity_ignores_legacy_grepai_binary_in_docker_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            provider_bin = root / "ar-coordination" / "providers" / "_bin"
-            provider_bin.mkdir(parents=True)
-            (provider_bin / "grepai").write_text("legacy host binary\n", encoding="utf-8")
-            (provider_bin / "grepai.exe").write_text("legacy host binary\n", encoding="utf-8")
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            payload = check_provider_runner_integrity(config)
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["state"], "notInstalled")
-        self.assertEqual(payload["fileCount"], 0)
-
-    def test_provider_integrity_ignores_recorded_legacy_grepai_binary(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-            write_json(
-                manifest_path_for_config(config),
-                {
-                    "version": 1,
-                    "coordinationRoot": config.coordination_root.as_posix(),
-                    "files": {
-                        "providers/_bin/grepai": "legacy",
-                        "providers/_bin/grepai.exe": "legacy",
-                    },
-                },
-            )
-
-            payload = check_provider_runner_integrity(config)
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["state"], "checked")
-        self.assertEqual(payload["fileCount"], 0)
 
 
 REAL_MCP_CONFIG = os.environ.get("AGENTS_REMEMBER_REAL_MCP_CONFIG")

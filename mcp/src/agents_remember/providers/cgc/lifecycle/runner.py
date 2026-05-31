@@ -10,7 +10,10 @@ from agents_remember.providers.cgc.lifecycle.compose import (
     cgc_compose_render,
     cgc_compose_summary,
 )
-from agents_remember.providers.cgc.lifecycle.core import cgc_all_layouts_from_settings
+from agents_remember.providers.cgc.lifecycle.core import (
+    CgcRuntimeLayout,
+    cgc_all_layouts_from_settings,
+)
 from agents_remember.providers.context import *
 from agents_remember.providers.lifecycle.compose_runtime import (
     compose_plan,
@@ -27,15 +30,11 @@ from agents_remember.providers.lifecycle.docker_runtime import (
 from agents_remember.providers.lifecycle.state_files import write_json
 
 
-def cgc_runner_dockerfile() -> str:
-    return provider_asset_text("docker", "codegraphcontext", "Dockerfile")
-
-
 def cgc_runner_patch_script() -> str:
     return provider_asset_text("docker", "codegraphcontext", "patch_cgc.py")
 
 
-def cgc_runner_image_build(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+def cgc_runner_image_build(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
     no_cache = bool(getattr(args, "no_cache", False))
@@ -75,7 +74,7 @@ def cgc_runner_image_build(args: argparse.Namespace, layout: Any) -> dict[str, A
     }
 
 
-def cgc_watcher_inspect(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
+def cgc_watcher_inspect(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
     if args.dry_run:
         return None
     return docker_inspect_container(
@@ -85,11 +84,11 @@ def cgc_watcher_inspect(args: argparse.Namespace, layout: Any) -> dict[str, Any]
     )
 
 
-def cgc_watcher_running(args: argparse.Namespace, layout: Any) -> bool:
+def cgc_watcher_running(args: argparse.Namespace, layout: CgcRuntimeLayout) -> bool:
     return docker_container_running(cgc_watcher_inspect(args, layout))
 
 
-def cgc_runner_image_status(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+def cgc_runner_image_status(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any]:
     exists = (
         False
         if args.dry_run

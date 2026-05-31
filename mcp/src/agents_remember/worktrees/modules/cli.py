@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import LedgerError
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result, direct_closeout_result
 from agents_remember.worktrees.modules.integrate import integrate_result
@@ -23,43 +24,43 @@ def parse_json_stdout(stdout: str) -> object:
 
 
 def command_status(args: argparse.Namespace) -> int:
-    result = status_result(args)
+    result = status_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_attach(args: argparse.Namespace) -> int:
-    result = attach_result(args)
+    result = attach_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_start(args: argparse.Namespace) -> int:
-    result = start_result(args)
+    result = start_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_closeout(args: argparse.Namespace) -> int:
-    result = closeout_result(args)
+    result = closeout_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_direct_closeout(args: argparse.Namespace) -> int:
-    result = direct_closeout_result(args)
+    result = direct_closeout_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_integrate(args: argparse.Namespace) -> int:
-    result = integrate_result(args)
+    result = integrate_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_cleanup(args: argparse.Namespace) -> int:
-    result = cleanup_result(args)
+    result = cleanup_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 

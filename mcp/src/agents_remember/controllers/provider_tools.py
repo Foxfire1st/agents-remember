@@ -6,14 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from agents_remember.controllers._guards import require_repo
 from agents_remember.mcp.config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
     McpRuntimeConfig,
-    RepositoryScope,
 )
 from agents_remember.providers import lifecycle_service
 from agents_remember.providers.current_state import write_current_provider_state
-from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import (
     lifecycle_settings_from_config,
     write_lifecycle_settings,
@@ -257,7 +256,7 @@ def cgc_visualize_tool(
     dry_run: bool = False,
     timeout: int | None = None,
 ) -> dict[str, Any]:
-    _repo(config, repo_id)
+    require_repo(config, repo_id)
     return _provider_operation_result(
         config,
         operation="cgc_visualize",
@@ -282,7 +281,7 @@ def _cgc_run_tool(
     dry_run: bool,
     timeout: int | None,
 ) -> dict[str, Any]:
-    _repo(config, repo_id)
+    require_repo(config, repo_id)
     return _provider_operation_result(
         config,
         operation=operation,
@@ -457,16 +456,6 @@ def _grepai_trace_action(trace_action: str) -> str:
     return value
 
 
-def _repo(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:
-    try:
-        return config.repositories[repo_id]
-    except KeyError as error:
-        allowed = ", ".join(config.allowed_repo_ids) or "<none>"
-        raise ValueError(
-            f"repo_id {repo_id!r} is not allowed by MCP settings; allowed: {allowed}"
-        ) from error
-
-
 def _provider_watchers_once(
     config: McpRuntimeConfig, action: str, *, dry_run: bool
 ) -> dict[str, Any]:
@@ -517,7 +506,7 @@ def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, A
             )
         )
     return {
-        "ok": all(step.get("ok") for step in steps),
+        "ok": bool(steps) and all(step.get("ok") for step in steps),
         "operation": "provider_watchers",
         "action": "refresh",
         "steps": steps,
@@ -538,10 +527,6 @@ def _provider_operation_result(
     timeout: int | None = None,
     run: ProviderLifecycleRunner,
 ) -> dict[str, Any]:
-    integrity = check_provider_runner_integrity(config)
-    if integrity.get("ok") is False:
-        return _provider_integrity_block_payload(operation, integrity)
-
     settings_path = write_lifecycle_settings(config)
     try:
         service_config = lifecycle_service.ProviderLifecycleServiceConfig(
@@ -551,22 +536,6 @@ def _provider_operation_result(
             timeout=timeout or DEFAULT_DOCKER_CONTROL_SECONDS,
         )
         data = run(service_config)
-        return {"operation": operation, "ok": bool(data.get("ok")), **data}
+        return {**data, "operation": operation, "ok": bool(data.get("ok"))}
     finally:
         settings_path.unlink(missing_ok=True)
-
-
-def _provider_integrity_block_payload(operation: str, integrity: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "operation": operation,
-        "ok": False,
-        "state": "runnerIntegrityFailed",
-        "error": "provider runner integrity check failed; run runtime_install before provider operations",
-        "integrity": integrity,
-        "recoveryActions": [
-            {
-                "action": "runtime_install",
-                "reason": "provider runner files changed or were not recorded since install",
-            }
-        ],
-    }

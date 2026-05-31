@@ -29,7 +29,6 @@ from agents_remember.models.providers import (
 )
 from agents_remember.providers import lifecycle
 from agents_remember.providers.current_state import write_current_provider_state
-from agents_remember.providers.integrity import check_provider_runner_integrity
 from agents_remember.providers.settings import write_lifecycle_settings
 
 
@@ -43,7 +42,6 @@ class ProviderStatusProjection:
     settings_file: str | None = None
     current_state_file: str | None = None
     current_state: dict[str, Any] | None = None
-    integrity: dict[str, Any] | None = None
     process_namespace: dict[str, Any] | None = None
     recovery_actions: list[dict[str, Any]] | None = None
     raw_status: dict[str, Any] | None = None
@@ -98,7 +96,6 @@ def provider_diagnostics_packet(
         settingsFile=projection.settings_file,
         currentStateFile=projection.current_state_file,
         currentState=projection.current_state,
-        integrity=projection.integrity,
         processNamespace=projection.process_namespace,
         items=_provider_diagnostics_items(config, projection)[:detail_limit],
         recoveryActions=projection.recovery_actions or [],
@@ -158,23 +155,6 @@ def _provider_status_projection(
             partial=False,
         )
 
-    integrity = check_provider_runner_integrity(config)
-    if integrity.get("ok") is False:
-        return ProviderStatusProjection(
-            configured=True,
-            enabled=True,
-            state="runnerIntegrityFailed",
-            ok=False,
-            partial=False,
-            integrity=integrity,
-            recovery_actions=[
-                {
-                    "action": "runtime_install",
-                    "reason": "provider runner files changed or were not recorded since install",
-                }
-            ],
-        )
-
     status = _watchers_status(config)
     current_state = write_current_provider_state(config, status)
     return ProviderStatusProjection(
@@ -186,7 +166,6 @@ def _provider_status_projection(
         settings_file=status.get("settingsFile", ""),
         current_state_file=current_state["path"],
         current_state=current_state["state"],
-        integrity=integrity,
         process_namespace=status.get("processNamespace"),
         recovery_actions=status.get("recoveryActions", []),
         raw_status=status,
@@ -412,7 +391,6 @@ def _provider_state(value: Any) -> ProviderState:
         "unknown",
         "noProviders",
         "skipped",
-        "runnerIntegrityFailed",
     }:
         state = "unknown"
     return cast(ProviderState, state)

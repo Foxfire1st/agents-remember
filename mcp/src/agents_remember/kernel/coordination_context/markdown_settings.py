@@ -220,9 +220,7 @@ class _MarkdownSettingsParser:
             self.current_list = None
 
     def try_apply_storage_mode(self, stripped: str) -> bool:
-        if stripped.startswith("mode:"):
-            self.settings.mode = clean_scalar(stripped.split(":", 1)[1]) or "external"
-        elif stripped.startswith("layout:"):
+        if stripped.startswith(("mode:", "layout:")):
             self.settings.mode = clean_scalar(stripped.split(":", 1)[1]) or self.settings.mode
         else:
             return False
@@ -232,7 +230,7 @@ class _MarkdownSettingsParser:
     def try_apply_storage_default(self, stripped: str) -> bool:
         if not stripped.startswith("default:"):
             return False
-        self.settings.default = clean_scalar(stripped.split(":", 1)[1]) or "external"
+        self.settings.default = clean_scalar(stripped.split(":", 1)[1]) or self.settings.default
         return True
 
     def handle_storage_path_rule_line(self, indent: int, stripped: str) -> None:

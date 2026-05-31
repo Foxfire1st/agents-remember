@@ -10,7 +10,6 @@ from agents_remember.models.base import (
 from agents_remember.models.benchmarks import (
     CodexBenchmarkPrepareResponse,
     CodexBenchmarkRunResponse,
-    CodexExecutionPolicy,
 )
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse, Transport
@@ -100,7 +99,6 @@ __all__ = [
     "CleanupStatus",
     "CodexBenchmarkPrepareResponse",
     "CodexBenchmarkRunResponse",
-    "CodexExecutionPolicy",
     "ContextPacketV2",
     "ContextProviderItem",
     "DirectCloseoutApplyResponse",

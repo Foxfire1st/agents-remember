@@ -11,11 +11,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.errors import AgentsRememberError
+
 CONTRACT_SCHEMA = "ar-worktree-contract/v1"
 VALID_MEMORY_MODES = {"internal", "external", "disabled"}
 
 
-class ContractError(ValueError):
+class ContractError(AgentsRememberError):
     """Raised when a worktree contract cannot be parsed or validated."""
 
 

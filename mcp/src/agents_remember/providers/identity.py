@@ -15,6 +15,12 @@ def stable_slug(value: str, *, fallback: str = "instance") -> str:
     return slug or fallback
 
 
+def stable_provider_id(value: str) -> str:
+    """Return a stable provider id component."""
+
+    return stable_slug(value, fallback="repo")
+
+
 def short_hash(value: str, *, length: int = 10) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 

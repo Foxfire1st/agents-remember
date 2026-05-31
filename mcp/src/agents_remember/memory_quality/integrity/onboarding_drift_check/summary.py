@@ -6,14 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
-
-ACTIONABLE_CLASSIFICATIONS = {
-    "drifted",
-    "missing verification",
-    "missing",
-    "orphaned",
-    "unsupported",
-}
+from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
+    ACTIONABLE_CLASSIFICATIONS,
+)
 
 
 def not_checked() -> dict[str, Any]:

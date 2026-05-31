@@ -17,7 +17,6 @@ from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
     compose_plan,
     provider_asset_path,
-    provider_asset_text,
     run_compose,
 )
 from agents_remember.providers.lifecycle.docker_runtime import (
@@ -32,11 +31,6 @@ from agents_remember.providers.lifecycle.docker_runtime import (
 from agents_remember.providers.lifecycle.state_files import (
     write_json,
 )
-
-
-def grepai_runner_dockerfile(version: str, arch: str) -> str:
-    del version, arch
-    return provider_asset_text("docker", "grepai", "Dockerfile")
 
 
 def grepai_runner_image_build(
@@ -108,7 +102,7 @@ def grepai_watcher_container_status(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def grepai_watcher_inspect(
-    args: argparse.Namespace, layout: Any, runner: dict[str, Any]
+    args: argparse.Namespace, layout: GrepaiRuntimeLayout, runner: dict[str, Any]
 ) -> dict[str, Any] | None:
     if args.dry_run:
         return None
@@ -119,7 +113,7 @@ def grepai_watcher_inspect(
 
 def grepai_watcher_workspace_status(
     args: argparse.Namespace,
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
     running: bool,
 ) -> dict[str, Any] | None:
@@ -159,7 +153,7 @@ def grepai_watcher_start_prerequisites(
     *,
     runner: dict[str, Any],
     network_name: str,
-) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+) -> tuple[GrepaiRuntimeLayout, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
     _, _, layout = grepai_layout_from_args(args)
     network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
     image = grepai_runner_image_build(args, runner=runner)
@@ -223,7 +217,7 @@ def grepai_watcher_create_start_result(
     runner: dict[str, Any],
     network_result: dict[str, Any],
     image: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     postgres_port: int | str | None,
     ollama_port: int | str | None,
 ) -> dict[str, Any]:
@@ -301,7 +295,7 @@ def grepai_watcher_container_stop(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def grepai_docker_state(
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     *,
     action: str,
     runner: dict[str, Any],

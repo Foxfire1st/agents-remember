@@ -5,6 +5,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
+
 from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
 from .tools import (
@@ -206,9 +208,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
     @server.tool()
     def provider_watchers(action: str, dry_run: bool = False) -> dict[str, Any]:
         """Control provider watchers. action: 'start' (recreate containers from current compose and
-        begin indexing), 'stop'/'shutdown-all', 'refresh' (re-seed/re-index after repo or memory
-        changed), or 'status'. Mutating except status. Indexing runs in the watcher and is never
-        time-capped. Preview with dry_run=true."""
+        begin indexing), 'restart' (stop then start), 'stop'/'shutdown-all', 'refresh'
+        (re-seed/re-index after repo or memory changed), or 'status'. Mutating except status.
+        Indexing runs in the watcher and is never time-capped. Preview with dry_run=true."""
         return provider_watchers_payload(config, action=action, dry_run=dry_run)
 
     @server.tool()
@@ -222,8 +224,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         timeout: int | None = None,
     ) -> dict[str, Any]:
         """Semantic search over memory/onboarding via the grepai provider. Read-only; needs the
-        grepai-memory provider enabled, running, and indexed. dry_run=true returns the planned
-        provider command without running it."""
+        grepai-memory provider enabled, running, and indexed. output_format is 'json' or 'toon'.
+        dry_run=true returns the planned provider command without running it."""
         return grepai_search_payload(
             config,
             query,
@@ -246,9 +248,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
         timeout: int | None = None,
     ) -> dict[str, Any]:
-        """Trace relationships (callers/callees/graph) in the grepai semantic graph for a symbol.
-        Read-only; needs grepai-memory enabled and indexed. dry_run=true returns the planned
-        command."""
+        """Trace relationships in the grepai semantic graph for a symbol. trace_action is
+        'callers', 'callees', or 'graph' (depth applies only to 'graph'). output_format is 'json'
+        or 'toon'. Read-only; needs grepai-memory enabled and indexed. dry_run=true returns the
+        planned command."""
         return grepai_trace_payload(
             config,
             trace_action,
@@ -383,7 +386,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
     ) -> dict[str, Any]:
         """Create or load a task contract plus code (and external-memory) git worktrees. Mutating:
         creates branches/worktrees on disk. Preview with dry_run=true. Driven by the C-09 worktree
-        workflow; pick workflow_kind to match the task format."""
+        workflow; workflow_kind is the task format ('light-task', 'heavy-task', or 'chat-task').
+        memory_mode is 'internal', 'external', or 'disabled'."""
         return worktree_start_payload(
             config,
             repo_id,
@@ -653,11 +657,12 @@ def create_server(config: McpRuntimeConfig) -> Any:
         force_clone: bool = False,
         skill_exposure_mode: str = "copy",
         provider_timeout: int = 1800,
-        codex_sandbox: str = "danger-full-access",
+        codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
     ) -> dict[str, Any]:
-        """Run a Codex benchmark case (executes Codex agents, may use a full-access sandbox).
-        Defaults to dry_run=true because a real run clones repos and runs agents. Set dry_run=false
-        to actually run; review codex_sandbox before doing so."""
+        """Run a Codex benchmark case (executes Codex agents in a sandbox). Refused unless the MCP
+        settings enable benchmarks (benchmarksEnabled). Defaults to dry_run=true because a real run
+        clones third-party repos and runs agents. codex_sandbox defaults to Codex's own 'default'
+        sandbox; pass 'danger-full-access' to grant full host access (trusted local runs only)."""
         return codex_benchmark_run_payload(
             config,
             target=target,

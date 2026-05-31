@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
 from typing import Any
 
+from agents_remember.controllers._guards import require_repo, require_within_coordination
 from agents_remember.mcp.config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
     McpRuntimeConfig,
     RepositoryScope,
-    path_is_relative_to,
 )
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
@@ -30,7 +28,7 @@ def worktree_start_tool(
     skip_provider_setup: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
     provider_setup_config = (
         None
@@ -71,12 +69,12 @@ def worktree_attach_tool(
     task_name: str | None = None,
     contract_path: str | None = None,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     args = _worktree_namespace(
         config,
         repo,
         task_name=task_name,
-        contract_path=_coord_path(config, contract_path, "contract_path")
+        contract_path=require_within_coordination(config, contract_path, "contract_path")
         if contract_path
         else None,
     )
@@ -90,12 +88,12 @@ def worktree_status_tool(
     task_name: str | None = None,
     contract_path: str | None = None,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     args = _worktree_namespace(
         config,
         repo,
         task_name=task_name,
-        contract_path=_coord_path(config, contract_path, "contract_path")
+        contract_path=require_within_coordination(config, contract_path, "contract_path")
         if contract_path
         else None,
     )
@@ -202,8 +200,8 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    args = argparse.Namespace(
-        contract_path=_coord_path(config, contract_path, "contract_path"),
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=require_within_coordination(config, contract_path, "contract_path"),
         strategy=strategy,
         approved=not dry_run,
         ledger_commit_message=ledger_commit_message,
@@ -218,39 +216,19 @@ def worktree_cleanup_tool(
     contract_path: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    args = argparse.Namespace(
-        contract_path=_coord_path(config, contract_path, "contract_path"),
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=require_within_coordination(config, contract_path, "contract_path"),
         approved=not dry_run,
         dry_run=dry_run,
     )
     return _worktree_result("worktree_cleanup", git_worktree_manager.cleanup_result(args))
 
 
-def _repo(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:
-    try:
-        return config.repositories[repo_id]
-    except KeyError as error:
-        allowed = ", ".join(config.allowed_repo_ids) or "<none>"
-        raise ValueError(
-            f"repo_id {repo_id!r} is not allowed by MCP settings; allowed: {allowed}"
-        ) from error
-
-
-def _coord_path(config: McpRuntimeConfig, value: str, label: str) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
-        path = config.coordination_root / path
-    path = path.resolve()
-    if not path_is_relative_to(path, config.coordination_root):
-        raise ValueError(f"{label} must stay inside coordination_root")
-    return path
-
-
 def _worktree_namespace(
     config: McpRuntimeConfig,
     repo: RepositoryScope,
     **kwargs: Any,
-) -> argparse.Namespace:
+) -> git_worktree_manager.WorktreeArgs:
     values: dict[str, Any] = {
         "code_repository_name": repo.repo_id,
         "workspace_root": config.workspace_root,
@@ -261,13 +239,13 @@ def _worktree_namespace(
         "task_name": None,
     }
     values.update(kwargs)
-    return argparse.Namespace(**values)
+    return git_worktree_manager.WorktreeArgs(**values)
 
 
 def _worktree_result(
     operation: str, result: git_worktree_manager.WorktreeCommandResult
 ) -> dict[str, Any]:
-    return {"ok": result.returncode == 0, "operation": operation, **result.payload}
+    return {**result.payload, "ok": result.returncode == 0, "operation": operation}
 
 
 def _worktree_closeout(
@@ -281,8 +259,8 @@ def _worktree_closeout(
     dry_run: bool,
     intent_note: str,
 ) -> dict[str, Any]:
-    args = argparse.Namespace(
-        contract_path=_coord_path(config, contract_path, "contract_path"),
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=require_within_coordination(config, contract_path, "contract_path"),
         code_commit_message=code_commit_message,
         memory_commit_message=memory_commit_message,
         ledger_commit_message=ledger_commit_message,
@@ -306,7 +284,7 @@ def _direct_closeout(
     ledger_commit_message: str,
     dry_run: bool,
 ) -> dict[str, Any]:
-    repo = _repo(config, repo_id)
+    repo = require_repo(config, repo_id)
     args = _worktree_namespace(
         config,
         repo,

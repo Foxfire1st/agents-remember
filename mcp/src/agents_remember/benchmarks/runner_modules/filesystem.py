@@ -80,16 +80,7 @@ def absolute_path(path: Path) -> Path:
 
 
 def removable_path(path: Path, *, resolve: bool = True) -> Path:
-    if sys.platform != "win32":
-        return path
-
-    resolved = path.resolve() if resolve else absolute_path(path)
-    text = str(resolved)
-    if text.startswith("\\\\?\\"):
-        return resolved
-    if text.startswith("\\\\"):
-        return Path("\\\\?\\UNC\\" + text.lstrip("\\"))
-    return Path("\\\\?\\" + text)
+    return long_path(path, resolve=resolve)
 
 
 def remove_readonly(function, path: str, exc_info) -> None:

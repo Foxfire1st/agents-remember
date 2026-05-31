@@ -114,17 +114,6 @@ def find_code_repository_root(workspace_root: Path, code_repository_name: str) -
     if direct.exists():
         return direct
 
-    matches = [
-        path
-        for path in workspace_root.iterdir()
-        if path.is_dir() and path.name == code_repository_name
-    ]
-    if len(matches) == 1:
-        return matches[0].resolve()
-    if len(matches) > 1:
-        raise ValueError(
-            f"multiple code repositories named {code_repository_name!r} found under {workspace_root}"
-        )
     raise ValueError(
         f"code repository {code_repository_name!r} was not found under {workspace_root}"
     )

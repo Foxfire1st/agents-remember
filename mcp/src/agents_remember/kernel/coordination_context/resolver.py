@@ -303,7 +303,7 @@ def build_coordination_context(
     task_root = _task_root(coordination_root, code_repository_name, task_name, contract)
     worktree_group = _worktree_group(coordination_root, code_repository_name, worktree_name, contract)
     memory_mode = contract.memory_mode if contract is not None else _memory_mode(topology)
-    effective_memory_root = _effective_memory_root(memory_root, contract, memory_mode)
+    effective_memory_root = _effective_memory_root(memory_root, contract)
     system_root = _system_root(memory_root, coordination_root)
     return CoordinationContext(
         topology=topology,
@@ -358,11 +358,9 @@ def _memory_mode(topology: Literal["internal", "external"]) -> Literal["internal
     return "internal" if topology == "internal" else "external"
 
 
-def _effective_memory_root(memory_root: Path, contract, memory_mode: str) -> Path:
+def _effective_memory_root(memory_root: Path, contract) -> Path:
     if contract is not None and contract.memory_worktree is not None:
         return contract.memory_worktree
-    if memory_mode == "disabled":
-        return memory_root
     return memory_root
 
 

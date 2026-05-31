@@ -60,7 +60,7 @@ def resolve_request_context(request: BaselineRequest):
     )
 
 
-def resolve_context(args: argparse.Namespace):
+def resolve_baseline_context(args: argparse.Namespace):
     return resolve_request_context(request_from_args(args))
 
 

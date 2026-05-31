@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from agents_remember.providers.lifecycle.runtime_environment import subprocess_env
 
@@ -78,59 +77,3 @@ def timeout_stream_text(stream: str | bytes | None) -> str:
     if isinstance(stream, bytes):
         return stream.decode("utf-8", errors="replace")
     return stream or ""
-
-
-def run_foreground_command(
-    command: list[str],
-    *,
-    cwd: Path,
-    env: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    merged_env = subprocess_env(env)
-    started = time.monotonic()
-    completed = subprocess.run(
-        command,
-        cwd=str(cwd),
-        env=merged_env,
-        stdin=subprocess.DEVNULL,
-        check=False,
-    )
-    return {
-        "command": command,
-        "cwd": cwd.as_posix(),
-        "returncode": completed.returncode,
-        "durationSeconds": round(time.monotonic() - started, 3),
-    }
-
-
-def popen_detached_command(
-    command: list[str],
-    *,
-    cwd: Path,
-    env: dict[str, str] | None = None,
-    stdout: Any = subprocess.DEVNULL,
-    stderr: Any = subprocess.DEVNULL,
-) -> subprocess.Popen[bytes]:
-    """Start a long-running command without owning its lifetime."""
-
-    merged_env = subprocess_env(env)
-    popen_kwargs: dict[str, Any] = {}
-    if os.name == "nt":
-        popen_kwargs["creationflags"] = getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        ) | getattr(subprocess, "DETACHED_PROCESS", 0)
-        popen_kwargs["creationflags"] |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    else:
-        popen_kwargs["start_new_session"] = True
-    # No text/encoding kwargs are set, so this is a bytes-mode Popen; the
-    # ``**popen_kwargs`` spread defeats Popen's text-vs-bytes overload selection.
-    process = subprocess.Popen(
-        command,
-        cwd=str(cwd),
-        env=merged_env,
-        stdin=subprocess.DEVNULL,
-        stdout=stdout,
-        stderr=stderr,
-        **popen_kwargs,
-    )
-    return cast("subprocess.Popen[bytes]", process)

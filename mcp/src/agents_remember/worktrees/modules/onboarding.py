@@ -48,7 +48,7 @@ def onboarding_refresh_plan_for_context(
         )
         if storage == "disabled":
             continue
-        if not resolver.sidecar_storage_label(storage):
+        if not resolver.is_sidecar_storage(storage):
             unsupported.append(source_path)
             continue
         onboarding_path = sidecar_onboarding_path(context.onboarding_root, source_path)

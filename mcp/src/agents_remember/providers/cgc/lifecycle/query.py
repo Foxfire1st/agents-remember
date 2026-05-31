@@ -16,7 +16,11 @@ from agents_remember.providers.cgc.lifecycle.core import (
     cgc_uses_settings,
 )
 from agents_remember.providers.cgc.lifecycle.installation import cgc_status
-from agents_remember.providers.context import ContextProviderError, ensure_cgc_runtime_layout
+from agents_remember.providers.context import (
+    CgcRuntimeLayout,
+    ContextProviderError,
+    ensure_cgc_runtime_layout,
+)
 from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
 from agents_remember.providers.lifecycle.process_status import require_durable_process_namespace
 
@@ -44,7 +48,7 @@ def cgc_run_native_args(args: argparse.Namespace) -> list[str]:
 
 
 def cgc_run_command(
-    args: argparse.Namespace, layout: Any, native_args: list[str]
+    args: argparse.Namespace, layout: CgcRuntimeLayout, native_args: list[str]
 ) -> tuple[dict[str, Any], Any, list[str]]:
     if cgc_uses_settings(args):
         _, provider_settings, layouts = cgc_project_layouts_from_settings(args, layout.repo_id)
@@ -55,7 +59,7 @@ def cgc_run_command(
     return compose_plan(render, command_args, cwd=layout.coordination_root), render, command_args
 
 
-def cgc_run_dry_result(layout: Any, command: dict[str, Any]) -> dict[str, Any]:
+def cgc_run_dry_result(layout: CgcRuntimeLayout, command: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "run",
@@ -106,7 +110,7 @@ def cgc_visualize_validate(args: argparse.Namespace) -> None:
 
 
 def cgc_visualize_command(
-    args: argparse.Namespace, layout: Any
+    args: argparse.Namespace, layout: CgcRuntimeLayout
 ) -> tuple[dict[str, Any], Any, list[str]]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
@@ -127,7 +131,7 @@ def cgc_visualize_command(
     return compose_plan(render, command_args, cwd=layout.coordination_root), render, command_args
 
 
-def cgc_visualize_dry_result(layout: Any, command: dict[str, Any], url: str) -> dict[str, Any]:
+def cgc_visualize_dry_result(layout: CgcRuntimeLayout, command: dict[str, Any], url: str) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "visualize",

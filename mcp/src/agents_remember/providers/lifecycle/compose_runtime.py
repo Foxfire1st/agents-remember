@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from importlib.resources import files
@@ -129,6 +130,16 @@ def optional_yaml_line(name: str, value: str | None, *, indent: int = 4) -> str:
     if not value:
         return ""
     return f"{' ' * indent}{name}: {yaml_scalar(value)}\n"
+
+
+def host_user() -> str | None:
+    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
+        return None
+    return f"{os.getuid()}:{os.getgid()}"
+
+
+def host_user_block() -> str:
+    return optional_yaml_line("user", host_user(), indent=4)
 
 
 def container_compose_project(inspect_data: dict[str, Any] | None) -> str | None:

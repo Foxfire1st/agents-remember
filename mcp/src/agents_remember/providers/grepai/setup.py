@@ -55,7 +55,6 @@ def prepare_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[s
     target_settings = getattr(args, "provider_isolated_settings_data", None)
     if target_settings is None:
         target_settings = load_settings(
-            args.coordination_root,
             getattr(args, "grepai_from_settings", None) or args.from_settings,
         )
     clone = grepai_clone_bundle(args, target_settings or settings)

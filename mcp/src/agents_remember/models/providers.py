@@ -24,7 +24,6 @@ ProviderState = Literal[
     "unknown",
     "noProviders",
     "skipped",
-    "runnerIntegrityFailed",
 ]
 
 
@@ -116,7 +115,6 @@ class ProviderDiagnosticsResponse(ToolResponse):
     settingsFile: str | None = None
     currentStateFile: str | None = None
     currentState: dict[str, Any] | None = None
-    integrity: dict[str, Any] | None = None
     processNamespace: dict[str, Any] | None = None
     items: list[ProviderDiagnosticsItem] = Field(default_factory=list)
     recoveryActions: list[dict[str, Any]] = Field(default_factory=list)

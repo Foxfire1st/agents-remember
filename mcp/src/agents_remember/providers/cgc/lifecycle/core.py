@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.context import (
+    CgcRuntimeLayout,
     ContextProviderError,
     cgc_runtime_layout,
     cgc_runtime_layout_from_provider_settings,
@@ -32,7 +33,7 @@ def cgc_uses_settings(args: argparse.Namespace) -> bool:
     )
 
 
-def cgc_layout_from_args(args: argparse.Namespace):
+def cgc_layout_from_args(args: argparse.Namespace) -> CgcRuntimeLayout:
     if cgc_uses_settings(args):
         _, provider_settings = cgc_settings_from_file(
             args.coordination_root, getattr(args, "from_settings", None)
@@ -91,7 +92,7 @@ def cgc_root_from_settings(
 
 def cgc_all_layouts_from_settings(
     args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], list[Any]]:
+) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout]]:
     settings_path, provider_settings = cgc_settings_from_file(
         args.coordination_root, getattr(args, "from_settings", None)
     )
@@ -115,7 +116,7 @@ def cgc_all_layouts_from_settings(
 def cgc_project_layouts_from_settings(
     args: argparse.Namespace,
     primary_repo_id: str,
-) -> tuple[Path, dict[str, Any], list[Any]]:
+) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout]]:
     """Return all configured layouts with the target repo first for runner mounts."""
 
     settings_path, provider_settings = cgc_settings_from_file(
@@ -143,7 +144,7 @@ def cgc_project_layouts_from_settings(
     return settings_path, provider_settings, layouts
 
 
-def cgc_backend_settings(provider_settings: dict[str, Any], layout: Any) -> dict[str, Any]:
+def cgc_backend_settings(provider_settings: dict[str, Any], layout: CgcRuntimeLayout) -> dict[str, Any]:
     backend_settings = cgc_backend_settings_dict(provider_settings)
     ports = cgc_backend_ports_dict(backend_settings)
     network = dict_value(backend_settings.get("network"))
@@ -192,7 +193,7 @@ def concrete_cgc_backend_image(backend_settings: dict[str, Any]) -> str:
     )
 
 
-def cgc_backend_image_lock_path(layout: Any, backend_settings: dict[str, Any]) -> Path:
+def cgc_backend_image_lock_path(layout: CgcRuntimeLayout, backend_settings: dict[str, Any]) -> Path:
     image_lock_file = backend_settings.get("imageLockFile")
     if not image_lock_file:
         return (
@@ -204,7 +205,7 @@ def cgc_backend_image_lock_path(layout: Any, backend_settings: dict[str, Any]) -
     return Path(expand_template(str(image_lock_file), cgc_backend_template_vars(layout))).resolve()
 
 
-def cgc_backend_template_vars(layout: Any) -> dict[str, str]:
+def cgc_backend_template_vars(layout: CgcRuntimeLayout) -> dict[str, str]:
     return {
         "coordination_root": layout.coordination_root.as_posix(),
         "runtimeRoot": layout.runtime_root.parent.as_posix(),
@@ -225,7 +226,7 @@ def cgc_scoped_args(
     return scoped
 
 
-def cgc_apply_layout_state(layout: Any, args: argparse.Namespace, settings_path: Path) -> None:
+def cgc_apply_layout_state(layout: CgcRuntimeLayout, args: argparse.Namespace, settings_path: Path) -> None:
     if args.dry_run:
         return
     ensure_cgc_runtime_layout(layout)
@@ -246,7 +247,7 @@ def cgc_apply_layout_state(layout: Any, args: argparse.Namespace, settings_path:
     write_json(layout.state_file, state)
 
 
-def cgc_layout_instance(layout: Any) -> dict[str, Any]:
+def cgc_layout_instance(layout: CgcRuntimeLayout) -> dict[str, Any]:
     return {
         "repoId": layout.repo_id,
         "codeRepoRoot": layout.code_repo_root.as_posix(),
@@ -258,7 +259,7 @@ def cgc_layout_instance(layout: Any) -> dict[str, Any]:
 
 
 def cgc_apply_backend_state(
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     *,
     args: argparse.Namespace,
     settings_path: Path,
@@ -275,7 +276,7 @@ def cgc_apply_backend_state(
     write_json(layouts[0].backend_state_file, backend_state)
 
 
-def cgc_backend_configured_state(layout: Any, backend_settings: dict[str, Any]) -> dict[str, Any]:
+def cgc_backend_configured_state(layout: CgcRuntimeLayout, backend_settings: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": backend_settings.get("id", "codegraphcontext-falkordb"),
         "type": backend_settings.get("type", "falkordb-remote"),

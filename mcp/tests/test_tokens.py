@@ -18,6 +18,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.mcp import SERVER_VERSION
 from agents_remember.models.core import PingResponse
 from agents_remember.models.tokens import (
     DEFAULT_TOKEN_COUNTER,
@@ -108,7 +109,7 @@ class FinalizePayloadTokensTests(unittest.TestCase):
 class ResponsePayloadTests(unittest.TestCase):
     def test_serializes_model_and_adds_token_metadata(self) -> None:
         response = PingResponse(
-            ok=True, server="agents-remember", version="0.9.6", transport="stdio"
+            ok=True, server="agents-remember", version=SERVER_VERSION, transport="stdio"
         )
         payload = response_payload(response)
         self.assertEqual(payload["server"], "agents-remember")
@@ -118,7 +119,7 @@ class ResponsePayloadTests(unittest.TestCase):
 
     def test_dump_with_token_count_is_response_payload_alias(self) -> None:
         response = PingResponse(
-            ok=True, server="agents-remember", version="0.9.6", transport="stdio"
+            ok=True, server="agents-remember", version=SERVER_VERSION, transport="stdio"
         )
         self.assertEqual(dump_with_token_count(response), response_payload(response))
 

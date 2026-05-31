@@ -96,7 +96,7 @@ def excludes_file_type(rule: StorageRule, source_file: str) -> bool:
     return source_file_type(source_file) in excluded
 
 
-def sidecar_storage_label(storage_mode: str) -> bool:
+def is_sidecar_storage(storage_mode: str) -> bool:
     return storage_mode in {"repo-sidecar", "memory-repo"}
 
 

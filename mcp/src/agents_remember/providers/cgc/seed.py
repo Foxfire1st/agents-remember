@@ -10,9 +10,9 @@ from typing import Any
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
 from agents_remember.providers.lifecycle.command_runner import UNLIMITED_TIMEOUT
 from agents_remember.providers.setup_common import (
-    context_providers,
     expand_template,
     load_settings,
+    provider_settings,
     run_lifecycle,
     settings_path,
     stable_provider_id,
@@ -62,18 +62,13 @@ def configured_cgc_repo_root(
     settings: dict[str, Any],
     repo_id: str | None,
 ) -> tuple[str, Path] | None:
-    provider = _cgc_provider(settings)
+    provider = provider_settings(settings, CGC_PROVIDER_ID)
     if provider is None:
         return None
     selected = _selected_cgc_root(provider, repo_id)
     if selected is None:
         return None
     return _configured_cgc_root_tuple(selected, repo_id, coordination_root)
-
-
-def _cgc_provider(settings: dict[str, Any]) -> dict[str, Any] | None:
-    provider = context_providers(settings).get(CGC_PROVIDER_ID)
-    return provider if isinstance(provider, dict) else None
 
 
 def _selected_cgc_root(
@@ -115,7 +110,7 @@ def _seed_runtime_root(
     settings: dict[str, Any],
     repo_id: str,
 ) -> Path | dict[str, Any]:
-    provider = _cgc_provider(settings)
+    provider = provider_settings(settings, CGC_PROVIDER_ID)
     if provider is None:
         return _seed_skip("CGC provider is not configured")
     runtime_root = _configured_cgc_runtime_root(coordination_root, provider)
@@ -168,7 +163,9 @@ def cgc_seed_source_extra_args(
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
-def git_head(repo_root: Path) -> str | None:
+def git_head_or_none(repo_root: Path) -> str | None:
+    """Return the HEAD commit, or None when the repo is missing or git fails."""
+
     if not repo_root.exists():
         return None
     result = subprocess.run(
@@ -250,11 +247,9 @@ def _load_seed_source_settings(
     source_settings_file = cgc_seed_source_settings_path(
         args, source_coordination_root, args.coordination_root
     )
-    source_settings = load_settings(source_coordination_root, source_settings_file)
+    source_settings = load_settings(source_settings_file)
     if source_settings is None:
-        return _seed_skip(
-            f"source settings missing: {settings_path(source_coordination_root, source_settings_file)}"
-        )
+        return _seed_skip(f"source settings missing: {settings_path(source_settings_file)}")
     return source_settings
 
 
@@ -308,8 +303,8 @@ def _validated_seed_context(
 ) -> CgcSeedContext | dict[str, Any]:
     target_repo_id, target_repo_root = target
     source_repo_id, source_repo_root = source
-    source_head = git_head(source_repo_root)
-    target_head = git_head(target_repo_root)
+    source_head = git_head_or_none(source_repo_root)
+    target_head = git_head_or_none(target_repo_root)
     failure = _seed_validation_failure(
         args,
         source_coordination_root,

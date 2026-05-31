@@ -21,6 +21,7 @@ from agents_remember.providers.context import (
     GREPAI_RUNNER_IMAGE_REPOSITORY,
     ContextProviderError,
     GrepaiMemoryRoot,
+    GrepaiRuntimeLayout,
     expand_template,
     grepai_runtime_layout,
     grepai_runtime_layout_from_provider_settings,
@@ -29,13 +30,12 @@ from agents_remember.providers.context import (
     sync_grepai_index_roots,
     write_grepai_workspace_config,
 )
-from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.provider_settings import (
     grepai_settings_from_file,
 )
 
 
-def grepai_layout_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any], Any]:
+def grepai_layout_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout]:
     settings_path, provider_settings = grepai_settings_from_file(
         args.coordination_root,
         getattr(args, "from_settings", None),
@@ -75,7 +75,7 @@ def grepai_settings_layout_requested(
 
 
 def prepare_grepai_workspace(
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     provider_settings: dict[str, Any],
     *,
     dsn: str,
@@ -130,7 +130,7 @@ def grepai_release_arch() -> str:
 
 def grepai_runner_settings(
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     *,
     version: str | None = None,
 ) -> dict[str, Any]:
@@ -184,7 +184,7 @@ def grepai_runner_image_lock_file(
 
 
 def grepai_embedder_backend_settings(
-    provider_settings: dict[str, Any], layout: Any
+    provider_settings: dict[str, Any], layout: GrepaiRuntimeLayout
 ) -> dict[str, Any]:
     embedder = grepai_embedder_settings(provider_settings)
     provider = str(embedder.get("provider", "ollama"))
@@ -250,7 +250,7 @@ def grepai_embedder_backend_settings(
     }
 
 
-def grepai_container_path(layout: Any, path: Path, *, runner: dict[str, Any]) -> str:
+def grepai_container_path(layout: GrepaiRuntimeLayout, path: Path, *, runner: dict[str, Any]) -> str:
     resolved = path.resolve()
     runtime_root = layout.runtime_root.resolve()
     logs_root = layout.logs_root.resolve()
@@ -272,7 +272,7 @@ def grepai_container_path(layout: Any, path: Path, *, runner: dict[str, Any]) ->
         ) from error
 
 
-def grepai_container_project_paths(layout: Any, runner: dict[str, Any]) -> dict[str, str]:
+def grepai_container_project_paths(layout: GrepaiRuntimeLayout, runner: dict[str, Any]) -> dict[str, str]:
     return {
         root.project_id: grepai_container_path(layout, root.path, runner=runner)
         for root in layout.roots
@@ -310,7 +310,7 @@ def grepai_container_embedder_settings(
     return settings
 
 
-def grepai_backend_settings(provider_settings: dict[str, Any], layout: Any) -> dict[str, Any]:
+def grepai_backend_settings(provider_settings: dict[str, Any], layout: GrepaiRuntimeLayout) -> dict[str, Any]:
     backend_settings = grepai_backend_settings_dict(provider_settings)
     ports = dict_value(backend_settings.get("ports"))
     postgres_port = dict_value(ports.get("postgres"))
@@ -351,7 +351,7 @@ def concrete_grepai_backend_image(backend_settings: dict[str, Any]) -> str:
     )
 
 
-def grepai_backend_image_lock_path(layout: Any, backend_settings: dict[str, Any]) -> Path:
+def grepai_backend_image_lock_path(layout: GrepaiRuntimeLayout, backend_settings: dict[str, Any]) -> Path:
     image_lock_file = backend_settings.get("imageLockFile")
     if not image_lock_file:
         return (
@@ -360,7 +360,7 @@ def grepai_backend_image_lock_path(layout: Any, backend_settings: dict[str, Any]
     return Path(expand_template(str(image_lock_file), grepai_backend_template_vars(layout))).resolve()
 
 
-def grepai_backend_template_vars(layout: Any) -> dict[str, str]:
+def grepai_backend_template_vars(layout: GrepaiRuntimeLayout) -> dict[str, str]:
     return {
         "coordination_root": layout.coordination_root.as_posix(),
         "runtimeRoot": layout.runtime_root.as_posix(),
@@ -389,16 +389,3 @@ def command_ok(result: dict[str, Any] | None) -> bool:
 
 def model_present(model: dict[str, Any] | None) -> bool:
     return model is None or bool(model["present"])
-
-
-def grepai_run_checked_command(
-    command: list[str],
-    *,
-    layout: Any,
-    timeout: int,
-    action: str,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    result = run_command(command, cwd=layout.coordination_root, timeout=timeout)
-    if result["returncode"] == 0:
-        return result, None
-    return result, {"provider": "grepai", "action": action, "ok": False, "command": result}

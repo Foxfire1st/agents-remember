@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
 from agents_remember.controllers.benchmark_tools import (
     codex_benchmark_prepare_tool,
     codex_benchmark_run_tool,
@@ -54,7 +55,7 @@ def codex_benchmark_run_payload(
     force_clone: bool = False,
     skill_exposure_mode: str = "copy",
     provider_timeout: int = 1800,
-    codex_sandbox: str = "danger-full-access",
+    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
 ) -> dict[str, Any]:
     return _tool_payload(
         "codex_benchmark_run",

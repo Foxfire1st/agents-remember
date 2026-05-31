@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from dataclasses import replace
 from typing import Any
 
@@ -11,6 +10,7 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import contract_context, resolve_context
 from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
@@ -68,7 +68,7 @@ def _refresh_plans_have_work(
     )
 
 
-def closeout_preview_payload(contract, args: argparse.Namespace) -> dict[str, object]:
+def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     ledger_message = (
         args.ledger_commit_message
         or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
@@ -193,7 +193,7 @@ def _validate_closeout_source_heads(contract) -> None:
             )
 
 
-def _closeout_approval_note(args: argparse.Namespace) -> str:
+def _closeout_approval_note(args: WorktreeArgs) -> str:
     if not args.approved:
         raise RuntimeError("closeout requires --approved after explicit commit approval")
     approval_note = args.approval_note.replace("\n", " ").strip()
@@ -252,7 +252,7 @@ def _run_memory_quality_gate(context) -> dict[str, Any]:
 
 def _external_closeout_commits(
     contract,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     changed_paths: list[str],
     code_commit: str,
     code_commit_date: str,
@@ -299,7 +299,8 @@ def _external_closeout_commits(
     )
 
 
-def closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
+    assert args.contract_path is not None
     contract = load_contract(args.contract_path)
     _validate_closeout_source_heads(contract)
     if args.dry_run:
@@ -378,7 +379,7 @@ def validate_direct_external_context(context, source_branch: str) -> MemoryLedge
 
 
 def direct_closeout_preview_payload(
-    context, args: argparse.Namespace, source_branch: str
+    context, args: WorktreeArgs, source_branch: str
 ) -> dict[str, object]:
     validate_direct_external_context(context, source_branch)
     code_dirty = worktree_dirty(context.code_repository_root)
@@ -462,7 +463,7 @@ def direct_closeout_preview_payload(
     }
 
 
-def direct_closeout_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def direct_closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
     source_branch = args.source_branch or current_branch(context.code_repository_root)
     validate_direct_external_context(context, source_branch)

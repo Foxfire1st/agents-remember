@@ -36,6 +36,7 @@ from agents_remember.memory import carryover as memory_carryover
 from agents_remember.providers.identity import provider_instance_id
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
+from agents_remember.worktrees.modules.integrate import _merge_integrated_commits
 from agents_remember.worktrees.modules.models import OnboardingRefreshPlan
 from agents_remember.worktrees.modules.onboarding import require_updated_sidecar_content
 from agents_remember.worktrees.worktree_contract import (
@@ -522,7 +523,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 coordination_root=coordination_root,
                 memory_root=memory_repo,
             )
-            args = Namespace(
+            args = worktree_manager.WorktreeArgs(
                 dry_run=True,
                 skip_provider_setup=False,
                 provider_timeout=1,
@@ -604,7 +605,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_base_commit="m1",
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, Namespace(memory_choice=None, dry_run=True)
+                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
@@ -638,7 +639,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_base_commit=memory_seed,
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, Namespace(memory_choice=None, dry_run=True)
+                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "blocked")
             self.assertIn("commit refreshed onboarding and ledger", result["reason"])
@@ -667,7 +668,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 memory_base_commit="m1",
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, Namespace(memory_choice=None, dry_run=True)
+                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
@@ -688,7 +689,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 worktree_name="fix-thing",
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, Namespace(memory_choice=None, dry_run=True)
+                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
             )
             self.assertEqual(result["state"], "internal")
 
@@ -1894,7 +1895,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_repository_root=None,
                 report=None,
             )
-            context = adopt_baseline.resolve_context(args)
+            context = adopt_baseline.resolve_baseline_context(args)
             rows, report = adopt_baseline.run_drift(context, None)
             payload: dict[str, Any] = adopt_baseline.base_payload(context, rows, report)
             self.assertEqual(
@@ -2078,6 +2079,50 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(payload["state"], "nothing-to-carryover")
             self.assertFalse((official_memory / "onboarding" / "feature.py.md").exists())
 
+    def test_memory_carryover_requires_review_when_only_earlier_path_commit_landed(self) -> None:
+        # Regression: a single landed path-commit must NOT count as exact-landed
+        # when a later commit to the same path has not landed on the official ref.
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            old_base = init_repo(code_repo, "main")
+            git(code_repo, "checkout", "-b", "workbench/reado/v1.2")
+            landed_head = commit_file(code_repo, "feature.py", "value = 'v1'\n", "Add feature v1")
+            # Land ONLY the first source-branch commit on main.
+            git(code_repo, "checkout", "main")
+            git(code_repo, "merge", "--ff-only", "workbench/reado/v1.2")
+            self.assertEqual(git(code_repo, "rev-parse", "main"), landed_head)
+            # The source branch keeps going with a second, never-landed commit to the same path.
+            git(code_repo, "checkout", "workbench/reado/v1.2")
+            source_head = commit_file(
+                code_repo, "feature.py", "value = 'v2 unlanded'\n", "Update feature v2"
+            )
+
+            official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
+            source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
+            write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
+
+            args = Namespace(
+                code_repository_root=code_repo,
+                official_code_ref="main",
+                source_code_ref="workbench/reado/v1.2",
+                old_base=old_base,
+                official_memory=official_memory,
+                source_memory=source_memory,
+                code_repository_name="repo-a",
+                replace_existing=False,
+                approved=True,
+                approval_note="developer approved C-11 carryover",
+                include_review_required=[],
+                memory_commit_message="Carry over landed memory",
+                ledger_commit_message="Record carryover ledger",
+            )
+            plan: dict[str, Any] = memory_carryover.build_plan(args)
+            self.assertNotEqual(plan["candidates"][0]["evidence"], "exact-landed-commit")
+            self.assertEqual(plan["candidates"][0]["evidence"], "same-path-changed")
+            self.assertEqual(plan["candidates"][0]["decision"], "review-required")
+
     def test_memory_carryover_rejects_branch_memory_when_code_did_not_land(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -2107,6 +2152,36 @@ class WorktreeSupportTests(unittest.TestCase):
             plan: dict[str, Any] = memory_carryover.build_plan(args)
             self.assertEqual(plan["candidates"][0]["decision"], "reject")
             self.assertEqual(plan["candidates"][0]["evidence"], "not-landed")
+
+    def test_integrate_refuses_non_fast_forward_code_without_mutating(self) -> None:
+        # Atomicity: when the code fast-forward is impossible, integration must
+        # raise BEFORE advancing the code branch (no half-integrated state).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo = root / "repo-a"
+            base = init_repo(code_repo, "main")
+            commit_file(code_repo, "main.py", "value = 1\n", "advance main")
+            head_before = git(code_repo, "rev-parse", "HEAD")
+            # A divergent commit whose ancestry does NOT include main's HEAD.
+            git(code_repo, "checkout", "-b", "other", base)
+            divergent = commit_file(code_repo, "other.py", "value = 2\n", "divergent")
+            git(code_repo, "checkout", "main")
+
+            contract = default_contract(
+                task_name="Atomic Integrate",
+                repo_name="repo-a",
+                workflow_kind="chat",
+                memory_mode="disabled",
+                coordination_root=root / "ar-coordination",
+                code_repo_path=code_repo,
+                code_source_branch="main",
+                code_work_branch="ar/atomic-integrate",
+                code_base_commit=base,
+                worktree_name="atomic-integrate",
+            )
+            with self.assertRaisesRegex(RuntimeError, "not a fast-forward"):
+                _merge_integrated_commits(contract, divergent, "", "")
+            self.assertEqual(git(code_repo, "rev-parse", "HEAD"), head_before)
 
 
 class BenchmarkRunnerPortabilityTests(unittest.TestCase):
@@ -2485,13 +2560,17 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
         with mock.patch.object(
             benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
         ):
-            command = benchmark_runner.codex_command(Path("workspace"), Path("final.md"))
+            command = benchmark_runner.codex_command(
+                Path("workspace"),
+                Path("final.md"),
+                codex_sandbox=benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
+            )
 
         self.assertEqual(command[0], "C:/tools/codex.exe")
         self.assertEqual(command[1], "exec")
         self.assertEqual(
             command[command.index("--sandbox") + 1],
-            benchmark_runner.CODEX_BENCHMARK_SANDBOX,
+            benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
         )
         policy = benchmark_runner.codex_execution_policy(command[0])
         self.assertEqual(policy["scope"], "codex-benchmark-only")
@@ -2565,6 +2644,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     repetition=1,
                     output_root=output_root,
                     dry_run=False,
+                    codex_sandbox=benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
                 )
 
             metadata = json.loads(

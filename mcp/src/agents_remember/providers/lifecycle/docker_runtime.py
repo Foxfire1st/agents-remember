@@ -184,29 +184,6 @@ def docker_image_exists(image: str, *, cwd: Path, timeout: int) -> bool:
     return result["returncode"] == 0
 
 
-def docker_ensure_network(name: str, *, cwd: Path, timeout: int, dry_run: bool) -> dict[str, Any]:
-    inspect_command = [docker_command(), "network", "inspect", name]
-    create_command = [docker_command(), "network", "create", name]
-    if dry_run:
-        return {
-            "ok": True,
-            "name": name,
-            "dryRun": True,
-            "commands": [inspect_command, create_command],
-        }
-
-    inspect = run_command(inspect_command, cwd=cwd, timeout=timeout)
-    if inspect["returncode"] == 0:
-        return {"ok": True, "name": name, "alreadyExists": True, "inspect": inspect}
-    create = run_command(create_command, cwd=cwd, timeout=timeout)
-    return {
-        "ok": create["returncode"] == 0,
-        "name": name,
-        "inspect": inspect,
-        "create": create,
-    }
-
-
 def docker_container_networks(inspect_data: dict[str, Any] | None) -> set[str]:
     if not inspect_data:
         return set()
@@ -214,38 +191,6 @@ def docker_container_networks(inspect_data: dict[str, Any] | None) -> set[str]:
     if not isinstance(networks, dict):
         return set()
     return {str(name) for name in networks}
-
-
-def docker_ensure_container_network(
-    container_name: str,
-    network_name: str,
-    *,
-    inspect_data: dict[str, Any] | None,
-    cwd: Path,
-    timeout: int,
-    dry_run: bool,
-) -> dict[str, Any]:
-    command = [docker_command(), "network", "connect", network_name, container_name]
-    if inspect_data and network_name in docker_container_networks(inspect_data):
-        return {"ok": True, "containerName": container_name, "network": network_name}
-    if dry_run:
-        return {
-            "ok": True,
-            "containerName": container_name,
-            "network": network_name,
-            "dryRun": True,
-            "command": command,
-        }
-    result = run_command(command, cwd=cwd, timeout=timeout)
-    already_connected = "already exists" in (
-        f"{result.get('stdout', '')}\n{result.get('stderr', '')}".lower()
-    )
-    return {
-        "ok": result["returncode"] == 0 or already_connected,
-        "containerName": container_name,
-        "network": network_name,
-        "command": result,
-    }
 
 
 def docker_wait_for_ping(container_name: str, *, cwd: Path, timeout: int) -> dict[str, Any]:

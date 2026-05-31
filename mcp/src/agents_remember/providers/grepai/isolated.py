@@ -18,7 +18,7 @@ from agents_remember.providers.identity import (
     provider_ownership_labels,
     scoped_name,
 )
-from agents_remember.providers.setup_common import context_providers, stable_provider_id
+from agents_remember.providers.setup_common import provider_settings, stable_provider_id
 
 GREPAI_PROVIDER_ID = "grepai-memory"
 
@@ -33,7 +33,7 @@ class IsolatedGrepaiOptions:
 
 
 def isolated_grepai_settings(args: Any, settings: dict[str, Any]) -> dict[str, Any] | None:
-    provider = _grepai_provider(settings)
+    provider = provider_settings(settings, GREPAI_PROVIDER_ID)
     if provider is None or args.grepai_isolated_runtime_root is None:
         return None
     _require_isolated_grepai_target(args)
@@ -71,11 +71,6 @@ def isolated_grepai_settings(args: Any, settings: dict[str, Any]) -> dict[str, A
         instance_id=instance_id,
     )
     return _isolated_settings_payload(grepai)
-
-
-def _grepai_provider(settings: dict[str, Any]) -> dict[str, Any] | None:
-    provider = context_providers(settings).get(GREPAI_PROVIDER_ID)
-    return provider if isinstance(provider, dict) else None
 
 
 def _require_isolated_grepai_target(args: Any) -> None:

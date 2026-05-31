@@ -1,4 +1,11 @@
 """Agents Remember MCP server package."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 SERVER_NAME = "agents-remember"
-SERVER_VERSION = "0.9.6"
+
+try:
+    # Single source of truth: the installed package metadata (mcp/pyproject.toml).
+    SERVER_VERSION = version("agents-remember-mcp")
+except PackageNotFoundError:  # running from a source checkout without an install
+    SERVER_VERSION = "1.0.0"

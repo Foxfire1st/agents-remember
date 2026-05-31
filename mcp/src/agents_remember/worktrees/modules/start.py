@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -12,6 +11,7 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
 )
 from agents_remember.providers import provider_setup
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
     current_branch,
@@ -46,7 +46,7 @@ class ProviderStartPaths:
     provider_settings_path: Path
 
 
-def load_contract_from_args(args: argparse.Namespace) -> WorktreeContract:
+def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
     if args.contract_path is not None:
         return load_contract(args.contract_path)
     context = resolve_context(args)
@@ -56,12 +56,12 @@ def load_contract_from_args(args: argparse.Namespace) -> WorktreeContract:
     return load_contract(contract_path)
 
 
-def status_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
     return WorktreeCommandResult(0, status_payload(contract))
 
 
-def attach_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
     return WorktreeCommandResult(
         0, {"state": "attached", "attached": True, **status_payload(contract)}
@@ -86,7 +86,9 @@ def _external_memory_value(memory_mode: str, value: str) -> str:
     return value if memory_mode == "external" else ""
 
 
-def _build_start_contract(context, args: argparse.Namespace) -> WorktreeContract:
+def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
+    assert args.task_name is not None
+    assert args.worktree_name is not None
     repo = context.code_repository_root
     source_branch = args.source_branch or current_branch(repo)
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
@@ -113,7 +115,7 @@ def _build_start_contract(context, args: argparse.Namespace) -> WorktreeContract
 
 
 def _blocked_memory_start_result(
-    context, args: argparse.Namespace, code_state: str, memory_state: dict[str, object]
+    context, args: WorktreeArgs, code_state: str, memory_state: dict[str, object]
 ) -> WorktreeCommandResult:
     return WorktreeCommandResult(
         2,
@@ -157,7 +159,7 @@ def _contract_after_memory_start(
 
 def _blocked_provider_start_result(
     context,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     code_state: str,
     memory_state: dict[str, object],
     provider_state: dict[str, object],
@@ -211,7 +213,7 @@ def _started_result(
     )
 
 
-def start_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
     repo = context.code_repository_root
     contract = _build_start_contract(context, args)
@@ -244,7 +246,7 @@ def start_result(args: argparse.Namespace) -> WorktreeCommandResult:
 
 
 def prepare_providers_for_start(
-    context, contract: WorktreeContract, args: argparse.Namespace
+    context, contract: WorktreeContract, args: WorktreeArgs
 ) -> dict[str, object]:
     skipped = _provider_setup_skip_state(args)
     if skipped:
@@ -307,7 +309,7 @@ def _provider_state_payload(
     }
 
 
-def _provider_setup_skip_state(args: argparse.Namespace) -> dict[str, object] | None:
+def _provider_setup_skip_state(args: WorktreeArgs) -> dict[str, object] | None:
     if args.skip_provider_setup:
         return {"state": "skipped", "reason": "provider setup was skipped"}
     if getattr(args, "provider_setup_config", None) is None:
@@ -319,9 +321,10 @@ def _provider_setup_skip_state(args: argparse.Namespace) -> dict[str, object] | 
 
 
 def _provider_start_paths(
-    context, contract: WorktreeContract, args: argparse.Namespace
+    context, contract: WorktreeContract, args: WorktreeArgs
 ) -> ProviderStartPaths:
     setup_config = args.provider_setup_config
+    assert setup_config is not None
     return ProviderStartPaths(
         target_coordination_root=setup_config.coordination_root.resolve(),
         source_coordination_root=(
@@ -338,26 +341,6 @@ def _provider_start_paths(
     )
 
 
-def _cgc_enablement_state(target_coordination_root, provider_settings_path) -> dict[str, object]:
-    try:
-        settings = provider_setup.load_settings(target_coordination_root, provider_settings_path)
-    except RuntimeError as error:
-        return {
-            "state": "blocked",
-            "reason": str(error),
-            "targetCoordinationRoot": target_coordination_root.as_posix(),
-        }
-    if bool(settings) and provider_setup.provider_enabled(settings, "codegraphcontext-code"):
-        return {"state": "enabled"}
-    return {
-        "state": "skipped",
-        "reason": "codegraphcontext-code is not enabled in provider settings",
-        "settingsFile": provider_setup.settings_path(
-            target_coordination_root, provider_settings_path
-        ).as_posix(),
-    }
-
-
 def _provider_enablement_state(
     target_coordination_root: Path,
     provider_settings_path: Path,
@@ -365,7 +348,7 @@ def _provider_enablement_state(
     target_memory_root: Path | None,
 ) -> dict[str, object]:
     try:
-        settings = provider_setup.load_settings(target_coordination_root, provider_settings_path)
+        settings = provider_setup.load_settings(provider_settings_path)
     except RuntimeError as error:
         return {
             "state": "blocked",
@@ -388,9 +371,7 @@ def _provider_enablement_state(
             grepai_enabled=grepai_enabled,
             target_memory_root=target_memory_root,
         ),
-        "settingsFile": provider_setup.settings_path(
-            target_coordination_root, provider_settings_path
-        ).as_posix(),
+        "settingsFile": provider_setup.settings_path(provider_settings_path).as_posix(),
     }
 
 
@@ -431,15 +412,13 @@ def _grepai_target_memory_root(contract: WorktreeContract) -> Path | None:
 
 def _run_provider_setup(
     context,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     paths: ProviderStartPaths,
 ) -> dict[str, object]:
     request = provider_setup.ProviderSetupRequest(
         action="prepare",
         coordination_root=paths.target_coordination_root,
-        settings_path=provider_setup.settings_path(
-            paths.target_coordination_root, paths.provider_settings_path
-        ),
+        settings_path=provider_setup.settings_path(paths.provider_settings_path),
         timeout=getattr(args, "provider_timeout", 1800),
         dry_run=args.dry_run,
         skip_grepai=paths.target_memory_root is None,
@@ -467,7 +446,7 @@ def _run_provider_setup(
 
 
 def prepare_memory_for_start(
-    contract: WorktreeContract, args: argparse.Namespace
+    contract: WorktreeContract, args: WorktreeArgs
 ) -> dict[str, object]:
     if contract.memory_mode == "internal":
         return {"state": "internal", "reason": "memory lives in the code worktree"}
@@ -500,13 +479,13 @@ def prepare_memory_for_start(
     }
 
 
-def _disabled_memory_choice(args: argparse.Namespace) -> dict[str, object] | None:
+def _disabled_memory_choice(args: WorktreeArgs) -> dict[str, object] | None:
     if args.memory_choice == "disabled-memory":
         return {"state": "disabled", "reason": "human selected disabled memory"}
     return None
 
 
-def _missing_memory_repo_state(args: argparse.Namespace) -> dict[str, object]:
+def _missing_memory_repo_state(args: WorktreeArgs) -> dict[str, object]:
     disabled = _disabled_memory_choice(args)
     if disabled:
         return disabled
@@ -517,7 +496,7 @@ def _missing_memory_repo_state(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
-def _dirty_memory_source_state(args: argparse.Namespace) -> dict[str, object]:
+def _dirty_memory_source_state(args: WorktreeArgs) -> dict[str, object]:
     disabled = _disabled_memory_choice(args)
     if disabled:
         return disabled
@@ -529,7 +508,7 @@ def _dirty_memory_source_state(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _load_memory_ledger(
-    contract: WorktreeContract, args: argparse.Namespace
+    contract: WorktreeContract, args: WorktreeArgs
 ) -> MemoryLedger | dict[str, object]:
     assert contract.memory_repo_path is not None
     try:

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents_remember.errors import AgentsRememberError
 from agents_remember.providers.identity import (
     explicit_provider_instance_id,
     provider_instance_id,
@@ -15,8 +16,16 @@ from agents_remember.providers.identity import (
 DEFAULT_PROVIDER_SETUP_SECONDS = 1800
 DEFAULT_DOCKER_CONTROL_SECONDS = 120
 
+# The documented timeout caps (see examples/mcp/settings.example.json and
+# docs/reference/settings-json.md). Unknown keys are rejected so a typo
+# (e.g. "providerSetupSecond") fails loudly instead of being silently stored and
+# ignored -- matching how the providers section rejects unknown fields. Only
+# providerSetupSeconds is currently consumed by the runtime; toolSeconds is a
+# documented, reserved cap.
+KNOWN_TIMEOUT_CAPS = frozenset({"providerSetupSeconds", "toolSeconds"})
 
-class ConfigError(ValueError):
+
+class ConfigError(AgentsRememberError):
     """Raised when MCP authority settings are missing or unsafe."""
 
 
@@ -48,6 +57,7 @@ class McpRuntimeConfig:
     repositories: dict[str, RepositoryScope] = field(default_factory=dict)
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
+    benchmarks_enabled: bool = False
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -108,6 +118,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     )
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
+    benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -118,6 +129,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         repositories=repositories,
         providers=providers,
         timeout_caps=timeout_caps,
+        benchmarks_enabled=benchmarks_enabled,
     )
 
 
@@ -206,7 +218,7 @@ def parse_providers(
         if not isinstance(value, dict):
             raise ConfigError(f"provider settings for {provider_id!r} must be an object")
 
-        provider_config = parse_provider_config(provider_id, value, workspace_root)
+        provider_config = parse_provider_config(value, workspace_root)
         unsupported = sorted(set(value) - {"instanceId", "scope"})
         if unsupported:
             unsupported_text = ", ".join(unsupported)
@@ -239,15 +251,14 @@ def parse_providers(
 
 
 def parse_provider_config(
-    provider_id: str,
     value: dict[str, Any],
     workspace_root: Path,
 ) -> dict[str, str]:
-    del provider_id
     scope = value.get("scope", "workspace")
     if not isinstance(scope, str) or not scope:
         raise ConfigError("provider scope must be a non-empty string")
-    scope = explicit_provider_instance_id(scope)
+    # scope is an open set (workspace/worktree/benchmark + custom benchmark scopes);
+    # provider_instance_id slugifies it internally, so do not pre-mangle it here.
     raw_instance = value.get("instanceId")
     if raw_instance is None:
         instance_id = provider_instance_id(scope, workspace_root)
@@ -269,6 +280,12 @@ def provider_runtime_name(provider_id: str) -> str:
         raise ConfigError(f"unsupported provider id: {provider_id}") from error
 
 
+def parse_benchmarks_enabled(raw: object) -> bool:
+    if not isinstance(raw, bool):
+        raise ConfigError("benchmarksEnabled must be a boolean")
+    return raw
+
+
 def parse_timeout_caps(raw: object) -> dict[str, int]:
     if not isinstance(raw, dict):
         raise ConfigError("timeoutCaps must be an object")
@@ -284,6 +301,9 @@ def parse_timeout_caps(raw: object) -> dict[str, int]:
             raise ConfigError("timeout cap names must be non-empty strings")
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ConfigError(f"timeout cap {key!r} must be a non-negative integer")
+        if key not in KNOWN_TIMEOUT_CAPS:
+            allowed = ", ".join(sorted(KNOWN_TIMEOUT_CAPS))
+            raise ConfigError(f"unsupported timeout cap {key!r}; allowed: {allowed}")
         parsed[key] = value
     return parsed
 

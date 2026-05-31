@@ -155,12 +155,19 @@ def evidence_for_path(
 ) -> tuple[str, str]:
     if not path_exists_at_ref(repo, official_ref, source_path):
         return "not-landed", "source path is not present on official code ref"
-    for commit in path_commits(repo, base_ref, source_ref, source_path):
-        if is_ancestor(repo, commit, official_ref):
-            return (
-                "exact-landed-commit",
-                f"source branch commit {commit} is an ancestor of official code ref",
-            )
+    path_commit_list = path_commits(repo, base_ref, source_ref, source_path)
+    if path_commit_list and all(
+        is_ancestor(repo, commit, official_ref) for commit in path_commit_list
+    ):
+        # Only the strongest proof when EVERY source-branch commit touching this
+        # path has landed on the official ref. A single landed commit is not
+        # enough: a later, unlanded commit to the same path would otherwise be
+        # silently carried over as if it had landed.
+        return (
+            "exact-landed-commit",
+            f"all {len(path_commit_list)} source branch commit(s) touching this path "
+            "are ancestors of official code ref",
+        )
     source_patch = patch_id(repo, base_ref, source_ref, source_path)
     official_patch = patch_id(repo, base_ref, official_ref, source_path)
     if source_patch and official_patch and source_patch == official_patch:

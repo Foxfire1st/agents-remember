@@ -26,6 +26,7 @@ from agents_remember.providers.cgc.lifecycle.runner import (
     cgc_watcher_inspect,
 )
 from agents_remember.providers.context import (
+    CgcRuntimeLayout,
     ContextProviderError,
     cleanup_cgc_runtime_artifacts,
     ensure_cgc_runtime_layout,
@@ -46,7 +47,7 @@ from agents_remember.providers.lifecycle.state_files import (
 )
 
 
-def cgc_install_commands(args: argparse.Namespace, layout: Any) -> tuple[Path, list[dict[str, Any]]]:
+def cgc_install_commands(args: argparse.Namespace, layout: CgcRuntimeLayout) -> tuple[Path, list[dict[str, Any]]]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
     return layout.image_build_root, [
@@ -59,7 +60,7 @@ def cgc_install_commands(args: argparse.Namespace, layout: Any) -> tuple[Path, l
     ]
 
 
-def cgc_install_dry_run_result(layout: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
+def cgc_install_dry_run_result(layout: CgcRuntimeLayout, commands: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "install",
@@ -73,7 +74,7 @@ def cgc_install_dry_run_result(layout: Any, commands: list[dict[str, Any]]) -> d
     }
 
 
-def cgc_failed_install_result(layout: Any, results: list[dict[str, Any]]) -> dict[str, Any]:
+def cgc_failed_install_result(layout: CgcRuntimeLayout, results: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "install",
@@ -83,7 +84,7 @@ def cgc_failed_install_result(layout: Any, results: list[dict[str, Any]]) -> dic
     }
 
 
-def cgc_install_backend(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
+def cgc_install_backend(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
     backend_result = cgc_backend_start(args) if cgc_uses_settings(args) else None
     if backend_result is not None and not backend_result.get("ok"):
         return {**backend_result, "action": "install", "ok": False, "repoId": layout.repo_id}
@@ -91,7 +92,7 @@ def cgc_install_backend(args: argparse.Namespace, layout: Any) -> dict[str, Any]
 
 
 def cgc_write_install_state(
-    layout: Any,
+    layout: CgcRuntimeLayout,
     *,
     install_result: dict[str, Any],
     backend_result: dict[str, Any] | None,
@@ -123,7 +124,7 @@ def cgc_write_install_state(
 
 
 def cgc_install_preflight(
-    args: argparse.Namespace, layout: Any, commands: list[dict[str, Any]]
+    args: argparse.Namespace, layout: CgcRuntimeLayout, commands: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
         return [], cgc_install_dry_run_result(layout, commands), None
@@ -286,19 +287,6 @@ def cgc_init_layout(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def cgc_patch(args: argparse.Namespace) -> dict[str, Any]:
-    layout = cgc_layout_from_args(args)
-    return {
-        "provider": "codegraphcontext",
-        "action": "patch",
-        "ok": True,
-        "dryRun": args.dry_run,
-        "mode": "docker-image",
-        "runnerImage": layout.runner_image,
-        "changed": False,
-    }
-
-
 def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
     layout = cgc_layout_from_args(args)
     status = cgc_status(args)
@@ -354,7 +342,7 @@ def cgc_doctor(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def cgc_runtime_root_containment_check(layout: Any) -> dict[str, Any]:
+def cgc_runtime_root_containment_check(layout: CgcRuntimeLayout) -> dict[str, Any]:
     """Return the CGC runtime-root containment safety check."""
 
     under_provider_root = layout.runtime_root.is_relative_to(layout.providers_root)

@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from agents_remember.providers.grepai.lifecycle.core import (
+    GrepaiRuntimeLayout,
     grepai_container_env,
     grepai_embedder_backend_settings,
     grepai_network_name,
 )
 from agents_remember.providers.lifecycle.compose_runtime import (
     ComposeRender,
-    optional_yaml_line,
+    host_user_block,
     provider_asset_path,
     provider_asset_text,
     render_template,
@@ -39,7 +39,7 @@ def grepai_ownership_labels(provider_settings: dict[str, Any]) -> dict[str, str]
 
 def grepai_compose_render(
     provider_settings: dict[str, Any],
-    layout: Any,
+    layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
     backend: dict[str, Any],
     *,
@@ -73,7 +73,7 @@ def grepai_compose_render(
         "GREPAI_VERSION": yaml_scalar(runner["version"]),
         "GREPAI_ARCH": yaml_scalar(runner["releaseArch"]),
         "WATCHER_CONTAINER_NAME": yaml_scalar(runner["containerName"]),
-        "WATCHER_USER_BLOCK": grepai_user_block(),
+        "WATCHER_USER_BLOCK": host_user_block(),
         "SERVICE_LABELS": yaml_labels(grepai_ownership_labels(provider_settings)),
         "WATCHER_ENVIRONMENT": yaml_environment(grepai_container_env(runner)),
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(
@@ -95,16 +95,6 @@ def grepai_compose_render(
         base_file=provider_asset_path("compose", "grepai.compose.yaml"),
         override_yaml=override_yaml,
     )
-
-
-def grepai_user() -> str | None:
-    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
-        return None
-    return f"{os.getuid()}:{os.getgid()}"
-
-
-def grepai_user_block() -> str:
-    return optional_yaml_line("user", grepai_user(), indent=4)
 
 
 def grepai_compose_summary(render: ComposeRender) -> dict[str, Any]:

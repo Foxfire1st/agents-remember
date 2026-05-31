@@ -17,14 +17,13 @@ from pathlib import Path
 from agents_remember.kernel.coordination_context_resolver import (
     StorageSettings,
     clean_scalar,
+    is_sidecar_storage,
     normalize_rel_path,
     resolve_coordination_context,
     resolve_storage_for_source,
-    sidecar_storage_label,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     discover_onboarding_files,
-    is_file_level_onboarding,
     is_supported_sidecar_onboarding,
     mirror_onboarding_path,
     normalize_overview_route,
@@ -127,7 +126,7 @@ __all__ = [
     "extract_inline_onboarding_block",
     "git_blob_hash",
     "git_stdout",
-    "is_file_level_onboarding",
+    "is_sidecar_storage",
     "is_supported_sidecar_onboarding",
     "line_bounds",
     "list_repo_sources",
@@ -152,7 +151,6 @@ __all__ = [
     "resolve_storage_for_source",
     "run_git",
     "sanitize_report_token",
-    "sidecar_storage_label",
     "split_evidence_paths",
     "split_table_row",
     "write_markdown_report",
@@ -176,7 +174,7 @@ def classify_source(
             affected_sections="none",
             note="Source path is excluded by pathRules.",
         )
-    if sidecar_storage_label(storage_mode):
+    if is_sidecar_storage(storage_mode):
         row = classify_external_source(source_file, repo_root, onboarding_root)
         row.storage_mode = storage_mode
         return row

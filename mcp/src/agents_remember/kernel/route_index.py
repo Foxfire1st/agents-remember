@@ -202,12 +202,6 @@ def build_route_indexes(
     )
 
 
-def load_route_index(index_path: Path) -> dict[str, Any]:
-    """Load a generated route index."""
-
-    return json.loads(index_path.read_text(encoding="utf-8"))
-
-
 def sidecar_status(source_path: str, route_index: dict[str, Any]) -> str:
     """Return present, absent, or out-of-scope for a source path."""
 

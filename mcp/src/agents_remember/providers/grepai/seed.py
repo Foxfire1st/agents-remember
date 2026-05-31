@@ -15,8 +15,8 @@ from agents_remember.providers.grepai.context.layout import (
 from agents_remember.providers.grepai.lifecycle.core import grepai_backend_settings
 from agents_remember.providers.lifecycle.docker_runtime import docker_command
 from agents_remember.providers.setup_common import (
-    context_providers,
     load_settings,
+    provider_settings,
     run_lifecycle,
     settings_path,
     stable_provider_id,
@@ -115,11 +115,9 @@ def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> Grepai
     source_settings_path = grepai_seed_source_settings_path(
         args, source_coordination_root, args.coordination_root
     )
-    source_settings = load_settings(source_coordination_root, source_settings_path)
+    source_settings = load_settings(source_settings_path)
     if source_settings is None:
-        return _clone_skip(
-            f"source settings missing: {settings_path(source_coordination_root, source_settings_path)}"
-        )
+        return _clone_skip(f"source settings missing: {settings_path(source_settings_path)}")
     source_provider = _grepai_provider(source_settings)
     target_provider = _grepai_provider(target_settings)
     if source_provider is None:
@@ -129,7 +127,7 @@ def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> Grepai
     return _clone_context_from_providers(
         args,
         source_coordination_root=source_coordination_root,
-        source_settings_path=settings_path(source_coordination_root, source_settings_path),
+        source_settings_path=settings_path(source_settings_path),
         target_settings_path=target_settings_path,
         project_id=stable_provider_id(project_id),
         source_provider=source_provider,
@@ -138,8 +136,10 @@ def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> Grepai
 
 
 def _grepai_provider(settings: dict[str, Any]) -> dict[str, Any] | None:
-    provider = context_providers(settings).get(GREPAI_PROVIDER_ID)
-    return provider if isinstance(provider, dict) and provider.get("enabled") is True else None
+    # Distinct from the other provider extractors: seed clone requires the
+    # source/target provider to be explicitly enabled, not merely present.
+    provider = provider_settings(settings, GREPAI_PROVIDER_ID)
+    return provider if provider is not None and provider.get("enabled") is True else None
 
 
 def _clone_context_from_providers(
@@ -330,4 +330,6 @@ def _clone_success_payload(
 
 
 def _clone_skip(reason: str) -> dict[str, Any]:
-    return {"ok": False, "skipped": True, "reason": reason}
+    # An intentional skip (no source memory configured, source == target backend,
+    # etc.) is not a failed phase -- mirror CGC's benign skips, which report ok:True.
+    return {"ok": True, "skipped": True, "reason": reason}

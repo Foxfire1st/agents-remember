@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import rel
+
 CHECK_NAME = "style.update_history.history_order"
 HEADING_PATTERN = re.compile(r"^(?P<marks>#{1,6})\s+(?P<title>.+?)\s*$")
 BULLET_PATTERN = re.compile(r"^\s*[-*]\s+(?P<body>.+?)\s*$")
@@ -182,7 +184,7 @@ def order_findings(
             findings.append(
                 QualityFinding(
                     check=CHECK_NAME,
-                    path=relative_path(path, onboarding_root),
+                    path=rel(path, onboarding_root),
                     line=entry.line,
                     severity="warning",
                     code="update_history_timestamp_missing",
@@ -194,7 +196,7 @@ def order_findings(
             findings.append(
                 QualityFinding(
                     check=CHECK_NAME,
-                    path=relative_path(path, onboarding_root),
+                    path=rel(path, onboarding_root),
                     line=entry.line,
                     severity="warning",
                     code="update_history_timestamp_invalid",
@@ -207,7 +209,7 @@ def order_findings(
             findings.append(
                 QualityFinding(
                     check=CHECK_NAME,
-                    path=relative_path(path, onboarding_root),
+                    path=rel(path, onboarding_root),
                     line=entry.line,
                     severity="warning",
                     code="update_history_not_newest_first",
@@ -219,10 +221,3 @@ def order_findings(
             )
         previous = entry
     return findings
-
-
-def relative_path(path: Path, onboarding_root: Path) -> str:
-    try:
-        return path.relative_to(onboarding_root).as_posix()
-    except ValueError:
-        return path.as_posix()

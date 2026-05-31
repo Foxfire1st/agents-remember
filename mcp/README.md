@@ -258,11 +258,18 @@ The server exposes tools for:
 - memory initialization, memory quality checks, and route index refresh
 - provider status, watcher control, GrepAI search, and CodeGraphContext queries
 - chat/direct closeout and worktree-backed task workflows
-- benchmark preparation and execution
+- benchmark preparation and execution (opt-in; see the note below)
 
 Provider tools only work when the MCP settings enable the provider and the
 required Docker services are available. Full tool list:
 [MCP Tool Reference](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/mcp-tools.md).
+
+> **Benchmark execution is opt-in and runs untrusted code.** `codex_benchmark_prepare`
+> and `codex_benchmark_run` are refused unless the MCP settings set
+> `"benchmarksEnabled": true`. A real run (`dry_run=false`) clones third-party
+> repositories and executes the Codex CLI against them. `codex_sandbox` defaults to
+> Codex's own `default` sandbox; pass `"danger-full-access"` only for trusted local
+> runs — it grants the benchmark agent full host access.
 
 ## More
 

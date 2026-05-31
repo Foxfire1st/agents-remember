@@ -12,6 +12,7 @@ from agents_remember.providers.cgc.lifecycle.compose import (
     cgc_compose_summary,
 )
 from agents_remember.providers.cgc.lifecycle.core import (
+    CgcRuntimeLayout,
     cgc_all_layouts_from_settings,
     cgc_layout_from_args,
     cgc_project_layouts_from_settings,
@@ -29,7 +30,7 @@ from agents_remember.providers.lifecycle.compose_runtime import compose_plan, ru
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
-def cgc_refresh_command(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+def cgc_refresh_command(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any]:
     _, provider_settings, layouts = (
         cgc_project_layouts_from_settings(args, layout.repo_id)
         if cgc_uses_settings(args)
@@ -48,7 +49,7 @@ def cgc_refresh_command(args: argparse.Namespace, layout: Any) -> dict[str, Any]
     return compose_plan(render, command_args, cwd=layout.coordination_root)
 
 
-def cgc_refresh_dry_result(layout: Any, command: dict[str, Any]) -> dict[str, Any]:
+def cgc_refresh_dry_result(layout: CgcRuntimeLayout, command: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "refresh",
@@ -61,14 +62,14 @@ def cgc_refresh_dry_result(layout: Any, command: dict[str, Any]) -> dict[str, An
     }
 
 
-def cgc_refresh_backend(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
+def cgc_refresh_backend(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
     backend_result = cgc_backend_start(args) if cgc_uses_settings(args) else None
     if backend_result is not None and not backend_result.get("ok"):
         return {**backend_result, "action": "refresh", "ok": False, "repoId": layout.repo_id}
     return backend_result
 
 
-def cgc_write_refresh_state(layout: Any, result: dict[str, Any]) -> None:
+def cgc_write_refresh_state(layout: CgcRuntimeLayout, result: dict[str, Any]) -> None:
     state = read_json(layout.state_file)
     state.update(
         {
@@ -86,7 +87,7 @@ def cgc_write_refresh_state(layout: Any, result: dict[str, Any]) -> None:
 
 
 def cgc_refresh_preflight(
-    args: argparse.Namespace, layout: Any, command: dict[str, Any]
+    args: argparse.Namespace, layout: CgcRuntimeLayout, command: dict[str, Any]
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
         return cgc_refresh_dry_result(layout, command), None

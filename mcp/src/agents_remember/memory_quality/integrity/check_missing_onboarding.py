@@ -12,10 +12,10 @@ from typing import Any
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context_resolver import (
     StorageSettings,
+    is_sidecar_storage,
     normalize_rel_path,
     resolve_coordination_context,
     resolve_storage_for_source,
-    sidecar_storage_label,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.drift import (
     extract_inline_onboarding_block,
@@ -93,7 +93,7 @@ def missing_onboarding_for_source(
     storage_mode = resolve_storage_for_source(source_file, settings, scoped_repo_path)
     if storage_mode == "disabled":
         return None
-    if sidecar_storage_label(storage_mode):
+    if is_sidecar_storage(storage_mode):
         expected = mirror_onboarding_path(onboarding_root, source_file)
         if filesystem.exists(expected):
             return None

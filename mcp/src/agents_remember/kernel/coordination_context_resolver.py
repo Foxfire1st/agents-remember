@@ -18,7 +18,7 @@ from agents_remember.kernel.coordination_context.cross_repo import (
     code_repo_exclusion,
     code_repository_info,
     git_branch,
-    git_head,
+    git_head_or_empty,
     invalid_cross_repo_entry,
     memory_repository_info,
     resolve_cross_repo_entry,
@@ -85,6 +85,7 @@ from agents_remember.kernel.coordination_context.storage import (
     default_unmatched_storage,
     excludes_file_type,
     expand_pattern_variants,
+    is_sidecar_storage,
     matches_any,
     matches_file_type,
     normalize_file_type,
@@ -96,7 +97,6 @@ from agents_remember.kernel.coordination_context.storage import (
     rule_file_types,
     rule_includes_source,
     rule_patterns,
-    sidecar_storage_label,
     source_file_type,
 )
 
@@ -150,6 +150,14 @@ def resolve_coordination_context(
 
 
 def _with_facade_agents_repo(function, *args, **kwargs):
+    # The facade re-exports `agents_repo_from_script` from `_paths`, so under
+    # normal use this swap is an identity rebind (a no-op against the source
+    # object). It is load-bearing as a test seam: callers/tests patch
+    # `coordination_context_resolver.agents_repo_from_script` (the facade-level
+    # name), and this propagates that binding into `_paths`, where
+    # `resolve_coordination_root_hint` actually invokes it. Removing the swap
+    # makes those patches ineffective. See test_worktree_support.py
+    # test_resolver_* coordination-root tests.
     original = _paths.agents_repo_from_script
     _paths.agents_repo_from_script = agents_repo_from_script
     try:
@@ -186,12 +194,13 @@ __all__ = [
     "find_code_repository_root",
     "find_task_contract",
     "git_branch",
-    "git_head",
+    "git_head_or_empty",
     "infer_settings_path",
     "infer_topology_from_onboarding_root",
     "internal_coordination_root",
     "internal_memory_root",
     "invalid_cross_repo_entry",
+    "is_sidecar_storage",
     "looks_like_installed_coordination_root",
     "main",
     "matches_any",
@@ -233,7 +242,6 @@ __all__ = [
     "rule_patterns",
     "run_git",
     "settings_path_for_roots",
-    "sidecar_storage_label",
     "source_file_type",
     "storage_to_dict",
     "string_list",

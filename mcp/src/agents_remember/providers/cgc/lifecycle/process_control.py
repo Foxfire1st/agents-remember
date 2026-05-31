@@ -24,10 +24,10 @@ from agents_remember.providers.cgc.lifecycle.core import (
 )
 from agents_remember.providers.cgc.lifecycle.installation import cgc_doctor
 from agents_remember.providers.cgc.lifecycle.runner import (
-    cgc_watcher_inspect,
     cgc_watcher_running,
 )
 from agents_remember.providers.context import (
+    CgcRuntimeLayout,
     ContextProviderError,
     ensure_cgc_runtime_layout,
     write_provider_state,
@@ -43,7 +43,7 @@ from agents_remember.providers.lifecycle.process_status import (
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
-def cgc_start_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+def cgc_start_dry_run_result(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
     command_args = ["up", "-d", cgc_watcher_service_name(layout)]
@@ -60,30 +60,11 @@ def cgc_start_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str,
     }
 
 
-def cgc_start_backend(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
+def cgc_start_backend(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
     backend_result = cgc_backend_start(args) if cgc_uses_settings(args) else None
     if backend_result is not None and not backend_result.get("ok"):
         return {**backend_result, "action": "start", "ok": False, "repoId": layout.repo_id}
     return backend_result
-
-
-def cgc_running_process_result(
-    args: argparse.Namespace, layout: Any, backend_result: dict[str, Any] | None
-) -> dict[str, Any] | None:
-    inspect_data = cgc_watcher_inspect(args, layout)
-    if not cgc_watcher_running(args, layout):
-        return None
-    return {
-        "provider": "codegraphcontext",
-        "action": "start",
-        "ok": True,
-        "repoId": layout.repo_id,
-        "alreadyRunning": True,
-        "containerName": layout.watcher_container_name,
-        "containerId": inspect_data.get("Id") if inspect_data else None,
-        "logFile": layout.watch_log_file.as_posix(),
-        "backend": backend_result,
-    }
 
 
 def cgc_backend_result_port(
@@ -104,7 +85,7 @@ def cgc_start_compose_render(args: argparse.Namespace, backend_result: dict[str,
     )
 
 
-def cgc_start_watch_process(args: argparse.Namespace, layout: Any, render: Any) -> dict[str, Any]:
+def cgc_start_watch_process(args: argparse.Namespace, layout: CgcRuntimeLayout, render: Any) -> dict[str, Any]:
     watch_log = layout.watch_log_file
     watch_log.parent.mkdir(parents=True, exist_ok=True)
     return run_compose(
@@ -117,7 +98,7 @@ def cgc_start_watch_process(args: argparse.Namespace, layout: Any, render: Any) 
 
 def cgc_start_all_watch_process(
     args: argparse.Namespace,
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     render: Any,
 ) -> dict[str, Any]:
     for layout in layouts:
@@ -130,7 +111,7 @@ def cgc_start_all_watch_process(
     )
 
 
-def cgc_write_start_state(layout: Any, result: dict[str, Any]) -> None:
+def cgc_write_start_state(layout: CgcRuntimeLayout, result: dict[str, Any]) -> None:
     write_provider_state(
         layout,
         {
@@ -152,7 +133,7 @@ def cgc_write_start_state(layout: Any, result: dict[str, Any]) -> None:
 
 
 def cgc_start_result(
-    layout: Any,
+    layout: CgcRuntimeLayout,
     *,
     process: dict[str, Any],
     render: Any,
@@ -174,7 +155,7 @@ def cgc_start_result(
 
 
 def cgc_start_preflight(
-    args: argparse.Namespace, layout: Any
+    args: argparse.Namespace, layout: CgcRuntimeLayout
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if args.dry_run:
         return cgc_start_dry_run_result(args, layout), None
@@ -217,7 +198,7 @@ def cgc_start(args: argparse.Namespace) -> dict[str, Any]:
 
 def cgc_layout_action_results(
     args: argparse.Namespace,
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     action: str,
     handler: Any,
 ) -> list[dict[str, Any]]:
@@ -245,7 +226,7 @@ def cgc_layout_action_results(
 
 def cgc_layout_action_result(
     args: argparse.Namespace,
-    layout: Any,
+    layout: CgcRuntimeLayout,
     action: str,
     handler: Any,
 ) -> dict[str, Any]:
@@ -269,7 +250,7 @@ def cgc_layout_action_result(
 
 def cgc_parallel_layout_action_results(
     args: argparse.Namespace,
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     action: str,
     handler: Any,
 ) -> list[dict[str, Any]]:
@@ -328,7 +309,7 @@ def cgc_all_result(
 
 def cgc_start_all_migrations(
     args: argparse.Namespace,
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     render: Any,
 ) -> dict[str, dict[str, Any] | None]:
     return {
@@ -344,7 +325,7 @@ def cgc_start_all_migrations(
 
 
 def cgc_start_all_dry_results(
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     render: Any,
     migrations: dict[str, dict[str, Any] | None],
     backend: dict[str, Any] | None,
@@ -372,7 +353,7 @@ def cgc_start_all_dry_results(
 
 def _cgc_start_all_live(
     args: argparse.Namespace,
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     render: Any,
     migrations: dict[str, Any],
     backend: dict[str, Any],
@@ -432,7 +413,7 @@ def cgc_start_all(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
-def cgc_stop_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str, Any]:
+def cgc_stop_dry_run_result(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
     command_args = ["rm", "-sf", cgc_watcher_service_name(layout)]
@@ -447,7 +428,7 @@ def cgc_stop_dry_run_result(args: argparse.Namespace, layout: Any) -> dict[str, 
     }
 
 
-def cgc_mark_stopped(layout: Any, result: dict[str, Any]) -> None:
+def cgc_mark_stopped(layout: CgcRuntimeLayout, result: dict[str, Any]) -> None:
     state = read_json(layout.state_file)
     state["process"] = {
         "pid": None,
@@ -461,7 +442,7 @@ def cgc_mark_stopped(layout: Any, result: dict[str, Any]) -> None:
     write_json(layout.state_file, state)
 
 
-def cgc_stop_preflight(args: argparse.Namespace, layout: Any) -> dict[str, Any] | None:
+def cgc_stop_preflight(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
     if not args.dry_run:
         require_durable_process_namespace("cgc stop")
     if args.dry_run:

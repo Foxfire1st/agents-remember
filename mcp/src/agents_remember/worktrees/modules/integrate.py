@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from dataclasses import replace
 
 from agents_remember.kernel.memory_ledger import (
@@ -9,6 +8,7 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     commit_if_dirty,
@@ -119,7 +119,6 @@ def replay_code_if_needed(
 def replay_memory_content(
     contract: WorktreeContract,
     integrated_code_commit: str,
-    _current_memory_source: str,
     ledger_message: str,
 ) -> tuple[str, str, dict[str, object] | None]:
     assert contract.memory_repo_path is not None
@@ -205,7 +204,7 @@ def _integration_replay_requirements(
 
 def _blocked_non_ff_result(
     contract: WorktreeContract,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     code_replay_required: bool,
     memory_replay_required: bool,
 ) -> WorktreeCommandResult:
@@ -224,7 +223,7 @@ def _blocked_non_ff_result(
 
 def _dry_run_result(
     contract: WorktreeContract,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     code_replay_required: bool,
     memory_replay_required: bool,
 ) -> WorktreeCommandResult:
@@ -253,7 +252,7 @@ def _dry_run_result(
 
 
 def _integrated_code_commit(
-    contract: WorktreeContract, args: argparse.Namespace, current_code_source: str
+    contract: WorktreeContract, args: WorktreeArgs, current_code_source: str
 ) -> tuple[str, dict[str, object] | None]:
     integrated_code_commit = contract.code_commit
     if args.strategy == "replay":
@@ -269,7 +268,7 @@ def _integrated_code_commit(
 
 def _memory_needs_new_ledger(
     contract: WorktreeContract,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     current_memory_source: str,
     integrated_code_commit: str,
 ) -> bool:
@@ -282,7 +281,7 @@ def _memory_needs_new_ledger(
 
 def _integrated_memory_commits(
     contract: WorktreeContract,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     current_memory_source: str,
     integrated_code_commit: str,
 ) -> tuple[str, str, dict[str, object] | None]:
@@ -295,7 +294,6 @@ def _integrated_memory_commits(
                 replay_memory_content(
                     contract,
                     integrated_code_commit,
-                    current_memory_source,
                     args.ledger_commit_message
                     or f"[{contract.task_id}] Integration ledger sync: {integrated_code_commit} -> {contract.memory_content_commit}",
                 )
@@ -317,9 +315,31 @@ def _merge_integrated_commits(
     integrated_ledger_commit: str,
     integrated_memory_content_commit: str,
 ) -> None:
-    require_git(contract.code_repo_path, ["merge", "--ff-only", integrated_code_commit])
-    if contract.memory_mode == "external":
+    external = contract.memory_mode == "external"
+    # Pre-validate that BOTH fast-forwards are possible before mutating either
+    # branch, so a memory-side problem cannot leave the code branch advanced
+    # while memory stays behind (a half-integrated state).
+    code_head_before = head_commit(contract.code_repo_path)
+    if not is_ancestor(contract.code_repo_path, code_head_before, integrated_code_commit):
+        raise RuntimeError(
+            "integrated code commit is not a fast-forward from the current code branch"
+        )
+    memory_head_before = ""
+    if external:
         assert contract.memory_repo_path is not None
+        memory_head_before = head_commit(contract.memory_repo_path)
+        if not is_ancestor(
+            contract.memory_repo_path, memory_head_before, integrated_ledger_commit
+        ):
+            raise RuntimeError(
+                "integrated memory ledger commit is not a fast-forward from the current memory branch"
+            )
+
+    require_git(contract.code_repo_path, ["merge", "--ff-only", integrated_code_commit])
+    if not external:
+        return
+    assert contract.memory_repo_path is not None
+    try:
         require_git(contract.memory_repo_path, ["merge", "--ff-only", integrated_ledger_commit])
         ledger = load_ledger(contract.memory_repo_path / "memory.md")
         mapping = find_mapping(ledger, integrated_code_commit)
@@ -327,11 +347,18 @@ def _merge_integrated_commits(
             raise RuntimeError(
                 "integrated memory ledger does not map landed code commit to landed memory content commit"
             )
+    except Exception:
+        # The memory side failed after the code branch advanced. Roll both
+        # branches back to their pre-merge heads (best-effort) so integration is
+        # all-or-nothing, then re-raise the original failure.
+        run_git(contract.code_repo_path, ["reset", "--hard", code_head_before])
+        run_git(contract.memory_repo_path, ["reset", "--hard", memory_head_before])
+        raise
 
 
 def _integrated_result(
     contract: WorktreeContract,
-    args: argparse.Namespace,
+    args: WorktreeArgs,
     integrated_code_commit: str,
     integrated_memory_content_commit: str,
     integrated_ledger_commit: str,
@@ -361,9 +388,10 @@ def _integrated_result(
     )
 
 
-def integrate_result(args: argparse.Namespace) -> WorktreeCommandResult:
+def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if not args.approved and not args.dry_run:
         raise RuntimeError("integration requires --approved after human review")
+    assert args.contract_path is not None
     contract = load_contract(args.contract_path)
     if contract.integration_status == "completed":
         return WorktreeCommandResult(0, {"state": "already-integrated", **status_payload(contract)})

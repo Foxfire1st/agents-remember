@@ -18,6 +18,7 @@ from agents_remember.providers.cgc.lifecycle.core import (
     cgc_backend_settings,
 )
 from agents_remember.providers.context import (
+    CgcRuntimeLayout,
     ContextProviderError,
     ensure_cgc_runtime_layout,
 )
@@ -49,7 +50,7 @@ from agents_remember.providers.lifecycle.state_files import (
 
 def cgc_primary_backend_context(
     args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], list[Any], Any, dict[str, Any]]:
+) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout], CgcRuntimeLayout, dict[str, Any]]:
     settings_path, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     if not layouts:
         raise ContextProviderError("codegraphcontext-code.roots must define at least one root")
@@ -65,7 +66,7 @@ def cgc_primary_backend_context(
 
 def cgc_backend_ping(
     args: argparse.Namespace,
-    layout: Any,
+    layout: CgcRuntimeLayout,
     backend: dict[str, Any],
     *,
     running: bool,
@@ -83,7 +84,7 @@ def cgc_backend_ping(
 
 
 def cgc_backend_runtime_details(
-    layout: Any,
+    layout: CgcRuntimeLayout,
     backend: dict[str, Any],
     state: dict[str, Any],
     inspect_data: dict[str, Any] | None,
@@ -201,7 +202,7 @@ def cgc_backend_status(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cgc_backend_inspect(
-    args: argparse.Namespace, layout: Any, backend: dict[str, Any]
+    args: argparse.Namespace, layout: CgcRuntimeLayout, backend: dict[str, Any]
 ) -> dict[str, Any] | None:
     if args.dry_run:
         return None
@@ -243,7 +244,7 @@ def cgc_browser_url(host: str, port: int | str) -> str | None:
 
 def cgc_backend_start_context(
     args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], list[Any], Any, dict[str, Any]]:
+) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout], CgcRuntimeLayout, dict[str, Any]]:
     settings_path, provider_settings, layouts, layout, backend = cgc_primary_backend_context(args)
     ensure_cgc_runtime_layout(layout)
     if backend["type"] != "falkordb-remote" or backend["mode"] != "docker":
@@ -253,7 +254,7 @@ def cgc_backend_start_context(
 
 def cgc_backend_remove_mismatched_container(
     args: argparse.Namespace,
-    layout: Any,
+    layout: CgcRuntimeLayout,
     backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
@@ -314,7 +315,7 @@ def cgc_backend_host_ports(
 def cgc_backend_dry_run_result(
     *,
     settings_path: Path,
-    layout: Any,
+    layout: CgcRuntimeLayout,
     backend: dict[str, Any],
     commands: list[dict[str, Any]],
     falkordb_port: int,
@@ -380,8 +381,8 @@ def cgc_backend_create_start_result(
     *,
     settings_path: Path,
     provider_settings: dict[str, Any],
-    layouts: list[Any],
-    layout: Any,
+    layouts: list[CgcRuntimeLayout],
+    layout: CgcRuntimeLayout,
     backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
     forced_remove_result: dict[str, Any] | None,
@@ -461,7 +462,7 @@ def cgc_backend_create_start_result(
 def cgc_project_migration(
     args: argparse.Namespace,
     provider_settings: dict[str, Any],
-    layouts: list[Any],
+    layouts: list[CgcRuntimeLayout],
     backend: dict[str, Any],
 ) -> dict[str, Any]:
     project_name = cgc_compose_project(provider_settings)
@@ -496,7 +497,7 @@ def cgc_project_migration(
 
 
 def cgc_backend_state(
-    layout: Any,
+    layout: CgcRuntimeLayout,
     backend: dict[str, Any],
     *,
     settings_path: Path,

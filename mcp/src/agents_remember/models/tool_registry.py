@@ -1,4 +1,23 @@
-"""Registry that maps public MCP tools to declared response models."""
+"""Registry that maps public MCP tools to declared response models.
+
+Response-model convention (one place, deliberately two tiers):
+
+- Tools whose response shape is fully owned by this package use a STRICT model
+  (``StrictResponseModel`` / ``ResponseModel`` / ``ToolResponse``, ``extra="forbid"``)
+  so the field set is a real, drift-proof contract. ``context_packet`` (the
+  fully-typed ``ContextPacketV2``), ``ping``, and ``server_info`` are the
+  exemplars; new AR-owned responses should follow them.
+- Tools that surface provider-native / raw diagnostic detail (CodeGraphContext,
+  GrepAI, Docker, watcher output) use a FLEXIBLE model
+  (``FlexibleResponseModel`` / ``FlexibleToolResponse``, ``extra="allow"``) ON
+  PURPOSE: that payload is owned by the upstream provider and must not be
+  rejected when the provider adds a field. This is a tolerated-drift surface,
+  not an un-validated one -- the envelope (ok/operation/tokens) is still typed.
+
+Controllers return plain dicts; ``_tool_payload`` validates them against the
+model registered here and finalizes token counts. Pick STRICT unless the
+payload genuinely embeds provider-native detail.
+"""
 
 from __future__ import annotations
 

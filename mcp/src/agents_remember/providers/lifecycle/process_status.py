@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import ctypes
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -54,49 +52,3 @@ def require_durable_process_namespace(action: str) -> None:
         f"{warning}. Run the lifecycle command from a normal host terminal or another durable host execution context."
     )
 
-
-def process_alive(pid: int) -> bool:
-    if os.name == "nt":
-        return windows_process_alive(pid)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def windows_process_alive(pid: int) -> bool:
-    if sys.platform != "win32":
-        return False
-    kernel32 = ctypes.windll.kernel32
-    process_query_limited_information = 0x1000
-    still_active = 259
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
-    if not handle:
-        # Access denied means the PID exists but cannot be queried by this
-        # process token. Other OpenProcess failures usually mean no process.
-        return ctypes.get_last_error() == 5
-    try:
-        exit_code = ctypes.c_ulong()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return True
-        return exit_code.value == still_active
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def process_cmdline(pid: int) -> str:
-    proc_cmdline = Path("/proc") / str(pid) / "cmdline"
-    if not proc_cmdline.exists():
-        return ""
-    try:
-        return (
-            proc_cmdline.read_bytes()
-            .replace(b"\x00", b" ")
-            .decode("utf-8", errors="replace")
-            .strip()
-        )
-    except OSError:
-        return ""

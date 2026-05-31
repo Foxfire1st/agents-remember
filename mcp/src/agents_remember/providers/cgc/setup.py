@@ -22,7 +22,7 @@ from agents_remember.providers.identity import (
     scoped_name,
 )
 from agents_remember.providers.setup_common import (
-    context_providers,
+    provider_settings,
     run_lifecycle,
     selected_provider_enabled,
     stable_provider_id,
@@ -43,17 +43,12 @@ def isolated_cgc_settings(
     if args.cgc_isolated_runtime_root is None:
         return None
 
-    provider = _cgc_provider(settings)
+    provider = provider_settings(settings, CGC_PROVIDER_ID)
     if provider is None:
         return None
     _require_isolated_target_root(args)
     cgc = _isolated_cgc_provider(args, provider)
     return _isolated_settings_payload(cgc)
-
-
-def _cgc_provider(settings: dict[str, Any]) -> dict[str, Any] | None:
-    provider = context_providers(settings).get(CGC_PROVIDER_ID)
-    return provider if isinstance(provider, dict) else None
 
 
 def _require_isolated_target_root(args: Any) -> None:

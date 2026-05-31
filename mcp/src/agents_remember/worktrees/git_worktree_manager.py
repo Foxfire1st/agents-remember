@@ -6,6 +6,7 @@ Requires Python 3.10+ and git. Uses only the Python standard library.
 
 from __future__ import annotations
 
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     cleanup_result,
     delete_branch_if_merged,
@@ -98,6 +99,7 @@ from agents_remember.worktrees.modules.start import (
 
 __all__ = [
     "ENTITY_FINGERPRINT_ALGORITHM",
+    "WorktreeArgs",
     "WorktreeCommandResult",
     "WorktreeProviderSetupConfig",
     "add_common",

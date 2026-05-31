@@ -6,14 +6,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from agents_remember.models.base import FlexibleResponseModel, FlexibleToolResponse
-
-
-class CodexExecutionPolicy(FlexibleResponseModel):
-    resolution: str | None = None
-    sandbox: str | None = None
-    sandboxArgument: str | None = None
-    benchmarkOnly: bool | None = None
+from agents_remember.models.base import FlexibleToolResponse
 
 
 class CodexBenchmarkPrepareResponse(FlexibleToolResponse):

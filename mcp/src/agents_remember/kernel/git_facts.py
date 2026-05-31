@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.git_command import run_git
+
 
 @dataclass(frozen=True)
 class GitFacts:
@@ -49,7 +51,7 @@ def _read_git_facts(repo_id: str, root: Path) -> GitFacts:
             f"repo path is not a directory: {root}",
         )
 
-    inside = _run_git(root, ["rev-parse", "--is-inside-work-tree"])
+    inside = run_git(root, ["rev-parse", "--is-inside-work-tree"])
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return GitFacts(
             repo_id,
@@ -86,22 +88,10 @@ def git_facts_to_packet(facts: GitFacts) -> dict[str, Any]:
 
 
 def _git_stdout(repo_root: Path, args: list[str]) -> str:
-    result = _run_git(repo_root, args)
+    result = run_git(repo_root, args)
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
-
-
-def _run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo_root.as_posix()}", *args],
-        cwd=repo_root,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=5,
-        check=False,
-    )
 
 
 def _git_error(result: subprocess.CompletedProcess[str], default: str) -> str:

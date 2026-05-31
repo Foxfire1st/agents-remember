@@ -7,6 +7,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
+from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import rel
 from agents_remember.memory_quality.style.update_history.history_order import (
     BULLET_PATTERN,
     datetime_value,
@@ -24,7 +25,7 @@ def fix_onboarding_root(onboarding_root: Path, *, dry_run: bool = False) -> dict
             continue
         files_checked += 1
         result = fix_file(path, dry_run=dry_run)
-        relative = relative_path(path, onboarding_root)
+        relative = rel(path, onboarding_root)
         if result["changed"]:
             changed_files.append(relative)
         if result["skipped"]:
@@ -114,13 +115,6 @@ def block_timestamp(block: list[str]) -> dt.datetime | None:
         return datetime_value(timestamp)
     except ValueError:
         return None
-
-
-def relative_path(path: Path, onboarding_root: Path) -> str:
-    try:
-        return path.relative_to(onboarding_root).as_posix()
-    except ValueError:
-        return path.as_posix()
 
 
 def main(argv: list[str] | None = None) -> int:
