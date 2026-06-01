@@ -123,6 +123,7 @@ def write_setup_summary(args: Any, payload: dict[str, Any]) -> dict[str, Any]:
             "reason": "dry-run",
             "last": paths["last"].as_posix(),
             "snapshot": paths["snapshot"].as_posix(),
+            "lastFull": paths["lastFull"].as_posix(),
         }
 
     try:
@@ -130,18 +131,23 @@ def write_setup_summary(args: Any, payload: dict[str, Any]) -> dict[str, Any]:
         encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
         paths["last"].write_text(encoded, encoding="utf-8")
         paths["snapshot"].write_text(encoded, encoding="utf-8")
+        # default=str keeps Path/other non-JSON values serializable; this copy is for humans.
+        full_encoded = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
+        paths["lastFull"].write_text(full_encoded, encoding="utf-8")
     except OSError as error:
         return {
             "written": False,
             "error": str(error),
             "last": paths["last"].as_posix(),
             "snapshot": paths["snapshot"].as_posix(),
+            "lastFull": paths["lastFull"].as_posix(),
         }
 
     return {
         "written": True,
         "last": paths["last"].as_posix(),
         "snapshot": paths["snapshot"].as_posix(),
+        "lastFull": paths["lastFull"].as_posix(),
     }
 
 
@@ -151,6 +157,10 @@ def setup_summary_paths(coordination_root: Path, action: str) -> dict[str, Path]
     return {
         "last": root / f"last-{action}.json",
         "snapshot": root / f"{timestamp}-{action}.json",
+        # Full, untrimmed payload (command stdout/stderr included) for debugging. The compact
+        # summary above drops command output, and the tool response is trimmed for the model's
+        # context -- neither is a usable debug artifact when a provider step fails.
+        "lastFull": root / f"last-{action}-full.json",
     }
 
 

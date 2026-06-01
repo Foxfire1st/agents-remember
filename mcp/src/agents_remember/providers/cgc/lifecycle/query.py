@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from agents_remember.providers.cgc.lifecycle.backend import cgc_backend_status
 from agents_remember.providers.cgc.lifecycle.compose import (
     cgc_compose_render,
     cgc_compose_summary,
@@ -73,7 +74,13 @@ def cgc_run_dry_result(layout: CgcRuntimeLayout, command: dict[str, Any]) -> dic
 
 
 def cgc_run_status_result(args: argparse.Namespace) -> dict[str, Any] | None:
-    status = cgc_status(args)
+    # A one-shot `cgc run` (bundle import, graph queries) needs the FalkorDB backend, not the
+    # watcher. Gating on the full provider status (which requires the watcher container running)
+    # blocked the seed's `bundle import`: worktree watchers start last (OQ7), so at seed time the
+    # watcher is missing, the import never ran, and the seed fell back to a full re-index. Gate on
+    # backend readiness instead -- the backend is up by seed time, and queries (run with the
+    # worktree fully up) are unaffected.
+    status = cgc_backend_status(args)
     return None if status["ok"] else {**status, "action": "run", "ok": False}
 
 
