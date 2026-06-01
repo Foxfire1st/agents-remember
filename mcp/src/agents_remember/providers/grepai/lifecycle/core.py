@@ -233,7 +233,7 @@ def grepai_embedder_backend_settings(
             base_variables,
         )
     ).resolve()
-    return {
+    resolved: dict[str, Any] = {
         "provider": provider,
         "mode": str(backend_settings.get("mode", "docker")),
         "image": str(backend_settings.get("image", GREPAI_OLLAMA_IMAGE)),
@@ -248,6 +248,12 @@ def grepai_embedder_backend_settings(
         "model": str(embedder.get("model", "nomic-embed-text")),
         "dimensions": embedder.get("dimensions", 768),
     }
+    # Worktree embedders carry the workspace ollama container to seed the model from,
+    # avoiding a per-worktree network re-pull. Absent for the workspace embedder itself.
+    seed_from = backend_settings.get("seedFromContainer")
+    if isinstance(seed_from, str) and seed_from:
+        resolved["seedFromContainer"] = seed_from
+    return resolved
 
 
 def grepai_container_path(layout: GrepaiRuntimeLayout, path: Path, *, runner: dict[str, Any]) -> str:

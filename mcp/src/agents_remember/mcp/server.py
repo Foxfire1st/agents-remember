@@ -39,6 +39,7 @@ from .tools import (
     runtime_install_payload,
     server_info_payload,
     skills_install_payload,
+    worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
@@ -208,9 +209,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
     @server.tool()
     def provider_watchers(action: str, dry_run: bool = False) -> dict[str, Any]:
         """Control provider watchers. action: 'start' (recreate containers from current compose and
-        begin indexing), 'restart' (stop then start), 'stop'/'shutdown-all', 'refresh'
-        (re-seed/re-index after repo or memory changed), or 'status'. Mutating except status.
-        Indexing runs in the watcher and is never time-capped. Preview with dry_run=true."""
+        begin indexing), 'restart' (stop then start; watchers come back up and pick up changes via
+        their incremental scan WITHOUT rebuilding indexes -- use this to wake a stale watcher),
+        'stop'/'shutdown-all', 'invalidate-indexes' (DELETE and rebuild every index from scratch:
+        full re-embed + full graph re-index, slow and CPU-heavy), or 'status'. Mutating except
+        status. Indexing runs in the watcher and is never time-capped. Preview with dry_run=true."""
         return provider_watchers_payload(config, action=action, dry_run=dry_run)
 
     @server.tool()
@@ -222,10 +225,13 @@ def create_server(config: McpRuntimeConfig) -> Any:
         output_format: str = "json",
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """Semantic search over memory/onboarding via the grepai provider. Read-only; needs the
         grepai-memory provider enabled, running, and indexed. output_format is 'json' or 'toon'.
-        dry_run=true returns the planned provider command without running it."""
+        dry_run=true returns the planned provider command without running it. `worktree` targets a
+        worktree's isolated stack by name; omit it and a single active worktree for one repo is the
+        default, otherwise the workspace stack is used."""
         return grepai_search_payload(
             config,
             query,
@@ -235,6 +241,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             output_format=output_format,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -247,11 +254,12 @@ def create_server(config: McpRuntimeConfig) -> Any:
         output_format: str = "json",
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """Trace relationships in the grepai semantic graph for a symbol. trace_action is
         'callers', 'callees', or 'graph' (depth applies only to 'graph'). output_format is 'json'
         or 'toon'. Read-only; needs grepai-memory enabled and indexed. dry_run=true returns the
-        planned command."""
+        planned command. `worktree` targets a worktree's isolated stack (see grepai_search)."""
         return grepai_trace_payload(
             config,
             trace_action,
@@ -262,6 +270,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             output_format=output_format,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -270,16 +279,19 @@ def create_server(config: McpRuntimeConfig) -> Any:
         name: str,
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """Find a symbol in the CodeGraphContext code graph. Read-only; needs the
         codegraphcontext-code provider enabled, running, and the repo indexed. dry_run=true returns
-        the planned command."""
+        the planned command. `worktree` targets a worktree's isolated graph by name; omit it and a
+        single active worktree for the repo is the default, otherwise the workspace graph is used."""
         return cgc_symbol_search_payload(
             config,
             repo_id,
             name,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -289,9 +301,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         file: str | None = None,
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """List the callers of a function from the CodeGraphContext graph. Read-only; needs the cgc
-        provider indexed. Optional `file` disambiguates same-named functions."""
+        provider indexed. Optional `file` disambiguates same-named functions. `worktree` targets a
+        worktree's isolated graph (see cgc_symbol_search)."""
         return cgc_callers_payload(
             config,
             repo_id,
@@ -299,6 +313,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             file=file,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -307,15 +322,18 @@ def create_server(config: McpRuntimeConfig) -> Any:
         function: str,
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """List what a function calls (its callees) from the CodeGraphContext graph. Read-only;
-        needs the cgc provider indexed."""
+        needs the cgc provider indexed. `worktree` targets a worktree's isolated graph (see
+        cgc_symbol_search)."""
         return cgc_callees_payload(
             config,
             repo_id,
             function,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -324,15 +342,17 @@ def create_server(config: McpRuntimeConfig) -> Any:
         module: str,
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """Report a module's dependencies from the CodeGraphContext graph. Read-only; needs the cgc
-        provider indexed."""
+        provider indexed. `worktree` targets a worktree's isolated graph (see cgc_symbol_search)."""
         return cgc_dependencies_payload(
             config,
             repo_id,
             module,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -341,15 +361,18 @@ def create_server(config: McpRuntimeConfig) -> Any:
         function: str | None = None,
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """Report complexity metrics from the CodeGraphContext graph (whole repo, or one function
-        if given). Read-only; needs the cgc provider indexed."""
+        if given). Read-only; needs the cgc provider indexed. `worktree` targets a worktree's
+        isolated graph (see cgc_symbol_search)."""
         return cgc_complexity_payload(
             config,
             repo_id,
             function=function,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -359,9 +382,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         context: str | None = None,
         dry_run: bool = False,
         timeout: int | None = None,
+        worktree: str | None = None,
     ) -> dict[str, Any]:
         """Produce a CodeGraphContext graph visualization (serves a browser view on `port`). Needs
-        the cgc provider running and indexed. dry_run=true returns the planned command."""
+        the cgc provider running and indexed. dry_run=true returns the planned command. `worktree`
+        targets a worktree's isolated graph (see cgc_symbol_search)."""
         return cgc_visualize_payload(
             config,
             repo_id,
@@ -369,6 +394,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             context=context,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         )
 
     @server.tool()
@@ -536,11 +562,28 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
-    def worktree_cleanup(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
+    def worktree_cleanup(
+        contract_path: str, dry_run: bool = False, teardown_providers: bool = True
+    ) -> dict[str, Any]:
         """Remove a task's worktrees and merged task branches after integration. MUTATING and
         destructive (deletes worktrees/branches) — run only after worktree_integrate. Preview with
-        dry_run=true."""
-        return worktree_cleanup_payload(config, contract_path, dry_run=dry_run)
+        dry_run=true. teardown_providers=true (default) also reclaims the worktree's isolated
+        provider stack (containers, networks, provider-runtime tree)."""
+        return worktree_cleanup_payload(
+            config, contract_path, dry_run=dry_run, teardown_providers=teardown_providers
+        )
+
+    @server.tool()
+    def worktree_abandon(
+        contract_path: str, dry_run: bool = False, force: bool = False
+    ) -> dict[str, Any]:
+        """Discard a worktree-backed task WITHOUT integrating it: reclaim its isolated provider
+        stack (containers, networks, provider-runtime tree), remove the code and memory worktrees,
+        delete the task branches, and remove the worktree group dir. MUTATING and destructive.
+        Unlike worktree_cleanup it needs no completed integration. Without force it refuses dirty
+        worktrees and unmerged branches (reporting the commits); force=true discards them
+        (git worktree remove --force, git branch -D). Preview with dry_run=true."""
+        return worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:

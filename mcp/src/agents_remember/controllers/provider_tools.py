@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agents_remember.controllers._guards import require_repo
@@ -45,9 +47,21 @@ def provider_watchers_tool(
     action: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    if action not in {"status", "start", "stop", "restart", "refresh", "shutdown-all"}:
-        raise ValueError("action must be status, start, stop, restart, refresh, or shutdown-all")
+    if action == "refresh":
+        # 'refresh' silently force-rebuilt every index, which read like a harmless restart.
+        # Split into two unmistakable actions so a restart can never wipe an index.
+        raise ValueError(
+            "'refresh' was renamed to make its effect explicit: use 'restart' to stop and start "
+            "the watchers WITHOUT touching their indexes, or 'invalidate-indexes' to delete and "
+            "rebuild every index from scratch (slow full re-embed/re-graph)."
+        )
+    if action not in {"status", "start", "stop", "restart", "invalidate-indexes", "shutdown-all"}:
+        raise ValueError(
+            "action must be status, start, stop, restart, invalidate-indexes, or shutdown-all"
+        )
     if action == "restart":
+        # Stop then start only. 'start' re-attaches the watchers and lets them pick up changes
+        # via their incremental scan; it never passes --force, so indexes are preserved.
         return {
             "ok": True,
             "operation": "provider_watchers",
@@ -57,10 +71,104 @@ def provider_watchers_tool(
                 _provider_watchers_once(config, "start", dry_run=dry_run),
             ],
         }
-    if action == "refresh":
-        return _provider_refresh(config, dry_run=dry_run)
+    if action == "invalidate-indexes":
+        return _provider_invalidate_indexes(config, dry_run=dry_run)
     effective_dry_run = False if action == "status" else dry_run
     return _provider_watchers_once(config, action, dry_run=effective_dry_run)
+
+
+@dataclass(frozen=True)
+class WorktreeProviderTarget:
+    """A worktree's isolated provider stack, located from its persisted state file."""
+
+    repo_id: str
+    task_name: str
+    group: str
+    settings_path: Path
+
+
+def _worktree_provider_targets(config: McpRuntimeConfig) -> list[WorktreeProviderTarget]:
+    """Discover worktree provider stacks from `worktrees/<repo>/<group>/provider-runtime`.
+
+    Only stacks whose persisted lifecycle-settings file still exists on disk are
+    returned, so half-torn-down worktrees are not offered as query targets.
+    """
+    base = config.coordination_root / "worktrees"
+    targets: list[WorktreeProviderTarget] = []
+    if not base.is_dir():
+        return targets
+    for state_file in sorted(base.glob("*/*/provider-runtime/provider-state.json")):
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        isolated = data.get("isolatedProviderSettings")
+        raw_path = isolated.get("path") if isinstance(isolated, dict) else None
+        repo_name = data.get("repoName")
+        if not isinstance(raw_path, str) or not isinstance(repo_name, str):
+            continue
+        settings_path = Path(raw_path)
+        if not settings_path.is_file():
+            continue
+        targets.append(
+            WorktreeProviderTarget(
+                repo_id=repo_name,
+                task_name=str(data.get("taskName") or ""),
+                group=state_file.parent.parent.name,
+                settings_path=settings_path,
+            )
+        )
+    return targets
+
+
+def _resolve_worktree_target(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str | None,
+    worktree: str | None,
+) -> WorktreeProviderTarget | None:
+    """Hybrid query routing: explicit worktree wins; else a single per-repo stack is
+    the default; otherwise (none, or ambiguous) fall back to / require workspace scope.
+    """
+    targets = _worktree_provider_targets(config)
+    if worktree:
+        scope = [t for t in targets if repo_id is None or t.repo_id == repo_id]
+        matches = [t for t in scope if worktree in t.task_name or worktree in t.group]
+        if len(matches) == 1:
+            return matches[0]
+        raise ValueError(
+            f"worktree {worktree!r} matched {len(matches)} provider stacks"
+            + (f" for {repo_id!r}" if repo_id else "")
+            + f"; available: {_worktree_listing(scope)}"
+        )
+    if repo_id is None:
+        return None
+    per_repo = [t for t in targets if t.repo_id == repo_id]
+    if len(per_repo) == 1:
+        return per_repo[0]
+    if len(per_repo) > 1:
+        raise ValueError(
+            f"multiple worktree provider stacks for {repo_id!r}; "
+            f"pass worktree=<name>: {_worktree_listing(per_repo)}"
+        )
+    return None
+
+
+def _worktree_listing(targets: list[WorktreeProviderTarget]) -> str:
+    return ", ".join(f"{t.task_name or t.group} [{t.repo_id}]" for t in targets) or "(none)"
+
+
+def _worktree_settings_override(target: WorktreeProviderTarget | None) -> Path | None:
+    return target.settings_path if target else None
+
+
+def _load_worktree_grepai_provider(settings_path: Path) -> dict[str, Any]:
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    providers = data.get("contextProviders", {})
+    provider = providers.get("providers", {}).get("grepai-memory") if isinstance(providers, dict) else None
+    if not isinstance(provider, dict):
+        raise ValueError(f"worktree grepai settings missing grepai-memory provider: {settings_path}")
+    return provider
 
 
 def grepai_search_tool(
@@ -73,12 +181,19 @@ def grepai_search_tool(
     output_format: str = "json",
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
+    target = _resolve_worktree_target(
+        config,
+        repo_id=repo_ids[0] if repo_ids and len(repo_ids) == 1 else None,
+        worktree=worktree,
+    )
     selection = _grepai_project_selection(
         config,
         repo_ids=repo_ids,
         all_repos=all_repos,
         allow_multiple=True,
+        provider_settings=_load_worktree_grepai_provider(target.settings_path) if target else None,
     )
     native_args = [
         "search",
@@ -96,6 +211,7 @@ def grepai_search_tool(
         operation="grepai_search",
         dry_run=dry_run,
         timeout=timeout,
+        settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
             action="run",
@@ -115,15 +231,22 @@ def grepai_trace_tool(
     output_format: str = "json",
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     action = _grepai_trace_action(trace_action)
     if depth is not None and action != "graph":
         raise ValueError("grepai_trace depth is only supported for trace_action='graph'")
+    target = _resolve_worktree_target(
+        config,
+        repo_id=repo_ids[0] if repo_ids and len(repo_ids) == 1 else None,
+        worktree=worktree,
+    )
     selection = _grepai_project_selection(
         config,
         repo_ids=repo_ids,
         all_repos=all_repos,
         allow_multiple=False,
+        provider_settings=_load_worktree_grepai_provider(target.settings_path) if target else None,
     )
     native_args = [
         "trace",
@@ -142,6 +265,7 @@ def grepai_trace_tool(
         operation="grepai_trace",
         dry_run=dry_run,
         timeout=timeout,
+        settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
             action="run",
@@ -157,6 +281,7 @@ def cgc_symbol_search_tool(
     name: str,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
         config,
@@ -165,6 +290,7 @@ def cgc_symbol_search_tool(
         native_args=["find", "name", _required_text(name, "name")],
         dry_run=dry_run,
         timeout=timeout,
+        worktree=worktree,
     )
 
 
@@ -176,6 +302,7 @@ def cgc_callers_tool(
     file: str | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     native_args = ["analyze", "callers", _required_text(function, "function")]
     if file:
@@ -187,6 +314,7 @@ def cgc_callers_tool(
         native_args=native_args,
         dry_run=dry_run,
         timeout=timeout,
+        worktree=worktree,
     )
 
 
@@ -197,6 +325,7 @@ def cgc_callees_tool(
     function: str,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
         config,
@@ -205,6 +334,7 @@ def cgc_callees_tool(
         native_args=["analyze", "calls", _required_text(function, "function")],
         dry_run=dry_run,
         timeout=timeout,
+        worktree=worktree,
     )
 
 
@@ -215,6 +345,7 @@ def cgc_dependencies_tool(
     module: str,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
         config,
@@ -223,6 +354,7 @@ def cgc_dependencies_tool(
         native_args=["analyze", "dependencies", _required_text(module, "module")],
         dry_run=dry_run,
         timeout=timeout,
+        worktree=worktree,
     )
 
 
@@ -233,6 +365,7 @@ def cgc_complexity_tool(
     function: str | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     native_args = ["analyze", "complexity"]
     if function:
@@ -244,6 +377,7 @@ def cgc_complexity_tool(
         native_args=native_args,
         dry_run=dry_run,
         timeout=timeout,
+        worktree=worktree,
     )
 
 
@@ -255,13 +389,16 @@ def cgc_visualize_tool(
     context: str | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     require_repo(config, repo_id)
+    target = _resolve_worktree_target(config, repo_id=repo_id, worktree=worktree)
     return _provider_operation_result(
         config,
         operation="cgc_visualize",
         dry_run=dry_run,
         timeout=timeout,
+        settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
             service_config,
             action="visualize",
@@ -280,13 +417,16 @@ def _cgc_run_tool(
     native_args: list[str],
     dry_run: bool,
     timeout: int | None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     require_repo(config, repo_id)
+    target = _resolve_worktree_target(config, repo_id=repo_id, worktree=worktree)
     return _provider_operation_result(
         config,
         operation=operation,
         dry_run=dry_run,
         timeout=timeout,
+        settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
             service_config,
             action="run",
@@ -314,8 +454,12 @@ def _grepai_project_selection(
     repo_ids: list[str] | None,
     all_repos: bool,
     allow_multiple: bool,
+    provider_settings: dict[str, Any] | None = None,
 ) -> GrepaiProjectSelection:
-    provider_settings = _grepai_provider_settings(config)
+    # provider_settings is the worktree's grepai provider when a worktree target was
+    # resolved; otherwise fall back to the workspace-scope provider from config.
+    if provider_settings is None:
+        provider_settings = _grepai_provider_settings(config)
     workspace = _required_text(
         str(provider_settings.get("workspace", "agents-remember-memory")),
         "grepai workspace",
@@ -477,7 +621,13 @@ def _provider_watchers_once(
     return payload
 
 
-def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, Any]:
+def _provider_invalidate_indexes(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, Any]:
+    """Delete and rebuild every provider index from scratch (full re-embed + full graph re-index).
+
+    This is the destructive path formerly called 'refresh'. It force-rebuilds the grepai
+    embeddings and the CGC graph for all enabled repos, so it is slow and CPU-heavy. Use
+    'restart' instead when the goal is only to bring a sleeping watcher back up to date.
+    """
     steps: list[dict[str, Any]] = []
     if "grepai-memory" in config.providers:
         steps.append(
@@ -508,7 +658,7 @@ def _provider_refresh(config: McpRuntimeConfig, *, dry_run: bool) -> dict[str, A
     return {
         "ok": bool(steps) and all(step.get("ok") for step in steps),
         "operation": "provider_watchers",
-        "action": "refresh",
+        "action": "invalidate-indexes",
         "steps": steps,
     }
 
@@ -526,8 +676,17 @@ def _provider_operation_result(
     dry_run: bool = False,
     timeout: int | None = None,
     run: ProviderLifecycleRunner,
+    settings_path_override: Path | None = None,
 ) -> dict[str, Any]:
-    settings_path = write_lifecycle_settings(config)
+    # When a worktree target resolves, run against its already-persisted lifecycle
+    # settings (do NOT delete that file). Otherwise write a temp workspace settings
+    # file and clean it up.
+    if settings_path_override is not None:
+        settings_path = settings_path_override
+        owns_settings = False
+    else:
+        settings_path = write_lifecycle_settings(config)
+        owns_settings = True
     try:
         service_config = lifecycle_service.ProviderLifecycleServiceConfig(
             coordination_root=config.coordination_root,
@@ -536,6 +695,10 @@ def _provider_operation_result(
             timeout=timeout or DEFAULT_DOCKER_CONTROL_SECONDS,
         )
         data = run(service_config)
-        return {**data, "operation": operation, "ok": bool(data.get("ok"))}
+        payload = {**data, "operation": operation, "ok": bool(data.get("ok"))}
+        if not owns_settings:
+            payload["worktreeScoped"] = True
+        return payload
     finally:
-        settings_path.unlink(missing_ok=True)
+        if owns_settings:
+            settings_path.unlink(missing_ok=True)

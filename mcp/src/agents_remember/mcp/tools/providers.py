@@ -17,6 +17,7 @@ from agents_remember.controllers.provider_tools import (
     provider_status_tool,
     provider_watchers_tool,
 )
+from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 
 from ..config import McpRuntimeConfig
 from .base import _tool_payload
@@ -48,7 +49,7 @@ def provider_watchers_payload(
 ) -> dict[str, Any]:
     return _tool_payload(
         "provider_watchers",
-        provider_watchers_tool(config, action=action, dry_run=dry_run),
+        summarize_command_logs(provider_watchers_tool(config, action=action, dry_run=dry_run)),
     )
 
 
@@ -62,6 +63,7 @@ def grepai_search_payload(
     output_format: str = "json",
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "grepai_search",
@@ -74,6 +76,7 @@ def grepai_search_payload(
             output_format=output_format,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -89,6 +92,7 @@ def grepai_trace_payload(
     output_format: str = "json",
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "grepai_trace",
@@ -102,6 +106,7 @@ def grepai_trace_payload(
             output_format=output_format,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -113,6 +118,7 @@ def cgc_symbol_search_payload(
     *,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_symbol_search",
@@ -122,6 +128,7 @@ def cgc_symbol_search_payload(
             name=name,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -134,6 +141,7 @@ def cgc_callers_payload(
     file: str | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_callers",
@@ -144,6 +152,7 @@ def cgc_callers_payload(
             file=file,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -155,6 +164,7 @@ def cgc_callees_payload(
     *,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_callees",
@@ -164,6 +174,7 @@ def cgc_callees_payload(
             function=function,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -175,6 +186,7 @@ def cgc_dependencies_payload(
     *,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_dependencies",
@@ -184,6 +196,7 @@ def cgc_dependencies_payload(
             module=module,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -195,6 +208,7 @@ def cgc_complexity_payload(
     function: str | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_complexity",
@@ -204,6 +218,7 @@ def cgc_complexity_payload(
             function=function,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )
 
@@ -216,6 +231,7 @@ def cgc_visualize_payload(
     context: str | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_visualize",
@@ -226,5 +242,6 @@ def cgc_visualize_payload(
             context=context,
             dry_run=dry_run,
             timeout=timeout,
+            worktree=worktree,
         ),
     )

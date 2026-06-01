@@ -104,6 +104,17 @@ def _isolated_grepai_base_fields(
 ) -> dict[str, Any]:
     runtime_root = isolated_root / "providers" / "runners" / "grepai" / instance_id
     log_root = isolated_root / "logs" / "providers" / "grepai" / instance_id
+    # The grepai logical `workspace` is a key INSIDE the (already isolated) worktree
+    # postgres, not a Docker resource name. Scoping it by the worktree instance made the
+    # seeded clone (keyed under the workspace `workspace`) invisible to the worktree
+    # watcher, forcing a full re-embed. Track the WORKSPACE identity instead so the clone
+    # is reused; the worktree instance_id still namespaces every container/network/runtime
+    # path below. workspace_name mirrors the proxy the worktree instance_id itself uses.
+    workspace_instance_id = provider_instance_id(
+        "workspace",
+        args.coordination_root,
+        workspace_name=args.coordination_root.parent.name,
+    )
     return {
         "enabled": True,
         "instance": {
@@ -116,7 +127,7 @@ def _isolated_grepai_base_fields(
                 coordination_root=args.coordination_root,
             ),
         },
-        "workspace": scoped_name("agents-remember-memory", instance_id),
+        "workspace": scoped_name("agents-remember-memory", workspace_instance_id),
         "runtimeRoot": runtime_root.as_posix(),
         "requirementsFile": (
             args.coordination_root / "providers" / "requirements" / "grepai.txt"
@@ -239,6 +250,16 @@ def _isolated_grepai_embedder(
     embedder = embedder_settings if isinstance(embedder_settings, dict) else {}
     embedder = dict(embedder)
     ollama_container = scoped_name("ar-grepai-ollama", instance_id)
+    # The worktree ollama starts with an empty model store. Rather than re-pulling the
+    # ~274MB embedding model over the network for every worktree, seed it locally from the
+    # already-running workspace ollama (the model is immutable shared content; the worktree's
+    # vectors stay isolated in its own postgres). The watcher only pulls as a fallback.
+    workspace_instance_id = provider_instance_id(
+        "workspace",
+        args.coordination_root,
+        workspace_name=args.coordination_root.parent.name,
+    )
+    workspace_ollama_container = scoped_name("ar-grepai-ollama", workspace_instance_id)
     backend = embedder.get("backend")
     backend = dict(backend) if isinstance(backend, dict) else {}
     backend.update(
@@ -254,6 +275,7 @@ def _isolated_grepai_embedder(
             "dataRoot": "<embedderRuntimeRoot>/data",
             "dataDestination": "/root/.ollama",
             "containerName": ollama_container,
+            "seedFromContainer": workspace_ollama_container,
             "ports": {
                 "http": {
                     "bindHost": "127.0.0.1",

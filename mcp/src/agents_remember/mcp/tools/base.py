@@ -39,6 +39,7 @@ PUBLIC_TOOLS = (
     "direct_closeout_apply",
     "worktree_integrate",
     "worktree_cleanup",
+    "worktree_abandon",
     "memory_baseline_status",
     "memory_baseline_adopt",
     "memory_carryover_plan",

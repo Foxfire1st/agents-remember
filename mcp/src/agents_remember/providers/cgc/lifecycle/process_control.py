@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -248,6 +249,30 @@ def cgc_layout_action_result(
         }
 
 
+DEFAULT_CGC_INDEX_CONCURRENCY = 2
+
+
+def cgc_index_concurrency(layout_count: int) -> int:
+    """How many repos to (re)index at once across a multi-repo workspace.
+
+    Each cgc indexer self-throttles to ~10 in-flight FalkorDB queries (asyncio.Semaphore in
+    codegraphcontext) and uses up to ~10 parser threads. Reindexing every repo at once -- the
+    previous ``max_workers=len(layouts)`` -- therefore both pegs the CPU and overruns the
+    shared FalkorDB query queue on a workspace with many repos. Cap the fan-in to a small
+    default so a large workspace degrades to "slower" instead of breaking; override with the
+    AR_CGC_INDEX_CONCURRENCY env var on bigger machines. Returns at least 1, never more than
+    the number of repos.
+    """
+    cap = DEFAULT_CGC_INDEX_CONCURRENCY
+    override = os.environ.get("AR_CGC_INDEX_CONCURRENCY")
+    if override:
+        try:
+            cap = int(override)
+        except ValueError:
+            cap = DEFAULT_CGC_INDEX_CONCURRENCY
+    return max(1, min(layout_count, cap))
+
+
 def cgc_parallel_layout_action_results(
     args: argparse.Namespace,
     layouts: list[CgcRuntimeLayout],
@@ -257,7 +282,8 @@ def cgc_parallel_layout_action_results(
     if not layouts:
         return []
     results: list[dict[str, Any] | None] = [None] * len(layouts)
-    with ThreadPoolExecutor(max_workers=len(layouts), thread_name_prefix=f"cgc-{action}") as pool:
+    workers = cgc_index_concurrency(len(layouts))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"cgc-{action}") as pool:
         futures = {
             pool.submit(cgc_layout_action_result, args, layout, action, handler): index
             for index, layout in enumerate(layouts)

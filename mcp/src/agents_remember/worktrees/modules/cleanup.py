@@ -8,15 +8,19 @@ from agents_remember.worktrees.modules.git import branch_exists, run_git
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.provider_teardown import teardown_worktree_providers
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 
 
-def remove_registered_worktree(repo: Path, worktree: Path, dry_run: bool) -> dict[str, object]:
+def remove_registered_worktree(
+    repo: Path, worktree: Path, dry_run: bool, *, force: bool = False
+) -> dict[str, object]:
     if not worktree.exists():
         return {"path": worktree.as_posix(), "removed": False, "reason": "already-absent"}
     if dry_run:
         return {"path": worktree.as_posix(), "removed": False, "would_remove": True}
-    result = run_git(repo, ["worktree", "remove", str(worktree)])
+    command = ["worktree", "remove", *(["--force"] if force else []), str(worktree)]
+    result = run_git(repo, command)
     if result.returncode != 0:
         return {
             "path": worktree.as_posix(),
@@ -39,6 +43,22 @@ def delete_branch_if_merged(repo: Path, branch: str, dry_run: bool) -> dict[str,
             "reason": result.stderr.strip() or "git branch -d refused the branch",
         }
     return {"branch": branch, "deleted": True}
+
+
+def delete_branch_force(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
+    """Discard a branch even if unmerged (`git branch -D`). Used by abandon force."""
+    if not branch_exists(repo, branch):
+        return {"branch": branch, "deleted": False, "reason": "already-absent"}
+    if dry_run:
+        return {"branch": branch, "deleted": False, "would_delete": True, "force": True}
+    result = run_git(repo, ["branch", "-D", branch])
+    if result.returncode != 0:
+        return {
+            "branch": branch,
+            "deleted": False,
+            "reason": result.stderr.strip() or "git branch -D failed",
+        }
+    return {"branch": branch, "deleted": True, "force": True}
 
 
 def remove_empty_dir(path: Path, dry_run: bool) -> dict[str, object]:
@@ -140,6 +160,13 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if contract.integration_status != "completed":
         raise RuntimeError("cleanup requires integration.status completed")
 
+    # Reclaim the worktree's isolated provider stack first so the (now provider-free)
+    # worktree group dir can be removed below. shutdown-all leaves backends/networks.
+    providers = (
+        teardown_worktree_providers(contract, dry_run=args.dry_run)
+        if args.teardown_providers
+        else {"state": "skipped", "reason": "teardown_providers disabled"}
+    )
     removed_worktrees = _removed_worktrees(contract, args.dry_run)
     branches = _deleted_branches(contract, args.dry_run)
     directories = _removed_directories(contract, args.dry_run)
@@ -153,7 +180,8 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 args.dry_run, updated.cleanup == "completed", removed_worktrees, branches
             ),
             **status_payload(updated),
-            "summary": "Cleanup completed; worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
+            "summary": "Cleanup completed; the worktree provider stack was reclaimed, worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
+            "providers": providers,
             "removed_worktrees": removed_worktrees,
             "branches": branches,
             "directories": directories,

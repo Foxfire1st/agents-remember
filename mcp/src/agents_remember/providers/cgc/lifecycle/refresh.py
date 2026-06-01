@@ -22,6 +22,7 @@ from agents_remember.providers.cgc.lifecycle.installation import cgc_doctor
 from agents_remember.providers.cgc.lifecycle.process_control import (
     cgc_all_result,
     cgc_backend_all_error,
+    cgc_index_concurrency,
     cgc_parallel_layout_action_results,
     cgc_start_all,
 )
@@ -205,4 +206,8 @@ def cgc_refresh_all(args: argparse.Namespace) -> dict[str, Any]:
         backend=backend,
         action="refresh-all",
         results=results,
-    ) | {"watchers": watchers, "parallel": True}
+    ) | {
+        "watchers": watchers,
+        "parallel": True,
+        "indexConcurrency": cgc_index_concurrency(len(layouts)),
+    }

@@ -6,9 +6,11 @@ Requires Python 3.10+ and git. Uses only the Python standard library.
 
 from __future__ import annotations
 
+from agents_remember.worktrees.modules.abandon import abandon_result
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     cleanup_result,
+    delete_branch_force,
     delete_branch_if_merged,
     remove_empty_dir,
     remove_registered_worktree,
@@ -88,6 +90,9 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_onboarding_refresh_plan,
     validate_onboarding_refresh_plan_for_context,
 )
+from agents_remember.worktrees.modules.provider_teardown import (
+    teardown_worktree_providers,
+)
 from agents_remember.worktrees.modules.start import (
     attach_result,
     load_contract_from_args,
@@ -102,6 +107,7 @@ __all__ = [
     "WorktreeArgs",
     "WorktreeCommandResult",
     "WorktreeProviderSetupConfig",
+    "abandon_result",
     "add_common",
     "attach_result",
     "blocked_integration_payload",
@@ -126,6 +132,7 @@ __all__ = [
     "contract_next_args",
     "contract_payload",
     "current_branch",
+    "delete_branch_force",
     "delete_branch_if_merged",
     "direct_closeout_preview_payload",
     "direct_closeout_result",
@@ -166,6 +173,7 @@ __all__ = [
     "start_result",
     "status_payload",
     "status_result",
+    "teardown_worktree_providers",
     "validate_direct_external_context",
     "validate_integrate_contract",
     "validate_onboarding_refresh_plan",

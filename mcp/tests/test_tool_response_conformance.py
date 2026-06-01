@@ -148,6 +148,18 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_cleanup"] = tools.worktree_cleanup_payload(
         config, contract_path, dry_run=False
     )
+    abandon_start = tools.worktree_start_payload(
+        config,
+        REPO,
+        "abandon-task",
+        "abandon-wt",
+        dry_run=False,
+        skip_provider_setup=True,
+        memory_choice="disabled-memory",
+    )
+    payloads["worktree_abandon"] = tools.worktree_abandon_payload(
+        config, abandon_start["contract_path"], dry_run=False, force=True
+    )
     return payloads
 
 

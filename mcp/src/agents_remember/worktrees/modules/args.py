@@ -48,6 +48,8 @@ class WorktreeArgs:
     strategy: str = "ff-only"
     approved: bool = False
     approval_note: str = ""
+    force: bool = False
+    teardown_providers: bool = True
 
     # Closeout / integrate commit messages
     code_commit_message: str = ""

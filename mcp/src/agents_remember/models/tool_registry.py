@@ -57,6 +57,7 @@ from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.worktree import (
     DirectCloseoutApplyResponse,
     DirectCloseoutPreviewResponse,
+    WorktreeAbandonResponse,
     WorktreeAttachResponse,
     WorktreeCleanupResponse,
     WorktreeCloseoutApplyResponse,
@@ -97,6 +98,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "direct_closeout_apply": DirectCloseoutApplyResponse,
     "worktree_integrate": WorktreeIntegrateResponse,
     "worktree_cleanup": WorktreeCleanupResponse,
+    "worktree_abandon": WorktreeAbandonResponse,
     "memory_baseline_status": MemoryBaselineStatusResponse,
     "memory_baseline_adopt": MemoryBaselineAdoptResponse,
     "memory_carryover_plan": MemoryCarryoverPlanResponse,
