@@ -7,6 +7,9 @@ import re
 from pathlib import Path
 
 MAX_DOCKER_NAME_COMPONENT = 40
+# Scoped names are used as container/network hostnames, which must stay within the
+# RFC-1035 single DNS label limit (63 chars) or host resolution fails ("label too long").
+MAX_SCOPED_NAME = 63
 
 
 def stable_slug(value: str, *, fallback: str = "instance") -> str:
@@ -106,7 +109,15 @@ def docker_component(value: str) -> str:
 def scoped_name(prefix: str, instance_id: str, *suffixes: str) -> str:
     parts = [stable_slug(prefix), docker_component(instance_id)]
     parts.extend(docker_component(suffix) for suffix in suffixes if suffix)
-    return "-".join(parts)
+    name = "-".join(parts)
+    if len(name) <= MAX_SCOPED_NAME:
+        return name
+    # Per-component caps are not enough once several components are joined: the
+    # joined name becomes a container/network hostname and must stay a valid DNS
+    # label. Bound the whole name with a deterministic, collision-safe hash suffix.
+    digest = short_hash(name)
+    head = name[: MAX_SCOPED_NAME - 1 - len(digest)].rstrip("-")
+    return f"{head}-{digest}"
 
 
 def provider_ownership_labels(

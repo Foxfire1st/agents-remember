@@ -112,7 +112,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `1.0.0` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `1.0.1` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Stability
 
