@@ -685,6 +685,34 @@ class McpToolTests(unittest.TestCase):
             ],
         )
 
+    def test_grepai_search_resolves_uppercase_repo_id_to_normalized_project(self) -> None:
+        # Regression: a configured repo id with uppercase (e.g. "Cobalt") is indexed
+        # by the watcher under the stable_provider_id-normalized project ("cobalt").
+        # The tool must emit "--project cobalt", and accept the repo id in any casing.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            (root / "workspace" / "Cobalt").mkdir(parents=True)
+            (root / "ar-coordination" / "memory-repos" / "ar-Cobalt").mkdir(parents=True)
+            payload_data = settings_payload(root)
+            payload_data["repositories"]["Cobalt"] = {}
+            path = root / "mcp-settings.json"
+            write_json(path, payload_data)
+            config = load_config(path)
+
+            configured = grepai_search_payload(
+                config, "automaton", repo_ids=["Cobalt"], dry_run=True
+            )
+            lowercased = grepai_search_payload(
+                config, "automaton", repo_ids=["cobalt"], dry_run=True
+            )
+
+        for payload in (configured, lowercased):
+            self.assertTrue(payload["ok"])
+            command = planned_command(payload)
+            self.assertEqual(command[command.index("--project") + 1], "cobalt")
+            self.assertNotIn("Cobalt", command)
+
     def test_grepai_payloads_reject_invalid_scope_and_trace_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

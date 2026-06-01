@@ -15,6 +15,7 @@ from agents_remember.mcp.config import (
 )
 from agents_remember.providers import lifecycle_service
 from agents_remember.providers.current_state import write_current_provider_state
+from agents_remember.providers.identity import stable_provider_id
 from agents_remember.providers.settings import (
     lifecycle_settings_from_config,
     write_lifecycle_settings,
@@ -465,7 +466,7 @@ def _grepai_project_selection(
         "grepai workspace",
     )
     project_by_repo = _grepai_project_ids_by_repo(config, provider_settings)
-    selected_repo_ids = _normalized_repo_ids(repo_ids)
+    selected_repo_ids = _canonical_repo_ids(config, _normalized_repo_ids(repo_ids))
     if not selected_repo_ids:
         return _grepai_workspace_selection(workspace, all_repos)
 
@@ -538,8 +539,12 @@ def _grepai_project_ids_by_repo(
     config: McpRuntimeConfig,
     provider_settings: dict[str, Any],
 ) -> dict[str, str]:
+    # Value is the project name the watcher actually uses: the runtime normalizes
+    # each root's id with `stable_provider_id` (lowercase/slugify), so a configured
+    # repo id like `Cobalt` is indexed under project `cobalt`. Passing the raw
+    # config id as `--project` matched nothing and returned an empty result.
     return {
-        project_id: project_id
+        project_id: stable_provider_id(project_id)
         for project_id in _grepai_provider_project_ids(provider_settings)
         if project_id in config.repositories
     }
@@ -576,6 +581,21 @@ def _normalized_repo_ids(repo_ids: list[str] | None) -> tuple[str, ...]:
             normalized.append(value)
             seen.add(value)
     return tuple(normalized)
+
+
+def _canonical_repo_ids(
+    config: McpRuntimeConfig, repo_ids: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Resolve user-supplied repo ids to their configured spelling, case-insensitively.
+
+    MCP-configured repo ids can carry uppercase (e.g. ``Cobalt``). Accept any casing
+    and resolve to the configured key so the project filter, validation, and
+    ``--project`` selection all agree. Unmatched ids pass through unchanged so the
+    unknown-repo error still reports them as the developer typed them.
+    """
+
+    by_lower = {repo_id.lower(): repo_id for repo_id in config.repositories}
+    return tuple(by_lower.get(repo_id.lower(), repo_id) for repo_id in repo_ids)
 
 
 def _positive_int(value: int, label: str) -> int:
