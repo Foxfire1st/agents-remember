@@ -364,7 +364,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         )
         self.assertEqual(
             result["workspaceState"]["projectPaths"],
-            {"memory-a": "/grepai/runtime/index-roots/memory-a"},
+            {"memory-a": "/grepai/roots/memory-a"},
         )
         self.assertEqual(
             result["workspaceState"]["embedder"]["endpoint"],
@@ -409,6 +409,12 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
         self.assertEqual(render.project_name, "agents-remember-grepai")
         self.assertNotIn("@", render.override_yaml)
+        # the live memory root is bind-mounted read-write into the watcher
+        for root in layout.roots:
+            self.assertIn(
+                f'"{root.path.as_posix()}:/grepai/roots/{root.project_id}"',
+                render.override_yaml,
+            )
         self.assertIn('image: "pgvector/pgvector:pg16"', render.override_yaml)
         self.assertIn('container_name: "ar-grepai-postgres"', render.override_yaml)
         self.assertIn('image: "ollama/ollama:latest"', render.override_yaml)

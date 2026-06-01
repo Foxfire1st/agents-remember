@@ -35,6 +35,7 @@ services:
     volumes:
       - @WATCHER_RUNTIME_VOLUME@
       - @WATCHER_LOGS_VOLUME@
+@WATCHER_ROOT_VOLUMES@
     command: ["watch", "--workspace", @WORKSPACE_NAME@, "--log-dir", @LOGS_MOUNT@]
 
 networks:

@@ -49,6 +49,11 @@ def grepai_compose_render(
     embedder = grepai_embedder_backend_settings(provider_settings, layout)
     postgres_port = postgres_port or backend["postgresHostPort"]
     ollama_port = ollama_port or embedder["httpHostPort"]
+    roots_mount = runner["rootsMount"].rstrip("/")
+    root_volumes = "\n".join(
+        f"      - {yaml_scalar(f'{root.path.as_posix()}:{roots_mount}/{root.project_id}')}"
+        for root in layout.roots
+    )
     values = {
         "POSTGRES_IMAGE": yaml_scalar(backend["image"]),
         "POSTGRES_CONTAINER_NAME": yaml_scalar(backend["containerName"]),
@@ -82,6 +87,7 @@ def grepai_compose_render(
         "WATCHER_LOGS_VOLUME": yaml_scalar(
             f"{layout.logs_root.as_posix()}:{runner['logsMount']}"
         ),
+        "WATCHER_ROOT_VOLUMES": root_volumes,
         "WORKSPACE_NAME": yaml_scalar(layout.workspace_name),
         "LOGS_MOUNT": yaml_scalar(runner["logsMount"]),
         "NETWORK_NAME": yaml_scalar(grepai_network_name(provider_settings)),
