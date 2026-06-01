@@ -13,6 +13,19 @@ on a sibling repository, use the installed runtime instructions instead:
 When working on this repository itself, use `agents-remember-md` as the target
 code repository for resolver, onboarding, workflow, and closeout commands.
 
+## Frame Before You Choose a Format
+
+The moment you are thinking about building something, the collaboration doctrine
+in `tasks/AGENTS.md` already applies — in plain chat, before any task file exists
+and before a format is chosen below.
+
+Do not rush a request into a plan. Use that doctrine to reframe the request, find
+the true scope, surface what could break, and expose hidden variables through
+back-and-forth. Pull the evidence it needs with `C-04-retrieval-strategy-router`.
+
+Continue until the design is defined well enough to write down. Only then choose
+a task format below.
+
 ## Task Format Routing
 
 Choose one work format before changing files:
@@ -71,6 +84,16 @@ guidance:
 Do not assume this source checkout has active root-level `system/` settings.
 Runtime settings examples live under `runtime/system/defaults/`, and installed
 runtime settings live under the selected `ar-coordination/` or memory root.
+
+### Memory Retrieval Strategies
+
+- `Semantics`: Fuzzy search use GrepAI to search over onboardings. Leads to code routes & files using 1-to-1 file mapping backward.
+- `Relationship`: For code-relationsship questions use Code Graph Context (cgc).
+- `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
+  branch-valid truths, behavioral expectations, or code intent are unknown. Use
+  onboarding plus bounded source confirmation.
+
+Use `C-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
 
 ## Source Layout
 

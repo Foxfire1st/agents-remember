@@ -1,5 +1,19 @@
 # AGENTS.md
 
+## Frame Before You Choose a Format
+
+The moment a developer is thinking about building something, the collaboration
+doctrine in `tasks/AGENTS.md` already applies — in plain chat, before any task
+file exists and before a format is chosen below.
+
+Do not rush a developer statement into a plan. Use that doctrine to reframe the
+request, find the true scope, surface what could break, and expose hidden
+variables through back-and-forth. Pull the evidence it needs with
+`C-04-retrieval-strategy-router`.
+
+Continue until the developer agrees the design is defined well enough to write
+down. Only then choose a task format below.
+
 ## Task Format Routing
 
 This workspace has exactly three task/work formats. Choose deliberately before creating or updating task artifacts.
@@ -37,10 +51,8 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- Do not rush on every dev statement to change the whole plan. Instead follow `tasks/AGENTS.md` doctrine
-  when designing and planning a task. Help the developer through back and forth discussion in chat, to reframe
-  their requests better, think through the problem, find deeper truths, and hidden variables. Do that until
-  the developer beliefs that the design item is well enough defined to be written down.
+- `tasks/AGENTS.md` — task collaboration doctrine (applied up front; see
+  *Frame Before You Choose a Format* above).
 
 ### Onboarding Documentation
 
@@ -115,6 +127,16 @@ report no providers.
   smoke-check, branch workflow, and local command notes.
 - `system/sources.md` for domain documentation and external references.
 - `system/coding-guidelines.md` when present for repo-specific coding rules.
+
+### Memory Retrieval Strategies
+
+- `Semantics`: Fuzzy search use GrepAI to search over onboardings. Leads to code routes & files using 1-to-1 file mapping backward.
+- `Relationship`: For code-relationsship questions use Code Graph Context (cgc).
+- `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
+  branch-valid truths, behavioral expectations, or code intent are unknown. Use
+  onboarding plus bounded source confirmation.
+
+Use `C-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
 
 ### Branch And Workflow Notes
 

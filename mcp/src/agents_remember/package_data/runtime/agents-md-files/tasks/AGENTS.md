@@ -1,5 +1,11 @@
 # Task Colaboration Doctrine
 
+This doctrine governs the up-front thinking that happens *before* a task format
+is chosen or a task file exists. It applies the moment a developer is thinking
+about building something — in plain chat — not only once a task is created. Let
+that shared understanding of scope and risk decide whether, and which, task file
+is warranted.
+
 ## Meta-Questioning Behavior
 
 The agent should help the developer improve the question itself.
@@ -112,6 +118,9 @@ The agent should separate evidence by type when relevant:
 2. Repo-internal evidence
 3. Cross-repo or system-boundary evidence
 4. Executable validation evidence
+
+Gather that evidence through `C-04-retrieval-strategy-router` (Semantics,
+Relationship, Intent) rather than ad-hoc reads.
 
 The agent should not only state what it plans to do. It should also state what will prove the plan is correct.
 
