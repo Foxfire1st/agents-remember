@@ -32,7 +32,7 @@ points:
 memory_init(repo_id="<repo-id>", dry_run=true, initialize_git=true)   # preview
 memory_init(repo_id="<repo-id>", initialize_git=true)                 # apply
 runtime_install(include_benchmarks=false, install_provider_deps=false)
-skills_install(layout="tree", overwrite=true)
+skills_install(overwrite=true)
 ```
 
 Use `memory_init` for creating or repairing the configured memory root for a

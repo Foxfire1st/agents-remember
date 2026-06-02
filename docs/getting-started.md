@@ -12,7 +12,17 @@ Ask your agent to:
 2. **Install Agents Remember** — Run `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled).
 3. **Onboard your project** — Run `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
 
-The only hands-on steps for you is to restart once after step 1, and then continue from there.
+Your only hands-on steps are a few harness restarts (see [Restart Points](#restart-points)); between them, the agent does the work.
+
+## Restart Points
+
+Setup is agent-driven, but a few steps need **you** to restart the harness so it reloads. This is the canonical list:
+
+| Step | Why restart? | Required? |
+| --- | --- | --- |
+| After MCP registration | The harness loads the MCP server and its tool list. | Yes |
+| After `skills_install()` | The harness discovers the newly installed skills. | Usually yes; some harnesses hot-reload. |
+| After `C-13-install-and-onboard` installs a session-start hook | Hooks load at session start, not mid-session. | Only for harnesses that use a start hook. |
 
 ## Example Workspace
 
@@ -28,7 +38,7 @@ projects/
 
 ## Manual Wire Of The MCP Server
 
-The agent should now how to setup the mcp. But if it doesn't work out here is how to do it manually. The simplest path is `uvx`, which fetches and runs the server on demand — no manual virtualenv or PATH setup. Register it with your harness by pointing the command at `uvx` and an **absolute** settings path:
+Your agent should usually handle MCP setup for you. If that does not work, wire it manually. The simplest path is `uvx`, which fetches and runs the server on demand — no manual virtualenv or PATH setup. Register it with your harness by pointing the command at `uvx` and an **absolute** settings path:
 
 ```json
 {
@@ -146,6 +156,8 @@ my-app/
 ```
 
 Use external memory only when you intentionally want a separate memory repo under `ar-coordination/memory-repos/ar-<repo>/`. See [Use External Memory](guides/use-external-memory.md).
+
+**How the resolver picks a location.** With no explicit choice, the resolver prefers repo-local internal memory (`<repo>/ar-memory/`) **when it exists**, and otherwise falls back to external memory (`ar-coordination/memory-repos/ar-<repo>/`) when *that* exists. Before either exists — a brand-new repo — resolution fails until you initialize one, which is exactly what `C-13` / `C-00` do here. For new projects the recommended default is repo-local internal memory; once `ar-memory/` exists, the resolver prefers it for that repository.
 
 ## Bootstrap Onboarding
 

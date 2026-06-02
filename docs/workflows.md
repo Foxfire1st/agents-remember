@@ -59,6 +59,15 @@ Closeout and commit approval are separate from implementation approval. The agen
 preview before any C-12 closeout creates commits. The git-landing flow (direct vs PR-gated) is
 deferred to the repo's `system/git-workflow.md` when present.
 
+## Direct Closeout
+
+The normal 2.0.0 build path is worktree-backed (only read-only exits skip it). The
+`direct_closeout_preview` / `direct_closeout_apply` MCP tools remain available as a
+**controlled exception** for current-checkout maintenance — small memory or doc updates
+where spinning up a worktree adds unnecessary ceremony. Use them only when the developer
+explicitly approves a current-checkout closeout; for normal code changes, prefer the
+worktree-backed path above.
+
 ## Choosing A Build Mode
 
 | Situation | Build mode |

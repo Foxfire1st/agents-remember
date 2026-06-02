@@ -33,6 +33,24 @@ The memory layer rests on a small, strict discipline:
 
 The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`.
 
+## What It Looks Like In Practice
+
+A source file has an onboarding note beside it, reached by path:
+
+```text
+mcp/src/agents_remember/mcp/server.py
+ar-memory/onboarding/mcp/src/agents_remember/mcp/server.py.md
+```
+
+At task start the agent orients and checks memory health:
+
+```text
+context_packet(repo_id="my-app")
+memory_quality_check(repo_id="my-app")
+```
+
+It then reads the source file and its onboarding note together before proposing a change. After the change is approved and lands, the onboarding is refreshed and re-verified against the new commit — so the note stays true to the code.
+
 ## Live Demo: This Repo Uses Agents Remember
 
 Agents Remember runs on itself. The companion memory repo is:
