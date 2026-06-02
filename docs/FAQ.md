@@ -15,7 +15,7 @@ The core rules are:
 3. implementation waits for developer approval
 4. onboarding records approved current state, not plans
 
-Chat, light task, and heavy task are different weights of the same discipline.
+Read-only answers, chat builds, and durable W-02 tasks are different weights of the same discipline.
 
 ### How does an agent find the right memory?
 
@@ -67,23 +67,23 @@ Repo-wide context belongs in `overview.md`. Larger repos can use route-local ove
 
 ## Workflow Layer
 
-### Do I need the heavy workflow?
+### Do I need a durable task?
 
-Usually no. Chat mode is the default.
+Often no. A chat build is the default for changes that fit in one session.
 
-Use light task when the work needs a durable task file or checklist. Use heavy task when the developer asks for it or when the risk justifies full phased research, design, planning, implementation, and review gates.
+Use a W-02 light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
 
 ### Is this overengineered?
 
 The memory layer is intentionally small: Markdown files, Git metadata, and deterministic paths. The workflow layer can be heavier, but it is optional and should match task risk.
 
-If a change fits in one session, use chat. If it needs a durable plan, use light task. If a plausible mistake would be expensive, use heavy task.
+If a change fits in one session, use a chat build. If it needs a durable plan, use a W-02 light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
 
 ### What happens when the agent discovers something during implementation?
 
 The agent should route the discovery to the right artifact instead of quietly changing requirements or memory.
 
-Durable current-state findings can go through C-05. Requirement or architecture changes need explicit developer approval. Heavy tasks use C-01 findings capture and review gates to keep that routing visible.
+Durable current-state findings can go through C-05. Requirement or architecture changes need explicit developer approval. C-01 findings capture keeps that routing visible.
 
 ### Why keep task files separate from onboarding?
 

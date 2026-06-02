@@ -62,14 +62,14 @@ Ask your agent to:
 
 Those three restarts (load the server, discover the skills, activate the hook) are the only hands-on steps; between and after them, your agent continues on its own.
 
-After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the L-01 session job lifecycle. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
-- [Workflows](docs/workflows.md) - chat, light task, heavy task, and when to use each.
+- [Workflows](docs/workflows.md) - the L-01 lifecycle and its build modes (read-only / chat build / W-02), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.

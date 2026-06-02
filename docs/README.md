@@ -7,7 +7,7 @@ Use this directory when the README is not enough. The root README explains the p
 - [Getting Started](getting-started.md) - the agent-driven setup path: wire the MCP with `uvx`, install the runtime and skills, then let `C-13-install-and-onboard` set up memory, onboarding, and providers.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
-- [Workflows](workflows.md) - chat, light task, heavy task, worktrees, and direct closeout.
+- [Workflows](workflows.md) - the L-01 lifecycle, its build modes, worktrees, and direct closeout.
 - [Benchmark Methodology](benchmarks-methodology.md) - paired benchmark runs, metrics, validity checks, and limitations.
 - [FAQ](FAQ.md) - design principles, objections, and comparisons.
 

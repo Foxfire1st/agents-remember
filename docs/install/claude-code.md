@@ -35,8 +35,8 @@ Before doing ANY work in a sibling repository, read and follow
 2. Resolve coordination/memory context FIRST — via the C-08 resolver, or the
    agents-remember MCP tools `resolve_context` then
    `context_packet(repo_id=..., include_providers=true)`.
-3. Pick a task format per AGENTS.md routing (chat / W-02 light / W-01 heavy)
-   before changing code or task-plan items.
+3. Pick a build mode per AGENTS.md routing — L-01's `decide` step: read-only exit,
+   chat build, or a W-02 light task — before changing code or task-plan items.
 
 This instruction is harness-injected and authoritative. Treat it as a required
 first step, not optional "maybe relevant" context.
@@ -122,7 +122,6 @@ This produces, for example:
 .claude/skills/w-02-light-task-workflow/SKILL.md
 ```
 
-Do **not** use the default `tree` layout here. Tree nests skills under a namespace
-directory (`.claude/skills/agents-remember-md/U-01-core-skills/…/SKILL.md`), which
-Claude Code does **not** discover — it does not scan recursively. (The `tree`
-layout is for recursive scanners such as Codex.)
+Skills install flat — one folder per skill directly under `.claude/skills/`, named
+by the skill's lowercase frontmatter name — which Claude Code discovers without
+recursive scanning.

@@ -1,56 +1,70 @@
 # Workflows
 
-Agents Remember has three task workflows. They share the same discipline and differ in how much ceremony the work needs.
+Every session runs through the **L-01 session job lifecycle**: orient → ground → frame → decide →
+build → close. The job type (bug / feature / triage / research) is a lens during framing, not a gate.
+The only task-format decision is L-01's build-mode step.
 
 ## Shared Discipline
 
-Every workflow keeps these rules:
+Every build keeps these rules:
 
 1. Resolve the active context with `C-08-ar-coordination-context-resolver`.
 2. Run drift detection before planning against onboarding.
-3. Wait for developer approval before implementation.
-4. Update onboarding only after approved changes.
+3. Wait for developer approval before implementation (L-01's `frame` plan gate).
+4. Update onboarding only after approved changes, live per completed plan-section.
 5. Run the checks listed in the resolved memory layer's `system/tools.md` when available.
 
-## Chat Mode
+## Build Modes
 
-Use chat mode by default.
+At `decide`, L-01 picks one of:
 
-Chat mode fits tasks that can finish in the current session and do not need a durable task file. The agent reads onboarding, proposes the intended change, waits for approval, implements, updates onboarding if needed, and verifies.
+### Read-only exit
 
-Small external-memory edits in the current checkout can use `C-12-closeout` direct closeout after approval. Direct closeout commits code first, refreshes onboarding metadata to that code commit, commits memory, then updates the ledger.
+The job answers a question or assesses something and changes no code — no worktree, no task file, no
+closeout. Research and triage jobs usually exit here; they may recommend or spawn a build job.
 
-## Light Task
+### Chat build
 
-Use `W-02-light-task-workflow` when the work needs a durable task file but still fits a compact plan.
+A code change small enough to carry inline this session: worktree-backed, with no durable task file.
+After approval, small external-memory edits close through `C-12-closeout` direct closeout, which
+commits code first, refreshes onboarding metadata to that code commit, commits memory, then updates
+the ledger. (This is the path the retired chat workflow used to own.)
 
-Light tasks create:
+### Durable task (W-02)
+
+Use `W-02-light-task-workflow` when the work needs a durable task file but still fits a compact plan:
 
 ```text
 ar-coordination/tasks/<repo>/<task-slug>/task.md
 ```
 
-The task file holds requirements, implementation steps, proposed examples, decisions, open questions, and references. The checklist is the live execution state.
+The task file holds requirements, implementation steps, proposed examples, decisions, open questions,
+and references; the checklist is the live execution state. Use it for documentation restructures,
+medium refactors, multi-step cleanup, and work that might survive more than one session.
 
-Use light tasks for documentation restructures, medium refactors, multi-step cleanup, and work that might survive more than one session.
-
-## Heavy Task
-
-Use `W-01-heavy-task-workflow` only when the developer explicitly asks for it or when the task genuinely needs full phased review.
-
-Heavy workflow is for migrations, cross-repo contracts, and changes where a plausible edit can be seriously wrong. It uses research, synthesis, design, planning, implementation, closure, and adversarial review checkpoints.
+When the work outgrows a single-page plan — broad cross-repo or high-risk changes, or several distinct
+slices that each need their own checklist and commit — escalate to a **master + light sub-task series**
+(`master-template.md`): one wrapper folder with a master `task.md` plus flat, numbered sub-task files,
+one shared worktree, a commit per slice, and a single release at the end. This composition replaces the
+retired heavy workflow.
 
 ## Worktree-Backed Tasks
 
-C-09 can create task worktrees when parallel work, external-memory closeout, or explicit lifecycle tracking is needed. A worktree-backed task has a `contract.md` beside the task file. C-09 owns the worktree lifecycle, integration, and cleanup; `C-12-closeout` runs the closeout itself.
+Every build is worktree-backed (only read-only exits skip the worktree). C-09 creates the task
+worktree; a worktree-backed task has a `contract.md` beside the task file. C-09 owns the worktree
+lifecycle, integration, and cleanup; `C-12-closeout` runs the closeout itself. A master series runs in
+**one** shared worktree for the whole series.
 
-Closeout and commit approval are separate from implementation approval. The agent should present a dry-run preview before any C-12 closeout creates commits.
+Closeout and commit approval are separate from implementation approval. The agent presents a dry-run
+preview before any C-12 closeout creates commits. The git-landing flow (direct vs PR-gated) is
+deferred to the repo's `system/git-workflow.md` when present.
 
-## Choosing A Workflow
+## Choosing A Build Mode
 
-| Situation | Workflow |
+| Situation | Build mode |
 | --- | --- |
-| One-session work, low risk | Chat |
-| Needs a durable plan or checklist | Light task |
-| High-risk migration or cross-repo contract | Heavy task |
-| Parallel implementation or explicit closeout tracking | Light or heavy task plus C-09 worktrees |
+| Answer or assessment, no code change | Read-only exit |
+| One-session code change, low risk | Chat build (worktree, no task file) |
+| Needs a durable plan or checklist | W-02 light task |
+| Outgrows a single-page plan, or broad/high-risk | Master + light sub-task series |
+| Parallel implementation or explicit closeout tracking | Any build mode — all builds are worktree-backed via C-09 |
