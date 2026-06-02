@@ -57,7 +57,7 @@ By-path notes are the core and need nothing extra; meaning and relationship are 
 
 File-level onboarding remains path-derived and verifiable, but agents often need
 different retrieval strategies before they know which file-level memory to read.
-C-04 is the retrieval strategy router for that job.
+The `c-04-retrieval-strategy-router` skill is the retrieval strategy router for that job.
 
 The router starts from the model's current intent: what kind of missing context
 does the agent need next, and in what shape should that context arrive? It then
@@ -84,7 +84,7 @@ promotion remain the truth controls.
 
 ## Drift Detection
 
-Each file-level sidecar onboarding unit records verification metadata, including the source commit it was checked against. Before planning against onboarding, `C-02-memory-quality-control` compares the source file with that verification point.
+Each file-level sidecar onboarding unit records verification metadata, including the source commit it was checked against. Before planning against onboarding, `c-02-memory-quality-control` compares the source file with that verification point.
 
 Common outcomes:
 
@@ -103,7 +103,7 @@ Onboarding records approved current state. It does not record speculation.
 That means:
 
 - chat builds wait for developer approval before implementation
-- W-02 tasks wait for task approval before implementation
+- `w-02-light-task-workflow` tasks wait for task approval before implementation
 - a master + light sub-task series gates each slice's approval and commit in turn
 - onboarding updates happen after approved changes, not before
 

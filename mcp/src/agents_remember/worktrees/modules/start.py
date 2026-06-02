@@ -530,7 +530,7 @@ def _missing_memory_repo_state(args: WorktreeArgs) -> dict[str, object]:
         return disabled
     return {
         "state": "blocked",
-        "reason": "external memory repo is missing; run C-00-initialize-memory-repo before starting an external-memory worktree",
+        "reason": "external memory repo is missing; run c-00-initialize-memory-repo before starting an external-memory worktree",
         "choices": ["initialize-memory-repo", "disabled-memory", "custom"],
     }
 

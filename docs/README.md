@@ -4,10 +4,10 @@ Use this directory when the README is not enough. The root README explains the p
 
 ## Start Here
 
-- [Getting Started](getting-started.md) - the agent-driven setup path: wire the MCP with `uvx`, install the runtime and skills, then let `C-13-install-and-onboard` set up memory, onboarding, and providers.
+- [Getting Started](getting-started.md) - the agent-driven setup path: wire the MCP with `uvx`, install the runtime and skills, then let `c-13-install-and-onboard` set up memory, onboarding, and providers.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
-- [Workflows](workflows.md) - the L-01 lifecycle, its build modes, worktrees, and direct closeout.
+- [Workflows](workflows.md) - the `l-01-session-job-lifecycle` lifecycle, its build modes, worktrees, and direct closeout.
 - [Benchmark Methodology](benchmarks-methodology.md) - paired benchmark runs, metrics, validity checks, and limitations.
 - [FAQ](FAQ.md) - design principles, objections, and comparisons.
 
@@ -39,7 +39,7 @@ Use this directory when the README is not enough. The root README explains the p
 - [settings.json](reference/settings-json.md)
 - [Path Rules](reference/path-rules.md)
 - [Skills](reference/skills.md)
-- [C-08 Resolver](reference/resolver-c08.md)
-- [C-02 Memory Quality Control](reference/drift-c02.md)
-- [C-09 Worktrees And Closeout](reference/worktrees-c09.md)
+- [c-08-ar-coordination-context-resolver Resolver](reference/resolver-c08.md)
+- [c-02-memory-quality-control Memory Quality Control](reference/drift-c02.md)
+- [c-09-git-worktree-manager Worktrees And Closeout](reference/worktrees-c09.md)
 - [Release Checklist](release-checklist.md) - pre-release quality, version-sync, and smoke gate.

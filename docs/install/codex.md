@@ -20,7 +20,7 @@ Treat these rules as workspace instructions!
 
 Use an absolute path in the `@...` include when the coordination runtime is outside the workspace.
 
-Codex also supports a Claude-style `SessionStart` hook, and `C-13-install-and-onboard` installs one when you let it (more authoritative than the `AGENTS.md` import). If it installs a hook, restart Codex afterward — a newly-added session hook only takes effect on the **next** session.
+Codex also supports a Claude-style `SessionStart` hook, and `c-13-install-and-onboard` installs one when you let it (more authoritative than the `AGENTS.md` import). If it installs a hook, restart Codex afterward — a newly-added session hook only takes effect on the **next** session.
 
 ## Skills
 

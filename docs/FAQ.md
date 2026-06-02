@@ -15,7 +15,7 @@ The core rules are:
 3. implementation waits for developer approval
 4. onboarding records approved current state, not plans
 
-Read-only answers, chat builds, and durable W-02 tasks are different weights of the same discipline.
+Read-only answers, chat builds, and durable `w-02-light-task-workflow` tasks are different weights of the same discipline.
 
 ### How does an agent find the right memory?
 
@@ -49,7 +49,7 @@ When an onboarding unit grows too large, that is often a signal that the source 
 
 ### How does the agent know memory is not stale?
 
-File-level sidecar onboarding records verification metadata. `C-02-memory-quality-control` compares the source file against that verification point before the agent plans against onboarding.
+File-level sidecar onboarding records verification metadata. `c-02-memory-quality-control` compares the source file against that verification point before the agent plans against onboarding.
 
 Typical outcomes are `up to date`, `drifted`, `missing verification`, `missing`, `orphaned`, `disabled`, or `unsupported`.
 
@@ -57,7 +57,7 @@ Drifted onboarding can still be useful historical context, but the agent must tr
 
 ### What happens when a file moves?
 
-The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. C-05 owns file-level onboarding relocation, while structural route changes can route through C-03.
+The onboarding should move with the source path. If it does not, drift detection can classify the old onboarding as orphaned. The `c-05-create-or-update-onboarding-files` skill owns file-level onboarding relocation, while structural route changes can route through the `c-03-repo-bootstrap` skill.
 
 ### How does this handle cross-file or cross-repo coupling?
 
@@ -71,19 +71,19 @@ Repo-wide context belongs in `overview.md`. Larger repos can use route-local ove
 
 Often no. A chat build is the default for changes that fit in one session.
 
-Use a W-02 light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
+Use a `w-02-light-task-workflow` light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
 
 ### Is this overengineered?
 
 The memory layer is intentionally small: Markdown files, Git metadata, and deterministic paths. The workflow layer can be heavier, but it is optional and should match task risk.
 
-If a change fits in one session, use a chat build. If it needs a durable plan, use a W-02 light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
+If a change fits in one session, use a chat build. If it needs a durable plan, use a `w-02-light-task-workflow` light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
 
 ### What happens when the agent discovers something during implementation?
 
 The agent should route the discovery to the right artifact instead of quietly changing requirements or memory.
 
-Durable current-state findings can go through C-05. Requirement or architecture changes need explicit developer approval. C-01 findings capture keeps that routing visible.
+Durable current-state findings can go through the `c-05-create-or-update-onboarding-files` skill. Requirement or architecture changes need explicit developer approval. The `c-01-findings-capture` skill keeps that routing visible.
 
 ### Why keep task files separate from onboarding?
 
@@ -101,11 +101,11 @@ Most users should start with internal memory under `<repo>/ar-memory/`. External
 
 ### What is `memory.md`?
 
-`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. C-12 writes it during closeout and C-09 uses it during worktree integration, so code and memory do not drift apart silently.
+`memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The `c-12-closeout` skill writes it during closeout and the `c-09-git-worktree-manager` skill uses it during worktree integration, so code and memory do not drift apart silently.
 
 ### Can a workspace mix internal and external memory?
 
-Yes. C-08 resolves topology per target repository. A repo with `<repo>/ar-memory/` uses internal memory. A repo with only `ar-coordination/memory-repos/ar-<repo>/` uses external memory. One repository does not force the choice onto its siblings.
+Yes. The `c-08-ar-coordination-context-resolver` skill resolves topology per target repository. A repo with `<repo>/ar-memory/` uses internal memory. A repo with only `ar-coordination/memory-repos/ar-<repo>/` uses external memory. One repository does not force the choice onto its siblings.
 
 ## Comparisons
 

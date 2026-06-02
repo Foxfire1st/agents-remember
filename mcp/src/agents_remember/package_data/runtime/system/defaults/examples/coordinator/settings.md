@@ -38,7 +38,7 @@ ar-coordination/
 
 ## Memory Repo Routing
 
-Agents should still invoke C-08 for the target code repository. C-08 resolves
+Agents should still invoke the `c-08-ar-coordination-context-resolver` skill for the target code repository. The `c-08-ar-coordination-context-resolver` skill resolves
 the active memory root and returns the memory layer's settings, tools, sources,
 onboarding, and ledger paths.
 

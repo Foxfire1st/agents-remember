@@ -4,7 +4,7 @@ Use this guide when a protected official code branch gets delayed or batched
 merges, while richer onboarding has accumulated on another branch (a personal
 workbench, a feature branch, or a branch handled in a reconciliation pass).
 
-`C-11-memory-carryover-from-branch` is **not a Git merge**. It is a selective
+`c-11-memory-carryover-from-branch` is **not a Git merge**. It is a selective
 memory reconciliation: it proves which source-branch code changes have actually
 landed on the official branch, then carries only the *corresponding* onboarding
 into official memory and refreshes its verification metadata to the official code
@@ -66,9 +66,9 @@ another developer may have changed the same file independently.
 - Never copies source-branch ledger rows into official memory.
 - Refreshes carried onboarding metadata to the official commit.
 - Does not auto-carry `same-path-changed` evidence.
-- C-02 remains the branch-accuracy drift detector; carryover only imports memory
+- The `c-02-memory-quality-control` skill remains the branch-accuracy drift detector; carryover only imports memory
   whose code validity is proven or explicitly approved.
 
-Related: [Adopt Existing Memory](adopt-existing-memory.md) (C-10) creates the
-first ledgered baseline; carryover (C-11) keeps an existing official memory
+Related: [Adopt Existing Memory](adopt-existing-memory.md) (the `c-10-adopt-memory-baseline` skill) creates the
+first ledgered baseline; carryover (the `c-11-memory-carryover-from-branch` skill) keeps an existing official memory
 enriched as branch work lands.

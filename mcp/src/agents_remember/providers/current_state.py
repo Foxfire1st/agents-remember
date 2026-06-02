@@ -134,6 +134,10 @@ def grepai_current_state(provider: ProviderScope, result: dict[str, Any]) -> dic
     watcher = container_resource(result.get("watcher", {}))
     watcher_up = watcher.get("running") is True
     state = provider_state(result.get("ok"), [backend, embedder, watcher])
+    if state == "ready" and not grepai_workspace_present(result):
+        # Containers are up but the watcher has no searchable workspace, so every
+        # search fails. Readiness must reflect that instead of trusting liveness.
+        state = "degraded"
     return {
         "id": provider.provider_id,
         "state": state,
@@ -253,13 +257,27 @@ def aggregate_state(providers: dict[str, Any]) -> str:
     return "failed"
 
 
-def grepai_indexing_state(result: dict[str, Any], *, watcher_up: bool) -> str:
+def grepai_workspace_present(result: dict[str, Any]) -> bool:
+    """True only when the grepai watcher reports a real, searchable workspace.
+
+    `grepai workspace status` exits 0 even when it prints "No workspaces
+    configured", so the return code alone cannot prove a searchable workspace —
+    the stdout has to be inspected too.
+    """
     watcher = result.get("watcher")
     watcher = watcher if isinstance(watcher, dict) else {}
     workspace_status = watcher.get("workspaceStatus")
-    if isinstance(workspace_status, dict) and workspace_status.get("returncode") == 0:
-        return "unknown"
-    return "unknown" if watcher_up else "unavailable"
+    if not isinstance(workspace_status, dict) or workspace_status.get("returncode") != 0:
+        return False
+    return "No workspaces configured" not in str(workspace_status.get("stdout") or "")
+
+
+def grepai_indexing_state(result: dict[str, Any], *, watcher_up: bool) -> str:
+    if not watcher_up:
+        return "unavailable"
+    # Workspace present => indexing progress is genuinely unknown (the watcher
+    # status does not report it); absent => nothing is searchable.
+    return "unknown" if grepai_workspace_present(result) else "noWorkspace"
 
 
 def cgc_indexing_state(repos: dict[str, Any]) -> str:

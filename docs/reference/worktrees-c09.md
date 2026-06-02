@@ -1,13 +1,13 @@
-# C-09 Worktrees And Closeout
+# `c-09-git-worktree-manager` Worktrees And Closeout
 
-`C-09-git-worktree-manager` owns worktree lifecycle, integration, and cleanup.
-Closeout sequencing and the commit approval gate belong to `C-12-closeout`
-(see [Skills](skills.md)); C-09 only supplies the worktree contract path that
-C-12's closeout consumes.
+`c-09-git-worktree-manager` owns worktree lifecycle, integration, and cleanup.
+Closeout sequencing and the commit approval gate belong to `c-12-closeout`
+(see [Skills](skills.md)); the `c-09-git-worktree-manager` skill only supplies the worktree contract path that
+the `c-12-closeout` skill's closeout consumes.
 
-## When To Use C-09
+## When To Use `c-09-git-worktree-manager`
 
-Use C-09 when:
+Use the `c-09-git-worktree-manager` skill when:
 
 - a task needs isolated code and memory worktrees
 - external-memory closeout needs code and memory commits mapped in `memory.md`
@@ -16,7 +16,7 @@ Use C-09 when:
 
 ## Worktree-Backed Tasks
 
-C-09 creates a `contract.md` beside the task file:
+The `c-09-git-worktree-manager` skill creates a `contract.md` beside the task file:
 
 ```text
 ar-coordination/tasks/<repo>/<task-slug>/
@@ -28,29 +28,29 @@ The contract records worktree paths, review state, closeout commits, integration
 
 Provider authority has moved to MCP settings outside the coordinator root, and
 coordinator-local Python provider scripts are no longer installed runtime
-assets. Legacy C-09 provider preparation is therefore skipped unless a future
+assets. Legacy `c-09-git-worktree-manager` provider preparation is therefore skipped unless a future
 MCP worktree/provider operation handles the isolated provider runtime for the
 new code worktree.
 
 ## Closeout Order
 
-Closeout is run by `C-12-closeout`. For worktree-backed tasks, C-09
-hands C-12 the task `contract.md`; C-12 keeps code and memory aligned:
+Closeout is run by `c-12-closeout`. For worktree-backed tasks, the `c-09-git-worktree-manager` skill
+hands the `c-12-closeout` skill the task `contract.md`; the `c-12-closeout` skill keeps code and memory aligned:
 
 1. commit code
 2. refresh affected onboarding metadata to the code commit
 3. commit memory content
 4. update and commit `memory.md`
 
-C-12 records the closeout commits back into the contract, and C-09 owns the
+The `c-12-closeout` skill records the closeout commits back into the contract, and the `c-09-git-worktree-manager` skill owns the
 later integration and cleanup of those committed branches.
 
 ## Integration
 
-C-09 integration lands reviewed task work back onto source branches. It can use fast-forward integration when source ancestry has not moved, or replay when compatible parallel work landed first.
+The `c-09-git-worktree-manager` skill integration lands reviewed task work back onto source branches. It can use fast-forward integration when source ancestry has not moved, or replay when compatible parallel work landed first.
 
 ## Approval Gates
 
-Implementation approval is not commit approval. For worktree-backed tasks, the agent should run a dry-run closeout preview and ask for explicit commit approval before C-12 creates the closeout commits.
+Implementation approval is not commit approval. For worktree-backed tasks, the agent should run a dry-run closeout preview and ask for explicit commit approval before the `c-12-closeout` skill creates the closeout commits.
 
 Cleanup happens only after successful integration and explicit approval.

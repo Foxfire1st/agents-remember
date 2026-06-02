@@ -974,7 +974,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
             )
-            with self.assertRaisesRegex(RuntimeError, "Run C-05 create-or-update-onboarding-files"):
+            with self.assertRaisesRegex(RuntimeError, "Run the c-05-create-or-update-onboarding-files skill"):
                 worktree_manager.command_closeout(args)
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
@@ -1242,7 +1242,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 ledger_commit_message="Sync direct ledger",
                 dry_run=False,
             )
-            with self.assertRaisesRegex(RuntimeError, "Run C-05 create-or-update-onboarding-files"):
+            with self.assertRaisesRegex(RuntimeError, "Run the c-05-create-or-update-onboarding-files skill"):
                 worktree_manager.command_direct_closeout(args)
             self.assertEqual(git(code_repo, "rev-parse", "HEAD"), code_base)
             self.assertTrue(worktree_manager.worktree_dirty(code_repo))
@@ -1574,7 +1574,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 workspace / "ar-coordination" / "memory-repos" / "ar-repo-a",
             )
             self.assertIn(
-                "initialize memory with C-00-initialize-memory-repo", str(raised.exception)
+                "initialize memory with c-00-initialize-memory-repo", str(raised.exception)
             )
 
     def test_drift_report_paths_use_temp_root(self) -> None:
@@ -2014,7 +2014,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_repository_name="repo-a",
                 replace_existing=False,
                 approved=True,
-                approval_note="developer approved C-11 carryover",
+                approval_note="developer approved c-11-memory-carryover-from-branch carryover",
                 include_review_required=[],
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",
@@ -2069,7 +2069,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_repository_name="repo-a",
                 replace_existing=False,
                 approved=True,
-                approval_note="developer approved C-11 carryover",
+                approval_note="developer approved c-11-memory-carryover-from-branch carryover",
                 include_review_required=[],
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",
@@ -2118,7 +2118,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_repository_name="repo-a",
                 replace_existing=False,
                 approved=True,
-                approval_note="developer approved C-11 carryover",
+                approval_note="developer approved c-11-memory-carryover-from-branch carryover",
                 include_review_required=[],
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",
@@ -2167,7 +2167,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 code_repository_name="repo-a",
                 replace_existing=False,
                 approved=True,
-                approval_note="developer approved C-11 carryover",
+                approval_note="developer approved c-11-memory-carryover-from-branch carryover",
                 include_review_required=[],
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",

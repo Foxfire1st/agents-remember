@@ -1,10 +1,10 @@
-# C-02 Memory Quality Control
+# `c-02-memory-quality-control` Memory Quality Control
 
-`C-02-memory-quality-control` controls whether onboarding can be trusted before planning and whether refreshed memory is clean enough to commit during closeout.
+`c-02-memory-quality-control` controls whether onboarding can be trusted before planning and whether refreshed memory is clean enough to commit during closeout.
 
 ## What It Checks
 
-For file-level sidecar onboarding, C-02 reads verification metadata and compares the source file against the recorded commit through `HEAD`, including staged or unstaged local changes.
+For file-level sidecar onboarding, the `c-02-memory-quality-control` skill reads verification metadata and compares the source file against the recorded commit through `HEAD`, including staged or unstaged local changes.
 
 It writes temporary drift reports under the resolved coordination root:
 
@@ -30,4 +30,4 @@ Drifted onboarding can still have directional value. The report should qualify t
 
 ## Boundary
 
-C-02 detects and reports. It does not refresh onboarding. Use C-05 for file-level onboarding maintenance and C-03 when structural route or slice changes need bootstrap-style maintenance.
+The `c-02-memory-quality-control` skill detects and reports. It does not refresh onboarding. Use the `c-05-create-or-update-onboarding-files` skill for file-level onboarding maintenance and the `c-03-repo-bootstrap` skill when structural route or slice changes need bootstrap-style maintenance.

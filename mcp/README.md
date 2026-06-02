@@ -19,13 +19,13 @@ Setup is agent-driven. Ask your agent to:
    Claude Code, `.codex/mcp/…` for Codex — not loose in the workspace root (see
    [Settings file location](#settings-file-location) for why). **Then restart the
    harness** so it loads the server.
-2. **Install the scaffolding, then the skills** — run `runtime_install` first
+2. **Install the scaffolding, then the skills** — run the `runtime_install` MCP tool first
    (it scaffolds the coordinator and, when providers are enabled and Docker is
-   running, builds the provider images), then `skills_install` (copies skills into
+   running, builds the provider images), then the `skills_install` MCP tool (copies skills into
    the harness skill folder). **Restart the harness again** so it discovers the
    newly-installed skills. Order matters: scaffolding → skills → providers last
    (see [Install order](#install-order-and-first-operations)).
-3. **Onboard your project** — run the `C-13-install-and-onboard` skill: it
+3. **Onboard your project** — run the `c-13-install-and-onboard` skill: it
    pre-checks the setup, installs the start hook (or places the directive for
    harnesses without one), sets up the memory repo (it will ask: scaffold a new
    one or use an existing one), bootstraps onboarding, and **starts the providers
@@ -99,7 +99,7 @@ A minimal starter `agents-remember-settings.json` (your agent can fill this in):
 ```
 
 `coordinationRoot` is where the runtime and memory repos live (populated by
-`runtime_install`). `workspaceRoot` holds your code repos. List each repo you
+the `runtime_install` MCP tool). `workspaceRoot` holds your code repos. List each repo you
 want Agents Remember to manage under `repositories`. Omit or empty the
 `providers` block if you do not want the Docker-backed providers. Full field
 reference:
@@ -114,12 +114,12 @@ reference:
 ### Settings file location
 
 Place the settings file under your **harness registration folder** in an `mcp/`
-subdirectory. This is not cosmetic: `skills_install` infers where to install
+subdirectory. This is not cosmetic: the `skills_install` MCP tool infers where to install
 skills from the settings path — it uses the sibling `skills/` folder **only when
 the settings file's parent directory is named `mcp`**. Put the file elsewhere
-(e.g. loose in the workspace root) and `skills_install` has no target and fails.
+(e.g. loose in the workspace root) and the `skills_install` MCP tool has no target and fails.
 
-| Harness | Put settings at | `skills_install` then targets |
+| Harness | Put settings at | `skills_install` MCP tool then targets |
 | --- | --- | --- |
 | Claude Code | `.claude/mcp/agents-remember-settings.json` | `.claude/skills/` |
 | Codex | `.codex/mcp/agents-remember-settings.json` | `.codex/skills/` |
@@ -153,7 +153,7 @@ installed console command) and the absolute settings path:
 After installing or changing the MCP server registration, restart the harness so
 it reloads the server and discovers the tool list. Register the server under the
 harness folder described in [Settings file location](#settings-file-location) so
-`skills_install` can infer the skill target.
+the `skills_install` MCP tool can infer the skill target.
 
 ### Per-harness setup pages
 
@@ -171,7 +171,7 @@ page, don't guess:
 | Pi.dev | [docs/install/pi.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/pi.md) |
 | OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/openclaw.md) |
 
-**One flat folder per skill.** `skills_install` copies the packaged skills —
+**One flat folder per skill.** The `skills_install` MCP tool copies the packaged skills —
 already flat — into the skill root, so each lands at `<skill-root>/<name>/`
 (matching the skill's lowercase frontmatter `name`). There is no layout option.
 If your harness discovers skills somewhere other than `<harness-root>/skills/`,
@@ -192,21 +192,21 @@ skills_install(dry_run=false)      # copy skills into the harness skill folder
 context_packet(repo_id="<repo-id>", include_providers=true)
 ```
 
-Then run the installed `C-13-install-and-onboard` skill (Quickstart step 3): it
+Then run the installed `c-13-install-and-onboard` skill (Quickstart step 3): it
 sets up the memory repo, installs the start hook, bootstraps onboarding, and
 **starts the providers indexing** (`provider_watchers(action="start")`).
 
 Why this order:
 
-1. **Scaffolding first.** `runtime_install` creates the coordinator directory and
+1. **Scaffolding first.** The `runtime_install` MCP tool creates the coordinator directory and
    records a provider-runner integrity manifest. Provider operations check that
-   manifest, so `provider_watchers` run **before** `runtime_install` fails fast
+   manifest, so the `provider_watchers` MCP tool runs **before** the `runtime_install` MCP tool fails fast
    with `runnerIntegrityFailed`.
-2. **Skills second**, so `C-13` and the rest are available for the final step.
+2. **Skills second**, so the `c-13-install-and-onboard` skill and the rest are available for the final step.
    (Most harnesses only discover newly-installed skills after a restart.)
-   `skills_install` copies one flat folder per skill; there is no layout option.
+   The `skills_install` MCP tool copies one flat folder per skill; there is no layout option.
 3. **Providers last.** They are heavy (Docker, plus Ollama for grepai),
-   per-repo, and optional. Note the split: `runtime_install` *builds* provider
+   per-repo, and optional. Note the split: the `runtime_install` MCP tool *builds* provider
    images during step 2 (with `install_provider_deps=true`, the default), but
    indexing only *starts* in step 3 — so "providers last" means indexing, not
    image builds. Pass `install_provider_deps=false` to refresh scaffold/docs
@@ -264,8 +264,8 @@ Provider tools only work when the MCP settings enable the provider and the
 required Docker services are available. Full tool list:
 [MCP Tool Reference](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/mcp-tools.md).
 
-> **Benchmark execution is opt-in and runs untrusted code.** `codex_benchmark_prepare`
-> and `codex_benchmark_run` are refused unless the MCP settings set
+> **Benchmark execution is opt-in and runs untrusted code.** The `codex_benchmark_prepare`
+> and `codex_benchmark_run` MCP tools are refused unless the MCP settings set
 > `"benchmarksEnabled": true`. A real run (`dry_run=false`) clones third-party
 > repositories and executes the Codex CLI against them. `codex_sandbox` defaults to
 > Codex's own `default` sandbox; pass `"danger-full-access"` only for trusted local
