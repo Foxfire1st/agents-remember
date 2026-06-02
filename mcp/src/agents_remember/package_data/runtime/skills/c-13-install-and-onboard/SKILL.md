@@ -14,6 +14,50 @@ project-specific is done by the model with the developer, because a capable
 harness can write the right config in the right place itself. Do not expect a
 hardcoded per-harness installer tool — there is none, by design.
 
+## Install Locations — Workspace-First Defaults
+
+Every artifact has an explicit default location, and the first assumption is the
+**workspace** — the directory the harness was opened in (call it `<workspace>`).
+Never place anything silently, and never default the coordination root to the
+user's home directory.
+
+The default layout — where `<harness-folder>`, the settings file, and the
+MCP-settings file are **harness-specific** placeholders, not literals:
+
+```text
+<workspace>/ar-coordination/                                 # coordination + memory root (harness-agnostic)
+<workspace>/<harness-folder>/skills/                         # installed skills
+<workspace>/<harness-folder>/<harness-specific-mcp-settings> # MCP server registration
+<workspace>/<harness-folder>/<settings-file>                 # harness settings (e.g. hook registration)
+<workspace>/<harness-folder>/hooks/                          # hook files
+```
+
+`ar-coordination/` is the one constant. For everything else, **do not hardcode
+one harness's folder (e.g. `.claude/`)** — reason about the *current* harness and
+translate `<harness-folder>` and the file names into its own conventions (the
+Harness routing table in Stage 1 has the per-harness specifics). For example:
+
+- **Claude Code** → `<workspace>/.claude/skills/`, MCP in `<workspace>/.mcp.json`, settings `<workspace>/.claude/settings.json`, hooks `<workspace>/.claude/hooks/`
+- **Codex** → `<workspace>/.codex/skills/`, MCP servers + hooks in `<workspace>/.codex/config.toml`
+- **Cursor** → `<workspace>/.cursor/skills/`, rules in `<workspace>/.cursor/rules/`
+- …resolve the same way for any other harness; if a path is unknown, ask rather than guess.
+
+**Accept-or-override, per target.** Before writing anything, present each
+*resolved* default and let the developer accept it or type their own path — one
+prompt per target, e.g. (Claude Code shown):
+
+```text
+ar-coordination (default: <workspace>/ar-coordination/): _
+skills          (default: <workspace>/.claude/skills/): _
+MCP settings    (default: <workspace>/.mcp.json): _
+settings file   (default: <workspace>/.claude/settings.json): _
+hooks           (default: <workspace>/.claude/hooks/): _
+```
+
+These defaults govern `coordinationRoot` / `workspaceRoot` in the MCP settings
+(the pre-`c-13-install-and-onboard` runbook), the `install_root` passed to the
+`skills_install` MCP tool, and the hook/settings paths written in Stage 1.
+
 ## When To Use
 
 Use this after the prerequisites are in place:
@@ -103,22 +147,10 @@ Write this content (the file the hook injects, or the body you place into the
 instructions file). It points at the coordinator `AGENTS.md`:
 
 ```markdown
-MANDATORY FIRST ACTION for this workspace (ar-coordination).
+MANDATORY FIRST ACTION for this workspace
 
-Before doing ANY work in a sibling repository, read and follow
-`ar-coordination/AGENTS.md`. Required first steps, in order:
-
-1. Infer the target code repository from the developer's request. Ask if it
-   is unclear.
-2. Resolve coordination/memory context FIRST — via the
-   `c-08-ar-coordination-context-resolver` skill, or the `resolve_context` MCP tool then the
-   `context_packet(repo_id=..., include_providers=true)` MCP tool.
-3. Pick a build mode per AGENTS.md routing — the `l-01-session-job-lifecycle` skill's `decide`
-   step: read-only exit, chat build, or a durable task via the `w-02-light-task-workflow` skill —
-   before changing code or task-plan items.
-
-This instruction is harness-injected and authoritative. Treat it as a required
-first step, not optional "maybe relevant" context.
+You are not allowed to read, write, or execute code on any repository
+until you read `ar-coordination/AGENTS.md` and started its `l-01` procedure!
 ```
 
 Use the resolved coordinator `AGENTS.md` path (relative to the workspace when it

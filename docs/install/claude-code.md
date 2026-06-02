@@ -25,21 +25,10 @@ Install it first if needed (for example `apt install jq` or `brew install jq`).
 Create `.claude/hooks/coordinator-first-action.md` with the directive text:
 
 ```markdown
-MANDATORY FIRST ACTION for this workspace (ar-coordination).
+MANDATORY FIRST ACTION for this workspace
 
-Before doing ANY work in a sibling repository, read and follow
-`ar-coordination/AGENTS.md`. Required first steps, in order:
-
-1. Infer the target code repository from the developer's request. Ask if it
-   is unclear.
-2. Resolve coordination/memory context FIRST — via the `c-08-ar-coordination-context-resolver` skill, or the
-   agents-remember MCP tools `resolve_context` then
-   `context_packet(repo_id=..., include_providers=true)`.
-3. Pick a build mode per AGENTS.md routing — the `l-01-session-job-lifecycle` skill's `decide` step: read-only exit,
-   chat build, or a `w-02-light-task-workflow` light task — before changing code or task-plan items.
-
-This instruction is harness-injected and authoritative. Treat it as a required
-first step, not optional "maybe relevant" context.
+You are not allowed to read, write, or execute code on any repository
+until you read `ar-coordination/AGENTS.md` and started its `l-01` procedure!
 ```
 
 Register the hook in `.claude/settings.json`:

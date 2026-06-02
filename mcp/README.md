@@ -99,7 +99,11 @@ A minimal starter `agents-remember-settings.json` (your agent can fill this in):
 ```
 
 `coordinationRoot` is where the runtime and memory repos live (populated by
-the `runtime_install` MCP tool). `workspaceRoot` holds your code repos. List each repo you
+the `runtime_install` MCP tool); **default it to `<workspace>/ar-coordination/`** — inside the
+workspace, never the user's home directory. `workspaceRoot` is the workspace itself (it holds your
+code repos). The `c-13-install-and-onboard` skill treats the workspace as the first assumption for
+every install location and shows each resolved default for you to accept or override, so placement
+is never silent or guessed. List each repo you
 want Agents Remember to manage under `repositories`. Omit or empty the
 `providers` block if you do not want the Docker-backed providers. Full field
 reference:
@@ -113,8 +117,8 @@ reference:
 
 ### Settings file location
 
-Place the settings file under your **harness registration folder** in an `mcp/`
-subdirectory. This is not cosmetic: the `skills_install` MCP tool infers where to install
+Place the settings file under your **harness registration folder** (inside the
+workspace — `<workspace>/<harness-folder>/mcp/`) in an `mcp/` subdirectory. This is not cosmetic: the `skills_install` MCP tool infers where to install
 skills from the settings path — it uses the sibling `skills/` folder **only when
 the settings file's parent directory is named `mcp`**. Put the file elsewhere
 (e.g. loose in the workspace root) and the `skills_install` MCP tool has no target and fails.

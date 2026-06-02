@@ -119,7 +119,10 @@ agents-remember-md/
   docs/                             # user-facing documentation
 ```
 
-The installed runtime lives in `ar-coordination/`, not in the source checkout:
+The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
+inside the workspace (never your home directory) — not in the source checkout. The
+`c-13-install-and-onboard` skill shows this and every other install path as a workspace-first
+default you can accept or override:
 
 ```text
 ar-coordination/
