@@ -412,7 +412,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     ) -> dict[str, Any]:
         """Create or load a task contract plus code (and external-memory) git worktrees. Mutating:
         creates branches/worktrees on disk. Preview with dry_run=true. Driven by the C-09 worktree
-        workflow; workflow_kind is the task format ('light-task', 'heavy-task', or 'chat-task').
+        workflow; workflow_kind is the task format ('light-task' or 'chat-task').
         memory_mode is 'internal', 'external', or 'disabled'."""
         return worktree_start_payload(
             config,

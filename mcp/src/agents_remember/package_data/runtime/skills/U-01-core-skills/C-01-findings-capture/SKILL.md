@@ -13,7 +13,7 @@ Companion file:
 
 ## Operating Modes
 
-1. Inside a heavy-task-workflow task.
+1. Inside a task workflow (an L-01 build job or a W-02 task, including a master + light sub-task series).
 2. Standalone during direct clarification.
 
 ## Durable Destinations

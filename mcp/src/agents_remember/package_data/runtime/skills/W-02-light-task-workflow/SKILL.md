@@ -17,17 +17,17 @@ This skill is the thin orchestration contract for the in-between case: work that
 
 Use this workflow when:
 
-1. the task sits between chat-mode work and the full heavy-task lifecycle
-2. the work needs a plan, approval gate, and decision tracking, but the implementation plan can still fit on a single page as a rule of thumb
+1. the work needs a durable task file, an approval gate, and decision tracking
+2. the implementation plan can still fit on a single page as a rule of thumb
 3. the target may be non-code or a small isolated code change, provided the lighter single-page plan remains a good fit
 
-Treat the single-page-plan test as guidance rather than a hard routing rule. Use `W-01-heavy-task-workflow` when the task clearly needs richer phase artifacts, broader coordination, or the light-task plan starts to sprawl beyond that compact shape.
+Treat the single-page-plan test as guidance rather than a hard routing rule. When the work outgrows a single page — richer artifacts, broader coordination, or a sprawling plan — escalate to a master + light sub-task series (`master-template.md`) rather than forcing it into one light task.
 
 ## Task Artifact
 
 Light-task-workflow maintains one task wrapper folder under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-coordination-context-resolver` for the target repository. The task document is always named `task.md` inside that wrapper folder.
 
-Naming follows the same convention as heavy-task-workflow:
+Naming convention:
 
 1. ticket-linked: `YYMMDD_#<number>_<short-slug>/task.md`
 2. organic: `YYMMDD_<descriptive-slug>/task.md`

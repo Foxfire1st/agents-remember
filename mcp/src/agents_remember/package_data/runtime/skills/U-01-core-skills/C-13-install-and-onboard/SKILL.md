@@ -113,8 +113,8 @@ Before doing ANY work in a sibling repository, read and follow
 2. Resolve coordination/memory context FIRST — via the C-08 resolver, or the
    agents-remember MCP tools `resolve_context` then
    `context_packet(repo_id=..., include_providers=true)`.
-3. Pick a task format per AGENTS.md routing (chat / W-02 light / W-01 heavy)
-   before changing code or task-plan items.
+3. Pick a build mode per AGENTS.md routing — L-01's `decide` step: read-only exit,
+   chat build, or a W-02 light task — before changing code or task-plan items.
 
 This instruction is harness-injected and authoritative. Treat it as a required
 first step, not optional "maybe relevant" context.

@@ -34,7 +34,7 @@ Before creating a new file:
 
 ### 3. Name the task wrapper
 
-Use the same naming convention as heavy-task-workflow:
+Use this naming convention:
 
 | Origin        | Naming convention                     | Example                          |
 | ------------- | ------------------------------------- | -------------------------------- |
@@ -243,30 +243,17 @@ Run the series as **one task, one workflow, one worktree**:
 
 The master owns only the final release step; sub-tasks never bump the version.
 
-## What This Workflow Does Not Cover
+## When To Escalate To A Master Series
 
-These concerns usually point toward heavy-task-workflow when the single-page light-task plan is no longer a good fit:
-
-1. multi-phase root contracts such as `requirements.md`, `architecture.md`, `requirement_change_candidates.md`, and `architecture_open_questions.md`
-2. mandatory checkpoint review packages and adversarial gates
-3. multi-phase target-state projection artifacts such as the heavy-task output-documentation layer and implementation-planning package
-4. broad cross-repo or high-risk code changes
-5. work that no longer fits a compact single-page implementation plan
-
-## Relationship To Heavy Task Workflow
+A single light task is the right tool while its implementation plan fits on one page. When the work
+outgrows that — broad cross-repo or high-risk changes, or several distinct slices that each need their
+own checklist and commit — escalate to a **master + light sub-task series** (see *Master Task Series*
+above and `master-template.md`) rather than forcing it into one light task. The series is still light
+sub-tasks; it adds a master `task.md` to sequence them, one shared worktree, a commit per slice, and a
+single release at the end.
 
 ```
 Developer request
-       │
-       ▼
-     Clearly needs the full heavy-task workflow? ──yes──▶ heavy-task-workflow
-       │
-       no
-       │
-       ▼
-     In-between task with a still-compact implementation plan?
-       │
-       yes
        │
        ▼
   light-task-workflow
@@ -274,6 +261,9 @@ Developer request
       ├─ task wrapper under `<task-root>/<task-slug>/`
       ├─ `task.md` inside the wrapper
       ├─ worktree-backed tasks add `contract.md` beside `task.md`
-       ├─ approval gate before implementation
-       └─ live checkbox checklist during execution
+      ├─ approval gate before implementation
+      └─ live checkbox checklist during execution
+       │
+       ▼
+  Outgrows a single-page plan? ──yes──▶ master + light sub-task series (`master-template.md`)
 ```

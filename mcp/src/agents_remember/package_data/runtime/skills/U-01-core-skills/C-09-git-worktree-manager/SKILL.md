@@ -7,7 +7,7 @@ description: "Create, attach to, report on, integrate, and clean up Agents Remem
 
 Use this skill when a task should run through an explicit code/memory worktree wrapper.
 
-C-09 wraps the existing chat, light-task, heavy-task, or external workflow. It owns Git worktree state, task contracts, external-memory compatibility checks, integration, and cleanup. It does not replace the workflow that performs the actual implementation.
+C-09 wraps the existing chat, light-task, or external workflow. It owns Git worktree state, task contracts, external-memory compatibility checks, integration, and cleanup. It does not replace the workflow that performs the actual implementation.
 
 For closeout, use `C-12-closeout`. C-09 only supplies the worktree-specific
 contract path and integration/cleanup follow-up rules.
@@ -45,7 +45,7 @@ The intended order is:
 1. run the C-08 resolver for the target repository
 2. run C-02 memory quality control's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
-4. decide whether the work is chat-only, W-02 light task, heavy task, or external workflow
+4. decide whether the work is chat-only, a W-02 light task (or master + light sub-task series), or external workflow
 5. choose or review the task slug and workflow variables
 6. create the durable task wrapper when one is needed
 7. request MCP `worktree_start` only after the task identity is stable and external memory is clean
