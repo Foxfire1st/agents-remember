@@ -31,21 +31,11 @@ from agents_remember.providers.lifecycle.process_status import process_namespace
 from agents_remember.providers.lifecycle.state_files import read_json, write_json
 
 
-def grepai_root_artifacts(layout: GrepaiRuntimeLayout) -> list[str]:
-    return [
-        path.as_posix()
-        for root in layout.roots
-        for path in ((root.source_path or root.path) / ".grepai",)
-        if path.exists()
-    ]
-
-
 def grepai_roots_payload(layout: GrepaiRuntimeLayout) -> list[dict[str, Any]]:
     return [
         {
             "projectId": root.project_id,
             "path": root.path.as_posix(),
-            "sourcePath": root.source_path.as_posix() if root.source_path else None,
         }
         for root in layout.roots
     ]
@@ -61,14 +51,12 @@ def grepai_docker_status(
     backend_status = grepai_backend_status(args)
     embedder_status = grepai_embedder_backend_status(args)
     watcher_status = grepai_watcher_container_status(args)
-    root_artifacts = grepai_root_artifacts(layout)
     return {
         "provider": "grepai",
         "action": "status",
         "ok": bool(backend_status.get("ok"))
         and bool(embedder_status.get("ok"))
-        and bool(watcher_status.get("ok"))
-        and not root_artifacts,
+        and bool(watcher_status.get("ok")),
         "dryRun": args.dry_run,
         "mode": "docker",
         "settingsFile": settings_path.as_posix(),
@@ -76,7 +64,6 @@ def grepai_docker_status(
         "roots": grepai_roots_payload(layout),
         "runtimeRoot": layout.runtime_root.as_posix(),
         "workspaceConfigFile": layout.workspace_config_file.as_posix(),
-        "rootArtifacts": root_artifacts,
         "backend": backend_status,
         "embedder": embedder_status,
         "watcher": watcher_status,

@@ -52,7 +52,6 @@ from agents_remember.providers.context import (
     apply_cgc_viz_cli_route_patch,
     apply_cgc_viz_repo_query_patch,
     apply_cgc_viz_server_route_patch,
-    assert_no_grepai_root_provider_artifacts,
     assert_no_source_provider_artifacts,
     cgc_cgcignore_patch_applied,
     cgc_delete_patch_applied,
@@ -66,16 +65,14 @@ from agents_remember.providers.context import (
     cleanup_cgc_runtime_artifacts,
     ensure_cgc_runtime_layout,
     ensure_grepai_requirements_file,
+    ensure_grepai_root_gitignore,
     ensure_grepai_runtime_layout,
-    grepai_root_provider_artifacts,
     grepai_runtime_layout,
     grepai_runtime_layout_from_provider_settings,
     grepai_workspace_config_text,
     read_provider_pin,
-    remove_grepai_root_provider_artifacts,
     source_provider_artifacts,
     stable_provider_id,
-    sync_grepai_index_roots,
     to_container_path,
     write_grepai_workspace_config,
 )
@@ -466,28 +463,9 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertEqual(
                 [item.project_id for item in layout.roots], ["ar-my-app", "my-app-internal"]
             )
-            self.assertEqual(layout.roots[0].source_path, external_memory)
-            self.assertEqual(layout.roots[1].source_path, internal_memory)
-            self.assertEqual(
-                layout.roots[0].path,
-                root
-                / "ar-coordination"
-                / "providers"
-                / "runners"
-                / "grepai"
-                / "index-roots"
-                / "ar-my-app",
-            )
-            self.assertEqual(
-                layout.roots[1].path,
-                root
-                / "ar-coordination"
-                / "providers"
-                / "runners"
-                / "grepai"
-                / "index-roots"
-                / "my-app-internal",
-            )
+            # roots are indexed live, in place -- no mirror redirect
+            self.assertEqual(layout.roots[0].path, external_memory)
+            self.assertEqual(layout.roots[1].path, internal_memory)
             self.assertEqual(
                 layout.backend_data_root,
                 root / "ar-coordination" / "providers" / "data" / "grepai" / "postgres" / "data",
@@ -496,40 +474,45 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 layout.logs_root, root / "ar-coordination" / "logs" / "providers" / "grepai"
             )
 
-    def test_grepai_syncs_provider_owned_index_roots_from_memory_sources(self) -> None:
+    def test_grepai_root_gitignore_ignores_working_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "ar-coordination" / "memory-repos" / "ar-my-app"
-            source.mkdir(parents=True)
-            (source / "overview.md").write_text("# Overview\n", encoding="utf-8")
-            (source / ".grepai").mkdir()
-            (source / ".grepai" / "symbols.gob").write_text("generated", encoding="utf-8")
-            layout = grepai_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                roots=(
-                    GrepaiMemoryRoot(
-                        project_id="ar-my-app",
-                        path=root
-                        / "ar-coordination"
-                        / "providers"
-                        / "runners"
-                        / "grepai"
-                        / "index-roots"
-                        / "ar-my-app",
-                        source_path=source,
-                    ),
-                ),
+            root = Path(tmp) / "ar-coordination" / "memory-repos"
+            with_existing = root / "ar-with-gitignore"
+            without = root / "ar-without-gitignore"
+            with_existing.mkdir(parents=True)
+            without.mkdir(parents=True)
+            (with_existing / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
+            roots = (
+                GrepaiMemoryRoot(project_id="ar-with-gitignore", path=with_existing),
+                GrepaiMemoryRoot(project_id="ar-without-gitignore", path=without),
             )
 
-            ensure_grepai_runtime_layout(layout)
-            synced = sync_grepai_index_roots(layout)
+            updated = ensure_grepai_root_gitignore(roots)
 
-            self.assertEqual(synced[0]["projectId"], "ar-my-app")
+            # appends to an existing .gitignore, creates a fresh one otherwise
             self.assertEqual(
-                (layout.roots[0].path / "overview.md").read_text(encoding="utf-8"), "# Overview\n"
+                {entry["projectId"] for entry in updated},
+                {"ar-with-gitignore", "ar-without-gitignore"},
             )
-            self.assertFalse((layout.roots[0].path / ".grepai").exists())
-            self.assertTrue((source / ".grepai").exists())
+            self.assertEqual(
+                (with_existing / ".gitignore").read_text(encoding="utf-8"), "*.pyc\n.grepai/\n"
+            )
+            self.assertEqual((without / ".gitignore").read_text(encoding="utf-8"), ".grepai/\n")
+
+    def test_grepai_root_gitignore_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_root = Path(tmp) / "memory-repos" / "ar-my-app"
+            memory_root.mkdir(parents=True)
+            roots = (GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),)
+
+            first = ensure_grepai_root_gitignore(roots)
+            second = ensure_grepai_root_gitignore(roots)
+
+            self.assertEqual(first[0]["projectId"], "ar-my-app")
+            self.assertEqual(second, [])
+            self.assertEqual(
+                (memory_root / ".gitignore").read_text(encoding="utf-8"), ".grepai/\n"
+            )
 
     def test_grepai_workspace_config_is_provider_owned_and_names_projects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -566,38 +549,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 ),
                 text,
             )
-
-    def test_grepai_rejects_provider_artifacts_in_indexed_roots(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "memory"
-            root.mkdir()
-            self.assertEqual(grepai_root_provider_artifacts(root), [])
-
-            (root / ".grepai").mkdir()
-            self.assertEqual(
-                [path.name for path in grepai_root_provider_artifacts(root)], [".grepai"]
-            )
-            with self.assertRaises(ContextProviderError):
-                assert_no_grepai_root_provider_artifacts(
-                    (GrepaiMemoryRoot(project_id="memory", path=root),)
-                )
-
-    def test_grepai_removes_disposable_provider_artifacts_in_indexed_roots(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "memory"
-            root.mkdir()
-            artifact = root / ".grepai"
-            artifact.mkdir()
-            (artifact / "symbols.gob").write_text("generated\n", encoding="utf-8")
-            (root / "overview.md").write_text("# Overview\n", encoding="utf-8")
-
-            removals = remove_grepai_root_provider_artifacts(
-                (GrepaiMemoryRoot(project_id="memory", path=root),)
-            )
-
-            self.assertEqual(removals, [{"projectId": "memory", "path": artifact.as_posix()}])
-            self.assertFalse(artifact.exists())
-            self.assertTrue((root / "overview.md").exists())
 
     def test_detects_forbidden_source_provider_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

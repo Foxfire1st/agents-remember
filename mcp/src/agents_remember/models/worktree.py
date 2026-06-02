@@ -12,7 +12,7 @@ MemoryMode = Literal["internal", "external", "disabled"]
 HumanReviewStatus = Literal["pending-review", "approved"]
 LifecycleStatus = Literal["not-started", "completed"]
 IntegrationStatus = Literal["not-started", "completed", "blocked"]
-CleanupStatus = Literal["pending", "completed"]
+CleanupStatus = Literal["pending", "completed", "abandoned"]
 WorktreePhase = Literal[
     "cleanup-completed",
     "integration-blocked",
@@ -113,3 +113,7 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
 
 class WorktreeCleanupResponse(WorktreeCommandResponse):
     operation: Literal["worktree_cleanup"] = "worktree_cleanup"
+
+
+class WorktreeAbandonResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_abandon"] = "worktree_abandon"

@@ -524,10 +524,19 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertEqual(grepai["instance"]["id"], instance_id)
             self.assertEqual(grepai["instance"]["scope"], "worktree")
             self.assertEqual(grepai["allowMissingRoots"], True)
+            # The grepai logical `workspace` tracks the WORKSPACE identity (== the clone
+            # source), NOT the worktree instance, so the seeded clone is reused instead of
+            # re-embedded. Container/runtime names below still use the worktree instance_id.
+            workspace_instance_id = provider_instance_id(
+                "workspace",
+                coordination_root,
+                workspace_name=coordination_root.parent.name,
+            )
             self.assertEqual(
                 grepai["workspace"],
-                f"agents-remember-memory-{instance_id}",
+                f"agents-remember-memory-{workspace_instance_id}",
             )
+            self.assertNotEqual(grepai["workspace"], f"agents-remember-memory-{instance_id}")
             self.assertEqual(
                 grepai["runtimeRoot"],
                 (isolated_root / "providers" / "runners" / "grepai" / instance_id).as_posix(),

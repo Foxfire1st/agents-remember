@@ -215,13 +215,31 @@ def worktree_cleanup_tool(
     *,
     contract_path: str,
     dry_run: bool = False,
+    teardown_providers: bool = True,
 ) -> dict[str, Any]:
     args = git_worktree_manager.WorktreeArgs(
         contract_path=require_within_coordination(config, contract_path, "contract_path"),
         approved=not dry_run,
         dry_run=dry_run,
+        teardown_providers=teardown_providers,
     )
     return _worktree_result("worktree_cleanup", git_worktree_manager.cleanup_result(args))
+
+
+def worktree_abandon_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    dry_run: bool = False,
+    force: bool = False,
+) -> dict[str, Any]:
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        approved=not dry_run,
+        dry_run=dry_run,
+        force=force,
+    )
+    return _worktree_result("worktree_abandon", git_worktree_manager.abandon_result(args))
 
 
 def _worktree_namespace(

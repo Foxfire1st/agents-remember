@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -219,10 +220,13 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = _build_start_contract(context, args)
 
     if contract.contract_path.exists():
-        contract = load_contract(contract.contract_path)
-        return WorktreeCommandResult(
-            0, {"state": "attached-existing-contract", **status_payload(contract)}
-        )
+        existing = load_contract(contract.contract_path)
+        # An abandoned contract is a tombstone: its worktrees/branches were discarded,
+        # so start must recreate fresh rather than attach to a dead binding.
+        if existing.cleanup != "abandoned":
+            return WorktreeCommandResult(
+                0, {"state": "attached-existing-contract", **status_payload(existing)}
+            )
 
     code_state = ensure_worktree(
         repo,
@@ -471,12 +475,47 @@ def prepare_memory_for_start(
         contract.memory_source_branch,
         args.dry_run,
     )
+    mtime_sync = _sync_worktree_memory_mtimes(contract, args.dry_run)
     return {
         "state": "compatible",
         "worktree": memory_branch_state,
+        "mtimeSync": mtime_sync,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
     }
+
+
+def _sync_worktree_memory_mtimes(
+    contract: WorktreeContract, dry_run: bool
+) -> dict[str, object]:
+    """Mirror source memory-repo file mtimes onto the freshly checked-out worktree.
+
+    `git checkout` stamps every file with the current time. grepai's watcher skips
+    unchanged files by comparing ModTime against its index, so brand-new mtimes make
+    every file look modified and force a full re-embed — defeating the DB clone. Copying
+    each file's mtime from the source memory repo lets the watcher reuse the cloned index
+    (files genuinely newer than the index still re-embed, exactly as on the source).
+    """
+    if dry_run:
+        return {"state": "skipped", "reason": "dry-run"}
+    if contract.memory_repo_path is None or contract.memory_worktree is None:
+        return {"state": "skipped", "reason": "no external memory worktree"}
+    source = contract.memory_repo_path
+    target = contract.memory_worktree
+    synced = 0
+    missing = 0
+    for path in target.rglob("*"):
+        if ".git" in path.parts or not path.is_file():
+            continue
+        source_file = source / path.relative_to(target)
+        try:
+            stat = source_file.stat()
+        except OSError:
+            missing += 1
+            continue
+        os.utime(path, (stat.st_atime, stat.st_mtime))
+        synced += 1
+    return {"state": "synced", "filesSynced": synced, "filesMissingInSource": missing}
 
 
 def _disabled_memory_choice(args: WorktreeArgs) -> dict[str, object] | None:

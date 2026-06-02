@@ -43,9 +43,9 @@ The GrepAI lifecycle command reads `contextProviders.providers.grepai-memory`,
 expands its workspace roots into explicit projects, ensures the shared Docker
 network plus PostgreSQL/pgvector and Ollama containers are healthy, writes
 GrepAI workspace config under `providers/runners/grepai/home/.grepai/workspace.yaml`,
-mirrors indexed memory roots under `providers/runners/grepai/index-roots/` when
-`mirrorRoots` is enabled, and records runtime state under
-`providers/runners/grepai/state/`. GrepAI is Docker-only in managed mode:
+bind-mounts the live memory roots read-write into the watcher (indexing them in
+place; grepai's `.grepai/` working dir is git-ignored), and records runtime state
+under `providers/runners/grepai/state/`. GrepAI is Docker-only in managed mode:
 the runner container owns the GrepAI binary and managed mode must not install
 or invoke host binaries.
 

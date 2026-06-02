@@ -1,9 +1,8 @@
-"""Docker-owned GrepAI provider layout and mirror-root helpers."""
+"""Docker-owned GrepAI provider layout helpers."""
 
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,6 @@ def _resolve_optional_path(candidate: Path | None, default: Path) -> Path:
 class GrepaiMemoryRoot:
     project_id: str
     path: Path
-    source_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -273,17 +271,11 @@ def grepai_runtime_layout_from_provider_settings(
         )
     ).resolve()
     workspace_name = str(provider_settings.get("workspace", "agents-remember-memory"))
+    # The containerized watcher indexes the live memory roots directly (bind-mounted
+    # read-write into the container). grepai drops a `.grepai/` working dir into each
+    # indexed root; `ensure_grepai_root_gitignore` keeps that out of git so closeout
+    # never stages it.
     roots = grepai_roots_from_provider_settings(coordination_root, provider_settings)
-    mirror_roots = provider_settings.get("mirrorRoots", True) is not False
-    if mirror_roots:
-        roots = tuple(
-            GrepaiMemoryRoot(
-                project_id=root.project_id,
-                path=provider_runtime_root / "index-roots" / root.project_id,
-                source_path=root.path,
-            )
-            for root in roots
-        )
     return grepai_runtime_layout(
         coordination_root=coordination_root,
         workspace_name=workspace_name,
@@ -315,49 +307,31 @@ def ensure_grepai_runtime_layout(layout: GrepaiRuntimeLayout) -> None:
         layout.cache_root,
         layout.backend_data_root,
         layout.backend_state_file.parent,
-        layout.runtime_root / "index-roots",
     ]:
         path.mkdir(parents=True, exist_ok=True)
     if not layout.requirements_file.exists():
         layout.requirements_file.write_text(f"{GREPAI_PIN}\n", encoding="utf-8")
 
 
-def sync_grepai_index_roots(layout: GrepaiRuntimeLayout) -> list[dict[str, str]]:
-    """Refresh provider-owned GrepAI mirror roots from durable memory roots."""
+def ensure_grepai_root_gitignore(roots: tuple[GrepaiMemoryRoot, ...]) -> list[dict[str, str]]:
+    """Ensure each indexed root ignores grepai's `.grepai/` working dir.
 
-    synced: list[dict[str, str]] = []
-    runtime_root = layout.runtime_root.resolve()
-    for root in layout.roots:
-        synced_root = _sync_grepai_index_root(root, runtime_root)
-        if synced_root is not None:
-            synced.append(synced_root)
-    return synced
+    The watcher indexes the live memory roots, and grepai writes a `.grepai/` working
+    directory into each one. Without ignoring it, the memory closeout's `git add` would
+    stage that provider artifact. Idempotently append `.grepai/` to each root's
+    `.gitignore` so the watcher can do its job without dirtying the tracked tree.
+    """
 
-
-def _sync_grepai_index_root(root: GrepaiMemoryRoot, runtime_root: Path) -> dict[str, str] | None:
-    if root.source_path is None:
-        return None
-    source = root.source_path.resolve()
-    target = root.path.resolve()
-    _validate_grepai_sync_paths(source, target, runtime_root)
-    if target.exists():
-        shutil.rmtree(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        source,
-        target,
-        symlinks=True,
-        ignore=shutil.ignore_patterns(".git", ".grepai", "__pycache__"),
-    )
-    return {"projectId": root.project_id, "source": source.as_posix(), "path": target.as_posix()}
-
-
-def _validate_grepai_sync_paths(source: Path, target: Path, runtime_root: Path) -> None:
-    if not source.exists() or not source.is_dir():
-        raise ContextProviderError(
-            f"grepai source root does not exist or is not a directory: {source.as_posix()}"
-        )
-    if not target.is_relative_to(runtime_root):
-        raise ContextProviderError(
-            f"refusing to sync GrepAI mirror outside provider runtime root: {target.as_posix()}"
-        )
+    updated: list[dict[str, str]] = []
+    for root in roots:
+        gitignore = root.path / ".gitignore"
+        entry = ".grepai/"
+        existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+        if entry in {line.strip() for line in existing.splitlines()}:
+            continue
+        if not root.path.is_dir():
+            continue
+        prefix = existing if existing.endswith("\n") or not existing else existing + "\n"
+        gitignore.write_text(f"{prefix}{entry}\n", encoding="utf-8")
+        updated.append({"projectId": root.project_id, "path": gitignore.as_posix()})
+    return updated

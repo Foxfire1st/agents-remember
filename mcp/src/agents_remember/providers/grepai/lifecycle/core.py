@@ -22,12 +22,11 @@ from agents_remember.providers.context import (
     ContextProviderError,
     GrepaiMemoryRoot,
     GrepaiRuntimeLayout,
+    ensure_grepai_root_gitignore,
     expand_template,
     grepai_runtime_layout,
     grepai_runtime_layout_from_provider_settings,
-    remove_grepai_root_provider_artifacts,
     stable_provider_id,
-    sync_grepai_index_roots,
     write_grepai_workspace_config,
 )
 from agents_remember.providers.lifecycle.provider_settings import (
@@ -83,8 +82,7 @@ def prepare_grepai_workspace(
     project_paths: dict[str, str] | None = None,
     embedder_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    removals = remove_grepai_root_provider_artifacts(layout.roots, dry_run=dry_run)
-    synced = [] if dry_run else sync_grepai_index_roots(layout)
+    gitignored = [] if dry_run else ensure_grepai_root_gitignore(layout.roots)
     if not dry_run:
         write_grepai_workspace_config(
             layout,
@@ -93,8 +91,7 @@ def prepare_grepai_workspace(
             project_paths=project_paths,
         )
     return {
-        "removedRootArtifacts": removals,
-        "syncedRoots": synced,
+        "gitignoredRoots": gitignored,
         "workspaceConfigFile": layout.workspace_config_file.as_posix(),
     }
 
@@ -150,6 +147,7 @@ def grepai_runner_settings(
         "containerName": str(runner.get("containerName", GREPAI_RUNNER_CONTAINER_NAME)),
         "runtimeMount": str(runner.get("runtimeMount", "/grepai/runtime")),
         "logsMount": str(runner.get("logsMount", "/grepai/logs")),
+        "rootsMount": str(runner.get("rootsMount", "/grepai/roots")),
     }
 
 
@@ -233,7 +231,7 @@ def grepai_embedder_backend_settings(
             base_variables,
         )
     ).resolve()
-    return {
+    resolved: dict[str, Any] = {
         "provider": provider,
         "mode": str(backend_settings.get("mode", "docker")),
         "image": str(backend_settings.get("image", GREPAI_OLLAMA_IMAGE)),
@@ -248,33 +246,23 @@ def grepai_embedder_backend_settings(
         "model": str(embedder.get("model", "nomic-embed-text")),
         "dimensions": embedder.get("dimensions", 768),
     }
+    # Worktree embedders carry the workspace ollama container to seed the model from,
+    # avoiding a per-worktree network re-pull. Absent for the workspace embedder itself.
+    seed_from = backend_settings.get("seedFromContainer")
+    if isinstance(seed_from, str) and seed_from:
+        resolved["seedFromContainer"] = seed_from
+    return resolved
 
 
-def grepai_container_path(layout: GrepaiRuntimeLayout, path: Path, *, runner: dict[str, Any]) -> str:
-    resolved = path.resolve()
-    runtime_root = layout.runtime_root.resolve()
-    logs_root = layout.logs_root.resolve()
-    try:
-        relative = resolved.relative_to(runtime_root)
-        suffix = relative.as_posix()
-        return (
-            f"{runner['runtimeMount'].rstrip('/')}/{suffix}" if suffix else runner["runtimeMount"]
-        )
-    except ValueError:
-        pass
-    try:
-        relative = resolved.relative_to(logs_root)
-        suffix = relative.as_posix()
-        return f"{runner['logsMount'].rstrip('/')}/{suffix}" if suffix else runner["logsMount"]
-    except ValueError as error:
-        raise ContextProviderError(
-            f"containerized GrepAI requires provider-owned mirrored roots: {path.as_posix()}"
-        ) from error
+def grepai_root_container_path(project_id: str, runner: dict[str, Any]) -> str:
+    """Container path where a live memory root is bind-mounted inside the watcher."""
+
+    return f"{runner['rootsMount'].rstrip('/')}/{project_id}"
 
 
 def grepai_container_project_paths(layout: GrepaiRuntimeLayout, runner: dict[str, Any]) -> dict[str, str]:
     return {
-        root.project_id: grepai_container_path(layout, root.path, runner=runner)
+        root.project_id: grepai_root_container_path(root.project_id, runner)
         for root in layout.roots
     }
 

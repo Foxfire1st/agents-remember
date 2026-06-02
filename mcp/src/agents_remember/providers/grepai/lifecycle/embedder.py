@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -74,6 +75,19 @@ def docker_ensure_ollama_model(
     listed = docker_wait_for_ollama(embedder, cwd=cwd, timeout=timeout)
     if ollama_model_present(listed.get("stdout", ""), embedder["model"]):
         return {"ok": True, "model": embedder["model"], "alreadyPresent": True, "list": listed}
+    # Prefer copying the model from the workspace ollama (a local tar stream) over a fresh
+    # ~274MB network pull; only pull if no source is configured or the copy did not land.
+    seed = _seed_ollama_model_from_source(embedder, cwd=cwd, timeout=timeout)
+    if seed is not None and seed["ok"]:
+        relisted = docker_wait_for_ollama(embedder, cwd=cwd, timeout=timeout)
+        if ollama_model_present(relisted.get("stdout", ""), embedder["model"]):
+            return {
+                "ok": True,
+                "model": embedder["model"],
+                "alreadyPresent": False,
+                "seededFrom": seed["source"],
+                "list": relisted,
+            }
     pull = run_command(
         [docker_command(), "exec", embedder["containerName"], "ollama", "pull", embedder["model"]],
         cwd=cwd,
@@ -83,8 +97,38 @@ def docker_ensure_ollama_model(
         "ok": pull["returncode"] == 0,
         "model": embedder["model"],
         "alreadyPresent": False,
+        "seedAttempt": seed,
         "list": listed,
         "pull": pull,
+    }
+
+
+def _seed_ollama_model_from_source(
+    embedder: dict[str, Any], *, cwd: Path, timeout: int
+) -> dict[str, Any] | None:
+    """Copy the embedding model from the workspace ollama into this worktree ollama.
+
+    Streams the model store (blobs + manifests) container-to-container through a local tar
+    pipe, so each worktree reuses the workspace's already-downloaded model instead of
+    re-pulling it. Returns None when no source is configured (e.g. the workspace embedder
+    itself), and a failed result -- callers then fall back to ``ollama pull`` -- when the
+    source container is unavailable or has no model to copy.
+    """
+    source = embedder.get("seedFromContainer")
+    target = embedder["containerName"]
+    if not isinstance(source, str) or not source or source == target:
+        return None
+    docker = docker_command()
+    pipe = (
+        f"{shlex.quote(docker)} exec {shlex.quote(source)} tar -C /root/.ollama -cf - models | "
+        f"{shlex.quote(docker)} exec -i {shlex.quote(target)} tar -C /root/.ollama -xf -"
+    )
+    result = run_command(["sh", "-c", pipe], cwd=cwd, timeout=timeout)
+    return {
+        "ok": result["returncode"] == 0,
+        "source": source,
+        "target": target,
+        "command": result,
     }
 
 

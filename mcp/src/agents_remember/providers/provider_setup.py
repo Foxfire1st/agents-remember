@@ -197,9 +197,14 @@ def install_enabled_providers(
 def prepare_enabled_providers(
     args: argparse.Namespace, settings: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    # Copy/seed everything BEFORE any watcher starts. Starting the grepai watcher here
+    # (the old `refresh_enabled_provider` step) made `watchers start` re-run the index-root
+    # rmtree+copytree under a live watcher — a burst of "moving files" that floods the event
+    # channel and forces a full re-embed. The single watcher start in `_watcher_results`
+    # now runs after the DB clone, cgc seed, and the index-root copy, so the initial scan
+    # sees a stable filesystem (and, with mtime sync, reuses the cloned index).
     results = install_enabled_providers(args, settings)
     results.extend(grepai_setup.prepare_enabled_provider(args, settings))
-    results.extend(grepai_setup.refresh_enabled_provider(args, settings))
     results.extend(cgc_setup.prepare_enabled_provider(args, settings))
     results.extend(_watcher_results(args, settings))
     return results

@@ -44,6 +44,7 @@ from .providers import (
 from .worktree import (
     direct_closeout_apply_payload,
     direct_closeout_preview_payload,
+    worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
@@ -86,6 +87,7 @@ __all__ = [
     "runtime_install_payload",
     "server_info_payload",
     "skills_install_payload",
+    "worktree_abandon_payload",
     "worktree_attach_payload",
     "worktree_cleanup_payload",
     "worktree_closeout_apply_payload",

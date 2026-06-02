@@ -310,7 +310,6 @@ def grepai_docker_state(
             {
                 "projectId": root.project_id,
                 "path": root.path.as_posix(),
-                "sourcePath": root.source_path.as_posix() if root.source_path else None,
             }
             for root in layout.roots
         ],

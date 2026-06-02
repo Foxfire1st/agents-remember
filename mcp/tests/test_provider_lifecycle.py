@@ -364,7 +364,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         )
         self.assertEqual(
             result["workspaceState"]["projectPaths"],
-            {"memory-a": "/grepai/runtime/index-roots/memory-a"},
+            {"memory-a": "/grepai/roots/memory-a"},
         )
         self.assertEqual(
             result["workspaceState"]["embedder"]["endpoint"],
@@ -409,6 +409,12 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
         self.assertEqual(render.project_name, "agents-remember-grepai")
         self.assertNotIn("@", render.override_yaml)
+        # the live memory root is bind-mounted read-write into the watcher
+        for root in layout.roots:
+            self.assertIn(
+                f'"{root.path.as_posix()}:/grepai/roots/{root.project_id}"',
+                render.override_yaml,
+            )
         self.assertIn('image: "pgvector/pgvector:pg16"', render.override_yaml)
         self.assertIn('container_name: "ar-grepai-postgres"', render.override_yaml)
         self.assertIn('image: "ollama/ollama:latest"', render.override_yaml)
@@ -861,6 +867,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "process_namespace_warning": lifecycle_process_status.process_namespace_warning,
             "ensure_cgc_runtime_layout": cgc_query.ensure_cgc_runtime_layout,
             "cgc_status": cgc_query.cgc_status,
+            "cgc_backend_status": cgc_query.cgc_backend_status,
             "run_compose": cgc_query.run_compose,
         }
         lifecycle_process_status.process_namespace_warning = lambda: (
@@ -868,6 +875,8 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         )
         cgc_query.ensure_cgc_runtime_layout = lambda layout: None
         cgc_query.cgc_status = lambda args: {"ok": True}
+        # cgc run now gates on backend readiness (FalkorDB), not the watcher.
+        cgc_query.cgc_backend_status = lambda args: {"ok": True}
         cgc_query.run_compose = lambda render, command_args, **kwargs: {
             "stdout": "hit\n",
             "stderr": "",
@@ -905,6 +914,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             ]
             cgc_query.ensure_cgc_runtime_layout = originals["ensure_cgc_runtime_layout"]
             cgc_query.cgc_status = originals["cgc_status"]
+            cgc_query.cgc_backend_status = originals["cgc_backend_status"]
             cgc_query.run_compose = originals["run_compose"]
 
     def test_docker_wait_for_postgres_requires_database_query(self) -> None:

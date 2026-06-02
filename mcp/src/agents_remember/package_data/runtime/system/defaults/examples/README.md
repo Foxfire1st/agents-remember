@@ -26,9 +26,11 @@ that are true for only one code repository.
 The memory layer owns rules that are valid for its respective code repository:
 onboarding storage, path eligibility, cross-repo policy, domain sources,
 repo-specific tools, coding guidelines, and branch/workflow notes.
-The memory-repo examples also include a code quality report template that
-agents can use when summarizing implementation validation in task notes or
-final responses.
+When a repo lands changes through a gated branch, `git-workflow.md` captures that
+landing flow — the spear branch, commit/push gates, the PR + merge convention,
+and the release/tag flow. The memory-repo examples also include a code quality
+report template that agents can use when summarizing implementation validation in
+task notes or final responses.
 
 When coordinator-wide guidance and memory-layer guidance both apply, prefer the
 more specific memory-layer rule for work in that code repository.

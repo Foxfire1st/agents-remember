@@ -113,8 +113,10 @@ report no providers.
 - Do not put rules that are valid for only one code repository in coordinator
   files; put them in that repository's memory layer.
 - After C-08 resolves a `memory_root`, read that memory layer's `system/settings.md`
-  and `system/tools.md`; also read `system/sources.md` and
-  `system/coding-guidelines.md` when present.
+  and `system/tools.md`; also read `system/sources.md`,
+  `system/coding-guidelines.md`, and `system/git-workflow.md` when present.
+- Read `system/git-workflow.md` (when present) **before any commit, push, PR, or
+  release** — it owns the repo's gated-branch landing flow.
 - Before committing read the `C12-closeout` procedure!
 
 ### Memory Repo User Settings, Instructions, and Guidelines
@@ -124,7 +126,10 @@ report no providers.
 - `system/settings.md` for human and agent instructions.
 - `system/settings.json` for storage, path-rule, and cross-repo policy.
 - `system/tools.md` for repo-specific test, lint, typecheck, build,
-  smoke-check, branch workflow, and local command notes.
+  smoke-check, and local command notes.
+- `system/git-workflow.md` when present for the repo's gated-branch landing flow:
+  the spear branch, commit/push gates, the PR + merge convention, and the
+  release/tag flow.
 - `system/sources.md` for domain documentation and external references.
 - `system/coding-guidelines.md` when present for repo-specific coding rules.
 
@@ -140,10 +145,12 @@ Use `C-04-retrieval-strategy-router` to understand the full benefit of the strat
 
 ### Branch And Workflow Notes
 
-Repo-specific branching strategies belong in `system/tools.md` so agents can
-discover them before using worktree integration commands. If a workflow helper
-has generic integration behavior, prefer the repository-specific branch notes
-when they are more restrictive.
+Repo-specific branching and landing strategies belong in `system/git-workflow.md`
+when present (otherwise `system/tools.md`), so agents discover them **before
+committing, pushing, opening a PR, or using worktree integration commands**. Read
+`git-workflow.md` before landing changes on a gated branch (e.g. a PR-gated
+`main`). If a workflow helper has generic integration behavior, prefer the
+repository-specific landing notes when they are more restrictive.
 
 Coordinator-wide guidance may still apply as a default, but this memory layer is
 the more specific authority for its code repository.

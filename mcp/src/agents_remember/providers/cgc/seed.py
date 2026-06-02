@@ -48,12 +48,17 @@ class CgcSeedContext:
     source_head: str | None
 
 
-def cgc_extra_args(args: Any) -> list[str]:
-    path = (
+def _cgc_settings_path(args: Any) -> Any:
+    """The settings path cgc runs against (the isolated worktree settings for a worktree seed)."""
+    return (
         getattr(args, "cgc_from_settings", None)
         or getattr(args, "provider_from_settings", None)
         or getattr(args, "from_settings", None)
     )
+
+
+def cgc_extra_args(args: Any) -> list[str]:
+    path = _cgc_settings_path(args)
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
@@ -132,6 +137,31 @@ def _configured_cgc_runtime_root(
         provider.get("runtimeRoot", "<coordination_root>/providers/runners/codegraphcontext")
     )
     return Path(expand_template(raw_root, coordination_root)).resolve()
+
+
+def _seed_target_runtime_root(
+    args: Any, settings: dict[str, Any], repo_id: str
+) -> Path | dict[str, Any]:
+    """Runtime root the rewritten target bundle is written under.
+
+    In an isolated worktree seed the `bundle import` runs inside the worktree's cgc runner,
+    which only bind-mounts the cgc instance runtime root (host:host) and is handed the bundle
+    path verbatim (no host->container translation). The bundle must therefore live under that
+    instance root. The caller's `settings` resolve against the workspace coordination_root and
+    land the bundle under the workspace runner root, which the worktree runner cannot see -- the
+    import then fails with "Bundle file not found" and silently falls back to a full re-index.
+    Resolve instead from the isolated `--from-settings` the import itself uses, whose cgc
+    `runtimeRoot` is the worktree instance root, so `<runtimeRoot>/<repoId>` matches the mount.
+    """
+    if getattr(args, "cgc_isolated_runtime_root", None) is not None:
+        isolated_settings_path = _cgc_settings_path(args)
+        if isolated_settings_path is not None:
+            isolated_settings = load_settings(isolated_settings_path)
+            if isolated_settings is not None:
+                resolved = _seed_runtime_root(args.coordination_root, isolated_settings, repo_id)
+                if not isinstance(resolved, dict):
+                    return resolved
+    return _seed_runtime_root(args.coordination_root, settings, repo_id)
 
 
 def _expand_tokens(value: str, variables: dict[str, str]) -> str:
@@ -224,7 +254,7 @@ def _resolve_seed_context(args: Any, settings: dict[str, Any]) -> CgcSeedContext
         return target
     if isinstance(source, dict):
         return source
-    target_runtime = _seed_runtime_root(args.coordination_root, settings, target[0])
+    target_runtime = _seed_target_runtime_root(args, settings, target[0])
     if isinstance(target_runtime, dict):
         return target_runtime
     source_runtime = _seed_runtime_root(source_coordination_root, source_settings, source[0])
