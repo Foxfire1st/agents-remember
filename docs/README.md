@@ -42,3 +42,4 @@ Use this directory when the README is not enough. The root README explains the p
 - [C-08 Resolver](reference/resolver-c08.md)
 - [C-02 Memory Quality Control](reference/drift-c02.md)
 - [C-09 Worktrees And Closeout](reference/worktrees-c09.md)
+- [Release Checklist](release-checklist.md) - pre-release quality, version-sync, and smoke gate.
