@@ -226,6 +226,23 @@ If the session ends mid-task:
 2. continue from the first unchecked checkbox
 3. keep step text detailed enough that a fresh agent can recover context quickly
 
+## Master Task Series
+
+When the work outgrows a single-page plan, escalate to a **master + light sub-task series**. Create one
+wrapper folder with a master `task.md` (scaffold in `master-template.md`) plus flat, numbered sub-task
+files `NN_<name>.md` in execution order.
+
+Run the series as **one task, one workflow, one worktree**:
+
+1. open a single C-09 worktree for the whole series (never one per sub-task)
+2. implement each sub-task slice, then commit it via its own C-09 closeout behind an explicit commit
+   gate — multiple commits accumulate on the worktree branch as slices complete
+3. keep the worktree open across slices; the test suite + listed checks run green before each commit
+4. when every sub-task is committed, **integrate + clean up once** and let the master perform the
+   single version bump / release
+
+The master owns only the final release step; sub-tasks never bump the version.
+
 ## What This Workflow Does Not Cover
 
 These concerns usually point toward heavy-task-workflow when the single-page light-task plan is no longer a good fit:
