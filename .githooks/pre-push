@@ -5,12 +5,29 @@
 #
 # Enable once per clone:  git config core.hooksPath .githooks
 # Prerequisite:           pip install -e "mcp[dev]"
+#
+# Works from any branch and any git worktree. When the current checkout has no
+# local .venv (the common worktree case), fall back to the primary worktree's
+# .venv so the dev tools are available without a per-worktree install. The
+# wrapper puts the current checkout's source first on PYTHONPATH, so the gate
+# always measures *this* checkout's code regardless of which python runs it.
 
 root="$(git rev-parse --show-toplevel)" || exit 1
 cd "$root" || exit 1
 
+# Primary worktree root = parent of the shared (common) git dir. For a linked
+# worktree this resolves to the main clone; for the main clone it resolves to
+# itself.
+common_git="$(git rev-parse --git-common-dir 2>/dev/null)"
+main_root=""
+if [ -n "$common_git" ]; then
+  main_root="$(CDPATH= cd -- "$common_git/.." 2>/dev/null && pwd)"
+fi
+
 if [ -x ".venv/bin/python" ]; then
   py=".venv/bin/python"
+elif [ -n "$main_root" ] && [ -x "$main_root/.venv/bin/python" ]; then
+  py="$main_root/.venv/bin/python"
 else
   py="$(command -v python3 || command -v python)"
 fi

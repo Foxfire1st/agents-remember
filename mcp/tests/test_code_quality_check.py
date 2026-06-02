@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -81,7 +84,7 @@ class CodeQualityCheckTests(unittest.TestCase):
                     top=5,
                     fail_on_crap_threshold=False,
                 ),
-                runner=lambda name, command, cwd: check.StepResult(name, 0, command),
+                runner=lambda name, command, cwd, env: check.StepResult(name, 0, command),
                 printer=lambda message: None,
             )
 
@@ -123,6 +126,41 @@ class CodeQualityCheckTests(unittest.TestCase):
             self.assertEqual(report_only_code, 0)
             self.assertEqual(gated_code, 1)
 
+    def test_run_fixed_checks_threads_checkout_source_onto_pythonpath(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = write_sample_source(root)
+            seen_env: list[Mapping[str, str]] = []
+
+            def runner(
+                name: str, command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> check.StepResult:
+                seen_env.append(env)
+                return check.StepResult(name, 0, command)
+
+            with mock.patch.dict(os.environ, {"PYTHONPATH": "/pre-existing"}):
+                check.run_fixed_checks(
+                    check.CheckConfig(
+                        project_root=root,
+                        source_paths=[source],
+                        test_paths=[root / "tests"],
+                        coverage_json=root / "coverage.json",
+                        threshold=30.0,
+                        top=5,
+                        fail_on_crap_threshold=False,
+                    ),
+                    root / "coverage.json",
+                    runner=runner,
+                    printer=lambda message: None,
+                )
+
+            self.assertTrue(seen_env)
+            entries = seen_env[0]["PYTHONPATH"].split(os.pathsep)
+            # The checkout's own source import root comes first; a pre-existing
+            # PYTHONPATH is preserved at the end.
+            self.assertEqual(entries[0], str(source.resolve().parent))
+            self.assertEqual(entries[-1], "/pre-existing")
+
 
 def write_sample_source(root: Path) -> Path:
     source = root / "sample.py"
@@ -147,7 +185,7 @@ def fake_runner(
     *,
     failing_step: str | None = None,
 ) -> check.CommandRunner:
-    def run(name: str, command: list[str], cwd: Path) -> check.StepResult:
+    def run(name: str, command: list[str], cwd: Path, env: Mapping[str, str]) -> check.StepResult:
         commands.append(command)
         if name == "pytest":
             coverage_json.write_text(
