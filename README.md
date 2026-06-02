@@ -62,14 +62,14 @@ Ask your agent to:
 
 Those three restarts (load the server, discover the skills, activate the hook) are the only hands-on steps; between and after them, your agent continues on its own.
 
-After that, normal work starts in chat mode. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the L-01 session job lifecycle. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
-- [Workflows](docs/workflows.md) - chat, light task, heavy task, and when to use each.
+- [Workflows](docs/workflows.md) - the L-01 lifecycle and its build modes (read-only / chat build / W-02), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
@@ -112,7 +112,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `1.0.2` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `2.0.0` and actively developed. **2.0.0 is a major, breaking release** — the session job lifecycle reshape: every session now enters the `L-01` lifecycle, the chat (W-03) and heavy (W-01) workflows are retired in favor of the light task plus master + light sub-task series composition, the skill tree is flat, and some public contracts changed (removed skill IDs, the `skills_install` `layout` input, and heavy `workflow_kind` values). The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump like this one; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Stability
 

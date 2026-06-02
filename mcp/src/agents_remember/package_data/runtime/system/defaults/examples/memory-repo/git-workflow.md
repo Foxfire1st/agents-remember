@@ -43,7 +43,9 @@ Adapt to your repo; a gated-`main` repo typically does:
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →
    `gh pr merge --delete-branch`.**
 8. C-09 closeout + worktree/provider cleanup.
-9. C-11 carryover of parked memory to spear-memory; the ledger is mapped to the **merged** commit.
+9. C-11 carryover of parked memory to spear-memory, run against the merged spear. Carryover maps the
+   ledger to the actual spear HEAD, **including a PR merge commit** even when nothing else needs
+   carrying, so the next worktree bases off the merged spear without a manual reconciliation.
 
 ### Gates, in one line
 

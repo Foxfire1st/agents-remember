@@ -11,22 +11,23 @@ This skill is the thin orchestration contract for the in-between case: work that
 
 1. `workflow.md`
 2. `template.md`
+3. `master-template.md`
 
 ## When To Use
 
 Use this workflow when:
 
-1. the task sits between chat-mode work and the full heavy-task lifecycle
-2. the work needs a plan, approval gate, and decision tracking, but the implementation plan can still fit on a single page as a rule of thumb
+1. the work needs a durable task file, an approval gate, and decision tracking
+2. the implementation plan can still fit on a single page as a rule of thumb
 3. the target may be non-code or a small isolated code change, provided the lighter single-page plan remains a good fit
 
-Treat the single-page-plan test as guidance rather than a hard routing rule. Use `W-01-heavy-task-workflow` when the task clearly needs richer phase artifacts, broader coordination, or the light-task plan starts to sprawl beyond that compact shape.
+Treat the single-page-plan test as guidance rather than a hard routing rule. When the work outgrows a single page — richer artifacts, broader coordination, or a sprawling plan — escalate to a master + light sub-task series (`master-template.md`) rather than forcing it into one light task.
 
 ## Task Artifact
 
 Light-task-workflow maintains one task wrapper folder under `<task-root>/`, where `<task-root>` is returned by `C-08-ar-coordination-context-resolver` for the target repository. The task document is always named `task.md` inside that wrapper folder.
 
-Naming follows the same convention as heavy-task-workflow:
+Naming convention:
 
 1. ticket-linked: `YYMMDD_#<number>_<short-slug>/task.md`
 2. organic: `YYMMDD_<descriptive-slug>/task.md`
@@ -34,6 +35,18 @@ Naming follows the same convention as heavy-task-workflow:
 Create the wrapper folder at the same time the durable task artifact is created, before any C-09 worktree exists. Use `template.md` as the canonical scaffold. Implementation steps and substeps are tracked with checkboxes, and that checklist is the live execution state during implementation. When code changes are in scope, the task file also carries proposed code examples for each distinct change type so the developer can review the intended implementation shape before approval.
 
 Light-task artifacts use minute-precision timestamps in `YYYY-MM-DDTHH:MM` format wherever they record task-local dates or times.
+
+## Master-Task Composition (task series)
+
+When a task outgrows a single-page plan, escalate to a **master + light sub-task series**. One wrapper
+folder holds a master `task.md` plus flat, numbered sub-task files (`NN_<name>.md`) in execution order;
+`master-template.md` is the canonical scaffold.
+
+The series lifecycle follows **one task = one workflow = one worktree**: the whole series runs in a
+single C-09 worktree, each sub-task slice is committed via its own closeout (a commit, behind an
+explicit commit gate), the worktree stays open across slices, and the series **integrates + cleans up
+once, at the end**. The master owns the single version bump and any release packaging, after every
+sub-task commit exists. See `master-template.md` for the convention and scaffolds.
 
 ## Agent Responsibilities
 
@@ -75,6 +88,9 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 10. Durable current-state findings discovered during implementation are routed through `C-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
 11. Significant mid-implementation changes update the task file before edits continue.
 12. When the Task Collaboration Doctrine (`tasks/AGENTS.md`) warrants it, the settled design is recorded in the task file's `## Design` section and the implementation steps derive from it.
+13. A task that outgrows a single-page plan escalates to a master + light sub-task series
+    (`master-template.md`): one wrapper folder (master `task.md` + flat `NN_<name>.md` sub-tasks), one
+    shared worktree for the series, a commit per slice, and a single integrate + release at the end.
 
 ## Relationship To Other Instructions
 

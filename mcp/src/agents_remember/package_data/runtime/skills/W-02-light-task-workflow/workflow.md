@@ -34,7 +34,7 @@ Before creating a new file:
 
 ### 3. Name the task wrapper
 
-Use the same naming convention as heavy-task-workflow:
+Use this naming convention:
 
 | Origin        | Naming convention                     | Example                          |
 | ------------- | ------------------------------------- | -------------------------------- |
@@ -226,30 +226,34 @@ If the session ends mid-task:
 2. continue from the first unchecked checkbox
 3. keep step text detailed enough that a fresh agent can recover context quickly
 
-## What This Workflow Does Not Cover
+## Master Task Series
 
-These concerns usually point toward heavy-task-workflow when the single-page light-task plan is no longer a good fit:
+When the work outgrows a single-page plan, escalate to a **master + light sub-task series**. Create one
+wrapper folder with a master `task.md` (scaffold in `master-template.md`) plus flat, numbered sub-task
+files `NN_<name>.md` in execution order.
 
-1. multi-phase root contracts such as `requirements.md`, `architecture.md`, `requirement_change_candidates.md`, and `architecture_open_questions.md`
-2. mandatory checkpoint review packages and adversarial gates
-3. multi-phase target-state projection artifacts such as the heavy-task output-documentation layer and implementation-planning package
-4. broad cross-repo or high-risk code changes
-5. work that no longer fits a compact single-page implementation plan
+Run the series as **one task, one workflow, one worktree**:
 
-## Relationship To Heavy Task Workflow
+1. open a single C-09 worktree for the whole series (never one per sub-task)
+2. implement each sub-task slice, then commit it via its own C-09 closeout behind an explicit commit
+   gate — multiple commits accumulate on the worktree branch as slices complete
+3. keep the worktree open across slices; the test suite + listed checks run green before each commit
+4. when every sub-task is committed, **integrate + clean up once** and let the master perform the
+   single version bump / release
+
+The master owns only the final release step; sub-tasks never bump the version.
+
+## When To Escalate To A Master Series
+
+A single light task is the right tool while its implementation plan fits on one page. When the work
+outgrows that — broad cross-repo or high-risk changes, or several distinct slices that each need their
+own checklist and commit — escalate to a **master + light sub-task series** (see *Master Task Series*
+above and `master-template.md`) rather than forcing it into one light task. The series is still light
+sub-tasks; it adds a master `task.md` to sequence them, one shared worktree, a commit per slice, and a
+single release at the end.
 
 ```
 Developer request
-       │
-       ▼
-     Clearly needs the full heavy-task workflow? ──yes──▶ heavy-task-workflow
-       │
-       no
-       │
-       ▼
-     In-between task with a still-compact implementation plan?
-       │
-       yes
        │
        ▼
   light-task-workflow
@@ -257,6 +261,9 @@ Developer request
       ├─ task wrapper under `<task-root>/<task-slug>/`
       ├─ `task.md` inside the wrapper
       ├─ worktree-backed tasks add `contract.md` beside `task.md`
-       ├─ approval gate before implementation
-       └─ live checkbox checklist during execution
+      ├─ approval gate before implementation
+      └─ live checkbox checklist during execution
+       │
+       ▼
+  Outgrows a single-page plan? ──yes──▶ master + light sub-task series (`master-template.md`)
 ```

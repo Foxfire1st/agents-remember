@@ -29,12 +29,7 @@ If you prefer to point VS Code directly at the installed runtime, add the instal
 {
   "settings": {
     "chat.agentSkillsLocations": {
-      "ar-coordination/skills": true,
-      "ar-coordination/skills/U-01-core-skills": true,
-      "ar-coordination/skills/W-01-heavy-task-workflow": true,
-      "ar-coordination/skills/W-01-heavy-task-workflow/skills": true,
-      "ar-coordination/skills/W-02-light-task-workflow": true,
-      "ar-coordination/skills/W-03-chat-task-workflow": true
+      "ar-coordination/skills": true
     }
   }
 }

@@ -20,10 +20,9 @@ agents-remember-md/
             requirements/
             patches/
           skills/
-            U-01-core-skills/
-            W-01-heavy-task-workflow/
+            C-00-initialize-memory-repo/   # ... flat C-* core skills (C-00 .. C-13)
+            L-01-session-job-lifecycle/
             W-02-light-task-workflow/
-            W-03-chat-task-workflow/
           system/defaults/examples/
         benchmarks/
       providers/
@@ -123,18 +122,10 @@ Each generated benchmark case workspace has one shared code checkout area under 
 
 ## Skill Install Contract
 
-`skills_install` copies packaged skills into a harness skill root. It is MCP-owned and does not create symlinks.
-
-Default tree layout:
-
-```text
-<install-root>/agents-remember-md/
-```
-
-Flat layout:
+`skills_install` copies the packaged skills into a harness skill root. It is MCP-owned and does not create symlinks. The packaged skills are flat (one folder per skill), so each is copied directly:
 
 ```text
 <install-root>/<skill-name>/
 ```
 
-Use flat layout when a harness requires the folder containing `SKILL.md` to match the skill's lowercase frontmatter name.
+`<skill-name>` is the skill's lowercase frontmatter name. There is no layout option or namespace folder — the source is already flat, so the installer just copies the skills across.

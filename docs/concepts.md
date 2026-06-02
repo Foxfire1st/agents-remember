@@ -102,9 +102,9 @@ Onboarding records approved current state. It does not record speculation.
 
 That means:
 
-- chat work waits for developer approval before implementation
-- light tasks wait for task approval before implementation
-- heavy tasks promote durable findings only after their review gates
+- chat builds wait for developer approval before implementation
+- W-02 tasks wait for task approval before implementation
+- a master + light sub-task series gates each slice's approval and commit in turn
 - onboarding updates happen after approved changes, not before
 
 ## Route-Local Overviews

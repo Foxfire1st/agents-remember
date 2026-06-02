@@ -1,42 +1,29 @@
 # AGENTS.md
 
-## Frame Before You Choose a Format
+## Start Here — Enter the Job Lifecycle
 
-The moment a developer is thinking about building something, the collaboration
-doctrine in `tasks/AGENTS.md` already applies — in plain chat, before any task
-file exists and before a format is chosen below.
+Every session enters `L-01-session-job-lifecycle` — the canvas this coordinator
+routes into. L-01 owns the whole arc: orient → ground → frame → decide → build →
+close. Classify the job (bug / feature / triage / research) as a *lens* during
+framing — a hint, re-pickable, never a gate.
 
-Do not rush a developer statement into a plan. Use that doctrine to reframe the
-request, find the true scope, surface what could break, and expose hidden
-variables through back-and-forth. Pull the evidence it needs with
-`C-04-retrieval-strategy-router`.
+The only task-format decision is L-01's **build-mode** step, taken at `decide`:
 
-Continue until the developer agrees the design is defined well enough to write
-down. Only then choose a task format below.
+- **Read-only exit** — answers or assessments that change no code: no worktree, no
+  task file, no closeout.
+- **Chat build** — a code change carried inline this session: worktree-backed, no
+  durable task file.
+- **Durable task** — `W-02-light-task-workflow`: a `task.md` with checklist,
+  decision log, and proposed code examples; escalates to a master + light
+  sub-task series when the work outgrows a single-page plan.
 
-## Task Format Routing
-
-This workspace has exactly three task/work formats. Choose deliberately before creating or updating task artifacts.
-
-### 1. Chat Mode
-
-Use chat mode `w-03-chat-task-workflow` by default when the work is small enough to finish in the current session and does not need a durable task file.
-
-### 2. Light Task Workflow
-
-Use `W-02-light-task-workflow` whenever a task file is needed. This is the
-standard durable-task format for planning and implementation work in this
-workspace.
-
-### 3. Heavy Task Workflow
-
-Use `W-01-heavy-task-workflow` only when the developer explicitly asks for the
-heavy task workflow, a heavy task, or the full phased workflow.
+The task-collaboration doctrine in `tasks/AGENTS.md` applies inside L-01's
+`frame` phase, in plain chat, before any task file or format is chosen.
 
 ---
 
 **IMPORTANT:**
-Do not change code without following one of the above workflows!
+Do not change code without entering the lifecycle and clearing its `frame` plan gate.
 Do not change task plan items without approval.
 Do not randomly commit. Use the `C12-closeout` procedure instead!
 
@@ -51,19 +38,16 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- `tasks/AGENTS.md` — task collaboration doctrine (applied up front; see
-  *Frame Before You Choose a Format* above).
+- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in L-01's
+  `frame` phase; see *Start Here — Enter the Job Lifecycle* above).
 
 ### Onboarding Documentation
 
 Onboarding files are companion context for source files. Their main purpose is
 to be read alongside the code they describe, at the moment that code is
-inspected.
-
-Use `C-04-retrieval-strategy-router` before relying on onboarding, providers,
-or repository source. C-04 owns Semantics, Relationship, and Intent routing
-across optional providers, route indexes, onboarding, and bounded source
-confirmation.
+inspected. Route retrieval through `C-04-retrieval-strategy-router` (see
+*Memory Retrieval Strategies* below) before relying on onboarding, providers, or
+repository source.
 
 ### Developer Clarifications
 

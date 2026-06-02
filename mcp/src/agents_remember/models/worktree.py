@@ -7,7 +7,7 @@ from typing import Any, Literal
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
 
 WorktreeState = Literal["inactive", "active", "missingContract", "invalidContract"]
-WorkflowKind = Literal["chat", "light", "light-task", "heavy", "heavy-task"]
+WorkflowKind = Literal["chat", "light", "light-task"]
 MemoryMode = Literal["internal", "external", "disabled"]
 HumanReviewStatus = Literal["pending-review", "approved"]
 LifecycleStatus = Literal["not-started", "completed"]

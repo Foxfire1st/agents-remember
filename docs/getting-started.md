@@ -168,7 +168,7 @@ Providers are optional — memory, onboarding, drift, and task workflows all wor
 
 ## Start Working
 
-Normal tasks start in chat mode. The agent should:
+Normal tasks run through the L-01 session job lifecycle (orient → ground → frame → decide → build → close). The agent should:
 
 1. resolve the repository context with `C-08-ar-coordination-context-resolver`
 2. run `C-02-memory-quality-control` before planning against onboarding
@@ -177,4 +177,4 @@ Normal tasks start in chat mode. The agent should:
 5. implement approved work
 6. update onboarding through `C-05-create-or-update-onboarding-files`
 
-Escalate to [light or heavy workflows](workflows.md) when the task needs a durable plan or stronger review gates.
+Escalate to a [durable W-02 task or master series](workflows.md) when the work needs a durable plan that survives the session.

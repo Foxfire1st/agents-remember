@@ -446,14 +446,17 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "skills_install")
             self.assertFalse(payload["dryRun"])
-            self.assertEqual(payload["layout"], "tree")
             self.assertEqual(
                 payload["installRoot"],
                 (root / ".codex" / "skills").as_posix(),
             )
             self.assertTrue(payload["installed"])
+            # Skills install flat: one folder per skill, named by its frontmatter name.
+            self.assertTrue(
+                (root / ".codex" / "skills" / "c-09-git-worktree-manager" / "SKILL.md").exists()
+            )
 
-    def test_skills_install_payload_replaces_legacy_symlink_tree(self) -> None:
+    def test_skills_install_payload_replaces_existing_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             path = root / ".codex" / "mcp" / "settings.json"
@@ -463,7 +466,7 @@ class McpToolTests(unittest.TestCase):
             install_root.mkdir(parents=True)
             old_target = root / "old-symlink-target"
             old_target.mkdir()
-            destination = install_root / "agents-remember-md"
+            destination = install_root / "c-09-git-worktree-manager"
             try:
                 os.symlink(old_target, destination, target_is_directory=True)
             except OSError as error:
@@ -482,11 +485,7 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(destination.is_dir())
             self.assertFalse(destination.is_symlink() or os.path.islink(destination))
             self.assertTrue(old_target.exists())
-            self.assertTrue(
-                (
-                    destination / "U-01-core-skills" / "C-00-initialize-memory-repo" / "SKILL.md"
-                ).exists()
-            )
+            self.assertTrue((destination / "SKILL.md").exists())
 
     def test_skills_install_payload_requires_configured_harness_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

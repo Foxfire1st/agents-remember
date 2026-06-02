@@ -12,13 +12,12 @@ The source copies live under:
 agents-remember-md/mcp/src/agents_remember/package_data/runtime/skills/
 ```
 
-## Workflow Skills
+## Lifecycle And Workflow Skills
 
 | Skill | Purpose |
 | --- | --- |
-| `W-03-chat-task-workflow` | Default current-session workflow. |
-| `W-02-light-task-workflow` | Durable one-page task plan with approval gate and live checklist. |
-| `W-01-heavy-task-workflow` | Full phased workflow for high-risk or explicitly heavy tasks. |
+| `L-01-session-job-lifecycle` | The session job lifecycle the coordinator routes every session into (orient → ground → frame → decide → build → close); owns the read-only exit and the build-mode decision. |
+| `W-02-light-task-workflow` | Durable one-page task plan with approval gate and live checklist; escalates to a master + light sub-task series for larger work. |
 
 ## Core Skills
 
@@ -37,16 +36,6 @@ agents-remember-md/mcp/src/agents_remember/package_data/runtime/skills/
 | `C-12-closeout` | Own the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks. |
 | `C-13-install-and-onboard` | Lead first-run setup: preflight checks, start hook (or instruction placement), memory repo, onboarding bootstrap, and provider indexing. |
 
-## Heavy Workflow Phase Skills
-
-The heavy workflow owns phase-local skills under:
-
-```text
-W-01-heavy-task-workflow/skills/
-```
-
-Those skills handle research, synthesis, design, planning, implementation, and adversarial checkpoint review. They should be used only through the heavy workflow unless a developer explicitly asks for that phase behavior.
-
 ## Installing Skills Into Harnesses
 
 Use:
@@ -60,6 +49,7 @@ The install target is normally inferred from the MCP settings location:
 `<registration-root>/skills/`. Use `harnessSkillRoot` only for non-standard
 harness layouts.
 
-Use `layout="flat"` when the harness requires direct `<skill-name>/SKILL.md` folders.
+The packaged skills are flat (one folder per skill), so each installs as
+`<registration-root>/skills/<skill-name>/` named by its lowercase frontmatter name.
 
 Do not copy individual skill folders by hand. The MCP tool copies the packaged skill tree consistently, including sibling files and shared helper modules.
