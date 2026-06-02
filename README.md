@@ -33,6 +33,13 @@ The memory layer rests on a small, strict discipline:
 
 The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`.
 
+## Live Demo: This Repo Uses Agents Remember
+
+Agents Remember runs on itself. The companion memory repo is:
+https://github.com/Foxfire1st/ar-agents-remember-md
+
+That repo contains the live onboarding layer, so you can inspect how by-path memory, drift-aware updates, and contribution-time onboarding look in practice.
+
 ## Requirements
 
 Before the Quickstart, make sure the host has:
