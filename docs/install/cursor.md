@@ -34,8 +34,8 @@ runtime_install()
 
 Cursor loads skills from `.agents/skills`, `.cursor/skills`, `~/.agents/skills`, and `~/.cursor/skills`; it also supports Claude and Codex compatibility folders. Place the MCP settings under the matching registration folder, such as `.cursor/mcp/` or `.agents/mcp/`, and the skill target is inferred as the sibling `skills/` folder.
 
-Use the flat layout so each visible folder matches the lowercase skill `name`:
+`skills_install` installs one folder per skill, each matching the lowercase skill `name`:
 
 ```text
-skills_install(layout="flat")
+skills_install()
 ```

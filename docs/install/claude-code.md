@@ -108,11 +108,11 @@ folder. Then expose packaged skills:
 
 Claude Code is a **direct** skill-folder scanner: it discovers a skill only when
 `SKILL.md` sits one level under the skill root, in a folder whose name matches the
-skill's lowercase `name`. Use the **flat** layout so each skill lands at
-`.claude/skills/<name>/SKILL.md`:
+skill's lowercase `name`. `skills_install` installs exactly that — one flat folder
+per skill, at `.claude/skills/<name>/SKILL.md`:
 
 ```text
-skills_install(layout="flat")
+skills_install()
 ```
 
 This produces, for example:

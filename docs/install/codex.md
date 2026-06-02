@@ -32,16 +32,16 @@ runtime_install()
 
 Place the MCP settings under the Codex registration folder, such as
 `.codex/mcp/`. The skill target is inferred as the sibling `.codex/skills/`
-folder. Then expose the packaged skill tree:
+folder. Then install the packaged skills:
 
 ```text
 skills_install()
 ```
 
-The default tree layout copies:
+This copies one flat folder per skill into `.codex/skills/`:
 
 ```text
-<install-root>/agents-remember-md/
+<install-root>/<skill-name>/
 ```
 
-That keeps the harness pointed at an MCP-installed skill package instead of ad hoc copied source folders.
+That keeps the harness pointed at MCP-installed skills instead of ad hoc copied source folders.
