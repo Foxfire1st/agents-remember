@@ -112,7 +112,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `1.0.2` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `2.0.0` and actively developed. **2.0.0 is a major, breaking release** — the session job lifecycle reshape: every session now enters the `L-01` lifecycle, the chat (W-03) and heavy (W-01) workflows are retired in favor of the light task plus master + light sub-task series composition, the skill tree is flat, and some public contracts changed (removed skill IDs, the `skills_install` `layout` input, and heavy `workflow_kind` values). The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump like this one; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Stability
 
