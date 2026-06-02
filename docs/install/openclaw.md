@@ -37,10 +37,10 @@ OpenClaw commonly uses global skills under `~/.openclaw/skills/` and workspace s
 Agents Remember skills should be installed through the MCP `skills_install`
 tool. Place the MCP settings under a registration folder with a sibling
 `skills/` directory, or set `harnessSkillRoot` for OpenClaw layouts that do not
-use that convention. Use the default nested/tree install layout. Do not use flat layout unless
-OpenClaw requires direct `<skill-name>/SKILL.md` folders.
+use that convention. `skills_install` copies one flat folder per skill
+(`<skill-root>/<name>/SKILL.md`); there is no layout option.
 
-Install skills with the default nested layout:
+Install skills:
 
 ```text
 skills_install()

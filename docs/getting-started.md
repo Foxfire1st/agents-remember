@@ -97,17 +97,13 @@ Some agent tools read skills from a folder in the workspace; others require skil
 skills_install()
 ```
 
-The install target is normally inferred from the MCP settings location: settings under `<registration-root>/mcp/<settings>.json` install into `<registration-root>/skills/`. For recursive skill scanners such as Codex and Claude Code, this creates one copied namespace tree:
+The install target is normally inferred from the MCP settings location: settings under `<registration-root>/mcp/<settings>.json` install into `<registration-root>/skills/`. The packaged skills are already flat, so `skills_install()` copies one folder per skill — each named for the skill's lowercase frontmatter `name`:
 
 ```text
-.codex/skills/agents-remember-md/
+.codex/skills/<skill-name>/
 ```
 
-For harnesses that require the folder containing `SKILL.md` to match the skill's lowercase `name` (direct skill-folder scanners), use the flat layout:
-
-```text
-skills_install(layout="flat")
-```
+There is no layout option. If your harness discovers skills somewhere other than `<registration-root>/skills/`, set `harnessSkillRoot` explicitly in the MCP settings.
 
 See the harness-specific pages under [install](install/README.md) for exact locations, and the [Skills reference](reference/skills.md) for the full skill list.
 

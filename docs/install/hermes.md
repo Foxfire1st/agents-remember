@@ -34,11 +34,11 @@ runtime_install()
 
 Hermes local skills commonly live under `~/.hermes/skills/`. Place the MCP
 settings under `~/.hermes/mcp/` to infer `~/.hermes/skills/`, or set
-`harnessSkillRoot` to a category folder when you want one. Then use flat layout
-so each visible skill folder matches the skill name:
+`harnessSkillRoot` to a category folder when you want one. `skills_install`
+installs one flat folder per skill, each matching the skill name:
 
 ```text
-skills_install(layout="flat")
+skills_install()
 ```
 
 You can also use `harnessSkillRoot` for a shared skills directory and add it to
