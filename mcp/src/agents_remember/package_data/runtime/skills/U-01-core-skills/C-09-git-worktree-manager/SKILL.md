@@ -62,6 +62,12 @@ When external memory is enabled, C-09 validates the memory repo and `memory.md` 
 2. `disabled-memory`
 3. `custom`
 
+The common trigger is starting a worktree off a **freshly-merged gated branch**: the PR merge commit
+lands on top of the verified tip with a new SHA the ledger has not mapped. Running
+`C-11-memory-carryover-from-branch` against the merged spear *after* the PR merges maps that merge
+commit automatically — even when nothing else needs carrying — so the next worktree starts cleanly
+without needing `reconciliation`.
+
 `worktree_attach` and `worktree_status` read the existing contract and report recoverable state without mutating Git. `worktree_status` includes a lifecycle phase, dirty worktree flags, a summary, and typed next hints such as `nextOperation`, `nextTool`, and `nextArgs`.
 
 ## Worktree Closeout

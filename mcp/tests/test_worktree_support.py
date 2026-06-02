@@ -25,7 +25,9 @@ from agents_remember.kernel import filesystem
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
+    find_mapping,
     ledger_to_text,
+    load_ledger,
     parse_ledger_text,
     prepend_mapping,
     write_ledger,
@@ -2078,6 +2080,58 @@ class WorktreeSupportTests(unittest.TestCase):
             payload: dict[str, Any] = memory_carryover.apply_carryover(args)
             self.assertEqual(payload["state"], "nothing-to-carryover")
             self.assertFalse((official_memory / "onboarding" / "feature.py.md").exists())
+
+    def test_memory_carryover_maps_unmapped_official_head_when_nothing_to_carry(self) -> None:
+        # Regression for the PR-merge-commit ledger gap: when nothing is actionable
+        # to carry but the official code HEAD is not in the ledger (e.g. a merge
+        # commit landed on top of the verified tip), carryover maps it to the
+        # current memory content so the next worktree can base off the merged branch
+        # without a manual reconciliation.
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            old_base = init_repo(code_repo, "main")
+            # A source branch with no commits of its own: nothing to carry.
+            git(code_repo, "checkout", "-b", "workbench/reado/v1")
+            git(code_repo, "checkout", "main")
+            # main advances to a new HEAD (stands in for a PR merge commit on top).
+            official_head = commit_file(
+                code_repo, "feature.py", "value = 'merged'\n", "Merge PR #1 into main"
+            )
+            self.assertNotEqual(official_head, old_base)
+
+            official_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
+            source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
+            (source_memory / "onboarding").mkdir(parents=True, exist_ok=True)
+
+            ledger_before = load_ledger(official_memory / "memory.md")
+            self.assertIsNone(find_mapping(ledger_before, official_head))
+
+            args = Namespace(
+                code_repository_root=code_repo,
+                official_code_ref="main",
+                source_code_ref="workbench/reado/v1",
+                old_base=old_base,
+                official_memory=official_memory,
+                source_memory=source_memory,
+                code_repository_name="repo-a",
+                replace_existing=False,
+                approved=True,
+                approval_note="developer approved C-11 carryover",
+                include_review_required=[],
+                memory_commit_message="Carry over landed memory",
+                ledger_commit_message="Record carryover ledger",
+            )
+            payload: dict[str, Any] = memory_carryover.apply_carryover(args)
+            self.assertEqual(payload["state"], "ledger-mapped-head")
+
+            ledger_after = load_ledger(official_memory / "memory.md")
+            self.assertEqual(ledger_after.rows[0].code_commit, official_head)
+            self.assertEqual(
+                ledger_after.rows[0].memory_commit, ledger_before.last_memory_content_commit
+            )
+            self.assertEqual(ledger_after.last_verified_code_commit, official_head)
 
     def test_memory_carryover_requires_review_when_only_earlier_path_commit_landed(self) -> None:
         # Regression: a single landed path-commit must NOT count as exact-landed

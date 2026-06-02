@@ -15,6 +15,8 @@ from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
+    MemoryLedger,
+    find_mapping,
     load_ledger,
     prepend_mapping,
     write_ledger,
@@ -332,6 +334,48 @@ def selected_candidates(
     return selected
 
 
+def _nothing_to_carry_result(
+    *,
+    plan: dict[str, object],
+    cleaned_note: str,
+    carried: list[dict[str, object]],
+    ledger: MemoryLedger,
+    ledger_path: Path,
+    official_memory: Path,
+    official_head: str,
+    ledger_commit_message: str,
+) -> dict[str, object]:
+    """Result when no onboarding was carried over.
+
+    When nothing is actionable (no auto-carry candidate and no pending
+    review-required candidate) the official memory is already current for
+    ``official_head``. If the ledger has no entry for that exact code commit —
+    e.g. a PR merge commit that landed on top of the verified tip, tree-identical
+    but a new SHA — map it to the current memory content commit so the next
+    worktree can base off the merged branch without a manual reconciliation.
+    Otherwise there is genuinely nothing to record.
+    """
+    counts = plan.get("counts", {})
+    assert isinstance(counts, dict)
+    pending = bool(counts.get("auto-carry", 0)) or bool(counts.get("review-required", 0))
+    if not pending and find_mapping(ledger, official_head) is None:
+        write_ledger(
+            ledger_path,
+            prepend_mapping(ledger, official_head, ledger.last_memory_content_commit),
+        )
+        require_git(official_memory, ["add", "memory.md"])
+        ledger_commit = commit_if_dirty(official_memory, ledger_commit_message)
+        return {
+            **plan,
+            "state": "ledger-mapped-head",
+            "intent_note": cleaned_note,
+            "carried": carried,
+            "memory_content_commit": ledger.last_memory_content_commit,
+            "ledger_commit": ledger_commit,
+        }
+    return {**plan, "state": "nothing-to-carryover", "carried": carried}
+
+
 def apply_carryover_for_request(
     request: CarryoverRequest,
     *,
@@ -364,8 +408,16 @@ def apply_carryover_for_request(
         refresh_onboarding_metadata(target, official_head, official_date)
         carried.append(candidate)
     if not carried or not has_changes(official_memory):
-        payload = {**plan, "state": "nothing-to-carryover", "carried": carried}
-        return payload
+        return _nothing_to_carry_result(
+            plan=plan,
+            cleaned_note=cleaned_note,
+            carried=carried,
+            ledger=ledger,
+            ledger_path=ledger_path,
+            official_memory=official_memory,
+            official_head=official_head,
+            ledger_commit_message=ledger_commit_message,
+        )
     memory_content_commit = commit_if_dirty(official_memory, memory_commit_message)
     write_ledger(ledger_path, prepend_mapping(ledger, official_head, memory_content_commit))
     require_git(official_memory, ["add", "memory.md"])
