@@ -104,6 +104,30 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertEqual(repo_state["containerState"], "exited")
             self.assertEqual(repo_state["indexingState"], "unknown")
 
+    def test_current_state_reports_grepai_no_workspace_as_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            grepai = next(
+                result for result in status["results"] if result["provider"] == "grepai"
+            )
+            # `grepai workspace status` exits 0 even with no workspace.
+            grepai["watcher"]["workspaceStatus"] = {
+                "returncode": 0,
+                "stdout": "No workspaces configured.\n",
+            }
+
+            payload = current_state.build_current_provider_state(config, status)
+
+            grepai_state = payload["providers"]["grepai-memory"]
+            self.assertEqual(grepai_state["state"], "degraded")
+            self.assertFalse(grepai_state["ok"])
+            self.assertEqual(grepai_state["indexingState"], "noWorkspace")
+            self.assertEqual(payload["state"], "degraded")
+
     def test_current_state_ignores_disabled_providers_for_aggregate_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -203,7 +227,13 @@ def ready_status_payload(root: Path) -> dict:
                 "watcherRunning": True,
                 "backend": container_payload("ar-grepai-postgres-workspace"),
                 "embedder": container_payload("ar-grepai-ollama-workspace"),
-                "watcher": container_payload("ar-grepai-watcher-workspace"),
+                "watcher": {
+                    **container_payload("ar-grepai-watcher-workspace"),
+                    "workspaceStatus": {
+                        "returncode": 0,
+                        "stdout": "Workspaces (1):\n\n  agents-remember-memory-projects\n",
+                    },
+                },
             },
             {
                 "provider": "codegraphcontext",

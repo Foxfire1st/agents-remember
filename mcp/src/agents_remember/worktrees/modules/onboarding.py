@@ -148,7 +148,7 @@ def validate_route_overview_refresh_plan_for_context(
         raise RuntimeError(
             "external-memory closeout requires route overview verification metadata before memory commit; "
             f"missing lastVerifiedCommitHash or lastVerifiedCommitDate in: {', '.join(missing_metadata)}. "
-            "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
     return plan
 
@@ -172,7 +172,7 @@ def refresh_route_overview_metadata_for_context(
             raise RuntimeError(
                 "external-memory closeout requires route overview verification metadata before memory commit; "
                 f"{overview_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
-                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
             )
         filesystem.write_text(overview_path, text, encoding="utf-8")
         refreshed.append(item)
@@ -301,7 +301,7 @@ def refresh_entity_fingerprints_for_context(
         details = ", ".join(f"{item['entity']} ({item['algorithm']})" for item in unsupported)
         raise RuntimeError(
             "external-memory closeout requires supported entity fingerprint rows before memory commit; "
-            f"unsupported rows: {details}. Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            f"unsupported rows: {details}. Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
     required = list(plan["required"])
     if not required:
@@ -327,7 +327,7 @@ def refresh_entity_fingerprints_for_context(
             raise RuntimeError(
                 "external-memory closeout requires entity fingerprint values before memory commit; "
                 f"{catalog_path.as_posix()} row {entity!r} is missing a fingerprint. "
-                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
             )
         refreshed.append(
             {
@@ -405,7 +405,7 @@ def require_updated_sidecar_content(
             "files, not only refreshed verification metadata; the following changed sources have "
             "an unmodified sidecar body: "
             + ", ".join(stale)
-            + ". Update each sidecar through C-05 to the approved current state and record the "
+            + ". Update each sidecar through the c-05-create-or-update-onboarding-files skill to the approved current state and record the "
             "change in its Update History before closeout. Advancing lastVerifiedCommitHash on "
             "stale content is a prohibited metadata-only refresh."
         )
@@ -426,7 +426,7 @@ def validate_onboarding_refresh_plan_for_context(
         raise RuntimeError(
             "external-memory closeout requires current onboarding for changed source files before memory commit; "
             + "; ".join(details)
-            + ". Run C-05 create-or-update-onboarding-files, then rerun closeout."
+            + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
     require_updated_sidecar_content(context, plan, memory_tree=memory_tree)
     for item in plan["required"]:
@@ -436,7 +436,7 @@ def validate_onboarding_refresh_plan_for_context(
             raise RuntimeError(
                 "external-memory closeout requires onboarding verification metadata before memory commit; "
                 f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
-                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
             )
     return plan
 
@@ -468,7 +468,7 @@ def refresh_onboarding_metadata_for_context(
             raise RuntimeError(
                 "external-memory closeout requires onboarding verification metadata before memory commit; "
                 f"{onboarding_path.as_posix()} is missing lastVerifiedCommitHash or lastVerifiedCommitDate. "
-                "Run C-05 create-or-update-onboarding-files, then rerun closeout."
+                "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
             )
         filesystem.write_text(onboarding_path, text, encoding="utf-8")
         refreshed.append(item)

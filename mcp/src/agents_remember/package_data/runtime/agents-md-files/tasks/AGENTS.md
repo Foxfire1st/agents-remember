@@ -119,7 +119,7 @@ The agent should separate evidence by type when relevant:
 3. Cross-repo or system-boundary evidence
 4. Executable validation evidence
 
-Gather that evidence through `C-04-retrieval-strategy-router` (Semantics,
+Gather that evidence through `c-04-retrieval-strategy-router` (Semantics,
 Relationship, Intent) rather than ad-hoc reads.
 
 The agent should not only state what it plans to do. It should also state what will prove the plan is correct.

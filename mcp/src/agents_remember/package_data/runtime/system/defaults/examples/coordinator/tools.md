@@ -14,8 +14,8 @@ When the Agents Remember MCP settings enable context providers, use MCP tools
 for normal status and install flows. The MCP settings file is the authority for
 allowed repos, providers, workspace paths, and runtime roots.
 
-Use `runtime_install` for runtime installation and provider dependency install.
-Use `context_packet` for startup status, including provider status and runner
+Use the `runtime_install` MCP tool for runtime installation and provider dependency install.
+Use the `context_packet` MCP tool for startup status, including provider status and runner
 integrity. Provider lifecycle Python scripts are source/package-owned mechanics,
 not installed coordinator runtime scripts.
 
@@ -86,6 +86,6 @@ layer.
 
 ## Notes
 
-Agents should resolve the target repository with C-08 before choosing task,
+Agents should resolve the target repository with the `c-08-ar-coordination-context-resolver` skill before choosing task,
 worktree, memory, or validation paths. Prefer memory-layer tool instructions
 when a command is repository-specific.

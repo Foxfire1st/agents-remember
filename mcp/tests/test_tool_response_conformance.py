@@ -198,7 +198,7 @@ def _direct_closeout_payloads(root: Path) -> dict[str, dict]:
 
 
 def _carryover_payloads(root: Path) -> dict[str, dict]:
-    """Landed-branch fixture for the C-11 carryover tools."""
+    """Landed-branch fixture for the c-11-memory-carryover-from-branch skill carryover tools."""
     code_repo = root / "repo-a"
     old_base = init_repo(code_repo, "main")
     git(code_repo, "checkout", "-b", "workbench/reado/v1.2")

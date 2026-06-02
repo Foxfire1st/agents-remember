@@ -4,7 +4,7 @@ Stale onboarding is expected. The important rule is that agents should detect it
 
 ## Detect Drift
 
-Run C-02 memory quality control for the target repository:
+Run the `c-02-memory-quality-control` skill for the target repository:
 
 ```text
 drift_check(repo_id="<repo-id>", detail_limit=50)
@@ -27,9 +27,9 @@ Common classifications:
 - `orphaned`: onboarding exists for a source file that no longer exists
 - `unsupported`: the helper cannot safely validate the storage shape
 
-## Refresh Through C-05
+## Refresh Through `c-05-create-or-update-onboarding-files`
 
-Use `C-05-create-or-update-onboarding-files` for file-level onboarding and repo entity catalogs.
+Use `c-05-create-or-update-onboarding-files` for file-level onboarding and repo entity catalogs.
 
 The refresh should:
 

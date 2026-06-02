@@ -28,7 +28,7 @@ Agents Remember fixes that: the matching note is reachable at the moment of the 
 The memory layer rests on a small, strict discipline:
 
 - **Onboarding units:** Markdown notes derived from source paths. A file such as `src/foo/bar.ts` maps to `ar-memory/onboarding/src/foo/bar.ts.md` in the default repo-local mode.
-- **Memory quality control:** Before an agent trusts onboarding, `C-02-memory-quality-control` checks whether the source changed since the onboarding was verified. During closeout it also covers new-file onboarding and final memory quality checks.
+- **Memory quality control:** Before an agent trusts onboarding, `c-02-memory-quality-control` checks whether the source changed since the onboarding was verified. During closeout it also covers new-file onboarding and final memory quality checks.
 - **Approval-gated updates:** Onboarding records approved current state, not guesses or plans. Task-local notes stay task-local until the developer approves implementation.
 
 The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`.
@@ -82,19 +82,19 @@ Ask your agent to:
    ```
 
    Have your agent follow the PyPI link for setup details and help you author the settings file. Then **restart the harness** so it loads the server.
-2. **Install Agents Remember** — Run the mcp tool `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled). Then **restart the harness** again so it discovers the skills `skills_install` just wrote (some harnesses hot-reload skills and skip this; restarting is the safe default).
-3. **Onboard your project** — Run the skill `C-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing. If it installed a session-start hook, **restart the harness once more** so the hook activates (hooks load at session start).
+2. **Install Agents Remember** — Run the `runtime_install` MCP tool, then the `skills_install` MCP tool (scaffolding, skills, and provider images when providers are enabled). Then **restart the harness** again so it discovers the skills the `skills_install` MCP tool just wrote (some harnesses hot-reload skills and skip this; restarting is the safe default).
+3. **Onboard your project** — Run the skill `c-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing. If it installed a session-start hook, **restart the harness once more** so the hook activates (hooks load at session start).
 
 Those three restarts (load the server, discover the skills, activate the hook) are the only hands-on steps; between and after them, your agent continues on its own.
 
-After that, normal work runs through the L-01 session job lifecycle. The agent resolves the active context with `C-08-ar-coordination-context-resolver`, checks memory quality with `C-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the `l-01-session-job-lifecycle` skill. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
-- [Workflows](docs/workflows.md) - the L-01 lifecycle and its build modes (read-only / chat build / W-02), and when to use each.
+- [Workflows](docs/workflows.md) - the `l-01-session-job-lifecycle` skill and its build modes (read-only / chat build / `w-02-light-task-workflow` skill), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
@@ -119,7 +119,10 @@ agents-remember-md/
   docs/                             # user-facing documentation
 ```
 
-The installed runtime lives in `ar-coordination/`, not in the source checkout:
+The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
+inside the workspace (never your home directory) — not in the source checkout. The
+`c-13-install-and-onboard` skill shows this and every other install path as a workspace-first
+default you can accept or override:
 
 ```text
 ar-coordination/
@@ -137,11 +140,11 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `2.0.0` and actively developed. **2.0.0 is a major, breaking release** — the session job lifecycle reshape: every session now enters the `L-01` lifecycle, the chat (W-03) and heavy (W-01) workflows are retired in favor of the light task plus master + light sub-task series composition, the skill tree is flat, and some public contracts changed (removed skill IDs, the `skills_install` `layout` input, and heavy `workflow_kind` values). The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump like this one; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `2.0.0` and actively developed. **2.0.0 is a major, breaking release** — the session job lifecycle reshape: every session now enters the `l-01-session-job-lifecycle` skill, the chat (W-03) and heavy (W-01) workflows are retired in favor of the light task plus master + light sub-task series composition, the skill tree is flat, and some public contracts changed (removed skill IDs, the `skills_install` MCP tool's `layout` input, and heavy `workflow_kind` values). The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump like this one; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Stability
 
-Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. `C-08`, `W-02`), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `ar-memory/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
+Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `c-08-ar-coordination-context-resolver` and `w-02-light-task-workflow` skills), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `ar-memory/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
 
 ## Contributing
 

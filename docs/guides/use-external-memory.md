@@ -9,7 +9,7 @@ External memory is useful when:
 - code and memory should be reviewed or permissioned separately
 - several code repositories share one coordination root
 - long-running branches need matching code and memory versions
-- C-12 worktree closeout should record code-memory ledger mappings
+- `c-12-closeout` worktree closeout should record code-memory ledger mappings
 
 ## Layout
 
@@ -42,7 +42,7 @@ Install the runtime first through the MCP server:
 runtime_install()
 ```
 
-Then ask the agent to run `C-00-initialize-memory-repo` in external-memory mode for the target repository. External mode should be explicit; C-00 defaults to internal memory.
+Then ask the agent to run `c-00-initialize-memory-repo` in external-memory mode for the target repository. External mode should be explicit; the `c-00-initialize-memory-repo` skill defaults to internal memory.
 
 ## Configure
 
@@ -76,7 +76,7 @@ In a one-repo memory repo, unscoped path rules are fine. In shared coordinator s
 
 ## Resolve
 
-C-08 checks internal memory first, then external memory:
+The `c-08-ar-coordination-context-resolver` skill checks internal memory first, then external memory:
 
 ```text
 <repo>/ar-memory/
@@ -87,7 +87,7 @@ An external memory repo does not force sibling repositories into external mode. 
 
 ## Closeout
 
-External-memory changes need code and memory to stay mapped. `C-12-closeout` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
+External-memory changes need code and memory to stay mapped. `c-12-closeout` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
 
 1. commit code
 2. refresh onboarding metadata against the code commit

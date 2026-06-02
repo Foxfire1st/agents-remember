@@ -112,12 +112,12 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
     if not context.memory_root.exists():
         raise RuntimeError(
             f"memory root does not exist: {context.memory_root}. "
-            "Run C-00-initialize-memory-repo before adopting a memory baseline."
+            "Run c-00-initialize-memory-repo before adopting a memory baseline."
         )
     if not (context.memory_root / ".git").exists():
         raise RuntimeError(
             f"external memory root is not a Git repo: {context.memory_root}. "
-            "Run C-00-initialize-memory-repo before adopting a memory baseline."
+            "Run c-00-initialize-memory-repo before adopting a memory baseline."
         )
 
     worktree_manager.ensure_git_identity(context.memory_root)
@@ -135,7 +135,7 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
     if not existing_paths:
         raise RuntimeError(
             f"memory root has no onboarding, docs, or system content: {context.memory_root}. "
-            "Run C-00-initialize-memory-repo first, then add onboarding before adopting."
+            "Run c-00-initialize-memory-repo first, then add onboarding before adopting."
         )
 
     worktree_manager.require_git(context.memory_root, ["add", *existing_paths])
@@ -226,7 +226,7 @@ def baseline_adopt(
         return 0, payload
     if actionable_rows(rows) and not accept_drift:
         payload["message"] = (
-            "actionable drift blocks adoption; refresh onboarding with C-05 or rerun with --accept-drift"
+            "actionable drift blocks adoption; refresh onboarding with the c-05-create-or-update-onboarding-files skill or rerun with --accept-drift"
         )
         return 2, payload
     if dry_run:
@@ -279,7 +279,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         "--topology", choices=("internal", "external"), help="Optional topology override."
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
-    parser.add_argument("--report", type=Path, help="Optional C-02 drift report path.")
+    parser.add_argument("--report", type=Path, help="Optional c-02-memory-quality-control drift report path.")
 
 
 def build_parser() -> argparse.ArgumentParser:

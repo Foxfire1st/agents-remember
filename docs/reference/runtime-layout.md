@@ -20,9 +20,9 @@ agents-remember-md/
             requirements/
             patches/
           skills/
-            C-00-initialize-memory-repo/   # ... flat C-* core skills (C-00 .. C-13)
-            L-01-session-job-lifecycle/
-            W-02-light-task-workflow/
+            c-00-initialize-memory-repo/   # ... flat core skills (c-00-initialize-memory-repo through c-13-install-and-onboard)
+            l-01-session-job-lifecycle/
+            w-02-light-task-workflow/
           system/defaults/examples/
         benchmarks/
       providers/

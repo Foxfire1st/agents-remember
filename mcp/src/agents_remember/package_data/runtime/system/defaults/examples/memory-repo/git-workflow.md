@@ -14,7 +14,7 @@ doesn't apply.
   land via PR>` or `<no — direct pushes allowed>`. State it explicitly so agents don't guess.
 - Work branches are cut from the spear: **`feat/<slug>`** (features) and **`fix/<slug>`** (fixes).
 - **Worktree-backed?** `<yes — chat and task both>` keeps external memory consistent: memory parks on
-  the worktree memory branch and lands on the spear via **C-11 carryover** *after* the code lands.
+  the worktree memory branch and lands on the spear via the **`c-11-memory-carryover-from-branch` skill** *after* the code lands.
   Repos with internal/disabled memory can relax this.
 
 ---
@@ -34,16 +34,16 @@ Adapt to your repo; a gated-`main` repo typically does:
 
 1. `<gh issue create>` for feat/fix/chore (skip for pure research).
 2. Cut `feat/<slug>` | `fix/<slug>` from the spear.
-3. C-09 worktree on that branch (task adds `task.md`; chat doesn't).
+3. The `c-09-git-worktree-manager` skill creates a worktree on that branch (task adds `task.md`; chat doesn't).
 4. Work in the worktree; memory parks on the worktree memory branch.
-5. **Commit gate (human)** — nothing is committed before explicit developer approval (C-12 /
+5. **Commit gate (human)** — nothing is committed before explicit developer approval (the `c-12-closeout` skill /
    direct-closeout preview first).
 6. **Push gate (human — one question)** — after commit approval, a single "push?" approval hands the
    tail to the agent.
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →
    `gh pr merge --delete-branch`.**
-8. C-09 closeout + worktree/provider cleanup.
-9. C-11 carryover of parked memory to spear-memory, run against the merged spear. Carryover maps the
+8. The `c-09-git-worktree-manager` skill handles closeout + worktree/provider cleanup.
+9. The `c-11-memory-carryover-from-branch` skill carries parked memory to spear-memory, run against the merged spear. Carryover maps the
    ledger to the actual spear HEAD, **including a PR merge commit** even when nothing else needs
    carrying, so the next worktree bases off the merged spear without a manual reconciliation.
 

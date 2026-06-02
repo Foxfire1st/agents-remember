@@ -15,22 +15,22 @@ code repository for resolver, onboarding, workflow, and closeout commands.
 
 ## Start Here — Enter the Job Lifecycle
 
-Every session enters `L-01-session-job-lifecycle` — the lifecycle this checkout
-routes into. L-01 owns the whole arc: orient → ground → frame → decide → build →
+Every session enters `l-01-session-job-lifecycle` — the lifecycle this checkout
+routes into. The `l-01-session-job-lifecycle` skill owns the whole arc: orient → ground → frame → decide → build →
 close. Classify the job (bug / feature / triage / research) as a *lens* during
 framing — a hint, re-pickable, never a gate.
 
-The only task-format decision is L-01's **build-mode** step, taken at `decide`:
+The only task-format decision is the `l-01-session-job-lifecycle` skill's **build-mode** step, taken at `decide`:
 
 1. **Read-only exit** — answers or assessments that change no code: no worktree,
    no task file.
 2. **Chat build** — a code change carried inline this session: worktree-backed,
    no durable task file.
-3. **Durable task** — `W-02-light-task-workflow`: a `task.md` with checklist,
+3. **Durable task** — `w-02-light-task-workflow`: a `task.md` with checklist,
    decision log, and proposed code examples; escalates to a master + light
    sub-task series when the work outgrows a single-page plan.
 
-The task-collaboration doctrine in `tasks/AGENTS.md` applies inside L-01's
+The task-collaboration doctrine in `tasks/AGENTS.md` applies inside the `l-01-session-job-lifecycle` skill's
 `frame` phase, in plain chat, before any task file or format is chosen.
 
 ---
@@ -38,14 +38,14 @@ The task-collaboration doctrine in `tasks/AGENTS.md` applies inside L-01's
 **IMPORTANT:**
 Do not change code or documentation without entering the lifecycle and clearing its `frame` plan gate.
 Do not change task plan items without approval. Think before acting.
-Do not randomly commit. Use the `C12-closeout` procedure instead!
+Do not randomly commit. Use the `c-12-closeout` skill instead!
 
 ---
 
 ## Memory And Onboarding
 
 Before relying on onboarding, task files, docs, or tools, resolve the active
-Agents Remember context with `C-08-ar-coordination-context-resolver`.
+Agents Remember context with `c-08-ar-coordination-context-resolver`.
 
 For this source checkout, the normal resolver input is:
 
@@ -53,8 +53,8 @@ For this source checkout, the normal resolver input is:
 code_repository_name = agents-remember-md
 ```
 
-After C-08 resolves the target repository and coordination root, prefer the
-Agents Remember MCP `context_packet` tool when that server is configured.
+After the `c-08-ar-coordination-context-resolver` skill resolves the target repository and coordination root, prefer the
+Agents Remember `context_packet` MCP tool when that server is configured.
 Provider authority comes from the MCP settings file.
 
 If the MCP settings configure providers, request:
@@ -66,10 +66,10 @@ context_packet(repo_id="agents-remember-md", include_providers=true)
 Skip this provider check when no MCP server is configured or the MCP settings
 report no providers.
 
-Then run `C-02-memory-quality-control` for the resolved context before
+Then run `c-02-memory-quality-control` for the resolved context before
 reasoning from onboarding or source files.
 
-After C-08 resolves `memory_root`, read that memory layer's repository-specific
+After the `c-08-ar-coordination-context-resolver` skill resolves `memory_root`, read that memory layer's repository-specific
 guidance:
 
 - `system/settings.md`
@@ -90,7 +90,7 @@ runtime settings live under the selected `ar-coordination/` or memory root.
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation.
 
-Use `C-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
+Use `c-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
 
 ## Source Layout
 

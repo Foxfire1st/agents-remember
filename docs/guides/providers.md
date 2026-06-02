@@ -63,7 +63,7 @@ provider_diagnostics()                              # raw provider-native detail
 `shutdown-all`. `context_packet(repo_id=..., include_providers=true)` also
 reports per-provider readiness, watcher state, and the target repo.
 
-The `C-13-install-and-onboard` skill performs this start/verify step
+The `c-13-install-and-onboard` skill performs this start/verify step
 (stage 4) as part of first-run setup.
 
 ## Use them

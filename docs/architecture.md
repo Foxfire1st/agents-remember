@@ -56,7 +56,7 @@ my-app/
   ar-memory/
 ```
 
-When internal memory exists, C-08 resolves it before checking for external memory.
+When internal memory exists, the `c-08-ar-coordination-context-resolver` skill resolves it before checking for external memory.
 
 ## Internal Memory
 
@@ -73,7 +73,7 @@ my-app/ar-memory/
     tools.md
 ```
 
-C-00 creates this scaffold. C-03 bootstraps onboarding content. C-05 maintains file-level onboarding and repo entity catalogs.
+The `c-00-initialize-memory-repo` skill creates this scaffold. The `c-03-repo-bootstrap` skill bootstraps onboarding content. The `c-05-create-or-update-onboarding-files` skill maintains file-level onboarding and repo entity catalogs.
 
 ## External Memory
 
@@ -91,17 +91,17 @@ Use external memory when teams need a separate memory repository, branch-specifi
 
 ## Resolution Order
 
-C-08 resolves a target repository by checking:
+The `c-08-ar-coordination-context-resolver` skill resolves a target repository by checking:
 
 1. explicit inputs such as `code_repository_root`, `coordination_root`, or task contract
 2. repo-local internal memory at `<repo>/ar-memory/`
 3. external memory at `<coordination-root>/memory-repos/ar-<repo>/`
 
-If neither supported memory location exists, C-08 fails and asks the caller to initialize memory instead of inventing an empty context.
+If neither supported memory location exists, the `c-08-ar-coordination-context-resolver` skill fails and asks the caller to initialize memory instead of inventing an empty context.
 
 ## Retrieval Substrates
 
-Once memory is resolved, agents reach into memory and code through three substrates, routed by `C-04`:
+Once memory is resolved, agents reach into memory and code through three substrates, routed by the `c-04-retrieval-strategy-router` skill:
 
 - **By path (Intent)** — a known file's onboarding note, located directly from its path. Always available; needs no provider.
 - **By meaning (Semantics)** — semantic search over the memory, for when the concept is known but the file is not.
@@ -115,16 +115,16 @@ These providers are accelerators for *finding* knowledge; they are not the sourc
 
 Runtime install owns package assets under `ar-coordination`.
 
-C-00 owns memory-root creation or repair.
+The `c-00-initialize-memory-repo` skill owns memory-root creation or repair.
 
-C-03 owns repo onboarding bootstrap and route/slice maintenance.
+The `c-03-repo-bootstrap` skill owns repo onboarding bootstrap and route/slice maintenance.
 
-C-05 owns file-level onboarding and repo entity catalog maintenance.
+The `c-05-create-or-update-onboarding-files` skill owns file-level onboarding and repo entity catalog maintenance.
 
-C-08 owns context resolution facts only.
+The `c-08-ar-coordination-context-resolver` skill owns context resolution facts only.
 
-C-09 owns worktree lifecycle, integration, and cleanup.
+The `c-09-git-worktree-manager` skill owns worktree lifecycle, integration, and cleanup.
 
-C-12 owns the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks.
+The `c-12-closeout` skill owns the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks.
 
 Provider lifecycle — building images, watchers, and indexing — is owned by the MCP provider tools and `runtime_install`, not by the memory or workflow skills.

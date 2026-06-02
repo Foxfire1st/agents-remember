@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--report",
         type=Path,
-        help="Optional Markdown report output path. Relative paths resolve from the C-08 temp root; absolute paths are constrained to the coordination root.",
+        help="Optional Markdown report output path. Relative paths resolve from the c-08-ar-coordination-context-resolver temp root; absolute paths are constrained to the coordination root.",
     )
     parser.add_argument(
         "--format", choices=("text", "json", "csv"), default="text", help="Stdout format."

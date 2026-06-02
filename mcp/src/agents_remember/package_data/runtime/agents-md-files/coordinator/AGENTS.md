@@ -2,22 +2,22 @@
 
 ## Start Here — Enter the Job Lifecycle
 
-Every session enters `L-01-session-job-lifecycle` — the canvas this coordinator
-routes into. L-01 owns the whole arc: orient → ground → frame → decide → build →
+Every session enters `l-01-session-job-lifecycle` — the canvas this coordinator
+routes into. The `l-01-session-job-lifecycle` skill owns the whole arc: orient → ground → frame → decide → build →
 close. Classify the job (bug / feature / triage / research) as a *lens* during
 framing — a hint, re-pickable, never a gate.
 
-The only task-format decision is L-01's **build-mode** step, taken at `decide`:
+The only task-format decision is the `l-01-session-job-lifecycle` skill's **build-mode** step, taken at `decide`:
 
 - **Read-only exit** — answers or assessments that change no code: no worktree, no
   task file, no closeout.
 - **Chat build** — a code change carried inline this session: worktree-backed, no
   durable task file.
-- **Durable task** — `W-02-light-task-workflow`: a `task.md` with checklist,
+- **Durable task** — `w-02-light-task-workflow`: a `task.md` with checklist,
   decision log, and proposed code examples; escalates to a master + light
   sub-task series when the work outgrows a single-page plan.
 
-The task-collaboration doctrine in `tasks/AGENTS.md` applies inside L-01's
+The task-collaboration doctrine in `tasks/AGENTS.md` applies inside the `l-01-session-job-lifecycle` skill's
 `frame` phase, in plain chat, before any task file or format is chosen.
 
 ---
@@ -25,7 +25,7 @@ The task-collaboration doctrine in `tasks/AGENTS.md` applies inside L-01's
 **IMPORTANT:**
 Do not change code without entering the lifecycle and clearing its `frame` plan gate.
 Do not change task plan items without approval.
-Do not randomly commit. Use the `C12-closeout` procedure instead!
+Do not randomly commit. Use the `c-12-closeout` skill instead!
 
 ---
 
@@ -38,28 +38,28 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in L-01's
+- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in the `l-01-session-job-lifecycle` skill's
   `frame` phase; see *Start Here — Enter the Job Lifecycle* above).
 
 ### Onboarding Documentation
 
 Onboarding files are companion context for source files. Their main purpose is
 to be read alongside the code they describe, at the moment that code is
-inspected. Route retrieval through `C-04-retrieval-strategy-router` (see
+inspected. Route retrieval through `c-04-retrieval-strategy-router` (see
 *Memory Retrieval Strategies* below) before relying on onboarding, providers, or
 repository source.
 
 ### Developer Clarifications
 
 When a developer clarifies an important concept, invariant, boundary, or
-current-state behavior, use `C-01-findings-capture`. Ask whether the verified
+current-state behavior, use `c-01-findings-capture`. Ask whether the verified
 clarification should be documented in onboarding.
 
 Do not copy the clarification into onboarding verbatim. Verify it against the
 relevant code, onboarding, and supporting context first. If code reality
 contradicts the clarification or only partially supports it, surface the
 mismatch and discuss it before propagating anything through
-`C-05-create-or-update-onboarding-files`.
+`c-05-create-or-update-onboarding-files`.
 
 ---
 
@@ -67,10 +67,10 @@ mismatch and discuss it before propagating anything through
 
 Infer which code repository is supposed to be worked on for a given task from the developer prompt. Ask the developer in case its unclear. That inferred repository is the code repository for resolver inputs.
 
-Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `C-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
+Resolve the active memory and coordination context for the code repository before relying on onboarding, task files, docs, or tools. Use `c-08-ar-coordination-context-resolver` as the normal resolver entry point: pass `code_repository_name` or `code_repository_root` and consume the returned local or shared context.
 
-After C-08 resolves the target repository and coordination root, prefer the
-Agents Remember MCP `context_packet` tool when that server is configured.
+After the `c-08-ar-coordination-context-resolver` skill resolves the target repository and coordination root, prefer the
+Agents Remember `context_packet` MCP tool when that server is configured.
 Provider authority comes from the MCP settings file.
 
 If the MCP settings configure providers, run:
@@ -96,12 +96,12 @@ report no providers.
 - Use `system/sources.md` for workspace-wide source registries.
 - Do not put rules that are valid for only one code repository in coordinator
   files; put them in that repository's memory layer.
-- After C-08 resolves a `memory_root`, read that memory layer's `system/settings.md`
+- After the `c-08-ar-coordination-context-resolver` skill resolves a `memory_root`, read that memory layer's `system/settings.md`
   and `system/tools.md`; also read `system/sources.md`,
   `system/coding-guidelines.md`, and `system/git-workflow.md` when present.
 - Read `system/git-workflow.md` (when present) **before any commit, push, PR, or
   release** — it owns the repo's gated-branch landing flow.
-- Before committing read the `C12-closeout` procedure!
+- Before committing read the `c-12-closeout` skill!
 
 ### Memory Repo User Settings, Instructions, and Guidelines
 
@@ -125,7 +125,7 @@ report no providers.
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation.
 
-Use `C-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
+Use `c-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
 
 ### Branch And Workflow Notes
 
@@ -157,7 +157,7 @@ the more specific authority for its code repository.
 
 ## Code Quality Instructions
 
-After C-08 resolves context, use the resolved memory layer's `system/tools.md`
+After the `c-08-ar-coordination-context-resolver` skill resolves context, use the resolved memory layer's `system/tools.md`
 for repository-specific test, lint, typecheck, build, smoke-check, branch, and
 local command guidance. Use `system/coding-guidelines.md` when present for
 repo-specific coding rules. Use `system/code-quality-report-template.md`

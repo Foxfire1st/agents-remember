@@ -11,9 +11,9 @@ This page is a map of the surface; behavior detail lives in the linked skill and
 reference pages.
 
 **Skills vs tools.** Many skills wrap one or more of these tools and add the
-procedure, gates, and ordering around them: `C-00` drives `memory_init`, `C-02`
-drives `drift_check` / `memory_quality_check`, `C-09` drives the `worktree_*`
-tools, and `C-12` drives the `*_closeout_*` tools. When the docs say "run `C-0x`,"
+procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool, the `c-02-memory-quality-control` skill
+drives the `drift_check` / `memory_quality_check` MCP tools, the `c-09-git-worktree-manager` skill drives the `worktree_*`
+MCP tools, and the `c-12-closeout` skill drives the `*_closeout_*` MCP tools. When the docs say "run a core skill,"
 the agent runs the skill, which calls the matching tool with the right
 preconditions. Call the raw tool directly only when you do not need the skill's
 surrounding procedure. See the [Skills reference](skills.md).
@@ -66,7 +66,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `worktree_integrate` | Land closed task branches back onto source branches (`ff-only` or `replay`). | `contract_path`, `strategy`, `dry_run=false` |
 | `worktree_cleanup` | Remove worktrees and merged task branches after integration. | `contract_path`, `dry_run=false` |
 
-See [C-09 Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
+See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
 
 ## Providers
 

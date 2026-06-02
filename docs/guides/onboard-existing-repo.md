@@ -14,7 +14,7 @@ Expose skills for your harness using the relevant [install guide](../README.md#i
 
 ## 2. Initialize Memory
 
-Ask the agent to run `C-00-initialize-memory-repo` for the target repository.
+Ask the agent to run `c-00-initialize-memory-repo` for the target repository.
 
 Default internal memory creates:
 
@@ -29,7 +29,7 @@ Default internal memory creates:
     tools.md
 ```
 
-Do not create onboarding content by hand before the memory root exists. C-00 owns the scaffold; C-03 owns onboarding bootstrap.
+Do not create onboarding content by hand before the memory root exists. The `c-00-initialize-memory-repo` skill owns the scaffold; the `c-03-repo-bootstrap` skill owns onboarding bootstrap.
 
 ## 3. Configure Path Eligibility
 
@@ -62,7 +62,7 @@ See [Path Rules](../reference/path-rules.md) for the fuller exclusion baseline.
 
 ## 4. Bootstrap A First Overview
 
-Ask the agent to run `C-03-repo-bootstrap`.
+Ask the agent to run `c-03-repo-bootstrap`.
 
 A repo-level `overview.md` is enough to start. Larger repositories can add route-local overviews under the mirrored onboarding hierarchy when a package, module, or source slice needs durable context.
 
@@ -70,10 +70,10 @@ A repo-level `overview.md` is enough to start. Larger repositories can add route
 
 When a task touches a file, the agent should:
 
-1. resolve context with C-08
-2. check drift with C-02
+1. resolve context with the `c-08-ar-coordination-context-resolver` skill
+2. check drift with the `c-02-memory-quality-control` skill
 3. read or create the relevant onboarding
 4. implement approved work
-5. refresh onboarding through C-05
+5. refresh onboarding through the `c-05-create-or-update-onboarding-files` skill
 
 This avoids a giant up-front documentation project. The first task on a file pays the onboarding cost; later tasks benefit.

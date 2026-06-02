@@ -167,7 +167,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     ) -> dict[str, Any]:
         """Initialize or repair a repository's memory root (scaffold system/ files, onboarding
         layout, optionally `git init`). Does not overwrite existing onboarding content. Preview
-        with dry_run=true. Usually driven by the C-00 skill."""
+        with dry_run=true. Usually driven by the c-00-initialize-memory-repo skill."""
         return memory_init_payload(
             config,
             repo_id,
@@ -410,8 +410,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Create or load a task contract plus code (and external-memory) git worktrees. Mutating:
-        creates branches/worktrees on disk. Preview with dry_run=true. Driven by the C-09 worktree
-        workflow; workflow_kind is the task format ('light-task' or 'chat-task').
+        creates branches/worktrees on disk. Preview with dry_run=true. Driven by the
+        c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
         memory_mode is 'internal', 'external', or 'disabled'."""
         return worktree_start_payload(
             config,
@@ -600,7 +600,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     ) -> dict[str, Any]:
         """Create the first ledgered memory baseline for an external memory repo. Mutating: writes
         the ledger and commits memory. Gated on clean drift unless accept_drift=true. Preview with
-        dry_run=true. Usually driven by the C-10 skill."""
+        dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill."""
         return memory_baseline_adopt_payload(
             config,
             repo_id,
