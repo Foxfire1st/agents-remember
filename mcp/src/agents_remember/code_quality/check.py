@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,7 +35,7 @@ class StepResult:
     command: list[str]
 
 
-CommandRunner = Callable[[str, list[str], Path], StepResult]
+CommandRunner = Callable[[str, list[str], Path, Mapping[str, str]], StepResult]
 Printer = Callable[[str], None]
 
 
@@ -42,8 +43,10 @@ def print_line(message: str) -> None:
     print(message, flush=True)
 
 
-def run_subprocess(name: str, command: list[str], cwd: Path) -> StepResult:
-    completed = subprocess.run(command, cwd=cwd, stdin=subprocess.DEVNULL, check=False)
+def run_subprocess(name: str, command: list[str], cwd: Path, env: Mapping[str, str]) -> StepResult:
+    completed = subprocess.run(
+        command, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL, check=False
+    )
     return StepResult(name=name, return_code=completed.returncode, command=command)
 
 
@@ -88,6 +91,35 @@ def coverage_arguments(source_paths: list[Path]) -> list[str]:
     return [f"--cov={path.as_posix()}" for path in source_paths]
 
 
+def source_import_roots(project_root: Path, source_paths: list[Path]) -> list[Path]:
+    """Import roots for the configured source packages.
+
+    Each source path points at a package directory (e.g. ``mcp/src/agents_remember``);
+    its parent (``mcp/src``) is the directory that must be importable. Putting these on
+    PYTHONPATH makes the wrapper's subprocesses import and cover *this* checkout's source
+    rather than whatever an editable install resolves to, so the gate behaves identically
+    from the primary clone and from any git worktree.
+    """
+    roots: list[Path] = []
+    for source in source_paths:
+        resolved = source if source.is_absolute() else project_root / source
+        root = resolved.resolve().parent
+        if root not in roots:
+            roots.append(root)
+    return roots
+
+
+def subprocess_env(config: CheckConfig) -> dict[str, str]:
+    """Subprocess environment with this checkout's source roots first on PYTHONPATH."""
+    env = dict(os.environ)
+    roots = [str(root) for root in source_import_roots(config.project_root, config.source_paths)]
+    existing = env.get("PYTHONPATH")
+    if existing:
+        roots.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(roots)
+    return env
+
+
 def run_quality_check(
     config: CheckConfig,
     *,
@@ -113,10 +145,11 @@ def run_fixed_checks(
     runner: CommandRunner,
     printer: Printer,
 ) -> int:
+    env = subprocess_env(config)
     failed_steps = 0
     for name, command in quality_commands(config, coverage_json):
         printer(f"\n## {name}")
-        result = runner(name, command, config.project_root)
+        result = runner(name, command, config.project_root, env)
         if result.return_code != 0:
             failed_steps += 1
             printer(f"{name} failed with exit code {result.return_code}")
