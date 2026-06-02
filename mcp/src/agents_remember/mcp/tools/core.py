@@ -116,7 +116,6 @@ def resolve_context_payload(
 def skills_install_payload(
     config: McpRuntimeConfig,
     *,
-    layout: str = "tree",
     dry_run: bool = False,
     overwrite: bool = False,
     archive_existing: bool = False,
@@ -125,7 +124,6 @@ def skills_install_payload(
         "skills_install",
         skills_install_tool(
             config,
-            layout=layout,
             dry_run=dry_run,
             overwrite=overwrite,
             archive_existing=archive_existing,

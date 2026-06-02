@@ -177,18 +177,17 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def skills_install(
-        layout: str = "tree",
         dry_run: bool = False,
         overwrite: bool = False,
         archive_existing: bool = False,
     ) -> dict[str, Any]:
         """Copy the packaged skills into the harness skill root (e.g. .claude/skills) so the harness
-        can discover them. layout 'tree' (default) or 'flat'. overwrite replaces existing skill
-        files; archive_existing backs them up first. Most harnesses only discover newly-installed
-        skills after a restart. Preview with dry_run=true."""
+        can discover them. The packaged skills are flat (one folder per skill), so each is copied by
+        its frontmatter name. overwrite replaces existing skill files; archive_existing backs them up
+        first. Most harnesses only discover newly-installed skills after a restart. Preview with
+        dry_run=true."""
         return skills_install_payload(
             config,
-            layout=layout,
             dry_run=dry_run,
             overwrite=overwrite,
             archive_existing=archive_existing,

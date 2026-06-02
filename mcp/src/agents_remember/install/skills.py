@@ -14,7 +14,6 @@ from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
 
-SKILLS_NAMESPACE = "agents-remember-md"
 IGNORED_COPY_PATTERNS = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
 
 
@@ -35,12 +34,10 @@ class SkillsInstallSummary:
 
 
 def _validate_install_skills_args(
-    *, install_root: Path, layout: str, overwrite: bool, archive_existing: bool
+    *, install_root: Path, overwrite: bool, archive_existing: bool
 ) -> None:
     if not install_root.is_absolute():
         raise ValueError("install_root must be an absolute path")
-    if layout not in {"tree", "flat"}:
-        raise ValueError("layout must be 'tree' or 'flat'")
     if overwrite and archive_existing:
         raise ValueError("overwrite and archive_existing are mutually exclusive")
 
@@ -48,14 +45,12 @@ def _validate_install_skills_args(
 def install_skills(
     *,
     install_root: Path,
-    layout: str = "tree",
     dry_run: bool = False,
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:
     _validate_install_skills_args(
         install_root=install_root,
-        layout=layout,
         overwrite=overwrite,
         archive_existing=archive_existing,
     )
@@ -70,39 +65,30 @@ def install_skills(
         if not dry_run:
             install_root.mkdir(parents=True, exist_ok=True)
 
-        if layout == "tree":
+        # The packaged skills tree is flat: every skill sits directly under skills/.
+        # Copy each skill into the harness root under its frontmatter name so every
+        # harness discovers them reliably; there is no nesting to flatten.
+        for skill_file in sorted(skills_root.rglob("SKILL.md")):
+            skill_dir = skill_file.parent
+            name = _read_skill_name(skill_file)
+            if not name:
+                raise ValueError(f"missing frontmatter name in {skill_file}")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+                raise ValueError(f"unsupported skill name in {skill_file}: {name}")
             _copy_skill_tree(
-                source=skills_root,
-                destination=install_root / SKILLS_NAMESPACE,
+                source=skill_dir,
+                destination=install_root / name,
                 install_root=install_root,
                 summary=summary,
                 dry_run=dry_run,
                 overwrite=overwrite,
                 archive_existing=archive_existing,
             )
-        else:
-            for skill_file in sorted(skills_root.rglob("SKILL.md")):
-                skill_dir = skill_file.parent
-                name = _read_skill_name(skill_file)
-                if not name:
-                    raise ValueError(f"missing frontmatter name in {skill_file}")
-                if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-                    raise ValueError(f"unsupported flat-layout skill name in {skill_file}: {name}")
-                _copy_skill_tree(
-                    source=skill_dir,
-                    destination=install_root / name,
-                    install_root=install_root,
-                    summary=summary,
-                    dry_run=dry_run,
-                    overwrite=overwrite,
-                    archive_existing=archive_existing,
-                )
 
     return {
         "ok": True,
         "operation": "skills_install",
         "dryRun": dry_run,
-        "layout": layout,
         "sourceRoot": source_root_text,
         "installRoot": install_root.as_posix(),
         **summary.to_dict(),

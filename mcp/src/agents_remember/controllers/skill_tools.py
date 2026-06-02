@@ -11,7 +11,6 @@ from agents_remember.mcp.config import McpRuntimeConfig
 def skills_install_tool(
     config: McpRuntimeConfig,
     *,
-    layout: str = "tree",
     dry_run: bool = False,
     overwrite: bool = False,
     archive_existing: bool = False,
@@ -23,7 +22,6 @@ def skills_install_tool(
         )
     return install_skills(
         install_root=config.harness_skill_root,
-        layout=layout,
         dry_run=dry_run,
         overwrite=overwrite,
         archive_existing=archive_existing,
