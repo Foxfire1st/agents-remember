@@ -13,33 +13,30 @@ on a sibling repository, use the installed runtime instructions instead:
 When working on this repository itself, use `agents-remember-md` as the target
 code repository for resolver, onboarding, workflow, and closeout commands.
 
-## Frame Before You Choose a Format
+## Start Here — Enter the Job Lifecycle
 
-The moment you are thinking about building something, the collaboration doctrine
-in `tasks/AGENTS.md` already applies — in plain chat, before any task file exists
-and before a format is chosen below.
+Every session enters `L-01-session-job-lifecycle` — the lifecycle this checkout
+routes into. L-01 owns the whole arc: orient → ground → frame → decide → build →
+close. Classify the job (bug / feature / triage / research) as a *lens* during
+framing — a hint, re-pickable, never a gate.
 
-Do not rush a request into a plan. Use that doctrine to reframe the request, find
-the true scope, surface what could break, and expose hidden variables through
-back-and-forth. Pull the evidence it needs with `C-04-retrieval-strategy-router`.
+The only task-format decision is L-01's **build-mode** step, taken at `decide`:
 
-Continue until the design is defined well enough to write down. Only then choose
-a task format below.
+1. **Read-only exit** — answers or assessments that change no code: no worktree,
+   no task file.
+2. **Chat build** — a code change carried inline this session: worktree-backed,
+   no durable task file.
+3. **Durable task** — `W-02-light-task-workflow`: a `task.md` with checklist,
+   decision log, and proposed code examples; escalates to a master + light
+   sub-task series when the work outgrows a single-page plan.
 
-## Task Format Routing
-
-Choose one work format before changing files:
-
-1. Use `w-03-chat-task-workflow` by default for small changes that can finish in
-   the current session and do not need a durable task file.
-2. Use `W-02-light-task-workflow` when the work needs a durable task file.
-3. Use `W-01-heavy-task-workflow` only when the developer explicitly asks for a
-   heavy task or the full phased workflow.
+The task-collaboration doctrine in `tasks/AGENTS.md` applies inside L-01's
+`frame` phase, in plain chat, before any task file or format is chosen.
 
 ---
 
 **IMPORTANT:**
-Do not change code or documentation without following one of these workflows.
+Do not change code or documentation without entering the lifecycle and clearing its `frame` plan gate.
 Do not change task plan items without approval. Think before acting.
 Do not randomly commit. Use the `C12-closeout` procedure instead!
 
