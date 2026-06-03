@@ -6,9 +6,10 @@
 #
 #     ./setup-hooks.sh
 #
-# It points git at .githooks/, whose pre-push hook runs the project quality
-# wrapper (ruff + Pyright + pytest + CRAP, enforcing) and blocks the push on any
-# finding. Bypass a single push intentionally with `git push --no-verify`.
+# It points git at .githooks/, whose pre-push hook checks generated skill copies,
+# then runs the project quality wrapper (ruff + Pyright + pytest + CRAP,
+# enforcing), and blocks the push on any finding. Bypass a single push
+# intentionally with `git push --no-verify`.
 #
 # Note: this is local fast feedback only. The non-bypassable backstop is the
 # GitHub Actions "Quality checks" workflow, which runs on every push/PR to main

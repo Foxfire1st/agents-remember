@@ -36,5 +36,7 @@ if [ -z "$py" ]; then
   exit 1
 fi
 
+echo "[pre-push] checking generated skill copies..."
+"$py" scripts/sync-skills.py --check || exit 1
 echo "[pre-push] running quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)..."
 "$py" -m agents_remember.code_quality.check --fail-on-crap-threshold

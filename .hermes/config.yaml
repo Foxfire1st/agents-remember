@@ -1,0 +1,17 @@
+# Merge these settings into ~/.hermes/config.yaml.
+#
+# Replace <PATH/TO/YOUR/PROJECTS_FOLDER> before starting Hermes.
+
+skills:
+  external_dirs:
+    - "<PATH/TO/YOUR/PROJECTS_FOLDER>/.hermes/skills"
+
+mcp_servers:
+  agents-remember:
+    command: "uvx"
+    args:
+      - "--refresh-package"
+      - "agents-remember-mcp"
+      - "agents-remember-mcp@latest"
+      - "--config"
+      - "<PATH/TO/YOUR/PROJECTS_FOLDER>/.hermes/mcp/agents-remember-settings.json"

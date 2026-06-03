@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "agents-remember": {
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "agents-remember-mcp",
+        "agents-remember-mcp@latest",
+        "--config",
+        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.pi/mcp/agents-remember-settings.json"
+      ]
+    }
+  }
+}

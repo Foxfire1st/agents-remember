@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "agents-remember": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--refresh-package",
+        "agents-remember-mcp",
+        "agents-remember-mcp@latest",
+        "--config",
+        "<PATH/TO/YOUR/PROJECTS_FOLDER>/.vscode/mcp/agents-remember-settings.json"
+      ]
+    }
+  }
+}

@@ -1,257 +1,199 @@
 ---
 name: c-13-install-and-onboard
-description: "After the MCP installs the runtime and skills (scaffolding), take over the rest of setup: install a start-of-session/chat hook (or place the coordinator directive in the harness's always-on instructions), set up the memory repo (ask scaffold vs existing), bootstrap onboarding when scaffolding new, and configure providers to index the code and memory."
+description: "After the harness starter package and MCP server are wired and the harness has restarted, run/verify runtime_install, set up the memory repo, bootstrap onboarding when scaffolding new, and configure providers to index the code and memory."
 ---
 
 # c-13-install-and-onboard Install And Onboard
 
-Take over installation **after** the MCP has done the deterministic scaffolding,
-and lead the developer through the rest of setup until the project is operational.
+Take over setup **after** the developer has copied the harness starter package,
+wired the Agents Remember MCP server, and restarted the harness once.
 
-This skill is model-driven on purpose. The MCP layer does what is deterministic
-(`runtime_install`, `skills_install`); everything harness-specific or
-project-specific is done by the model with the developer, because a capable
-harness can write the right config in the right place itself. Do not expect a
-hardcoded per-harness installer tool — there is none, by design.
+The harness package owns harness-native files: skills, hooks, rules,
+instructions, MCP registration templates, and settings templates. This skill does
+not install or repair those files during first-run setup. If they are missing,
+stop and tell the developer to copy the correct starter package from this repo,
+replace placeholders, restart the harness, and invoke this skill again.
 
-## Install Locations — Workspace-First Defaults
-
-Every artifact has an explicit default location, and the first assumption is the
-**workspace** — the directory the harness was opened in (call it `<workspace>`).
-Never place anything silently, and never default the coordination root to the
-user's home directory.
-
-The default layout — where `<harness-folder>`, the settings file, and the
-MCP-settings file are **harness-specific** placeholders, not literals:
-
-```text
-<workspace>/ar-coordination/                                 # coordination + memory root (harness-agnostic)
-<workspace>/<harness-folder>/skills/                         # installed skills
-<workspace>/<harness-folder>/<harness-specific-mcp-settings> # MCP server registration
-<workspace>/<harness-folder>/<settings-file>                 # harness settings (e.g. hook registration)
-<workspace>/<harness-folder>/hooks/                          # hook files
-```
-
-`ar-coordination/` is the one constant. For everything else, **do not hardcode
-one harness's folder (e.g. `.claude/`)** — reason about the *current* harness and
-translate `<harness-folder>` and the file names into its own conventions (the
-Harness routing table in Stage 1 has the per-harness specifics). For example:
-
-- **Claude Code** → `<workspace>/.claude/skills/`, MCP in `<workspace>/.mcp.json`, settings `<workspace>/.claude/settings.json`, hooks `<workspace>/.claude/hooks/`
-- **Codex** → `<workspace>/.codex/skills/`, MCP servers + hooks in `<workspace>/.codex/config.toml`
-- **Cursor** → `<workspace>/.cursor/skills/`, rules in `<workspace>/.cursor/rules/`
-- …resolve the same way for any other harness; if a path is unknown, ask rather than guess.
-
-**Accept-or-override, per target.** Before writing anything, present each
-*resolved* default and let the developer accept it or type their own path — one
-prompt per target, e.g. (Claude Code shown):
-
-```text
-ar-coordination (default: <workspace>/ar-coordination/): _
-skills          (default: <workspace>/.claude/skills/): _
-MCP settings    (default: <workspace>/.mcp.json): _
-settings file   (default: <workspace>/.claude/settings.json): _
-hooks           (default: <workspace>/.claude/hooks/): _
-```
-
-These defaults govern `coordinationRoot` / `workspaceRoot` in the MCP settings
-(the pre-`c-13-install-and-onboard` runbook), the `install_root` passed to the
-`skills_install` MCP tool, and the hook/settings paths written in Stage 1.
+The MCP layer still exposes deterministic maintenance tools such as
+`runtime_install()` and `skills_install()`. In the normal first-run path,
+`skills_install()` is not used because the starter package already placed the
+skills where the harness can discover them. `runtime_install()` remains the first
+runtime action this skill performs because it creates or refreshes the
+coordinator scaffold under `ar-coordination/`.
 
 ## When To Use
 
-Use this after the prerequisites are in place:
+Use this skill after these prerequisites are in place:
 
-1. The Agents Remember MCP server is wired and reachable (the developer did this
-   and restarted the harness).
-2. `runtime_install()` installed the coordinator runtime scaffold (it applies by
-   default; preview first with `runtime_install(dry_run=true)`).
-3. `skills_install()` exposed the packaged skills to the harness.
+1. The developer copied the harness-native starter package for the active
+   harness into the workspace and replaced every
+   `<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`
+   placeholders.
+2. The Agents Remember MCP server is registered with the harness, typically with
+   a command like:
 
-If those are not done, do not improvise around them — guide the developer through
-the pre-`c-13-install-and-onboard` runbook first: get and wire the MCP server, author valid MCP
-settings, restart the harness, then `runtime_install` and `skills_install`. See
-the install docs for the copy-pasteable zero-to-operational runbook, and
-`c-00-initialize-memory-repo` for memory scaffolding. Stage 0 below re-checks
-these so a too-early invocation fails loudly with a fix, not silently.
+   ```text
+   uvx agents-remember-mcp@latest --config <absolute path to agents-remember-settings.json>
+   ```
+
+3. The harness was restarted once so it can load the MCP server, native skills,
+   hooks, rules, and instruction files from the copied package.
+
+If any prerequisite is missing, do not improvise a harness installer. Point the
+developer at the appropriate `docs/install/<harness>.md` page, have them copy the
+starter package, and resume after the restart.
 
 ## What This Skill Owns
 
-A preflight check plus a four-stage sequence. Run them in order; stop and report
-between stages when a stage needs a developer decision.
+Run this sequence in order:
 
-0. Preflight — verify host/setup prerequisites and explain any fix before working.
-1. Install a start-of-session/chat hook, or place the coordinator directive.
-2. Set up the memory repo — ask scaffold-new vs use-existing.
-3. If a new memory repo was scaffolded, hand off to `c-03-repo-bootstrap`.
-4. Configure providers so they index the code and memory.
+0. Preflight: verify the copied package and MCP setup are usable enough to
+   continue.
+1. Runtime scaffold: run or verify `runtime_install()`.
+2. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
+3. Bootstrap: when a new memory repo was scaffolded, hand off to
+   `c-03-repo-bootstrap`.
+4. Providers: when providers are enabled, start/refresh indexing and verify
+   readiness.
 
-This skill orchestrates and delegates. It does not reimplement the `c-00-initialize-memory-repo` skill
-(memory init), the `c-03-repo-bootstrap` skill (bootstrap), or the provider lifecycle; it sequences them
-and fills the harness/provider-wiring gap between them.
+This skill orchestrates and delegates. It does not reimplement
+`c-00-initialize-memory-repo`, `c-03-repo-bootstrap`,
+`c-10-adopt-memory-baseline`, context resolution, or provider lifecycle tools.
 
-## Stage 0 — Preflight (prerequisites)
+## Stage 0 - Preflight
 
-Before any work, verify the setup and, for each failed check, tell the developer
-in plain language what is wrong and the exact command to fix it. Do not proceed
-past a failed check silently — a half-installed system strands a non-expert.
-Report a short pass/fail checklist with the fix for each failure.
+Before runtime or memory work, report a short pass/fail checklist. For each
+failed check, give the exact fix and stop when the developer must act.
 
 Check, in order:
 
-1. **MCP reachable.** You are running as an installed skill, so `skills_install`
-   already ran — but confirm the MCP responds (`ping` / `server_info`). If it does
-   not, the harness was not restarted after the MCP was wired: tell the developer
-   to restart the harness, then retry.
-2. **Scaffolding present.** Confirm `runtime_install` ran (coordinator `AGENTS.md`,
-   `skills/`, `tasks/`, `memory-repos/` exist under the coordination root). If
-   missing, ask the developer to request `runtime_install()` (it applies by
-   default; preview first with `runtime_install(dry_run=true)`).
-3. **Settings sane.** Confirm `server_info` reports the expected `coordinationRoot`,
-   `workspaceRoot`, allowed repos, and providers. A wrong path here is the usual
-   cause of later resolver errors; surface the resolved absolute paths.
-4. **Hook prerequisite (for Stage 1).** If the harness hook command needs `jq`
-   (Claude Code), confirm `jq` is on `PATH`. If it is missing the hook installs but
-   injects **nothing, silently** — install `jq` (`apt install jq` / `brew install jq`)
-   or use the instructions-file fallback. Never leave a silent dead hook.
-5. **Provider prerequisites (for Stage 4), only if providers are enabled.**
-   Providers run in Docker, and grepai's embedder needs Ollama with a pulled model.
-   Confirm Docker is running and (for grepai) Ollama is reachable with its model.
-   If not, say so plainly: the providers will report `degraded` and index nothing
-   until Docker/Ollama are up. Use `provider_diagnostics` for the exact gap.
-6. **Topology consistency.** If the MCP settings point at an external coordination
-   root, Stage 2 should use external memory; do not let the `c-00-initialize-memory-repo` skill default to internal
-   in a way that contradicts the configured topology.
+1. **MCP reachable.** Confirm the MCP responds (`ping`, `server_info`, or the
+   equivalent available tool). If not, the harness did not load the server; tell
+   the developer to verify the MCP registration path and restart the harness.
+2. **Harness package present.** Confirm this skill is running from a
+   harness-discoverable skill root and that the active harness package includes
+   its native settings/instruction files. Do not create missing harness files
+   here; ask the developer to recopy the package and restart.
+3. **Settings sane.** Confirm `server_info` reports the expected
+   `coordinationRoot`, `workspaceRoot`, allowed repositories, and providers.
+   Surface the resolved absolute paths because wrong paths are the common cause
+   of resolver failures.
+4. **Runtime state.** Check whether the coordinator scaffold already exists under
+   `coordinationRoot` (`AGENTS.md`, `skills/`, `tasks/`, `memory-repos/`,
+   `system/` as applicable). If it is missing or stale, Stage 1 will run
+   `runtime_install()`.
+5. **Provider prerequisites, only when providers are enabled.** Providers run in
+   Docker. If provider diagnostics report Docker/Ollama/image problems, explain
+   the gap. A developer may explicitly defer providers and continue with core
+   memory setup.
+6. **Topology consistency.** If MCP settings point at an external coordination
+   root, memory setup must remain consistent with that topology. Do not let
+   memory initialization silently choose internal memory when settings clearly
+   describe an external-memory layout.
 
-Pass everything — or the developer explicitly accepts a known gap (e.g. providers
-deferred) — before moving on. When a prerequisite is the developer's to fix, stop
-with the exact fix and resume once they confirm.
+Do not check for hook prerequisites such as `jq`. Hook and instruction files are
+part of the copied harness package; this skill no longer installs them.
 
-## Stage 1 — Start Hook Or Instructions
+## Stage 1 - Runtime Scaffold
 
-Goal: make the coordinator first-action directive **authoritative** so every new
-session reads and follows `ar-coordination/AGENTS.md` before sibling-repo work.
+Run or verify:
 
-Decide per harness:
-
-- If the harness supports a **context-injecting** start-of-session/chat hook,
-  install the hook (write the directive file + register the hook in the harness's
-  settings).
-- Otherwise, place the directive into the harness's **always-on instructions
-  file** and tell the developer it is lower-authority (it loads as context that
-  the harness may treat as optional), so they may need to nudge at session start.
-
-### The directive
-
-Write this content (the file the hook injects, or the body you place into the
-instructions file). It points at the coordinator `AGENTS.md`:
-
-```markdown
-MANDATORY FIRST ACTION for this workspace
-
-You are not allowed to read, write, or execute code on any repository
-until you read `ar-coordination/AGENTS.md` and started its `l-01` procedure!
+```text
+runtime_install()
 ```
 
-Use the resolved coordinator `AGENTS.md` path (relative to the workspace when it
-is inside the workspace, otherwise absolute).
+Use `runtime_install(dry_run=true)` only when the developer asks for a preview or
+when local workflow policy requires one. Otherwise apply the runtime scaffold so
+setup can proceed.
 
-### Harness routing (researched 2026-05-29 — verify before relying on it)
+After it runs, verify the coordinator root exists and contains the expected
+package-owned runtime files. `runtime_install()` may also prepare provider
+runtime assets when providers are enabled, but it does not create memory repos,
+bootstrap onboarding, or start provider indexing.
 
-| Harness | Mechanism | What to do |
-| --- | --- | --- |
-| Claude Code | `SessionStart` hook injects `additionalContext` | Install the hook: write `.claude/hooks/coordinator-first-action.md`, add a `SessionStart` command entry to `.claude/settings.json` that emits the file as `additionalContext`. Full worked example in [docs/install/claude-code.md](agents-remember-md/docs/install/claude-code.md). Keep `CLAUDE.md` import only as a degraded fallback. |
-| Codex | `SessionStart` hook (Claude-style), `~/.codex/hooks.json` or `.codex/config.toml [hooks]`; `stdout` JSON `hookSpecificOutput.additionalContext` is injected | Install the hook with the same directive; also note Codex reads `AGENTS.md` natively. |
-| Pi.dev | `session_start` / `before_agent_start` can inject context | Install the harness's start hook with the directive. |
-| OpenClaw | `session_start` / `before_prompt_build` can inject context | Install the harness's start hook with the directive. |
-| Antigravity | Supports hooks (skills/MCP under `~/.gemini/...`); exact hook format not yet confirmed | If you can confirm the hook format from current Antigravity docs, install it; otherwise fall back to its instructions file and say so. |
-| Cursor | Hooks are governance/observe (e.g. `beforeSubmitPrompt` is informational only) — a hook cannot inject authoritative context | Do NOT install a hook. Place the directive in an `alwaysApply` rule: `.cursor/rules/agents-remember.mdc` with `alwaysApply: true`. |
-| VS Code + Copilot | No start command hook | Place the directive in `.github/copilot-instructions.md`. |
-| Hermes | `HERMES.md` is highest-priority context; no injecting start hook confirmed | Place the directive in `HERMES.md` (or `AGENTS.md`). |
+Do not run `skills_install()` as part of first-run setup. The harness starter
+package already carries the skills. `skills_install()` remains available for
+manual maintenance or non-package setups, but it is not the default path.
 
-If the harness is not listed, check its current docs: prefer a context-injecting
-start hook if one exists; otherwise use its highest-priority always-on
-instructions file. Never fabricate a hook format you cannot confirm — fall back
-to the instructions file and tell the developer.
+## Stage 2 - Memory Repo: Ask Scaffold Vs Existing
 
-After installing, report exactly what was written and where, and whether it is a
-true hook (authoritative) or an instructions-file fallback.
+Do not assume the developer wants a fresh memory repo. Ask which case applies,
+unless a memory repo is already present and resolvable:
 
-If you installed a context-injecting start hook, tell the developer it activates
-on the **next** session start, not the current one (harnesses load session hooks
-at startup, and many snapshot them as a security measure). Ask them to restart so
-the hook takes effect, and confirm on the next session that the directive appears
-as injected context. This is a distinct restart from the post-`skills_install`
-one.
-
-## Stage 2 — Memory Repo: Ask Scaffold Vs Existing
-
-Do not assume the developer wants a fresh memory repo. Ask which case applies:
-
-1. **Scaffold a new memory repo** — they have no existing memory for this code
+1. **Scaffold a new memory repo** - they have no existing memory for this code
    repo. Run `c-00-initialize-memory-repo` (internal by default; external only if
-   they ask). Continue to Stage 3.
-2. **Use an existing memory repo** — they already have one. Clone/checkout it to
-   the resolved memory location, then adopt it as the ledgered baseline with
-   `c-10-adopt-memory-baseline`. Skip Stage 3 (its onboarding already exists).
+   the developer asks or the configured topology requires it). Continue to Stage
+   3.
+2. **Use an existing memory repo** - they already have one. Clone or checkout it
+   to the resolved memory location, then adopt it as the ledgered baseline with
+   `c-10-adopt-memory-baseline`. Skip Stage 3 because its onboarding already
+   exists.
 
 Internal-memory note: pre-existing internal memory lives inside the code repo
-(`<repo>/ar-memory/`), so it is already present on checkout. That is the usual
-non-case — detect it via `c-08-ar-coordination-context-resolver` and skip the
-question when memory is already there.
+(`<repo>/ar-memory/`), so it is already present on checkout. Detect that through
+`c-08-ar-coordination-context-resolver` and skip the question when the memory
+layer is already there.
 
-## Stage 3 — Bootstrap (only when scaffolding new)
+## Stage 3 - Bootstrap
 
-If Stage 2 scaffolded a new memory repo, hand off to `c-03-repo-bootstrap` to
-generate the initial onboarding (a thin root `overview.md` is enough to start;
-deeper onboarding grows as work touches new areas).
+Run this stage only when Stage 2 scaffolded a new memory repo.
 
-Skip this stage when an existing memory repo was adopted in Stage 2.
+Hand off to `c-03-repo-bootstrap` to generate initial onboarding. A thin
+`overview.md` is enough to start; deeper route-local overviews and file-level
+onboarding should grow as work touches new areas.
 
-## Stage 4 — Configure Providers To Index
+Skip this stage when an existing memory repo was adopted.
 
-`runtime_install` builds the provider runtimes (containers) but they index
-**nothing** until they are pointed at repos and their watchers run. Make the
-configured providers start indexing the code and its memory:
+## Stage 4 - Configure Providers To Index
 
-1. Confirm the target repo is in the MCP provider scope (it is the `repo_id` in
-   the MCP settings; providers index the configured repos).
-2. Start the watchers: `provider_watchers(action="start")` — applies by default;
-   preview first with `provider_watchers(action="start", dry_run=true)`. Use
-   `action="refresh"` to re-seed an already-running provider after the repo or
-   memory changed.
-3. Verify with `provider_status` (or `context_packet(repo_id=..., include_providers=true)`)
-   that each provider is `ready`, its watcher is up, and it targets the repo. Use
-   `provider_diagnostics` for raw detail when a provider is degraded.
+If providers are enabled, make them index the configured code and memory:
 
-Both providers should cover the work surface: code-relationship search
-(CodeGraphContext) over the code repo, and semantic-memory search (grepai) over
-the memory/onboarding. If a provider reports stopped/degraded, report that state
-and the recovery action rather than treating setup as complete.
+1. Confirm the target repo is in MCP provider scope.
+2. Start watchers:
+
+   ```text
+   provider_watchers(action="start")
+   ```
+
+   Use `provider_watchers(action="start", dry_run=true)` only when a preview is
+   requested or workflow policy requires one. Use `action="refresh"` to reseed
+   providers after repo or memory changes.
+3. Verify with `provider_status` or
+   `context_packet(repo_id=..., include_providers=true)` that providers are
+   `ready`, watchers are up, and the target repo is covered.
+4. Use `provider_diagnostics` when a provider reports `stopped` or `degraded`.
+
+Providers are accelerators. If they are deferred, say that core by-path memory
+still works and list the provider recovery action separately.
 
 ## Report Result
 
-Summarize, per stage:
+Summarize:
 
-1. hook installed (harness + file/setting paths) or directive placed in which
-   instructions file, and whether it is authoritative or a degraded fallback;
-2. memory repo: scaffolded (internal/external) or existing-adopted, and the
+1. harness package: detected and left untouched, or missing with the exact copy
+   step the developer must perform;
+2. runtime scaffold: `runtime_install()` run or already current, with the
+   resolved coordination root;
+3. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
-3. bootstrap: run via the `c-03-repo-bootstrap` skill or skipped (existing memory);
-4. providers: which are indexing the code and memory, and any degraded state.
+4. bootstrap: run via `c-03-repo-bootstrap` or skipped;
+5. providers: indexing status and any deferred/degraded state.
 
-End by telling the developer the project is ready for normal work, or list the
-remaining manual step if a stage needed something only they can do. If you
-installed a context-injecting start hook this run, the final remaining step is
-the developer's: restart the harness so the hook activates on the next session.
+End by telling the developer whether the project is ready for normal work. Do
+not tell them to restart for hooks installed by this skill, because this skill no
+longer installs hooks.
 
 ## Boundaries
 
 1. This skill is guidance for the model; it adds no MCP tool and no hardcoded
    per-harness installer.
-2. It must not scaffold a memory repo without asking (Stage 2), and must not
-   assume the start hook is supported without checking the harness.
-3. It delegates memory init to the `c-00-initialize-memory-repo` skill, bootstrap to the `c-03-repo-bootstrap` skill, baseline adoption to
-   the `c-10-adopt-memory-baseline` skill, and context resolution to the `c-08-ar-coordination-context-resolver` skill.
-4. It must not fabricate a harness hook format; when unconfirmed, use the
-   instructions-file fallback and say so.
+2. It must not install, overwrite, or invent harness hooks, rules, instruction
+   files, skills, or MCP registration files during first-run setup.
+3. It must not call `skills_install()` as part of the package-based first-run
+   path. Mention it only as a maintenance/manual option.
+4. It must not scaffold a memory repo without asking unless memory already
+   exists and resolves cleanly.
+5. It delegates memory init to `c-00-initialize-memory-repo`, bootstrap to
+   `c-03-repo-bootstrap`, baseline adoption to
+   `c-10-adopt-memory-baseline`, and context resolution to
+   `c-08-ar-coordination-context-resolver`.

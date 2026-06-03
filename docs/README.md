@@ -4,7 +4,7 @@ Use this directory when the README is not enough. The root README explains the p
 
 ## Start Here
 
-- [Getting Started](getting-started.md) - the agent-driven setup path: wire the MCP with `uvx`, install the runtime and skills, then let `c-13-install-and-onboard` set up memory, onboarding, and providers.
+- [Getting Started](getting-started.md) - the agent-driven setup path: copy the harness starter package, wire the MCP with `uvx`, restart once, then let `c-13-install-and-onboard` run `runtime_install` and set up memory, onboarding, and providers.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
 - [Workflows](workflows.md) - the `l-01-session-job-lifecycle` lifecycle, its build modes, worktrees, and direct closeout.
