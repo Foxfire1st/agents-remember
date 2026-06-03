@@ -11,32 +11,33 @@ Source: [github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st
 
 Setup is agent-driven. Ask your agent to:
 
-1. **Install and wire Agents Remember MCP** — set it to run via
-   `uvx agents-remember-mcp --config <absolute-path>/agents-remember-settings.json`,
-   help you fill in that settings file (starter below), and register it with this
-   harness. **Place the settings file under your harness's registration folder in
-   an `mcp/` subdirectory** — e.g. `.claude/mcp/agents-remember-settings.json` for
-   Claude Code, `.codex/mcp/…` for Codex — not loose in the workspace root (see
-   [Settings file location](#settings-file-location) for why). **Then restart the
-   harness** so it loads the server.
-2. **Install the scaffolding, then the skills** — run the `runtime_install` MCP tool first
-   (it scaffolds the coordinator and, when providers are enabled and Docker is
-   running, builds the provider images), then the `skills_install` MCP tool (copies skills into
-   the harness skill folder). **Restart the harness again** so it discovers the
-   newly-installed skills. Order matters: scaffolding → skills → providers last
-   (see [Install order](#install-order-and-first-operations)).
-3. **Onboard your project** — run the `c-13-install-and-onboard` skill: it
-   pre-checks the setup, installs the start hook (or places the directive for
-   harnesses without one), sets up the memory repo (it will ask: scaffold a new
-   one or use an existing one), bootstraps onboarding, and **starts the providers
-   indexing last** (this is when indexing begins; image builds already happened in
-   step 2). If it installs a session-start hook, **restart once more** so the hook
-   activates — hooks are loaded at session start, not mid-session.
+1. **Copy the harness package** — Pick your harness guide under
+   [docs/install](https://github.com/Foxfire1st/agents-remember-md/tree/main/docs/install),
+   copy that harness's native starter files from the source repo into the
+   workspace, and replace every placeholder, including
+   `<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`. These
+   packages include the harness-visible skills, hooks/rules/instructions, and
+   MCP settings templates.
+2. **Wire the MCP server** — Register Agents Remember MCP with `uvx` and the
+   copied settings file:
 
-The hands-on steps for you: ask your agent for the steps above, **restart three
-times** (after step 1 so the harness loads the server, after step 2 so it
-discovers the installed skills, and after step 3 so a newly-installed session
-hook activates), and answer the new-vs-existing memory question in step 3.
+   ```text
+   uvx agents-remember-mcp@latest --config /absolute/path/to/agents-remember-settings.json
+   ```
+
+   Use the `agents-remember-settings.json` path from the copied harness package.
+   Then **restart the harness once** so it loads the MCP server, native skills,
+   and package hooks/rules/instructions.
+3. **Onboard your project** — Invoke the copied skill
+   `c-13-install-and-onboard`. It runs or verifies `runtime_install()`, asks
+   whether to scaffold a new memory repo or use an existing one, bootstraps
+   onboarding when needed, and starts provider indexing when providers are
+   enabled.
+
+That is the normal first-run path. `skills_install()` remains available as a
+maintenance/manual MCP tool, but the starter packages already provide the
+initial skills and harness files. Your only required first-run restart is after
+copying the harness package and wiring the MCP server.
 
 ## Requirements
 
@@ -117,24 +118,22 @@ reference:
 
 ### Settings file location
 
-Place the settings file under your **harness registration folder** (inside the
-workspace — `<workspace>/<harness-folder>/mcp/`) in an `mcp/` subdirectory. This is not cosmetic: the `skills_install` MCP tool infers where to install
-skills from the settings path — it uses the sibling `skills/` folder **only when
-the settings file's parent directory is named `mcp`**. Put the file elsewhere
-(e.g. loose in the workspace root) and the `skills_install` MCP tool has no target and fails.
+Place the settings file where the copied starter package expects it. Keep it
+under the harness registration folder, not loose in the workspace root and not
+inside `ar-coordination/`.
 
-| Harness | Put settings at | `skills_install` MCP tool then targets |
+| Harness | Starter package | Settings path after copy |
 | --- | --- | --- |
-| Claude Code | `.claude/mcp/agents-remember-settings.json` | `.claude/skills/` |
-| Codex | `.codex/mcp/agents-remember-settings.json` | `.codex/skills/` |
-| Cursor | `.cursor/mcp/…` (or `.agents/mcp/…`) | `.cursor/skills/` (or `.agents/skills/`) |
-| VS Code + Copilot | `.agents/mcp/agents-remember-settings.json` | `.agents/skills/` |
+| Claude Code | `.claude/` | `.claude/mcp/agents-remember-settings.json` |
+| Codex | `.codex/` | `.codex/mcp/agents-remember-settings.json` |
+| Cursor | `.cursor/` | `.cursor/mcp/agents-remember-settings.json` |
+| Antigravity | `.agents/` | `.agents/mcp/agents-remember-settings.json` |
+| VS Code + Copilot | `.github-vscode/` + `.vscode/` | `.vscode/mcp/agents-remember-settings.json` |
+| Hermes | `.hermes/` | `.hermes/mcp/agents-remember-settings.json` |
+| Pi.dev | `.pi/` | `.pi/mcp/agents-remember-settings.json` |
+| OpenClaw | `.openclaw/` | `.openclaw/mcp/agents-remember-settings.json` |
 
-Do **not** place the settings file at the workspace root or inside
-`ar-coordination/`. If your harness needs a non-standard layout you can set
-`harnessSkillRoot` explicitly in the settings — but point it at a folder the
-harness actually discovers (e.g. `.claude/skills`), or the skills install but
-never load. See your harness page under
+See your harness page under
 [docs/install/](https://github.com/Foxfire1st/agents-remember-md/tree/main/docs/install)
 for the exact registration folder.
 
@@ -155,9 +154,9 @@ installed console command) and the absolute settings path:
 ```
 
 After installing or changing the MCP server registration, restart the harness so
-it reloads the server and discovers the tool list. Register the server under the
-harness folder described in [Settings file location](#settings-file-location) so
-the `skills_install` MCP tool can infer the skill target.
+it reloads the server and discovers the tool list. Use the starter package for
+your harness whenever possible; it already carries the matching skills,
+hooks/rules/instructions, and settings template.
 
 ### Per-harness setup pages
 
@@ -175,49 +174,45 @@ page, don't guess:
 | Pi.dev | [docs/install/pi.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/pi.md) |
 | OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/openclaw.md) |
 
-**One flat folder per skill.** The `skills_install` MCP tool copies the packaged skills —
-already flat — into the skill root, so each lands at `<skill-root>/<name>/`
-(matching the skill's lowercase frontmatter `name`). There is no layout option.
-If your harness discovers skills somewhere other than `<harness-root>/skills/`,
-set `harnessSkillRoot` explicitly (see your harness page).
+**One flat folder per skill.** The copied starter package already includes the
+skills in the harness-native skill root. `skills_install()` remains available for
+manual maintenance and non-package setups; it copies packaged skills into a
+skill root as `<skill-root>/<name>/` (matching the skill's lowercase frontmatter
+`name`).
 
 ## Install Order And First Operations
 
-Setup runs in a strict order: **scaffolding → skills → providers last.** Preview
-each step with `dry_run=true` before applying (`dry_run=false`, the default).
+With starter packages, the strict first-run order is **package + MCP wiring →
+one harness restart → runtime and onboarding**.
 
 ```text
 server_info()                      # confirm resolved roots / allowed providers
 runtime_install(dry_run=true)      # preview, then apply:
 runtime_install(dry_run=false)     # scaffold coordinator; build provider images if enabled
-skills_install(dry_run=true)       # preview
-skills_install(dry_run=false)      # copy skills into the harness skill folder
-# --- restart the harness here so it discovers the installed skills ---
 context_packet(repo_id="<repo-id>", include_providers=true)
 ```
 
-Then run the installed `c-13-install-and-onboard` skill (Quickstart step 3): it
-sets up the memory repo, installs the start hook, bootstraps onboarding, and
-**starts the providers indexing** (`provider_watchers(action="start")`).
+The copied `c-13-install-and-onboard` skill owns this post-restart phase. It
+runs or verifies `runtime_install()`, sets up the memory repo, bootstraps
+onboarding, and **starts provider indexing** (`provider_watchers(action="start")`)
+when providers are enabled.
 
 Why this order:
 
-1. **Scaffolding first.** The `runtime_install` MCP tool creates the coordinator directory and
-   records a provider-runner integrity manifest. Provider operations check that
-   manifest, so the `provider_watchers` MCP tool runs **before** the `runtime_install` MCP tool fails fast
-   with `runnerIntegrityFailed`.
-2. **Skills second**, so the `c-13-install-and-onboard` skill and the rest are available for the final step.
-   (Most harnesses only discover newly-installed skills after a restart.)
-   The `skills_install` MCP tool copies one flat folder per skill; there is no layout option.
+1. **Harness-native files first.** Skills, hooks/rules/instructions, and MCP
+   settings are loaded by the harness, so the copied starter package must be in
+   place before restart.
+2. **Runtime scaffolding after restart.** The MCP server must be loaded before
+   the agent can run `runtime_install()`. The runtime tool creates the
+   coordinator directory and records the provider-runner integrity manifest.
 3. **Providers last.** They are heavy (Docker, plus Ollama for grepai),
-   per-repo, and optional. Note the split: the `runtime_install` MCP tool *builds* provider
-   images during step 2 (with `install_provider_deps=true`, the default), but
-   indexing only *starts* in step 3 — so "providers last" means indexing, not
-   image builds. Pass `install_provider_deps=false` to refresh scaffold/docs
-   without rebuilding images or disturbing running watchers; pass `no_cache=true`
-   to force a from-scratch image rebuild (it otherwise skips images whose tag
-   already exists). If providers report `degraded`, check that Docker is running
-   and (for grepai) that the Ollama model pulled, then
+   per-repo, and optional. Note the split: `runtime_install()` builds provider
+   images when `install_provider_deps=true`, but indexing only starts later via
+   `c-13-install-and-onboard`. Pass `install_provider_deps=false` to refresh
+   scaffold/docs without rebuilding images or disturbing running watchers; pass
+   `no_cache=true` to force a from-scratch image rebuild (it otherwise skips
+   images whose tag already exists). If providers report `degraded`, check that
+   Docker is running and (for grepai) that the Ollama model pulled, then
    `provider_watchers(action="refresh")`; `provider_diagnostics()` shows the gap.
 
 ## Troubleshooting
