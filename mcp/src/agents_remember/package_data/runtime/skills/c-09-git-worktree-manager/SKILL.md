@@ -46,15 +46,26 @@ The intended order is:
 2. run the `c-02-memory-quality-control` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
 4. decide whether the work is a chat build, a `w-02-light-task-workflow` light task (or master + light sub-task series), or external workflow
-5. choose or review the task slug and workflow variables
-6. create the durable task wrapper when one is needed
-7. request the `worktree_start` MCP tool only after the task identity is stable and external memory is clean
+5. read the repository's `system/git-workflow.md` and identify the branch that
+   `worktree_integrate` would move; if that branch is protected, PR-gated, or
+   otherwise not directly landable, create or check out a pushable integration
+   branch from it first and use that integration branch as the worktree
+   `source_branch`
+6. choose or review the task slug and workflow variables
+7. create the durable task wrapper when one is needed
+8. request the `worktree_start` MCP tool only after the task identity is stable, the
+   correct landable `source_branch` is selected, and external memory is clean
 
 For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. The `c-09-git-worktree-manager` skill then places `contract.md` beside that `task.md` when worktrees are created.
 
 ## Start / Attach / Status
 
 The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
+
+The recorded `source_branch` is not merely the base branch. It is the branch
+that `worktree_integrate` will later fast-forward or replay into. For
+protected, PR-gated, or otherwise not-directly-landable flows, `source_branch`
+must be the pushable integration branch, not the protected target branch.
 
 When external memory is enabled, the `c-09-git-worktree-manager` skill validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. Missing external memory is not a `c-09-git-worktree-manager` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If no compatible memory state exists, the `c-09-git-worktree-manager` skill stops and reports the allowed human choices:
 
@@ -87,6 +98,10 @@ moved since task start.
 ## Integration
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
+
+Integration always lands into the recorded `source_branch`. It does not open a
+PR and it does not discover protected-branch policy on its own; that policy must
+be reflected in the branch choice made before `worktree_start`.
 
 Strategies:
 
