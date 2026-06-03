@@ -7,7 +7,13 @@ description: "Initialize or repair the Agents Remember memory root for a target 
 
 Create the minimal memory root required before onboarding or task workflows can use Agents Remember for a target repository.
 
-This skill initializes durable repo memory through MCP `memory_init`. It does not install the coordinator runtime, expose harness skills, create task worktrees, or generate onboarding content. Request MCP `runtime_install` for coordinator runtime installation, MCP `skills_install` for harness skill exposure, and `c-03-repo-bootstrap` after this scaffold exists when the developer wants onboarding content generated.
+This skill initializes durable repo memory through MCP `memory_init`. It does
+not install the coordinator runtime, expose harness skills, create task
+worktrees, or generate onboarding content. Request MCP `runtime_install` only
+when the coordinator runtime scaffold is missing or stale. Harness skill
+exposure for first-run setup comes from the copied starter package, not from
+this skill. Use `c-03-repo-bootstrap` after the memory scaffold exists when the
+developer wants onboarding content generated.
 
 Use `c-08-ar-coordination-context-resolver` to inspect an existing repository's active context. This skill creates or repairs missing memory scaffolding; it does not replace the `c-08-ar-coordination-context-resolver` skill as the normal resolver.
 
@@ -32,14 +38,15 @@ points:
 memory_init(repo_id="<repo-id>", dry_run=true, initialize_git=true)   # preview
 memory_init(repo_id="<repo-id>", initialize_git=true)                 # apply
 runtime_install(include_benchmarks=false, install_provider_deps=false)
-skills_install(overwrite=true)
 ```
 
 Use `memory_init` for creating or repairing the configured memory root for a
 repo. Use `runtime_install` only when the coordinator runtime scaffold itself is
-missing or stale. Use `skills_install` only when the registered harness skill
-root needs to be refreshed. The skill tree is instruction-only; installed and
-development workflows use the MCP/package route.
+missing or stale. Do not use `skills_install` as part of package-based first-run
+setup; copied starter packages already carry the harness skills. `skills_install`
+remains available only for manual maintenance or non-package installs. The skill
+tree is instruction-only; installed and development workflows use the
+MCP/package route.
 
 ## Safety Rules
 

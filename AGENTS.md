@@ -94,13 +94,18 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 
 ## Source Layout
 
+- `skills/` is the canonical skill source tree. Edit skills here first.
+- `scripts/sync-skills.py` copies root `skills/` into the MCP package-data copy
+  and all harness starter package skill folders. Run it after any skill edit.
 - `mcp/` contains the MCP server, tool surface, and package-owned runtime
   services.
-- `runtime/agents-md-files/` contains package-owned `AGENTS.md` templates for
-  the installed coordinator runtime.
-- `runtime/skills/` contains the package-owned skill source tree.
-- `runtime/system/defaults/` contains starter examples that initialization
-  skills may use when creating user-owned settings.
+- `mcp/src/agents_remember/package_data/runtime/agents-md-files/` contains
+  package-owned `AGENTS.md` templates for the installed coordinator runtime.
+- `mcp/src/agents_remember/package_data/runtime/skills/` is the generated
+  package-owned skill copy used by `runtime_install`.
+- `mcp/src/agents_remember/package_data/runtime/system/defaults/` contains
+  starter examples that initialization skills may use when creating user-owned
+  settings.
 - `README.md` documents the current user-facing install and usage model.
 - `roadmap/` contains future design notes, not active runtime behavior.
 
@@ -108,6 +113,8 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 
 - Keep this root `AGENTS.md` scoped to working on the source checkout.
 - Keep installed coordinator instructions in `runtime/agents-md-files/`.
+- Do not edit generated skill copies directly; edit root `skills/` and run
+  `python3 scripts/sync-skills.py`.
 - Keep user-specific behavior, project notes, and repo policy in the resolved
   memory layer, not in package-owned installed `AGENTS.md` templates.
 - Do not create, close out, integrate, push, or clean up worktrees without the

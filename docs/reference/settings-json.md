@@ -157,13 +157,15 @@ ids. It must be absolute.
 `transcriptRoot` is optional. If omitted, MCP logs default to
 `<coordinationRoot>/logs/mcp`.
 
-`harnessSkillRoot` is optional. By default, when the MCP settings file lives
-under `<registration-root>/mcp/`, `skills_install` copies packaged skills into
+`harnessSkillRoot` is optional. It is only needed for the `skills_install`
+maintenance/manual tool. By default, when the MCP settings file lives under
+`<registration-root>/mcp/`, `skills_install` copies packaged skills into
 `<registration-root>/skills/`. Set `harnessSkillRoot` only for non-standard
 harness layouts where the registration folder and skill folder are not siblings.
 When neither inference nor the override is available, the MCP server can still
 run, but `skills_install` refuses to install because the target root is not
-configured.
+configured. The package-based first-run path gets skills from the copied
+harness starter package and does not need this field.
 
 `repositories` is an allow-list keyed by repo id. The MCP server derives each
 code repository path from `workspaceRoot/<repo-id>` and each memory root from

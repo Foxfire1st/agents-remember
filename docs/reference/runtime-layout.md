@@ -1,11 +1,16 @@
 # Runtime Layout
 
-The source checkout packages runtime and benchmark assets under `mcp/src/agents_remember/package_data/`. The MCP `runtime_install` tool reconciles those assets into `ar-coordination/`.
+The source checkout keeps canonical skills at repository root and packages
+runtime and benchmark assets under `mcp/src/agents_remember/package_data/`. The
+MCP `runtime_install` tool reconciles those assets into `ar-coordination/`.
 
 ## Source Checkout
 
 ```text
 agents-remember-md/
+  skills/                         # canonical skill source tree
+  scripts/
+    sync-skills.py                # copies root skills into generated targets
   mcp/
     src/agents_remember/
       install/
@@ -20,7 +25,7 @@ agents-remember-md/
             requirements/
             patches/
           skills/
-            c-00-initialize-memory-repo/   # ... flat core skills (c-00-initialize-memory-repo through c-13-install-and-onboard)
+            c-00-initialize-memory-repo/   # generated copy of root skills/
             l-01-session-job-lifecycle/
             w-02-light-task-workflow/
           system/defaults/examples/
@@ -28,6 +33,10 @@ agents-remember-md/
       providers/
       mcp/
 ```
+
+Edit `skills/` directly. Do not edit the generated skill copies in
+`mcp/src/agents_remember/package_data/runtime/skills/` or the harness starter
+packages by hand; run `python3 scripts/sync-skills.py` after root skill edits.
 
 ## Installed Runtime
 
@@ -122,7 +131,11 @@ Each generated benchmark case workspace has one shared code checkout area under 
 
 ## Skill Install Contract
 
-`skills_install` copies the packaged skills into a harness skill root. It is MCP-owned and does not create symlinks. The packaged skills are flat (one folder per skill), so each is copied directly:
+`skills_install` copies the packaged skills into a harness skill root for
+maintenance/manual and non-package installs. It is MCP-owned and does not create
+symlinks. The package-based first-run path gets these skills from the copied
+harness starter package instead. The packaged skills are flat (one folder per
+skill), so each is copied directly:
 
 ```text
 <install-root>/<skill-name>/

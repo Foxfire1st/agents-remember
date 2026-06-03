@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python3 .github/hooks/agents-remember-session-start.py",
+        "windows": "py -3 .github\\hooks\\agents-remember-session-start.py",
+        "linux": "python3 .github/hooks/agents-remember-session-start.py",
+        "osx": "python3 .github/hooks/agents-remember-session-start.py",
+        "timeout": 60
+      }
+    ]
+  }
+}

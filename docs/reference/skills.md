@@ -6,11 +6,21 @@ Installed skills live under:
 ar-coordination/skills/
 ```
 
-The source copies live under:
+The canonical source copies live under:
 
 ```text
-agents-remember-md/mcp/src/agents_remember/package_data/runtime/skills/
+agents-remember-md/skills/
 ```
+
+After editing root `skills/`, run:
+
+```text
+python3 scripts/sync-skills.py
+```
+
+That refreshes the generated MCP package-data copy and every harness starter
+package skill folder. The pre-push hook runs
+`python3 scripts/sync-skills.py --check` so unsynced copies fail before push.
 
 ## Lifecycle And Workflow Skills
 
@@ -34,11 +44,14 @@ agents-remember-md/mcp/src/agents_remember/package_data/runtime/skills/
 | `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding into the first ledgered baseline. |
 | `c-11-memory-carryover-from-branch` | Carry richer memory forward after matching code lands. |
 | `c-12-closeout` | Own the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks. |
-| `c-13-install-and-onboard` | Lead first-run setup: preflight checks, start hook (or instruction placement), memory repo, onboarding bootstrap, and provider indexing. |
+| `c-13-install-and-onboard` | Lead package-based first-run setup after the harness starter package and MCP server are wired: preflight checks, `runtime_install`, memory repo, onboarding bootstrap, and provider indexing. |
 
 ## Installing Skills Into Harnesses
 
-Use:
+The normal first-run path does **not** use this section. Copy the harness starter
+package instead; it already contains the skill folders each harness discovers.
+
+For manual maintenance or non-package installs, use:
 
 ```text
 skills_install()
@@ -52,4 +65,6 @@ harness layouts.
 The packaged skills are flat (one folder per skill), so each installs as
 `<registration-root>/skills/<skill-name>/` named by its lowercase frontmatter name.
 
-Do not copy individual skill folders by hand. The MCP tool copies the packaged skill tree consistently, including sibling files and shared helper modules.
+Do not copy individual skill folders by hand for a maintenance install. The MCP
+tool copies the packaged skill tree consistently, including sibling files and
+shared helper modules.

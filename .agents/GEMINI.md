@@ -1,0 +1,13 @@
+# Antigravity Workspace Instructions
+
+MANDATORY FIRST ACTION for this workspace:
+
+You are not allowed to read, write, or execute code on any repository until you
+read `<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md` and started its
+`l-01` procedure.
+
+Read and follow `<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md`
+before working in any sibling project.
+Treat those rules as workspace instructions.
+
+@<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md

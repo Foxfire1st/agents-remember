@@ -1,12 +1,26 @@
 # Install Guides
 
-These pages explain how to expose the installed Agents Remember runtime to specific agent harnesses.
+These pages explain how to copy the Agents Remember starter package for each
+agent harness.
 
-Configure the Agents Remember MCP server first, then install the runtime:
+The normal first-run path is:
 
-```text
-runtime_install()
-```
+1. Copy the harness-native package files from this repo into your workspace.
+2. Replace every placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
+   `<YOUR_REPOSITORY_FOLDER_NAME>`.
+3. Register the Agents Remember MCP server, usually:
+
+   ```text
+   uvx agents-remember-mcp@latest --config <absolute path to agents-remember-settings.json>
+   ```
+
+4. Restart the harness once.
+5. Invoke `c-13-install-and-onboard`; it runs or verifies `runtime_install()` and
+   then handles memory, onboarding, and providers.
+
+Initial skills and hooks/rules/instructions come from the copied package. Do not
+run `skills_install()` for first-run setup; that MCP tool remains available for
+manual maintenance and non-package installs.
 
 Then choose the guide for your tool:
 

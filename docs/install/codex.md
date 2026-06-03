@@ -2,12 +2,50 @@
 
 Codex needs two things:
 
-1. workspace instructions through `AGENTS.md`
-2. skills exposed in a Codex-visible skills folder such as `.codex/skills` or `~/.codex/skills`
+1. the Agents Remember MCP server in Codex config
+2. Codex-visible skills and startup instructions from the `.codex/` starter package
+
+Official references:
+
+- [Codex configuration reference](https://developers.openai.com/codex/config-reference)
+- [Codex MCP](https://developers.openai.com/codex/mcp)
+- [Codex hooks](https://developers.openai.com/codex/hooks)
+- [Codex agent skills](https://developers.openai.com/codex/skills)
+- [Codex AGENTS.md instructions](https://developers.openai.com/codex/guides/agents-md)
+
+## Root Starter Package
+
+The repository includes a Codex starter package at `.codex/`. Copy that folder
+to your workspace root, replace every placeholder, including
+`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, then
+restart Codex once.
+
+The package contains:
+
+- `.codex/config.toml` - MCP registration and `SessionStart` hook registration.
+- `.codex/hooks/agents-remember-session-start.*` - startup directive emitted as
+  session context.
+- `.codex/mcp/agents-remember-settings.json` - Agents Remember MCP authority
+  settings.
+- `.codex/skills/` - Agents Remember skills in Codex's project skill root.
+
+After the restart, invoke:
+
+```text
+c-13-install-and-onboard
+```
+
+That skill runs or verifies `runtime_install()` and then handles memory,
+onboarding, and providers.
 
 ## Workspace Instructions
 
-At the root of the projects folder, create `AGENTS.md`:
+Do not overwrite a repository's root `AGENTS.md` just to wire Agents Remember;
+root `AGENTS.md` is project-specific. Codex can read `AGENTS.md` when a project
+already owns one, but the starter package uses the copied `SessionStart` hook as
+the first-run instruction surface.
+
+The hook emits this directive:
 
 ```markdown
 # Workspace Agent Instructions
@@ -20,28 +58,17 @@ Treat these rules as workspace instructions!
 
 Use an absolute path in the `@...` include when the coordination runtime is outside the workspace.
 
-Codex also supports a Claude-style `SessionStart` hook, and `c-13-install-and-onboard` installs one when you let it (more authoritative than the `AGENTS.md` import). If it installs a hook, restart Codex afterward — a newly-added session hook only takes effect on the **next** session.
+The starter package already includes the Codex `SessionStart` hook. `c-13-install-and-onboard`
+does not install hooks during first-run setup.
 
 ## Skills
 
-Install the runtime first through the MCP server:
+The copied starter package already includes one flat folder per skill under
+`.codex/skills/`:
 
 ```text
-runtime_install()
+.codex/skills/<skill-name>/
 ```
 
-Place the MCP settings under the Codex registration folder, such as
-`.codex/mcp/`. The skill target is inferred as the sibling `.codex/skills/`
-folder. Then install the packaged skills:
-
-```text
-skills_install()
-```
-
-This copies one flat folder per skill into `.codex/skills/`:
-
-```text
-<install-root>/<skill-name>/
-```
-
-That keeps the harness pointed at MCP-installed skills instead of ad hoc copied source folders.
+Do not run `skills_install()` for first-run setup. It remains available for
+manual maintenance and non-package installs.

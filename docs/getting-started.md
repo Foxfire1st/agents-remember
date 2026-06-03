@@ -8,21 +8,34 @@ Setup is agent-driven. Once the MCP server is wired in, you ask your agent to do
 
 Ask your agent to:
 
-1. **Wire the MCP server** — Register Agents Remember MCP with this harness using `uvx`, help you author the settings file, then **restart the harness** so it loads the server.
-2. **Install Agents Remember** — Run `runtime_install`, then `skills_install` (scaffolding, skills, and provider images when providers are enabled).
-3. **Onboard your project** — Run `c-13-install-and-onboard`. It pre-checks the setup, installs the start hook (or places the directive for harnesses without one), sets up the memory repo (it asks: scaffold a new one or use an existing one), bootstraps onboarding, and starts the providers indexing.
+1. **Copy the harness package** — Use the install guide for your harness and copy
+   its native starter files from this repo into the workspace. Replace every
+   placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
+   `<YOUR_REPOSITORY_FOLDER_NAME>`.
+2. **Wire the MCP server** — Register Agents Remember MCP with this harness using
+   `uvx` and the copied `agents-remember-settings.json`, then **restart the
+   harness once** so it loads the MCP server, skills, hooks/rules/instructions,
+   and settings from the package.
+3. **Onboard your project** — Invoke `c-13-install-and-onboard`. It pre-checks
+   setup, runs or verifies `runtime_install()`, sets up the memory repo (it asks:
+   scaffold a new one or use an existing one), bootstraps onboarding, and starts
+   provider indexing.
 
-Your only hands-on steps are a few harness restarts (see [Restart Points](#restart-points)); between them, the agent does the work.
+Your only required restart in the package-based first-run path is after copying
+the harness package and wiring the MCP server.
 
 ## Restart Points
 
-Setup is agent-driven, but a few steps need **you** to restart the harness so it reloads. This is the canonical list:
+Setup is agent-driven, but the harness must restart once after package and MCP
+wiring so it can load new skills, settings, hooks/rules/instructions, and MCP
+tools:
 
 | Step | Why restart? | Required? |
 | --- | --- | --- |
-| After MCP registration | The harness loads the MCP server and its tool list. | Yes |
-| After `skills_install()` | The harness discovers the newly installed skills. | Usually yes; some harnesses hot-reload. |
-| After `c-13-install-and-onboard` installs a session-start hook | Hooks load at session start, not mid-session. | Only for harnesses that use a start hook. |
+| After copying the harness package and registering MCP | The harness loads the MCP server, copied skills, hooks/rules/instructions, and settings. | Yes |
+
+`c-13-install-and-onboard` does not install hooks or skills, so it does not add
+another restart point.
 
 ## Example Workspace
 
@@ -35,6 +48,32 @@ projects/
 ```
 
 `agents-remember-md` is the source checkout. `ar-coordination` is the installed runtime and local coordination area. `my-app` is the repository you want agents to work on.
+
+## Copy The Harness Package
+
+Different tools discover instructions, hooks, MCP settings, and skills in
+different native locations. Use the install page for your harness, copy its
+starter package into the workspace, and replace every placeholder:
+
+| Harness | Setup guide |
+| --- | --- |
+| Codex | [install/codex.md](install/codex.md) |
+| Claude Code | [install/claude-code.md](install/claude-code.md) |
+| Cursor | [install/cursor.md](install/cursor.md) |
+| Antigravity | [install/antigravity.md](install/antigravity.md) |
+| VS Code + GitHub Copilot | [install/vscode-copilot.md](install/vscode-copilot.md) |
+| Hermes.md | [install/hermes.md](install/hermes.md) |
+| Pi.dev | [install/pi.md](install/pi.md) |
+| OpenClaw | [install/openclaw.md](install/openclaw.md) |
+
+The starter packages are intentionally copy-pasteable. They carry the initial
+skills and harness-native hooks/rules/instructions, so first-run setup does not
+need `skills_install()` or a harness-specific hook installer.
+
+In the copied `agents-remember-settings.json`, replace
+`<YOUR_REPOSITORY_FOLDER_NAME>` with the folder name of the repository the agent
+should be allowed to work on. Add more repository keys only when you intentionally
+want the MCP server to cover more checkouts.
 
 ## Manual Wire Of The MCP Server
 
@@ -68,11 +107,20 @@ A minimal starter `agents-remember-settings.json`:
 }
 ```
 
-The settings file must be absolute and must live **outside** the `ar-coordination/` runtime folder. See the [settings.json reference](reference/settings-json.md) for every field. After registering or changing the server, **restart the harness** so it discovers the tool list.
+The settings file must be absolute and must live **outside** the
+`ar-coordination/` runtime folder. See the [settings.json reference](reference/settings-json.md)
+for every field. After registering or changing the server, **restart the
+harness** so it discovers the MCP tool list and the copied starter package.
 
-## Install The Runtime
+## Run c-13 And Install The Runtime
 
-With the server loaded, request:
+After the restart, invoke the copied skill:
+
+```text
+c-13-install-and-onboard
+```
+
+The skill first runs or verifies:
 
 ```text
 runtime_install()
@@ -84,58 +132,15 @@ When providers are enabled in the settings, `runtime_install` also builds or pul
 
 Benchmark fixtures are optional and not installed by default. Install or refresh them with `runtime_install(include_benchmarks=true)`. The benchmark package is idempotent and preserves local outputs under `ar-coordination/benchmarks/user-runs/`.
 
-## Choose Your Agent
+## Skills And Hooks
 
-Different tools discover instructions and skills differently. Use the install page for your harness:
+The package-based first-run path gets skills and hooks/rules/instructions from
+the copied harness starter package. Do not run `skills_install()` for initial
+setup.
 
-| Harness | Setup guide |
-| --- | --- |
-| Codex | [docs/install/codex.md](docs/install/codex.md) |
-| Claude Code | [docs/install/claude-code.md](docs/install/claude-code.md) |
-| Cursor | [docs/install/cursor.md](docs/install/cursor.md) |
-| Antigravity | [docs/install/antigravity.md](docs/install/antigravity.md) |
-| VS Code + GitHub Copilot | [docs/install/vscode-copilot.md](docs/install/vscode-copilot.md) |
-| Hermes.md | [docs/install/hermes.md](docs/install/hermes.md) |
-| Pi.dev | [docs/install/pi.md](docs/install/pi.md) |
-| OpenClaw | [docs/install/openclaw.md](docs/install/openclaw.md) |
-
-## Expose Skills To Your Harness
-
-Some agent tools read skills from a folder in the workspace; others require skills in a specific registration folder. Use the MCP `skills_install` tool instead of copying skill folders by hand:
-
-```text
-skills_install()
-```
-
-The install target is normally inferred from the MCP settings location: settings under `<registration-root>/mcp/<settings>.json` install into `<registration-root>/skills/`. The packaged skills are already flat, so `skills_install()` copies one folder per skill — each named for the skill's lowercase frontmatter `name`:
-
-```text
-.codex/skills/<skill-name>/
-```
-
-There is no layout option. If your harness discovers skills somewhere other than `<registration-root>/skills/`, set `harnessSkillRoot` explicitly in the MCP settings.
-
-See the harness-specific pages under [install](install/README.md) for exact locations, and the [Skills reference](reference/skills.md) for the full skill list.
-
-## Install The Hook Or Workspace Instructions
-
-Agents Remember works best when its coordinator directive is loaded authoritatively at the start of every session. `c-13-install-and-onboard` does this for you, choosing per harness:
-
-- **Harnesses with a session/chat start hook** (Claude Code, Codex, Pi.dev, Antigravity, OpenClaw) — install a start hook that injects `ar-coordination/AGENTS.md` as authoritative context. Start hooks are first-class here because instruction-following is far more reliable when the directive is injected than when it merely sits in an optional import.
-- **Harnesses without a start hook** (Cursor, GitHub Copilot, Hermes) — place the directive in the harness's native instruction location (a Cursor project rule, a Copilot instructions file, Hermes priority context).
-
-If you set this up by hand instead, the workspace-root instruction file most harnesses read is `AGENTS.md`:
-
-```markdown
-# Workspace Agent Instructions
-
-Read and follow `ar-coordination/AGENTS.md` before working in any sibling project.
-Treat these rules as workspace instructions!
-
-@ar-coordination/AGENTS.md
-```
-
-For Claude Code specifically, prefer the SessionStart hook so the directive is authoritative; a `CLAUDE.md` import works only as a degraded optional fallback. See [Install for Claude Code](install/claude-code.md) and the other [install pages](install/README.md).
+`skills_install()` remains available as a maintenance/manual MCP tool for
+non-package setups or later refreshes. See the [MCP tool reference](reference/mcp-tools.md)
+for that capability; it is not part of the quickstart.
 
 ## Set Up Memory
 
