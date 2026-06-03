@@ -3,68 +3,101 @@
 One shared spine carries every session. The job type (see `job-variants.md`) only tunes the opening
 move, the retrieval lean, and the `decide` default — it never adds or removes phases.
 
+The front half is a developer/model collaboration loop. The developer states
+the request and remains the state authority for whether the model's reframe
+is correct. The model owns interpretation, evidence gathering, synthesis,
+and reporting. MCP tools and onboarding provide auditable proof points that
+the model did the required grounding before moving on.
+
 ```
-0 Orient -> 1 Ground -> 2 Frame -> 3 Decide -> 4 Build -> 5 Close
-                                        |
-                                        +-- read-only exit (no worktree, no closeout)
+0 Request -> 1 Trust Checkpoint -> 2 Reframe + Research -> 3 Decide -> 4 Build -> 5 Close
+                                                   |
+                                                   +-- research-only (e.g. investigation, code questions...)
 ```
 
 ---
 
-## 0 — Orient
+## 0 — Request
 
-Establish the ground truth before reasoning about the work.
+Receive the developer's raw request and identify the active repository.
 
-1. Resolve coordination/memory context with `c-08-ar-coordination-context-resolver` for the inferred
-   code repository (ask the developer if the target is unclear).
-2. Pull `context_packet(repo_id=..., include_providers=true)` once. Read two things from it:
-   - **onboarding freshness** — whether onboarding has drifted from the code since last verified;
-   - **provider readiness** — whether the semantic (grepai) and relationship (cgc) providers are up.
-3. If providers are stopped or degraded, surface that now and use the matching provider/runtime
-   operations rather than discovering it mid-task.
+1. Treat the developer's statement as raw input, not yet as an implementation plan.
+2. Infer the target code repository from the request and local context. Ask the
+   developer if the target is unclear.
 
-Orient is a read; it changes nothing.
+Request intake changes nothing. It only establishes which repository the next
+checkpoint must inspect.
 
 ---
 
-## 1 — Ground
+## 1 — Trust Checkpoint
 
-Build a trustworthy picture of current state from committed memory.
+Establish whether memory and providers are trustworthy enough to use.
 
-1. Run `c-02-memory-quality-control` **once** for the repository as the task-start drift gate. Apply
-   its clean-source vs dirty-source classification:
-   - Do **not** plan against clean-source **drifted**, **missing-verification**, or **orphaned**
-     pre-existing onboarding until those approved update candidates have been refreshed through
-     `c-05-create-or-update-onboarding-files`.
-   - **Leave dirty-source drift alone** as active work-in-progress unless the developer explicitly
-     takes ownership of it in this job.
-   - Do not re-trigger this gate later just because this job goes on to create or modify files.
-2. Read **committed-state** onboarding for the in-scope anchors. A file that is dirty in another chat
-   is still valid for HEAD and *more* worth comparing — read it; do not treat its drift as a
-   maintenance target. (Dirty ≠ ignore.)
+1. For the target repository, resolve coordination/memory context with
+   the MCP tool call:
+
+   ```text
+   context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true)
+   ```
+
+2. Report the packet facts before relying on memory or providers:
+   - repository, branch, and dirty state
+   - memory root and onboarding root
+   - provider state
+   - drift status and actionable drift count
+3. If onboarding for committed source is drifted, missing verification, or
+   orphaned, and the corresponding source file is not dirty in the code
+   worktree, stop and ask the developer whether to refresh it through
+   `c-05-create-or-update-onboarding-files` before proceeding or to continue
+   with that onboarding explicitly marked untrusted.
+4. If drift is tied to dirty source, report it as active work-in-progress. Do
+   not adopt it as maintenance or silently trust it as current state unless the
+   developer explicitly says this job owns it.
+5. If providers are stopped or degraded, use the matching MCP provider/runtime
+   operations, then re-run the provider check. If providers are ready, report
+   readiness and continue. If issues persist report it to the developer and
+   wait for instructions.
+6. After the trust checkpoint passes, read committed-state onboarding for the
+   in-scope anchors as needed. A file dirty in another chat is still valid for
+   HEAD and worth comparing, but its dirty-source drift remains active work.
 
 ---
 
-## 2 — Frame
+## 2 — Reframe And Research
 
-Turn a developer statement into a defined piece of work. The `tasks/AGENTS.md` collaboration doctrine
-applies here, in plain chat, before any task file or format exists.
+Turn the developer's raw request into an agreed piece of work, then perform the
+deeper research that the agreed frame requires. The `tasks/AGENTS.md`
+collaboration doctrine applies here in plain chat, before any task file or task
+format exists.
 
-1. **Reframe** the request: find the true scope, surface what could break, expose hidden variables
-   through back-and-forth. Do not rush a statement into a plan.
-2. **Pull the evidence** the reframe needs through `c-04-retrieval-strategy-router`. Pick the strategy
-   by the question:
+1. **Gather evidence for the reframe** through reading the
+   `c-04-retrieval-strategy-router` skill. Pick the strategy by the question:
    - *Semantics* (grepai over onboarding) — "where does X live / what handles Y."
    - *Relationship* (cgc) — callers/callees/dependencies/impact.
    - *Intent* (onboarding + bounded source confirmation) — hidden contracts, invariants,
-     branch-valid truths, behavioral expectations. This is the modernized form of the retired chat
-     workflow's paired source+onboarding read: read the source file together with its verified onboarding, and
-     when this job already changed that pair after the gate, read the current working versions and
-     treat them as pending verification.
-3. Run the **job opening move** for the job lens (see `job-variants.md`) and name the **truth gaps**
-   that remain.
-4. Continue until the developer agrees the design is defined well enough to write down, then produce
-   the **plan**: the steps, and a **code example for every distinct change** you intend to make.
+     branch-valid truths, behavioral expectations. This is a workflow of paired
+     source+onboarding reads: read the source file together with its verified onboarding.
+     Use the memory-repo root overview.md file to gain a birds view of a code repo.
+2. **Reframe** the request through `tasks/AGENTS.md`: distinguish the surface
+   request, deeper objective, highest-leverage framing, assumptions, boundaries,
+   invariants, and truth gaps. Do not rush a statement into a plan.
+3. Present the reframe to the developer. If the developer disagrees, discuss and
+   revise the reframe. If the developer agrees, proceed to deeper research.
+4. **Perform deeper research** for the agreed frame. This research still uses
+   `c-04-retrieval-strategy-router`, but it is now scoped by the developer-agreed
+   frame rather than by the model's first guess.
+5. The deeper research report must list its proof:
+   - onboarding docs read
+   - semantic queries performed
+   - code graph queries performed
+   - source files inspected
+   - remaining truth gaps
+6. Run the **job opening move** for the job lens (see `job-variants.md`) and use
+   the deeper research to name the truth gaps that remain.
+7. Continue until the developer agrees the design is defined well enough to write
+   down, then produce the **plan**: the steps, and a **code example for every
+   distinct change** you intend to make.
 
 **Plan gate:** stop and wait for explicit developer approval before changing any code. No
 implementation begins before this approval.
@@ -75,8 +108,8 @@ implementation begins before this approval.
 
 One decision: does this job change code?
 
-- **No → read-only exit.** Deliver the answer/assessment. No worktree, no task artifact, no closeout.
-  A read-only job may recommend or spawn a follow-up build job; it does not perform one itself.
+- **No -> research-only exit.** Deliver the answer/assessment. No worktree, no task artifact, no closeout.
+  A research-only job may recommend or spawn a follow-up build job; it does not perform one itself.
 - **Yes → always a worktree.** Open it with `c-09-git-worktree-manager`. Then pick the build mode:
   - **Chat build** — small enough to carry inline this session: worktree-backed, **no** `task.md`.
   - **Durable task build** — hand off to `w-02-light-task-workflow`: `task.md`, checklist, decision
@@ -136,4 +169,4 @@ Land the work. **Implementation approval is not commit approval.**
    ledger maps that merge commit so the next worktree can base off the merged branch without a manual
    reconciliation. `system/git-workflow.md` owns this step.
 
-A read-only exit skips this phase entirely.
+A research-only exit skips this phase entirely.

@@ -1,6 +1,6 @@
 ---
 name: l-01-session-job-lifecycle
-description: "The session job lifecycle the coordinator routes every session into: orient -> ground -> frame -> decide build mode -> build -> close. Owns the read-only exit, the build-mode decision (chat build vs durable w-02-light-task-workflow task), and the job lens (bug/feature/triage/research). Supersedes the retired chat workflow by migrating and modernizing its doctrine."
+description: "The session job lifecycle the coordinator routes every session into: request -> context/trust checkpoint -> developer-agreed reframe -> deeper research -> decide build mode -> build -> close. Owns research-only exits, the build-mode decision (chat build vs durable w-02-light-task-workflow task), and the job lens (bug/feature/triage/research). Supersedes the retired chat workflow by migrating and modernizing its doctrine."
 ---
 
 # l-01-session-job-lifecycle Session Job Lifecycle
@@ -8,16 +8,23 @@ description: "The session job lifecycle the coordinator routes every session int
 The `l-01-session-job-lifecycle` skill is the **canvas** the coordinator routes into at the start of every session.
 It is not a task format. A task format is one outcome of a single step inside it.
 
-The lifecycle is one shared spine with thin per-job lenses:
+The lifecycle is one shared spine with thin per-job lenses. Its front half is a
+developer/model collaboration loop: the developer states the request, the model
+runs mandatory MCP grounding checks, the model presents an evidence-backed
+reframe, and the developer agrees or revises that reframe before deeper research
+or build-mode decisions proceed.
 
 ```
-0 Orient   pull context_packet — onboarding freshness + provider readiness (surface gotchas up front)
-1 Ground   read committed-state onboarding for the in-scope anchors (dirty != ignore)
-2 Frame    tasks-doctrine: reframe, pull evidence via the c-04-retrieval-strategy-router skill, expose truth gaps + run the job opening move
-3 Decide   changes code? no -> read-only exit · yes -> ALWAYS a c-09-git-worktree-manager worktree; then pick the build mode
+0 Request  developer states the request; model infers the target repo and reports ambiguity
+1 Trust    resolve via context_packet(include_providers=true, include_drift=true); handle drift and providers before relying on memory
+2 Frame    gather c-04 evidence, reframe through tasks/AGENTS.md, get developer agreement, then do deeper research with proof
+3 Decide   changes code? no -> research-only exit · yes -> ALWAYS a c-09-git-worktree-manager worktree; then pick the build mode
 4 Build    implement in the worktree; refresh onboarding per completed plan-section; checks green per commit
 5 Close    worktree closeout -> land per system/git-workflow.md -> cleanup -> c-11-memory-carryover-from-branch carryover (commit-gated)
 ```
+
+Research-only answers, investigations, and code questions can exit after the
+reframe/research phase without opening a worktree or entering closeout.
 
 ## Companion Files
 
@@ -28,7 +35,7 @@ The lifecycle is one shared spine with thin per-job lenses:
 
 Every session. The coordinator routes here first; classify the job as a lens during `frame`, not as a
 gate. The lifecycle owns the whole arc from a developer's first statement to a landed change (or a
-read-only answer). It does not replace the memory/core skills it calls (the `c-02-memory-quality-control`,
+research-only answer). It does not replace the memory/core skills it calls (the `c-02-memory-quality-control`,
 `c-04-retrieval-strategy-router`, `c-05-create-or-update-onboarding-files`, `c-08-ar-coordination-context-resolver`,
 `c-09-git-worktree-manager`, and `c-11-memory-carryover-from-branch` skills); it sequences them.
 
@@ -36,7 +43,7 @@ read-only answer). It does not replace the memory/core skills it calls (the `c-0
 
 Format routing is no longer a top-level choice. It is the `decide` step of this lifecycle:
 
-1. **Read-only exit** — the job answers a question or assesses something and changes no code. No
+1. **Research-only exit** — the job answers a question or assesses something and changes no code. No
    worktree, no task artifact, no closeout. May spawn a build job later.
 2. **Chat build** — a code change small enough to carry inline this session. Worktree-backed, **no
    durable task artifact**. (This path is the one the retired chat workflow used to own.)
@@ -50,26 +57,38 @@ repo's `system/git-workflow.md`.
 ## Invariants
 
 1. Every session enters the `l-01-session-job-lifecycle` skill; the job type is a lens, re-pickable, never a gate.
-2. `orient` runs `context_packet` once at the start so onboarding-freshness and provider-readiness are
-   known before any planning — no mid-task surprises.
-3. `ground` reads **committed-state** onboarding; a file dirty in another chat is still valid for HEAD
-   and *more* worth comparing — read it, do not adopt its drift as a maintenance target.
-4. Retrieval routes through `c-04-retrieval-strategy-router` (Semantics / Relationship / Intent), not a
+2. The model runs `context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true)`
+   before trusting onboarding, providers, task files, or source interpretation.
+3. Clean-source onboarding drift is a developer choice point: refresh through
+   `c-05-create-or-update-onboarding-files` before proceeding, or proceed with
+   that onboarding explicitly marked untrusted. Dirty-source drift is reported as
+   active work-in-progress and is not taken over unless the developer says so.
+4. Degraded providers are handled with the matching MCP provider/runtime
+   operations and then re-checked; ready providers are reported before evidence
+   gathering continues.
+5. Retrieval routes through `c-04-retrieval-strategy-router` (Semantics / Relationship / Intent), not a
    blanket "read all onboarding."
-5. `build => worktree`. `durable task => worktree + task.md`. `chat build => worktree, no artifact`.
-   `read-only => no worktree`.
-6. No implementation begins before explicit developer approval (the `frame` plan gate).
-7. Implementation approval is **not** commit approval. Closeout is a separate, explicit commit gate
+6. The model reframes the developer request through `tasks/AGENTS.md`, presents
+   the reframe, and waits for developer agreement or revision before deeper
+   research proceeds.
+7. Deeper research reports list the onboarding docs read, semantic queries,
+   code graph queries, source files inspected, and remaining truth gaps.
+8. `build => worktree`. `durable task => worktree + task.md`. `chat build => worktree, no artifact`.
+   `research-only => no worktree`.
+9. No implementation begins before explicit developer approval (the `frame` plan gate).
+10. Implementation approval is **not** commit approval. Closeout is a separate, explicit commit gate
    after a preview.
-8. Onboarding is refreshed **live, per completed plan-section** during `build`, never deferred to the
+11. Onboarding is refreshed **live, per completed plan-section** during `build`, never deferred to the
    end of the job.
-9. Checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` run green before **each** incremental commit; the
+12. Checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` run green before **each** incremental commit; the
    pre-commit/pre-push hooks enforce it.
-10. The agent never pushes a protected branch on its own authority; landing follows
+13. The agent never pushes a protected branch on its own authority; landing follows
     `system/git-workflow.md` and its gates.
-11. The `l-01-session-job-lifecycle` skill covers everything the retired chat workflow did — the `c-02-memory-quality-control` task-start gate, paired
-    source+onboarding reads, the approval gate, and `c-09-git-worktree-manager` closeout — plus the job lens and the
-    read-only exit. No regression of the default path.
+14. The `l-01-session-job-lifecycle` skill covers everything the retired chat
+    workflow did — task-start trust control, paired source+onboarding reads, the
+    approval gate, and `c-09-git-worktree-manager` closeout — plus the job lens,
+    developer-agreed reframe, proof-bearing research, and the research-only exit. No
+    regression of the default path.
 
 ## Relationship To Other Instructions
 

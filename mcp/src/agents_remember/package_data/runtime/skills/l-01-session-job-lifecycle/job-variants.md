@@ -13,7 +13,7 @@ things only:
 | `bug`      | reproduce the failure; prove the root cause     | Relationship (cgc) + Intent        | -> build                    |
 | `feature`  | clarify intent, scope, and explicit non-goals   | design doctrine + Intent           | -> build                    |
 | `triage`   | assess severity, blast radius, and ownership    | breadth scan (Semantics first)     | may exit (route or spawn)   |
-| `research` | state the question precisely                    | Semantics (grepai) + onboarding    | read-only exit              |
+| `research` | state the question precisely                    | Semantics (grepai) + onboarding    | research-only exit          |
 
 ## bug
 
@@ -31,7 +31,7 @@ contracts the feature must respect. Defaults to a build; size decides chat vs du
 ## triage
 
 Lead by assessing severity, blast radius, and ownership — enough to route, not to fix. A breadth scan
-(Semantics first) maps the surface fast. Triage frequently **exits read-only**: its product is a
+(Semantics first) maps the surface fast. Triage frequently **exits research-only**: its product is a
 recommendation, a routed owner, or a spawned build/bug job — not a code change. Only escalate to a
 build when triage itself is the cheapest place to fix it.
 
@@ -39,5 +39,5 @@ build when triage itself is the cheapest place to fix it.
 
 Lead by stating the question precisely. Semantics (grepai over onboarding) plus committed-state
 onboarding usually answers it; reach for source only as bounded Intent confirmation. Research
-**exits read-only** by design: it produces an answer, and may recommend a follow-up build job, but
+**exits research-only** by design: it produces an answer, and may recommend a follow-up build job, but
 performs none itself.
