@@ -1,0 +1,15 @@
+[mcp_servers.agents-remember]
+command = "uvx"
+args = [
+    "agents-remember-mcp@latest",
+    "--config",
+    "<PATH/TO/YOUR/PROJECTS_FOLDER>/.codex/mcp/agents-remember-settings.json"
+]
+
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "<PATH/TO/YOUR/PROJECTS_FOLDER>/.codex/hooks/agents-remember-session-start.py"
+timeout = 60
+statusMessage = "Loading Agents Remember workspace directive"
