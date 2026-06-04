@@ -29,7 +29,12 @@ export default function (pi) {
       "until you read `ar-coordination/AGENTS.md` and started its `l-01` procedure.",
       "",
       `Read and follow \`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` before working in any sibling project.`,
-      "Treat those rules as workspace instructions."
+      "Treat those rules as workspace instructions.",
+      "",
+      "During the `l-01` deep research step, keep a tally of the retrieval strategies",
+      "used from `c-04-retrieval-strategy-router` (Semantics, Relationship, Intent).",
+      "Include the onboarding files inspected and every CGC and GrepAI query made as",
+      "evidence."
     ].join("\n");
 
     return {
