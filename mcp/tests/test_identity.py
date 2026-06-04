@@ -1,11 +1,14 @@
-"""Tests for provider identity helpers (scoped name DNS-label bounding)."""
+"""Tests for provider identity helpers (scoped Docker/DNS-safe names)."""
 
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
 
 from agents_remember.providers.identity import (
     MAX_SCOPED_NAME,
+    provider_instance_id,
     scoped_name,
 )
 
@@ -40,3 +43,16 @@ class ScopedNameTests(unittest.TestCase):
         self.assertNotEqual(a, b)
         self.assertLessEqual(len(a), MAX_SCOPED_NAME)
         self.assertLessEqual(len(b), MAX_SCOPED_NAME)
+
+    def test_worktree_instance_id_replaces_dots_for_compose_project_names(self) -> None:
+        runtime_root = Path(
+            "/home/example/Projects/ar-coordination/worktrees/agents-remember-md/"
+            "release-mcp-2.3.3-ar/provider-runtime"
+        )
+
+        instance_id = provider_instance_id("worktree", runtime_root, workspace_name="Projects")
+        compose_project = scoped_name("agents-remember-grepai", instance_id)
+
+        self.assertEqual(instance_id, "projects-release-mcp-2-3-3-ar")
+        self.assertEqual(compose_project, "agents-remember-grepai-projects-release-mcp-2-3-3-ar")
+        self.assertRegex(compose_project, re.compile(r"^[a-z0-9][a-z0-9_-]*$"))

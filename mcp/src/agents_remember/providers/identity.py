@@ -14,7 +14,7 @@ MAX_SCOPED_NAME = 63
 
 def stable_slug(value: str, *, fallback: str = "instance") -> str:
     lowered = value.strip().lower()
-    slug = re.sub(r"[^a-z0-9._-]+", "-", lowered).strip(".-_")
+    slug = re.sub(r"[^a-z0-9_-]+", "-", lowered).strip("-_")
     return slug or fallback
 
 
