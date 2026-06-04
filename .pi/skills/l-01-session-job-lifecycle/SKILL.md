@@ -30,6 +30,7 @@ reframe/research phase without opening a worktree or entering closeout.
 
 1. `lifecycle.md` — the spine in detail: what each phase does, the doctrine it carries, and its gates.
 2. `job-variants.md` — the four thin job lenses (bug / feature / triage / research).
+3. `deep-research-report-template.md` — the reusable report and evidence-ledger shape for deeper research.
 
 ## When To Use
 
@@ -71,8 +72,8 @@ repo's `system/git-workflow.md`.
 6. The model reframes the developer request through `tasks/AGENTS.md`, presents
    the reframe, and waits for developer agreement or revision before deeper
    research proceeds.
-7. Deeper research reports list the onboarding docs read, semantic queries,
-   code graph queries, source files inspected, and remaining truth gaps.
+7. Deeper research reports use `deep-research-report-template.md` and list the onboarding docs read,
+   semantic queries, code graph queries, source files inspected, and remaining truth gaps.
 8. `build => worktree`. `durable task => worktree + task.md`. `chat build => worktree, no artifact`.
    `research-only => no worktree`.
 9. No implementation begins before explicit developer approval (the `frame` plan gate).
@@ -93,4 +94,5 @@ repo's `system/git-workflow.md`.
 ## Relationship To Other Instructions
 
 This skill extends the coordinator `AGENTS.md` and the repository memory layer; it does not replace
-them. Read `lifecycle.md` for phase behavior and `job-variants.md` for the per-job lenses.
+them. Read `lifecycle.md` for phase behavior, `job-variants.md` for the per-job lenses, and
+`deep-research-report-template.md` for the deeper research report shape.

@@ -86,8 +86,10 @@ format exists.
    revise the reframe. If the developer agrees, proceed to deeper research.
 4. **Perform deeper research** for the agreed frame. This research still uses
    `c-04-retrieval-strategy-router`, but it is now scoped by the developer-agreed
-   frame rather than by the model's first guess.
-5. The deeper research report must list its proof:
+   frame rather than by the model's first guess. Use
+   `deep-research-report-template.md` for the report shape; the lifecycle owns
+   the required proof categories, while the template owns evidence formatting.
+5. The deeper research report must list its proof and tie evidence to the claim it supports:
    - onboarding docs read
    - semantic queries performed
    - code graph queries performed
