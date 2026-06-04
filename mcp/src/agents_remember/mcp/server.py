@@ -92,15 +92,17 @@ def create_server(config: McpRuntimeConfig) -> Any:
         """Install/refresh the packaged coordinator runtime into the coordination root. Safe to
         re-run over an existing install.
 
-        PRESERVES user data: memory-repos/ (onboarding), providers/data/ (DBs, Ollama model,
-        FalkorDB graph), and providers/runners/. REPLACES managed scaffold: skills/, AGENTS.md
-        templates, and provider compose/docker/requirements ("shape"). Removes the legacy
-        scripts/ dir.
+        PRESERVES user data: memory-repos/ (onboarding) and providers/data/ (DBs, Ollama model,
+        FalkorDB graph). REPLACES managed scaffold: skills/, AGENTS.md templates, provider
+        compose/docker/requirements ("shape"), and with install_provider_deps=true may refresh
+        providers/runners/ after stopping watchers so containers rebind cleanly. Removes the
+        legacy scripts/ dir.
 
         With install_provider_deps=true (default) it also builds provider images, but SKIPS any
-        image whose tag already exists. Pass no_cache=true to force a true from-scratch rebuild
-        (bypasses that skip AND adds --no-cache to docker build). include_benchmarks=true also
-        installs benchmark fixtures. ALWAYS preview with dry_run=true first."""
+        image whose tag already exists, then starts/rechecks watchers without rebuilding indexes.
+        Pass no_cache=true to force a true from-scratch rebuild (bypasses that skip AND adds
+        --no-cache to docker build). include_benchmarks=true also installs benchmark fixtures.
+        ALWAYS preview with dry_run=true first."""
         return runtime_install_payload(
             config,
             dry_run=dry_run,

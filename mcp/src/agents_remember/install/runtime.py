@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import stat
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +14,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
+from agents_remember.install.provider_watchers import (
+    ProviderWatcherRebindReport,
+    complete_provider_watcher_rebind,
+    stop_provider_watchers_before_refresh,
+    write_temp_provider_settings,
+)
 from agents_remember.mcp.config import DEFAULT_PROVIDER_SETUP_SECONDS, McpRuntimeConfig
 from agents_remember.providers import lifecycle
 from agents_remember.providers.settings import lifecycle_settings_from_config
@@ -62,6 +67,7 @@ class InstallSummary:
     replaced_links: int = 0
     removed_paths: int = 0
     dependency_runs: int = 0
+    provider_watcher_rebind: ProviderWatcherRebindReport | None = None
 
     def report(self) -> str:
         return (
@@ -72,6 +78,11 @@ class InstallSummary:
             f"removed_paths={self.removed_paths} "
             f"dependency_runs={self.dependency_runs}"
         )
+
+    def provider_watcher_report(self) -> dict[str, Any] | None:
+        if self.provider_watcher_rebind is None:
+            return None
+        return self.provider_watcher_rebind.payload()
 
 
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
@@ -397,18 +408,6 @@ def install_provider_dependencies_from_settings(
     return results
 
 
-def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        delete=False,
-        suffix="-agents-remember-provider-settings.json",
-    ) as handle:
-        path = Path(handle.name)
-        json.dump(settings, handle, indent=2)
-    return path
-
-
 def install_runtime(
     source_root: Path,
     coordination_root: Path,
@@ -435,56 +434,95 @@ def install_runtime(
     )
     copy_tree(runtime_root / "skills", coordination_root / "skills", summary, dry_run)
     remove_path(coordination_root / "scripts", summary, dry_run)
+    provider_watcher_rebind = install_provider_deps and any_provider_enabled(provider_settings)
+    rebind_report: ProviderWatcherRebindReport | None = None
 
-    # Provider runtime scaffolding is disposable during a full reinstall. A
-    # dependency-skipped copy preserves live provider runner state so
-    # script/docs-only updates do not interrupt Docker-owned watchers. Host
-    # provider binaries and venvs are not managed runtime contracts.
-    # Durable provider data and logs are user-owned coordinator state and must
-    # not be removed by either install mode.
-    if install_provider_deps:
-        prune_tree(
-            runtime_root / "providers",
-            coordination_root / "providers",
-            summary,
-            dry_run,
-            preserve=PROVIDER_DATA_PATHS,
-        )
-        copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
-    else:
-        prune_tree(
-            runtime_root / "providers",
-            coordination_root / "providers",
-            summary,
-            dry_run,
-            preserve=PROVIDER_DEPENDENCY_PATHS | PROVIDER_DATA_PATHS,
-        )
-        copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
-
-    for source_rel, target_rel in AGENTS_MD_TARGETS.items():
-        copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)
-
-    for user_owned in (
-        "memory-repos",
-        "tasks",
-        "worktrees",
-        "notes",
-        "temp",
-        *PROVIDER_USER_DIRS,
-    ):
-        ensure_dir(coordination_root / user_owned, summary, dry_run)
-
-    if include_benchmarks:
-        install_benchmarks(source_root, coordination_root, summary, dry_run)
-
-    if install_provider_deps:
-        install_provider_dependencies(
+    if provider_watcher_rebind:
+        rebind_report = ProviderWatcherRebindReport()
+        summary.provider_watcher_rebind = rebind_report
+        stop_provider_watchers_before_refresh(
+            rebind_report,
             coordination_root,
             provider_settings,
-            summary,
-            dry_run,
-            provider_deps_timeout,
-            no_cache=no_cache,
+            dry_run=dry_run,
+            timeout=provider_deps_timeout,
+        )
+
+    try:
+        # Provider runtime scaffolding is disposable during a full reinstall. A
+        # dependency-skipped copy preserves live provider runner state so
+        # script/docs-only updates do not interrupt Docker-owned watchers. Host
+        # provider binaries and venvs are not managed runtime contracts.
+        # Durable provider data and logs are user-owned coordinator state and must
+        # not be removed by either install mode.
+        if install_provider_deps:
+            prune_tree(
+                runtime_root / "providers",
+                coordination_root / "providers",
+                summary,
+                dry_run,
+                preserve=PROVIDER_DATA_PATHS,
+            )
+            copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
+        else:
+            prune_tree(
+                runtime_root / "providers",
+                coordination_root / "providers",
+                summary,
+                dry_run,
+                preserve=PROVIDER_DEPENDENCY_PATHS | PROVIDER_DATA_PATHS,
+            )
+            copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
+
+        for source_rel, target_rel in AGENTS_MD_TARGETS.items():
+            copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)
+
+        for user_owned in (
+            "memory-repos",
+            "tasks",
+            "worktrees",
+            "notes",
+            "temp",
+            *PROVIDER_USER_DIRS,
+        ):
+            ensure_dir(coordination_root / user_owned, summary, dry_run)
+
+        if include_benchmarks:
+            install_benchmarks(source_root, coordination_root, summary, dry_run)
+
+        if install_provider_deps:
+            install_provider_dependencies(
+                coordination_root,
+                provider_settings,
+                summary,
+                dry_run,
+                provider_deps_timeout,
+                no_cache=no_cache,
+            )
+    except Exception as error:
+        if rebind_report is not None:
+            complete_provider_watcher_rebind(
+                rebind_report,
+                coordination_root,
+                provider_settings,
+                dry_run=dry_run,
+                timeout=provider_deps_timeout,
+            )
+            raise RuntimeError(
+                "runtime install failed after provider watchers were stopped; "
+                "attempted non-destructive watcher recovery. "
+                f"original error: {error}; provider watcher recovery: "
+                f"{json.dumps(summary.provider_watcher_report(), indent=2)}"
+            ) from error
+        raise
+
+    if rebind_report is not None:
+        complete_provider_watcher_rebind(
+            rebind_report,
+            coordination_root,
+            provider_settings,
+            dry_run=dry_run,
+            timeout=provider_deps_timeout,
         )
 
     return summary
@@ -527,8 +565,9 @@ def install_runtime_from_config(
                 provider_settings=provider_settings,
                 no_cache=no_cache,
             )
-    return {
-        "ok": True,
+    ok = summary.provider_watcher_rebind is None or summary.provider_watcher_rebind.ok is not False
+    payload = {
+        "ok": ok,
         "operation": "runtime_install",
         "dryRun": dry_run,
         "coordinationRoot": config.coordination_root.as_posix(),
@@ -543,3 +582,12 @@ def install_runtime_from_config(
             "dependencyRuns": summary.dependency_runs,
         },
     }
+    provider_watcher_report = summary.provider_watcher_report()
+    if provider_watcher_report is not None:
+        payload["providerWatcherRebind"] = provider_watcher_report
+    if summary.provider_watcher_rebind is not None:
+        if summary.provider_watcher_rebind.recovery_actions:
+            payload["recoveryActions"] = summary.provider_watcher_rebind.recovery_actions
+        if summary.provider_watcher_rebind.messages:
+            payload["messages"] = summary.provider_watcher_rebind.messages
+    return payload
