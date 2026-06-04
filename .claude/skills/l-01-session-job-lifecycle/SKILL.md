@@ -18,7 +18,7 @@ or build-mode decisions proceed.
 0 Request  developer states the request; model infers the target repo and reports ambiguity
 1 Trust    resolve via context_packet(include_providers=true, include_drift=true); handle drift and providers before relying on memory
 2 Frame    gather c-04 evidence, reframe through tasks/AGENTS.md, get developer agreement, then do deeper research with proof
-3 Decide   changes code? no -> research-only exit · yes -> ALWAYS a c-09-git-worktree-manager worktree; then pick the build mode
+3 Decide   changes code? no -> research-only exit · yes -> approve worktree intent, then c-09 worktree; pick build mode
 4 Build    implement in the worktree; refresh onboarding per completed plan-section; checks green per commit
 5 Close    worktree closeout -> land per system/git-workflow.md -> cleanup -> c-11-memory-carryover-from-branch carryover (commit-gated)
 ```
@@ -52,8 +52,10 @@ Format routing is no longer a top-level choice. It is the `decide` step of this 
    decision log, and proposed code examples. Escalate to a master + light sub-task series when the
    work outgrows a single-page plan.
 
-**Build always means a worktree.** The git-landing decision (direct vs PR-gated) is deferred to the
-repo's `system/git-workflow.md`.
+**Build always means a worktree.** Before `worktree_start`, read `c-09-git-worktree-manager`
+and the repo's `system/git-workflow.md`, present the worktree intent packet,
+and wait for explicit approval. The git-landing decision (direct vs PR-gated)
+is deferred to the repo's `system/git-workflow.md`.
 
 ## Invariants
 
@@ -76,16 +78,19 @@ repo's `system/git-workflow.md`.
    semantic queries, code graph queries, source files inspected, and remaining truth gaps.
 8. `build => worktree`. `durable task => worktree + task.md`. `chat build => worktree, no artifact`.
    `research-only => no worktree`.
-9. No implementation begins before explicit developer approval (the `frame` plan gate).
-10. Implementation approval is **not** commit approval. Closeout is a separate, explicit commit gate
+9. Before `worktree_start`, the model presents a worktree intent packet naming
+   repo, build mode, branch policy, source branch, work branch, memory mode,
+   landing path, and risks; the developer approves or revises it.
+10. No implementation begins before explicit developer approval (the `frame` plan gate).
+11. Implementation approval is **not** commit approval. Closeout is a separate, explicit commit gate
    after a preview.
-11. Onboarding is refreshed **live, per completed plan-section** during `build`, never deferred to the
+12. Onboarding is refreshed **live, per completed plan-section** during `build`, never deferred to the
    end of the job.
-12. Checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` run green before **each** incremental commit; the
+13. Checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` run green before **each** incremental commit; the
    pre-commit/pre-push hooks enforce it.
-13. The agent never pushes a protected branch on its own authority; landing follows
+14. The agent never pushes a protected branch on its own authority; landing follows
     `system/git-workflow.md` and its gates.
-14. The `l-01-session-job-lifecycle` skill covers everything the retired chat
+15. The `l-01-session-job-lifecycle` skill covers everything the retired chat
     workflow did — task-start trust control, paired source+onboarding reads, the
     approval gate, and `c-09-git-worktree-manager` closeout — plus the job lens,
     developer-agreed reframe, proof-bearing research, and the research-only exit. No
