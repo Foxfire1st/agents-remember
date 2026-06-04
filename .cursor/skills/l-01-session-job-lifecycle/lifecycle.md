@@ -112,11 +112,19 @@ One decision: does this job change code?
 
 - **No -> research-only exit.** Deliver the answer/assessment. No worktree, no task artifact, no closeout.
   A research-only job may recommend or spawn a follow-up build job; it does not perform one itself.
-- **Yes → always a worktree.** Open it with `c-09-git-worktree-manager`. Then pick the build mode:
+- **Yes -> worktree intent gate, then always a worktree.** Read `c-09-git-worktree-manager`
+  and `system/git-workflow.md`, present the worktree intent packet, and wait for
+  explicit developer approval before `worktree_start`. Then open it with
+  `c-09-git-worktree-manager` and pick the build mode:
   - **Chat build** — small enough to carry inline this session: worktree-backed, **no** `task.md`.
   - **Durable task build** — hand off to `w-02-light-task-workflow`: `task.md`, checklist, decision
     log, proposed code examples. Escalate to a master + light sub-task series when the work outgrows a
     single-page plan.
+
+The worktree intent packet names the target repo, build mode, discovered branch policy, proposed
+`source_branch`, proposed work branch/worktree name, memory mode, landing path, and material risks.
+On PR-gated repos, the packet must prove that the recorded `source_branch` is pushable and that
+protected targets are reached later through the repo's PR flow.
 
 Worktree granularity = the task unit: a single task gets its own worktree; a master multi-task gets
 **one** worktree for the whole series (never one per sub-task); a chat build gets its own worktree
@@ -159,9 +167,10 @@ Land the work. **Implementation approval is not commit approval.**
 3. On approval, the `c-09-git-worktree-manager` skill owns the external-memory invariant in order: commit code → refresh affected
    onboarding metadata to the new code commit → run memory quality control → commit memory content →
    update and commit the ledger.
-4. **Land** per `system/git-workflow.md`: on a PR-gated branch, push the work branch, open the PR,
-   wait for green checks, merge per the repo convention; never push a protected branch directly. The
-   agent does not push on its own authority.
+4. **Integrate + land** per `c-09-git-worktree-manager` and `system/git-workflow.md`: integrate the
+   worktree branch into the approved source/integration branch, then on a PR-gated repo push that
+   source branch, open the PR, wait for green checks, and merge per the repo convention. Never push a
+   protected branch directly. The agent does not push on its own authority.
 5. **Cleanup + carryover:** reclaim the worktree/provider stack and bring the parked memory home.
    When the worktree memory branch diverged or the code PR squash-merged, use
    `c-11-memory-carryover-from-branch`; when it is a clean linear descendant of main-memory, a

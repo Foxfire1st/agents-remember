@@ -52,9 +52,27 @@ The intended order is:
    branch from it first and use that integration branch as the worktree
    `source_branch`
 6. choose or review the task slug and workflow variables
-7. create the durable task wrapper when one is needed
-8. request the `worktree_start` MCP tool only after the task identity is stable, the
-   correct landable `source_branch` is selected, and external memory is clean
+7. present the **Worktree Intent Gate** and wait for explicit developer approval
+8. create the durable task wrapper when one is needed
+9. request the `worktree_start` MCP tool only after the task identity is stable, the
+   correct landable `source_branch` is selected, external memory is clean, and
+   the developer approved the intent packet
+
+The Worktree Intent Gate must name:
+
+1. target repo and build mode
+2. discovered branch policy from `system/git-workflow.md`
+3. proposed pushable `source_branch`
+4. proposed work branch and worktree name
+5. memory mode and memory branch behavior
+6. intended landing path from closeout through integration, PR/merge when needed,
+   cleanup, and memory carryover
+7. material risks, unusual choices, or unresolved branch-policy questions
+
+If the repo is PR-gated, the intent packet must make the protection boundary
+visible: the protected target is not the recorded `source_branch`; the recorded
+`source_branch` is the pushable integration branch that `worktree_integrate`
+will move before the branch is pushed for PR.
 
 For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. The `c-09-git-worktree-manager` skill then places `contract.md` beside that `task.md` when worktrees are created.
 
@@ -65,7 +83,8 @@ The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` c
 The recorded `source_branch` is not merely the base branch. It is the branch
 that `worktree_integrate` will later fast-forward or replay into. For
 protected, PR-gated, or otherwise not-directly-landable flows, `source_branch`
-must be the pushable integration branch, not the protected target branch.
+must be the developer-approved pushable integration branch, not the protected
+target branch.
 
 When external memory is enabled, the `c-09-git-worktree-manager` skill validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. Missing external memory is not a `c-09-git-worktree-manager` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If no compatible memory state exists, the `c-09-git-worktree-manager` skill stops and reports the allowed human choices:
 
@@ -126,6 +145,8 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 4. The `c-09-git-worktree-manager` skill must not use divergent memory as semi-trusted reference context.
 5. The `c-09-git-worktree-manager` skill must not bypass the `c-12-closeout` skill's explicit closeout approval gate.
 6. The `c-09-git-worktree-manager` skill must not create closeout commits outside the `c-12-closeout` skill's code-memory-ledger sequence.
-7. The `c-09-git-worktree-manager` skill must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
-8. The `c-09-git-worktree-manager` skill must not clean up without explicit cleanup approval.
-9. The `c-08-ar-coordination-context-resolver` skill remains the facts-only resolver; the `c-09-git-worktree-manager` skill owns worktree and lifecycle mutation.
+7. The `c-09-git-worktree-manager` skill must not call `worktree_start` until
+   the developer has approved the Worktree Intent Gate.
+8. The `c-09-git-worktree-manager` skill must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
+9. The `c-09-git-worktree-manager` skill must not clean up without explicit cleanup approval.
+10. The `c-08-ar-coordination-context-resolver` skill remains the facts-only resolver; the `c-09-git-worktree-manager` skill owns worktree and lifecycle mutation.
