@@ -29,6 +29,7 @@ from agents_remember.models.providers import (
 )
 from agents_remember.providers import lifecycle
 from agents_remember.providers.current_state import write_current_provider_state
+from agents_remember.providers.recovery import PROVIDER_WATCHER_RESTART_RECOVERY
 from agents_remember.providers.settings import write_lifecycle_settings
 
 
@@ -98,7 +99,7 @@ def provider_diagnostics_packet(
         currentState=projection.current_state,
         processNamespace=projection.process_namespace,
         items=_provider_diagnostics_items(config, projection)[:detail_limit],
-        recoveryActions=projection.recovery_actions or [],
+        recoveryActions=_provider_recovery_actions(projection),
         rawStatus=ProviderRawStatus.model_validate(projection.raw_status)
         if projection.raw_status
         else None,
@@ -128,7 +129,7 @@ def provider_summary(
             detail_limit=detail_limit,
             target_repo_id=target_repo_id,
         ),
-        recoveryActions=projection.recovery_actions or [],
+        recoveryActions=_provider_recovery_actions(projection),
     )
 
 
@@ -208,6 +209,20 @@ def _provider_summary_items(
                 )
             )
     return items[:detail_limit]
+
+
+def _provider_recovery_actions(projection: ProviderStatusProjection) -> list[dict[str, Any]]:
+    actions = list(projection.recovery_actions or [])
+    grepai_state = _current_provider_states(projection).get("grepai-memory", {})
+    if grepai_state.get("indexingState") == "noWorkspace":
+        actions.append(
+            {
+                "provider": "grepai-memory",
+                "action": "restart",
+                "recoveryAction": PROVIDER_WATCHER_RESTART_RECOVERY,
+            }
+        )
+    return actions
 
 
 def _provider_summary_item(

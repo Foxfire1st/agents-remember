@@ -9,6 +9,7 @@ from unittest.mock import patch
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.install import runtime as install_runtime
 from agents_remember.install import skills as install_skills
 from agents_remember.install.assets import packaged_source_root
@@ -31,6 +32,25 @@ def create_runtime_source(root: Path) -> Path:
     write_file(runtime_root / "providers" / "requirements" / "grepai.txt")
     write_file(runtime_root / "providers" / "patches" / "codegraphcontext" / "patch.diff")
     return source_root
+
+
+def enabled_provider_settings(*provider_ids: str) -> dict:
+    return {
+        "contextProviders": {
+            "enabled": True,
+            "providers": {provider_id: {"enabled": True} for provider_id in provider_ids},
+        }
+    }
+
+
+def watcher_result(action: str, *, ok: bool = True, partial: bool = False) -> dict:
+    return {
+        "provider": "watchers",
+        "action": action,
+        "ok": ok,
+        "partial": partial,
+        "recoveryActions": [],
+    }
 
 
 class InstallRuntimeTests(unittest.TestCase):
@@ -103,9 +123,7 @@ class InstallRuntimeTests(unittest.TestCase):
             providers_root = coordination_root / "providers"
             grepai_data = providers_root / "data" / "grepai" / "postgres.db"
             grepai_log = providers_root / "logs" / "grepai" / "watch.log"
-            central_grepai_log = (
-                coordination_root / "logs" / "providers" / "grepai" / "watch.log"
-            )
+            central_grepai_log = coordination_root / "logs" / "providers" / "grepai" / "watch.log"
             old_venv = providers_root / "_venvs" / "old" / "python.exe"
             mcp_package = coordination_root / "src" / "agents_remember" / "mcp" / "__init__.py"
 
@@ -140,6 +158,300 @@ class InstallRuntimeTests(unittest.TestCase):
             self.assertTrue((providers_root / "requirements" / "codegraphcontext.txt").exists())
             self.assertFalse((coordination_root / "mcp").exists())
             self.assertFalse(mcp_package.exists())
+
+    def test_runtime_install_provider_deps_rebinds_watchers_around_runner_refresh(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            runner_file = (
+                coordination_root
+                / "providers"
+                / "runners"
+                / "grepai"
+                / "projects"
+                / "home"
+                / ".grepai"
+                / "workspace.yaml"
+            )
+            write_file(runner_file, "old workspace\n")
+            events: list[str] = []
+
+            def fake_watchers(args, action):
+                events.append(f"watchers:{action}")
+                self.assertFalse(args.dry_run)
+                if action == "stop":
+                    self.assertTrue(runner_file.exists())
+                if action == "start":
+                    self.assertFalse(runner_file.exists())
+                return watcher_result(action)
+
+            def fake_grepai_install(args):
+                events.append("grepai:install")
+                self.assertFalse(args.dry_run)
+                return {"ok": True, "provider": "grepai"}
+
+            with (
+                patch.object(
+                    install_provider_watchers.lifecycle,
+                    "watchers_run",
+                    side_effect=fake_watchers,
+                ),
+                patch.object(
+                    install_runtime.lifecycle,
+                    "grepai_install",
+                    side_effect=fake_grepai_install,
+                ),
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    install_provider_deps=True,
+                    provider_settings=enabled_provider_settings("grepai-memory"),
+                )
+
+            self.assertEqual(
+                events,
+                [
+                    "watchers:stop",
+                    "grepai:install",
+                    "watchers:start",
+                    "watchers:status",
+                ],
+            )
+            self.assertFalse(runner_file.exists())
+            report = summary.provider_watcher_rebind
+            assert report is not None
+            self.assertTrue(report.ok)
+            self.assertEqual(
+                [run["action"] for run in report.runs],
+                ["stop", "start", "status"],
+            )
+
+    def test_runtime_install_provider_deps_dry_run_reports_rebind_without_mutating(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            runner_file = (
+                coordination_root
+                / "providers"
+                / "runners"
+                / "grepai"
+                / "projects"
+                / "home"
+                / ".grepai"
+                / "workspace.yaml"
+            )
+            write_file(runner_file, "old workspace\n")
+            events: list[str] = []
+
+            def fake_watchers(args, action):
+                events.append(f"watchers:{action}")
+                self.assertTrue(args.dry_run)
+                return watcher_result(action)
+
+            def fake_grepai_install(args):
+                events.append("grepai:install")
+                self.assertTrue(args.dry_run)
+                return {"ok": True, "provider": "grepai"}
+
+            with (
+                patch.object(
+                    install_provider_watchers.lifecycle,
+                    "watchers_run",
+                    side_effect=fake_watchers,
+                ),
+                patch.object(
+                    install_runtime.lifecycle,
+                    "grepai_install",
+                    side_effect=fake_grepai_install,
+                ),
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=True,
+                    install_provider_deps=True,
+                    provider_settings=enabled_provider_settings("grepai-memory"),
+                )
+
+            self.assertEqual(
+                events,
+                [
+                    "watchers:stop",
+                    "grepai:install",
+                    "watchers:start",
+                    "watchers:status",
+                ],
+            )
+            self.assertTrue(runner_file.exists())
+            report = summary.provider_watcher_rebind
+            assert report is not None
+            self.assertTrue(report.ok)
+            self.assertGreater(summary.removed_paths, 0)
+
+    def test_runtime_install_provider_deps_retries_rebind_after_degraded_status(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            events: list[str] = []
+            status_calls = 0
+
+            def fake_watchers(args, action):
+                nonlocal status_calls
+                events.append(f"watchers:{action}")
+                if action == "status":
+                    status_calls += 1
+                    return watcher_result(action, ok=status_calls > 1, partial=status_calls == 1)
+                return watcher_result(action)
+
+            def fake_grepai_install(args):
+                events.append("grepai:install")
+                return {"ok": True, "provider": "grepai"}
+
+            with (
+                patch.object(
+                    install_provider_watchers.lifecycle,
+                    "watchers_run",
+                    side_effect=fake_watchers,
+                ),
+                patch.object(
+                    install_runtime.lifecycle,
+                    "grepai_install",
+                    side_effect=fake_grepai_install,
+                ),
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    install_provider_deps=True,
+                    provider_settings=enabled_provider_settings("grepai-memory"),
+                )
+
+            self.assertEqual(
+                events,
+                [
+                    "watchers:stop",
+                    "grepai:install",
+                    "watchers:start",
+                    "watchers:status",
+                    "watchers:stop",
+                    "watchers:start",
+                    "watchers:status",
+                ],
+            )
+            report = summary.provider_watcher_rebind
+            assert report is not None
+            self.assertTrue(report.ok)
+            self.assertIn("restart/rebind", report.messages[0])
+
+    def test_runtime_install_provider_deps_reports_unrecovered_provider_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+
+            def fake_watchers(args, action):
+                if action == "status":
+                    return watcher_result(action, ok=False, partial=True)
+                return watcher_result(action)
+
+            with (
+                patch.object(
+                    install_provider_watchers.lifecycle,
+                    "watchers_run",
+                    side_effect=fake_watchers,
+                ),
+                patch.object(
+                    install_runtime.lifecycle,
+                    "grepai_install",
+                    return_value={"ok": True, "provider": "grepai"},
+                ),
+            ):
+                summary = install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    install_provider_deps=True,
+                    provider_settings=enabled_provider_settings("grepai-memory"),
+                )
+
+            report = summary.provider_watcher_rebind
+            assert report is not None
+            self.assertFalse(report.ok)
+            self.assertEqual(
+                [run["action"] for run in report.runs],
+                ["stop", "start", "status", "stop", "start", "status"],
+            )
+            self.assertEqual(report.recovery_actions[0]["provider"], "watchers")
+            self.assertEqual(report.recovery_actions[0]["action"], "restart")
+            self.assertIn(
+                "provider_watchers(action='restart')",
+                report.recovery_actions[0]["recoveryAction"],
+            )
+
+    def test_runtime_install_provider_dependency_failure_attempts_watcher_recovery(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            events: list[str] = []
+
+            def fake_watchers(args, action):
+                events.append(f"watchers:{action}")
+                return watcher_result(action)
+
+            def fake_grepai_install(args):
+                events.append("grepai:install")
+                return {"ok": False, "provider": "grepai", "error": "boom"}
+
+            with (
+                patch.object(
+                    install_provider_watchers.lifecycle,
+                    "watchers_run",
+                    side_effect=fake_watchers,
+                ),
+                patch.object(
+                    install_runtime.lifecycle,
+                    "grepai_install",
+                    side_effect=fake_grepai_install,
+                ),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "attempted non-destructive watcher recovery",
+                ),
+            ):
+                install_runtime.install_runtime(
+                    source_root,
+                    coordination_root,
+                    dry_run=False,
+                    install_provider_deps=True,
+                    provider_settings=enabled_provider_settings("grepai-memory"),
+                )
+
+            self.assertEqual(
+                events,
+                [
+                    "watchers:stop",
+                    "grepai:install",
+                    "watchers:start",
+                    "watchers:status",
+                ],
+            )
 
 
 class ProviderDependencyHelperTests(unittest.TestCase):

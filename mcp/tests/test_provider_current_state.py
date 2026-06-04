@@ -111,9 +111,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             write_json(config_path, settings_payload(root))
             config = load_config(config_path)
             status = ready_status_payload(root)
-            grepai = next(
-                result for result in status["results"] if result["provider"] == "grepai"
-            )
+            grepai = next(result for result in status["results"] if result["provider"] == "grepai")
             # `grepai workspace status` exits 0 even with no workspace.
             grepai["watcher"]["workspaceStatus"] = {
                 "returncode": 0,
@@ -127,6 +125,34 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertFalse(grepai_state["ok"])
             self.assertEqual(grepai_state["indexingState"], "noWorkspace")
             self.assertEqual(payload["state"], "degraded")
+
+    def test_provider_status_reports_restart_recovery_for_grepai_no_workspace(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            grepai = next(result for result in status["results"] if result["provider"] == "grepai")
+            grepai["watcher"]["workspaceStatus"] = {
+                "returncode": 0,
+                "stdout": "No workspaces configured.\n",
+            }
+
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=status,
+            ):
+                packet = provider_status.provider_status_packet(config)
+                diagnostics = provider_status.provider_diagnostics_packet(config)
+
+            recovery = packet["providers"]["recoveryActions"][0]
+            self.assertEqual(recovery["provider"], "grepai-memory")
+            self.assertIn("provider_watchers(action='restart')", recovery["recoveryAction"])
+            self.assertEqual(diagnostics["recoveryActions"], packet["providers"]["recoveryActions"])
 
     def test_current_state_ignores_disabled_providers_for_aggregate_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
