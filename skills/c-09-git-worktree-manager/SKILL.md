@@ -118,6 +118,8 @@ moved since task start.
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
 
+Before previewing integration, check out the recorded code and memory `source_branch` in their source repositories; `worktree_integrate` requires those active checkouts even for `dry_run=true`.
+
 Integration always lands into the recorded `source_branch`. It does not open a
 PR and it does not discover protected-branch policy on its own; that policy must
 be reflected in the branch choice made before `worktree_start`.
