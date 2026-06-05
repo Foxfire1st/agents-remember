@@ -1,6 +1,35 @@
-# Agents Remember
+<h1 align="center">
+  Agents Remember
+</h1>  
+<h3 align="center">
+  Durable, git-verified repo memory for coding agents.
+</h3>
 
-Durable, git-verified repo memory for coding agents.
+<p align="center">
+  <img alt="NPM License" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FFoxfire1st%2Fagents-remember-md%2Fmain%2Fmcp%2Fpyproject.toml">
+</p>
+
+## Table of Contents
+
+1. [Why It Exists](#why-it-exists)
+2. [Core Model](#core-model)
+3. [What It Looks Like In Practice](#what-it-looks-like-in-practice)
+4. [Live Demo](#live-demo)
+5. [Requirements](#requirements)
+6. [Quickstart](#quickstart)
+7. [Documentation](#documentation)
+8. [Repository Layout](#repository-layout)
+9. [Status](#status)
+10. [Stability](#stability)
+11. [Contributing](#contributing)
+
+## Why It Exists
+
+Modern coding agents can make clean, plausible edits while missing the project-specific rules that make those edits safe. A top-level instruction file can help, but it does not naturally reappear when the agent is deep in a file and deciding what to change.
+
+Agents Remember fixes that: the matching note is reachable at the moment of the edit — most often by the very path the agent is already working in — so project rules surface exactly when a change is being made, not buried in a top-level file.
+
+## Core Model
 
 **Agents Remember makes hard-earned lessons first-class infrastructure** — the local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts that live in people's heads, old PRs, and team habits, exactly where coding agents miss them. It keeps that knowledge as versioned Markdown beside the code, drift-checked against Git and updated only after approved work lands.
 
@@ -16,14 +45,6 @@ Agents reach that memory three ways:
 - **By relationship** — a code graph for callers, callees, and dependencies.
 
 The by-path notes are the core; meaning and relationship are opt-in providers (see [Concepts](docs/concepts.md) and [Providers](docs/guides/providers.md)).
-
-## Why It Exists
-
-Modern coding agents can make clean, plausible edits while missing the project-specific rules that make those edits safe. A top-level instruction file can help, but it does not naturally reappear when the agent is deep in a file and deciding what to change.
-
-Agents Remember fixes that: the matching note is reachable at the moment of the edit — most often by the very path the agent is already working in — so project rules surface exactly when a change is being made, not buried in a top-level file.
-
-## Core Model
 
 The memory layer rests on a small, strict discipline:
 
@@ -51,7 +72,7 @@ memory_quality_check(repo_id="my-app")
 
 It then reads the source file and its onboarding note together before proposing a change. After the change is approved and lands, the onboarding is refreshed and re-verified against the new commit — so the note stays true to the code.
 
-## Live Demo: This Repo Uses Agents Remember
+## Live Demo
 
 Agents Remember runs on itself. The companion memory repo is:
 https://github.com/Foxfire1st/ar-agents-remember-md
