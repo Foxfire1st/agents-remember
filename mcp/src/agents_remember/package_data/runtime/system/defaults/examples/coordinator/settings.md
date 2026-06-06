@@ -89,17 +89,17 @@ Semantic providers must keep generated config, index, logs, and state out of
 source repositories and durable memory roots. For GrepAI, configure one
 `grepai-memory` provider in workspace mode with explicit `{ projectId, path }`
 roots for both external memory repos and repo-internal memory roots. The
-managed default mirrors those roots into provider-owned index roots before
-launching GrepAI, because GrepAI still keeps per-project symbol/config artifacts
-beside each configured project path. The lifecycle manager writes GrepAI
-workspace config, logs, provider state, and mirrored index roots under
-`providers/runners/grepai/`, while all memory roots share one Docker network,
-one lifecycle-owned PostgreSQL/pgvector container with persistent data under
+managed default indexes those live roots in place and git-ignores GrepAI's
+per-root `.grepai/` working directory so generated GrepAI artifacts stay out of
+memory commits. The lifecycle manager writes GrepAI workspace config, logs,
+provider state, cache, and home artifacts under `providers/runners/grepai/`,
+while all memory roots share one Docker network, one lifecycle-owned
+PostgreSQL/pgvector container with persistent data under
 `providers/data/grepai/postgres/`, and one lifecycle-owned Ollama container for
-embedding. GrepAI itself runs from the lifecycle-owned runner container; managed
-mode must not install GrepAI or Ollama into host user space. A `.grepai/`
-directory inside any indexed memory root is a containment failure, not durable
-memory.
+embedding. GrepAI itself runs from the lifecycle-owned runner container;
+managed mode must not install GrepAI or Ollama into host user space. A
+`.grepai/` directory inside any indexed memory root is runtime artifact output,
+not durable memory.
 
 Relationship providers must keep runtime artifacts out of code repositories
 unless a repository-local config file is explicitly approved. For

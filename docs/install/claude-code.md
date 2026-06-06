@@ -19,13 +19,16 @@ The repository includes a Claude Code starter package at `.claude/`. Copy that
 folder to your workspace root, replace every placeholder, including
 `<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, make sure
 `jq` is installed for the hook command, then restart Claude Code once.
+Also copy `.claude/mcp/mcp.json` to `<workspace>/.mcp.json`; Claude Code will
+not detect the MCP registration if the file only lives under `.claude/mcp/`.
 
 The package contains:
 
 - `.claude/settings.json` - `SessionStart` hook registration.
 - `.claude/hooks/agents-remember-session-start.md` - startup directive emitted
   as `additionalContext`.
-- `.claude/mcp/mcp.json` - MCP registration template.
+- `.claude/mcp/mcp.json` - MCP registration template to copy to root
+  `.mcp.json`.
 - `.claude/mcp/agents-remember-settings.json` - Agents Remember MCP authority
   settings.
 - `.claude/skills/` - Agents Remember skills in Claude Code's project skill

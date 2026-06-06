@@ -12,7 +12,7 @@
 ## Table of Contents
 
 1. [Why It Exists](#why-it-exists)
-2. [Core Model](#core-model)
+2. [Core Features](#core-features)
 3. [What It Looks Like In Practice](#what-it-looks-like-in-practice)
 4. [Live Demo](#live-demo)
 5. [Requirements](#requirements)
@@ -29,30 +29,23 @@ Modern coding agents can make clean, plausible edits while missing the project-s
 
 Agents Remember fixes that: the matching note is reachable at the moment of the edit — most often by the very path the agent is already working in — so project rules surface exactly when a change is being made, not buried in a top-level file.
 
-## Core Model
+## Core Features
 
-**Agents Remember makes hard-earned lessons first-class infrastructure** — the local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts that live in people's heads, old PRs, and team habits, exactly where coding agents miss them. It keeps that knowledge as versioned Markdown beside the code, drift-checked against Git and updated only after approved work lands.
+**Agents Remember gives coding agents project memory they can verify and act on.** It turns local invariants, naming rules, migration scars, cross-repo contracts, and "this looks safe but is not" facts into versioned Markdown beside the code, checks that memory against Git before use, and updates it only after approved work lands.
 
 ```text
 src/orchestrator/core_editor.py
 ar-memory/onboarding/src/orchestrator/core_editor.py.md
 ```
 
-Agents reach that memory three ways:
+- **Path-addressed memory:** A source file's note lives at a deterministic mirror path, so an agent holding a file can reach the right context without search, ranking, or guesswork.
+- **Git-proven freshness:** File notes, route overviews, and entity catalogs are drift-checked against source commits, route scopes, or deterministic fingerprints before they are trusted.
+- **Search that finds, not decides:** Optional semantic memory and code-graph providers help locate relevant files, callers, dependencies, and concepts, but verified Markdown and source code remain the truth.
+- **Memory that lands with code:** External memory repos use a `memory.md` ledger, isolated dual worktrees, preview/apply closeout, and all-or-nothing integration so code and memory stay synchronized.
+- **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
+- **Harness-ready first run:** Starter packages for Claude Code, Codex, Cursor, Antigravity, VS Code Copilot, Hermes, Pi.dev, and OpenClaw carry the native MCP, skills, hooks, rules, and instruction files each harness needs.
 
-- **By path** — a source file's own note, found directly from its path (as above). Needs nothing extra.
-- **By meaning** — semantic search across the memory when you know the concept but not the file.
-- **By relationship** — a code graph for callers, callees, and dependencies.
-
-The by-path notes are the core; meaning and relationship are opt-in providers (see [Concepts](docs/concepts.md) and [Providers](docs/guides/providers.md)).
-
-The memory layer rests on a small, strict discipline:
-
-- **Onboarding units:** Markdown notes derived from source paths. A file such as `src/foo/bar.ts` maps to `ar-memory/onboarding/src/foo/bar.ts.md` in the default repo-local mode.
-- **Memory quality control:** Before an agent trusts onboarding, `c-02-memory-quality-control` checks whether the source changed since the onboarding was verified. During closeout it also covers new-file onboarding and final memory quality checks.
-- **Approval-gated updates:** Onboarding records approved current state, not guesses or plans. Task-local notes stay task-local until the developer approves implementation.
-
-The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`.
+The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`. For the full tour, see [Features](docs/features.md).
 
 ## What It Looks Like In Practice
 
@@ -129,6 +122,7 @@ After that, normal work runs through the `l-01-session-job-lifecycle` skill. The
 
 ## Documentation
 
+- [Features](docs/features.md) - the concentrated tour of what Agents Remember gives users.
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
