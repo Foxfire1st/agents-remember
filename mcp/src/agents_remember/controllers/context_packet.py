@@ -25,9 +25,8 @@ from agents_remember.models.context_packet import (
     StorageSummary,
 )
 from agents_remember.models.drift import DriftSummary
-from agents_remember.models.providers import ProviderSummary
 from agents_remember.models.worktree import WorktreeSummary
-from agents_remember.providers.status import provider_summary_packet
+from agents_remember.providers.status import provider_summary
 from agents_remember.worktrees.status import worktree_status_packet
 
 CONTEXT_PACKET_VERSION = 2
@@ -68,13 +67,11 @@ def build_context_packet(
         paths=_context_paths(context_dict),
         memory=_memory_summary(context_dict),
         worktree=WorktreeSummary.model_validate(worktree_status_packet(context.contract_path)),
-        providers=ProviderSummary.model_validate(
-            provider_summary_packet(
-                config,
-                include_providers=request.include_providers,
-                detail_limit=request.provider_detail_limit,
-                target_repo_id=repo_scope.repo_id,
-            )
+        providers=provider_summary(
+            config,
+            include_providers=request.include_providers,
+            detail_limit=request.provider_detail_limit,
+            target_repo_id=repo_scope.repo_id,
         ),
         drift=DriftSummary.model_validate(_drift_packet(request, context, repo_scope)),
     )
