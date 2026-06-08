@@ -79,12 +79,11 @@ Before the Quickstart, make sure the host has:
 - **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.11+** — the agent runs the MCP server with `uvx`, which picks a compatible interpreter.
 - **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
 - **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
-- **`jq`**, only when using the Claude Code starter package's `SessionStart`
-  hook: `apt install jq` (Debian/Ubuntu), `brew install jq` (macOS),
-  `pacman -S jq` (Arch), `dnf install jq` (Fedora), or `apk add jq` (Alpine).
-  Without it the copied Claude hook injects nothing.
 
-Providers, Docker, Ollama, and `jq` are only needed for the optional Docker-backed providers and the Claude Code package hook; the core by-path memory works without them. Full detail and troubleshooting live in the [MCP package README](https://pypi.org/project/agents-remember-mcp/).
+Providers, Docker, and Ollama are only needed for the optional Docker-backed
+providers; the core by-path memory works without them. Claude Code hooks do not
+require `jq`; the current starter package uses a Python hook. Full detail and
+troubleshooting live in the [MCP package README](https://pypi.org/project/agents-remember-mcp/).
 
 ## Quickstart
 
@@ -94,10 +93,13 @@ Ask your agent to:
 
 1. **Copy the harness package** — Pick your harness guide under
    [docs/install](docs/install/README.md), copy that harness's native starter
-   files from this repo into the workspace, and replace every
-   placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
-   `<YOUR_REPOSITORY_FOLDER_NAME>`. These packages include the harness-visible
-   skills, hooks/rules/instructions, and MCP settings templates.
+   files from this repo into the workspace, then render the copied package.
+   The `render-starter` script is a convenience: it infers the workspace root
+   from the copied harness folder and fills the copied package's path,
+   repository, and hook-command placeholders from a single `--repo` list such as
+   `--repo my-app shared-lib`. You can also do those replacements by hand. These
+   packages include the harness-visible skills, hooks/rules/instructions, and
+   MCP settings templates.
 2. **Wire the MCP server** — Register Agents Remember MCP from
    [PyPI](https://pypi.org/project/agents-remember-mcp/) with `uvx`:
 

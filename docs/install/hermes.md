@@ -12,11 +12,18 @@ Official references:
 ## Root Starter Package
 
 The repository includes a Hermes starter package at `.hermes/`. Copy that
-folder to your workspace root, copy `.hermes/HERMES.md` to the workspace root as
-`HERMES.md`, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, merge
-`.hermes/config.yaml` into `~/.hermes/config.yaml`, then start Hermes from the
-workspace or reload it once.
+folder to your workspace root, then render the copied package. The
+`.hermes/render-starter` script is a convenience: with a single `--repo` list
+such as `--repo my-app shared-lib`, it infers the workspace root from the copied
+`.hermes/` folder, fills path and repository placeholders, writes the installed
+`HERMES.md`, and validates that each requested repository exists before you
+merge `.hermes/config.yaml` into `~/.hermes/config.yaml` and start or reload
+Hermes from that workspace once. If you prefer not to run the renderer, make
+those same replacements by hand, copy or merge the directive into `HERMES.md`,
+and verify that no placeholder tokens remain.
+
+If the workspace root already has a different `HERMES.md`, merge the rendered
+Agents Remember directive into that file before rerunning the renderer.
 
 The source checkout keeps the template under `.hermes/` so the repository root
 remains reserved for source-project files such as its own `AGENTS.md`.

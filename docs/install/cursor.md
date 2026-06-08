@@ -13,10 +13,14 @@ Official references:
 ## Root Starter Package
 
 The repository includes a Cursor starter package at `.cursor/`. Copy that folder
-to your workspace root, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`,
-install/register the MCP server, then open or restart the workspace in Cursor
-once.
+to your workspace root, then render the copied package. The
+`.cursor/render-starter` script is a convenience: with a single `--repo` list
+such as `--repo my-app shared-lib`, it infers the workspace root from the copied
+`.cursor/` folder, fills path and repository placeholders, writes the Python
+hook command, and validates that each requested repository exists before you open
+or restart the workspace in Cursor once. If you prefer not to run the renderer,
+make those same replacements by hand and verify that no placeholder tokens
+remain.
 
 The package contains:
 

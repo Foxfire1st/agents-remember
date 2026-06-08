@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit Agents Remember workspace startup context for VS Code SessionStart."""
+"""Emit Agents Remember workspace startup context for Claude Code SessionStart."""
 
 from __future__ import annotations
 
