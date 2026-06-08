@@ -1,0 +1,429 @@
+Reading prompt from stdin...
+2026-05-19T03:28:08.866398Z  WARN codex_core_plugins::manager: failed to warm featured plugin ids cache error=remote plugin sync request to https://chatgpt.com/backend-api/plugins/featured failed with status 403 Forbidden: <html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style global>body{font-family:Arial,Helvetica,sans-serif}.container{align-items:center;display:flex;flex-direction:column;gap:2rem;height:100%;justify-content:center;width:100%}@keyframes enlarge-appear{0%{opacity:0;transform:scale(75%) rotate(-90deg)}to{opacity:1;transform:scale(100%) rotate(0deg)}}.logo{color:#8e8ea0}.scale-appear{animation:enlarge-appear .4s ease-out}@media (min-width:768px){.scale-appear{height:48px;width:48px}}.data:empty{display:none}.data{border-radius:5px;color:#8e8ea0;text-align:center}@media (prefers-color-scheme:dark){body{background-color:#343541}.logo{color:#acacbe}}</style>
+  <meta http-equiv="refresh" content="360"></head>
+  <body>
+    <div class="container">
+      <div class="logo">
+        <svg
+          width="41"
+          height="41"
+          viewBox="0 0 41 41"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          strokeWidth="2"
+          class="scale-appear"
+        >
+          <path
+            d="M37.5324 16.8707C37.9808 15.5241 38.1363 14.0974 37.9886 12.6859C37.8409 11.2744 37.3934 9.91076 36.676 8.68622C35.6126 6.83404 33.9882 5.3676 32.0373 4.4985C30.0864 3.62941 27.9098 3.40259 25.8215 3.85078C24.8796 2.7893 23.7219 1.94125 22.4257 1.36341C21.1295 0.785575 19.7249 0.491269 18.3058 0.500197C16.1708 0.495044 14.0893 1.16803 12.3614 2.42214C10.6335 3.67624 9.34853 5.44666 8.6917 7.47815C7.30085 7.76286 5.98686 8.3414 4.8377 9.17505C3.68854 10.0087 2.73073 11.0782 2.02839 12.312C0.956464 14.1591 0.498905 16.2988 0.721698 18.4228C0.944492 20.5467 1.83612 22.5449 3.268 24.1293C2.81966 25.4759 2.66413 26.9026 2.81182 28.3141C2.95951 29.7256 3.40701 31.0892 4.12437 32.3138C5.18791 34.1659 6.8123 35.6322 8.76321 36.5013C10.7141 37.3704 12.8907 37.5973 14.9789 37.1492C15.9208 38.2107 17.0786 39.0587 18.3747 39.6366C19.6709 40.2144 21.0755 40.5087 22.4946 40.4998C24.6307 40.5054 26.7133 39.8321 28.4418 38.5772C30.1704 37.3223 31.4556 35.5506 32.1119 33.5179C33.5027 33.2332 34.8167 32.6547 35.9659 31.821C37.115 30.9874 38.0728 29.9178 38.7752 28.684C39.8458 26.8371 40.3023 24.6979 40.0789 22.5748C39.8556 20.4517 38.9639 18.4544 37.5324 16.8707ZM22.4978 37.8849C20.7443 37.8874 19.0459 37.2733 17.6994 36.1501C17.7601 36.117 17.8666 36.0586 17.936 36.0161L25.9004 31.4156C26.1003 31.3019 26.2663 31.137 26.3813 30.9378C26.4964 30.7386 26.5563 30.5124 26.5549 30.2825V19.0542L29.9213 20.998C29.9389 21.0068 29.9541 21.0198 29.9656 21.0359C29.977 21.052 29.9842 21.0707 29.9867 21.0902V30.3889C29.9842 32.375 29.1946 34.2791 27.7909 35.6841C26.3872 37.0892 24.4838 37.8806 22.4978 37.8849ZM6.39227 31.0064C5.51397 29.4888 5.19742 27.7107 5.49804 25.9832C5.55718 26.0187 5.66048 26.0818 5.73461 26.1244L13.699 30.7248C13.8975 30.8408 14.1233 30.902 14.3532 30.902C14.583 30.902 14.8088 30.8408 15.0073 30.7248L24.731 25.1103V28.9979C24.7321 29.0177 24.7283 29.0376 24.7199 29.0556C24.7115 29.0736 24.6988 29.0893 24.6829 29.1012L16.6317 33.7497C14.9096 34.7416 12.8643 35.0097 10.9447 34.4954C9.02506 33.9811 7.38785 32.7263 6.39227 31.0064ZM4.29707 13.6194C5.17156 12.0998 6.55279 10.9364 8.19885 10.3327C8.19885 10.4013 8.19491 10.5228 8.19491 10.6071V19.808C8.19351 20.0378 8.25334 20.2638 8.36823 20.4629C8.48312 20.6619 8.64893 20.8267 8.84863 20.9404L18.5723 26.5542L15.206 28.4979C15.1894 28.5089 15.1703 28.5155 15.1505 28.5173C15.1307 28.5191 15.1107 28.516 15.0924 28.5082L7.04046 23.8557C5.32135 22.8601 4.06716 21.2235 3.55289 19.3046C3.03862 17.3858 3.30624 15.3413 4.29707 13.6194ZM31.955 20.0556L22.2312 14.4411L25.5976 12.4981C25.6142 12.4872 25.6333 12.4805 25.6531 12.4787C25.6729 12.4769 25.6928 12.4801 25.7111 12.4879L33.7631 17.1364C34.9967 17.849 36.0017 18.8982 36.6606 20.1613C37.3194 21.4244 37.6047 22.849 37.4832 24.2684C37.3617 25.6878 36.8382 27.0432 35.9743 28.1759C35.1103 29.3086 33.9415 30.1717 32.6047 30.6641C32.6047 30.5947 32.6047 30.4733 32.6047 30.3889V21.188C32.6066 20.9586 32.5474 20.7328 32.4332 20.5338C32.319 20.3348 32.154 20.1698 31.955 20.0556ZM35.3055 15.0128C35.2464 14.9765 35.1431 14.9142 35.069 14.8717L27.1045 10.2712C26.906 10.1554 26.6803 10.0943 26.4504 10.0943C26.2206 10.0943 25.9948 10.1554 25.7963 10.2712L16.0726 15.8858V11.9982C16.0715 11.9783 16.0753 11.9585 16.0837 11.9405C16.0921 11.9225 16.1048 11.9068 16.1207 11.8949L24.1719 7.25025C25.4053 6.53903 26.8158 6.19376 28.2383 6.25482C29.6608 6.31589 31.0364 6.78077 32.2044 7.59508C33.3723 8.40939 34.2842 9.53945 34.8334 10.8531C35.3826 12.1667 35.5464 13.6095 35.3055 15.0128ZM14.2424 21.9419L10.8752 19.9981C10.8576 19.9893 10.8423 19.9763 10.8309 19.9602C10.8195 19.9441 10.8122 19.9254 10.8098 19.9058V10.6071C10.8107 9.18295 11.2173 7.78848 11.9819 6.58696C12.7466 5.38544 13.8377 4.42659 15.1275 3.82264C16.4173 3.21869 17.8524 2.99464 19.2649 3.1767C20.6775 3.35876 22.0089 3.93941 23.1034 4.85067C23.0427 4.88379 22.937 4.94215 22.8668 4.98473L14.9024 9.58517C14.7025 9.69878 14.5366 9.86356 14.4215 10.0626C14.3065 10.2616 14.2466 10.4877 14.2479 10.7175L14.2424 21.9419ZM16.071 17.9991L20.4018 15.4978L24.7325 17.9975V22.9985L20.4018 25.4983L16.071 22.9985V17.9991Z"
+            fill="currentColor"
+          />
+        </svg>
+      </div>
+      <div class="data"><div class="main-wrapper" role="main"><div class="main-content"><noscript><div class="h2"><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></div></noscript></div></div><script>(function(){window._cf_chl_opt = {cFPWv: 'g',cH: 'P8q.qTZ5CImPPLlBHeaTYatVJWPpAZ76kRKMvB2AghU-1779161289-1.2.1.1-0DMITkEcYAT.nsRmetqDFhRKt18MMyOHiah6jV6FIxxsDX0dKLtJkn3FILuK_Sq5',cITimeS: '1779161289',cRay: '9fe00289abeb4f41',cTplB: '0',cTplC:1,cTplO:0,cTplV:5,cType: 'managed',cUPMDTk:"/backend-api/plugins/featured?platform=codex&__cf_chl_tk=LGCtVk0Q9dO0chodYyd6bqoCuJwQW2yJ9hWHN44FmMs-1779161289-1.0.1.1-.o5oXRjxmpN4ob7zaCcx8NXVv.E0gRxnsjXIylo7Oqo",cvId: '3',cZone: 'chatgpt.com',fa:"/backend-api/plugins/featured?platform=codex&__cf_chl_f_tk=LGCtVk0Q9dO0chodYyd6bqoCuJwQW2yJ9hWHN44FmMs-1779161289-1.0.1.1-.o5oXRjxmpN4ob7zaCcx8NXVv.E0gRxnsjXIylo7Oqo",md: '4WaLBnxFIvO0.fR3FlPRHg9qobwOY7vzjsmFGvUXe6g-1779161289-1.2.1.1-VtCc9R75jQbCxMhLjstU7Zp8XS0HvEobDTPS9Z2gcrU8803Hj56S0vtrQ87NiDyefQlJ8yMD39vPxIYLyQjgYCzfw3q54ADX7nw.uMejqUdSR60BLGZ3Aa8UWcYuHGf.Eo2gvQnq.IGpHGf2lMnJRRKbe2Qkt4Ezbf4SLA6G_7KnpaGa_0J1z3MR9AzpWrOhGkDF0b2fJc9ZGtWZdzNTpCSay9aMCFbNjJhT7iZlVlqKS7B3NcG4i8JmChzIccTGI9rNAJM0J7K04OETgmnzGPY2dU22ISZytO3vkjxWrZjx_.rEbWs.bO3wXvHxw2FmTwNWVSMZy6Gd0lObMPWYl.lD2yxDnH4xKI_rTChvoyKkidWmnTfTRYTDytg0e0SneaNJomF_Ijh7.vo3aF.aEPOCrOE_noxIy1rqWcN9P3.4LrPNeH8pVg.bDDpiBsDHkUKLEUR7I.44zZOyhPVDDfiZBol__RMx6TZc1ScWhr_KUOX1GVA6LosAcgGSRn0h4_qOiOJCQz1OE6.83tbXNeCNwghbgEWWuZX_B2NyZ1S4WltjPHFc_dKwMftcICs.DsaqcA9Xd1deethtauYnv3C2z2UDqwpW1JhsiB7rBmq0BvYPZI1BqpwjDhywP7PPtzwcfYNU9jnqEPUYa3snPNidDr2FMSWVUr46T5ChWDBQj2aUQHIxCFZvPoQAHXNaAxLDO9HUwrCPusJ_TwwEMRRyvkffljW8pc.6oOIfVYNM5ei.eEjqWmjE47WsBaKT0u6RM3HkzfflHk6VV4hmRyoslqJ42LMFrsK3AWEFuX7vfCvQK9mwNHcecVa0MjNkvG0Tn3D5L7MfDwdUkqmb9AZFNrqL0vDaFWIV1Wa2ZzZeRTsy36cDqhNNeak4TFuOpjosJ_4TXSdfxumFonbJT4yU4.6M_BE3sbmTkfKLve28bv3I0CTidxxbi1Wm.BE70yzCG5Nz5jbcKPYQBkLN_fodMpxZFYqGyZKdy5gzm0jrfFpRsuMbnAKx9jOdpEtt',mdrd: 'wMVMUTHlzm3GdPXfkom9sFIbLlXdOl.ywhSV1Lwo5cQ-1779161289-1.2.1.1-7xL.xoCh7Bb0otWbIU.FcM0Tvu4mG4V3M_f5yvDtIGCcyHfu2aaO3U97GacYrCWUzHgj0O4BHBcU1OXC4v7aJByhJIRB78RWFUKlRllNPOcsJ12_vjo..d0RqgKGQkOT.4kWPUdxY480WibFH9YBSg3GKxNFz6BsV3geYimzZ2VLVJyQxN3RLDR5AXKIS.nWc7Sd2rd1sgEPkQ0hafu3cn8OaQFU7vEolU59QV81YeMXn5f3UjYvgcgrBfJ_LBC_M2TqKo5q7T4d7lWd4D9TRkxp2M7cstklPFsUyhay2EnrQrakg0sN._z7GoxBXeVQqhpyavGNS_g89ktvQSRieJghN_D2hYuvuPXEB2MBZYsApi2nIdeqIjQfrMpqxLk1_tINU8PSUkcXaue.xZvWvWhzhV30cT8IYvZlaX_Iu5kFcVs6ViDx4pmcPSFayyByOg8b6s4dewRm1zvzr9uR0.gzz1pwrJCcRSE8BCeMtLpTzfHDzehq5K_JYnGuwv7ZZ7Hj0Tgk0.lf_.9PBpwoOm39D3jzwPLRU1noQycy_o_A8kS_D9MnB16ZKosB856_OHhsHL79ZkKWX1fci9AWu2nr0esAnvzS9BVVMlSNzscOAqAK6I1mFTPGsFl6YTU1x6i3z.HrMZYYyT4Sxua_1fTyiQTdKLrjy24hp0hIN2646kLT60dE_d_UjoV.cXPG.feFuPvnhob5X_MSHcaB.5791cVulDgt56qXnRMpmre.T4OzGOY3qrmwRFV9tb1NOefGFhDyh2.Lsuk38EyBCpSY8YtM63dqCvxKqtAxh1YYcxkD4bzG5iIfxU6nE6EhIONJXg3CsrWtrPChH533PzFuu83Xd5rn13nzfDZl9YbqXu.FBH.OSxZG9LLAT4AeaA8IblnXsW9DoPwefkHIE7BwtG8e3TihhgymkP55BdOqpWicirdRp4xB1vOnMYoCdLIGXbEfulO06mWnBMP0zRJ0MNW_wi68OS8RKorezAhTXryoMysXGbX1RFQsOFqYa0iRL..9_IgHrlRmEpQZWjIGJw5szJ7L9nI0sLGwH85L2j1Cora4zQ4c.i0xp31ueBffgryAWbsQeaE6PZx8vBYFjV3KXfkze5zHVuxotJqvD1UaUXd4A7Y4c5pKvisE4Lr7RG9DgSLzLzTVbFXd_pFZ7HUJxbcolyj8EJdIQSamjXrKLdw57.TAsrz9.ukkyQ4AgFZ7w.wwlpvC9Ie32b0O0FiJ4aGcFpC4kDSrmOU9vd2MTYcVDfjOyXN28oCx1cg1Np8XimiAvIalwrn3XWJ.Z4Djm01JShDkOtZRs93UKYNNr.JFePATs59B_lEmh9OzGB328nmH8xiEFSBlSo8CcEOB_8yCUqMPJSnzGZCt2dW3F9p3hMxlX7w69MS6kJvh.lXrmIDPO_6GCZk3PAeTBNZcxbiijcX3vJv2mG7VLEf9yYjLXWAgmKDus0yUY_SvQJrCa7KkLHxv_w2plhulOkx1dEdzqaQLBKuBsbq6JECbXJt1F1hUTFa_ra0ZD1HDxsuTu1JFdMC2AuFvDYWcVlciBkkfsqI6OY89ZMXYvvH2ajmdrasLCXs_RPA_JGU9yA62ls_pOE68n6Hd3B6ht1Eb9XYOQZdoc3HMS3YY4VXmj102pjemhkNxDaFhWOJx8g5MHbs6VePJhldpV4k367T3EBwfELUWQd71l5KPj4bddOVneIYfx1y6_IygkLc_AwlcXu6NnVOsF7_HaEjWBayD1kXUpoRxOaZ_4kjNpaUq4ALA4ZtemcyK7tOfGZ055H70zKsDT7jcTB2jFF50fkXeFdjAC5qyZpJ235n0I2Ivmue1VAqWwuI8W7kps3AunpQ3wIGKF4QaBSb.R.haynvbLkIv46SwgBlu0gn7gAn044wyVxIxydlsqpXEAlo1sX_fD1eS096DAqp9fLwyxpBYcSb4xZ9zmtGf7UGdzQ5NIvQWuBm_coCjUq0_4zRfdj37lBkYtPoqCyS.ywpoP0K_58twzrDTW2HBeWm1izZJELL3hI7oIo5Qs5AZEpHuRtj1PuXPaHULhMXhxv9A2BrXNIg6p3bNO06A_Hh2krb043ezoF0QYmUrTwuNQk.t93f1U_inJT3JHUwHwxNtSqYp22K2XTw2GacHj9zrRvWcq..EDrr2JxLfMPuy.0svQmtbSzY1Lqtu4JQ7jlhiZQgNFVzaiRKdJIP7OZqD4zKoxuunDM5yjTh0RDmm',};var a = document.createElement('script');a.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=9fe00289abeb4f41';window._cf_chl_opt.cOgUHash = location.hash === '' && location.href.indexOf('#') !== -1 ? '#' : location.hash;window._cf_chl_opt.cOgUQuery = location.search === '' && location.href.slice(0, location.href.length - window._cf_chl_opt.cOgUHash.length).indexOf('?') !== -1 ? '?' : location.search;if (window.history && window.history.replaceState) {var ogU = location.pathname + window._cf_chl_opt.cOgUQuery + window._cf_chl_opt.cOgUHash;history.replaceState(null, null,"/backend-api/plugins/featured?platform=codex&__cf_chl_rt_tk=LGCtVk0Q9dO0chodYyd6bqoCuJwQW2yJ9hWHN44FmMs-1779161289-1.0.1.1-.o5oXRjxmpN4ob7zaCcx8NXVv.E0gRxnsjXIylo7Oqo"+ window._cf_chl_opt.cOgUHash);a.onload = function() {history.replaceState(null, null, ogU);}}document.getElementsByTagName('head')[0].appendChild(a);}());</script></div>
+    </div>
+  </body>
+</html>
+
+2026-05-19T03:28:08.872805Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:08.885379Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:09.276284Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:28:09.277028Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:28:09.283041Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:28:09.283138Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:28:09.308088Z  WARN codex_core_plugins::manager: failed to refresh curated plugin cache after sync: failed to refresh curated plugin cache for github@openai-curated: failed to back up plugin cache entry: Zugriff verweigert (os error 5)
+2026-05-19T03:28:09.697348Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell
+2026-05-19T03:28:09.783893Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:09.794100Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:12.347796Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:12.355627Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:12.366442Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:28:12.367063Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:28:12.371572Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:28:12.371655Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:28:12.401108Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:12.401134Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:12.402047Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:12.402064Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:12.402881Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:12.402894Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:12.403682Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:12.403697Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:12.404984Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:12.405004Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:12.405861Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:12.405872Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:13.186497Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:13.196127Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:13.208467Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:28:13.209346Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:28:13.214431Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:28:13.214523Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:28:13.247069Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:13.247095Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:13.247928Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:13.247941Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:13.248902Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:13.248921Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:13.250347Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:13.250380Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:13.251534Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:13.251553Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:13.252349Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:13.252362Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:29.779571Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:29.789310Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:29.800692Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:28:29.801268Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:28:29.806091Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:28:29.806178Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:28:29.840220Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:29.840243Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:29.841283Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:29.841310Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:29.842415Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:29.842431Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:29.843329Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:29.843339Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:29.844160Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:29.844170Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:29.845021Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:29.845031Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:38.675836Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:38.685034Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:28:38.696215Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:28:38.696798Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:28:38.701494Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:28:38.701580Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:28:38.734884Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:38.734906Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:38.735842Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:38.735859Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:38.737085Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:38.737100Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:38.738430Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:38.738445Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:38.739422Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:38.739435Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:28:38.740350Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:28:38.740361Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:00.039754Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:00.048683Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:00.059391Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:29:00.059972Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:29:00.064523Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:29:00.064610Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:29:00.100311Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:00.100334Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:00.101379Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:00.101392Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:00.102385Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:00.102398Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:00.103627Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:00.103640Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:00.104885Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:00.104901Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:00.105930Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:00.105944Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:24.659460Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:24.671702Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:24.684394Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:29:24.684987Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:29:24.689619Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:29:24.689716Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:29:24.727435Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:24.727460Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:24.728602Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:24.728625Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:24.729942Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:24.729961Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:24.730997Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:24.731014Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:24.731921Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:24.731934Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:24.734092Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:24.734114Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:33.923024Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:33.933253Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:33.944874Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:29:33.945517Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:29:33.950751Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:29:33.950838Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:29:33.985286Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:33.985310Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:33.986371Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:33.986389Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:33.987729Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:33.987748Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:33.988722Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:33.988732Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:33.989653Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:33.989663Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:33.990622Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:33.990640Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:51.124911Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:51.134365Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:29:51.146177Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:29:51.146746Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:29:51.151381Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:29:51.151473Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:29:51.186181Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:51.186199Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:51.187386Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:51.187406Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:51.188432Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:51.188446Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:51.189459Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:51.189472Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:51.190454Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:51.190468Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:29:51.191884Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:29:51.191899Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:09.526993Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:09.536278Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:09.547702Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:30:09.548274Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:30:09.552831Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:30:09.552926Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:30:09.587743Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:09.587765Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:09.588746Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:09.588762Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:09.589816Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:09.589831Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:09.591087Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:09.591108Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:09.592287Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:09.592301Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:09.593327Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:09.593339Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:28.505163Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.2 seconds
+Output:
+
+2026-05-19T03:30:28.538630Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:28.547288Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:28.558762Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:30:28.559357Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:30:28.564123Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:30:28.564209Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:30:28.600926Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:28.600950Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:28.602239Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:28.602256Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:28.603520Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:28.603543Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:28.604711Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:28.604730Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:28.605724Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:28.605738Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:28.606640Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:28.606649Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:35.987942Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:35.996694Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:36.008210Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:30:36.008799Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:30:36.013559Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:30:36.013647Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:30:36.050031Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:36.050055Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:36.051013Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:36.051026Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:36.051926Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:36.051940Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:36.053036Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:36.053072Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:36.054338Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:36.054352Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:36.055281Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:36.055293Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:41.906587Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.5 seconds
+Output:
+rg: regex parse error:
+    (?:REGISTER_OP\(\)
+    ^
+error: unclosed group
+
+2026-05-19T03:30:41.944227Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:41.957244Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:41.972295Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:30:41.972919Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:30:41.978051Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:30:41.978163Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:30:42.030503Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:42.030547Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:42.032486Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:42.032525Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:42.034039Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:42.034064Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:42.035426Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:42.035450Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:42.037142Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:42.037169Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:42.038337Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:42.038358Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:49.219033Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:49.228737Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:49.240693Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:30:49.241293Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:30:49.245949Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:30:49.246037Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:30:49.287265Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:49.287301Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:49.289081Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:49.289111Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:49.291399Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:49.291449Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:49.293239Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:49.293260Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:49.294260Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:49.294276Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:49.295478Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:49.295493Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:54.480886Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:54.492625Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:30:54.506067Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:30:54.506699Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:30:54.511401Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:30:54.511504Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:30:54.555556Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:54.555581Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:54.556964Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:54.556986Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:54.558519Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:54.558539Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:54.559668Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:54.559685Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:54.561043Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:54.561062Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:30:54.562661Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:30:54.562687Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:01.085837Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:01.095351Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:01.106478Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:31:01.107083Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:31:01.111433Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:31:01.111513Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:31:01.146075Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:01.146098Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:01.147089Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:01.147103Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:01.148208Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:01.148223Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:01.149462Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:01.149479Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:01.150472Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:01.150486Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:01.151359Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:01.151369Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:12.620971Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:12.630922Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:12.646007Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:31:12.646614Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:31:12.651372Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:31:12.651465Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:31:12.695953Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:12.695980Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:12.697404Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:12.697427Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:12.699599Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:12.699630Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:12.701391Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:12.701424Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:12.703303Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:12.703327Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:12.704958Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:12.704985Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:19.784803Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:19.794946Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:19.806735Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:31:19.807356Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:31:19.811871Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:31:19.811954Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:31:19.845868Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:19.845890Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:19.846850Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:19.846865Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:19.847807Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:19.847819Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:19.849140Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:19.849157Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:19.850176Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:19.850191Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:19.851166Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:19.851178Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:28.673549Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:28.683136Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:28.695289Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:31:28.695883Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:31:28.700703Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:31:28.700789Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:31:28.735542Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:28.735569Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:28.737036Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:28.737053Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:28.738025Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:28.738038Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:28.738915Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:28.738926Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:28.740077Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:28.740094Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:28.741166Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:28.741181Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:36.287897Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:36.296942Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:36.308429Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:31:36.309049Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:31:36.313494Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:31:36.313575Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:31:36.348081Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:36.348105Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:36.349560Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:36.349578Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:36.350463Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:36.350475Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:36.351338Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:36.351348Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:36.352266Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:36.352281Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:36.353350Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:36.353363Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:52.565462Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:52.575999Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:31:52.588166Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:31:52.588763Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:31:52.593278Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:31:52.593366Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:31:52.630061Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:52.630085Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:52.631318Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:52.631341Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:52.632481Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:52.632503Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:52.633425Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:52.633438Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:52.634398Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:52.634411Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:31:52.635465Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:31:52.635486Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:32:08.905467Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:32:08.914236Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:32:08.925169Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:32:08.925745Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:32:08.930110Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:32:08.930188Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:32:08.962392Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:32:08.962415Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:32:08.963293Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:32:08.963310Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:32:08.964643Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:32:08.964663Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:32:08.965700Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:32:08.965715Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:32:08.966584Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:32:08.966595Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:32:08.967495Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:32:08.967509Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "id": "tensorflow-check-numerics-xla",
+  "name": "TensorFlow check_numerics XLA triage",
+  "status": "draft",
+  "description": "Triages a TensorFlow issue where tf.debugging.check_numerics raises in eager and non-XLA graph mode but silently passes NaN/Inf under tf.function(jit_compile=True). The prompts intentionally avoid exact implementation file pointers so runs must discover the relevant TensorFlow subsystem boundaries.",
+  "sizeBand": "large",
+  "repository": {
+    "name": "tensorflow",
+    "url": "https://github.com/tensorflow/tensorflow.git",
+    "commit": "12bd4f195c6504935d9dda753781ad9730ffbf71",
+    "fileCount": 36323,
+    "fileCountScope": "Tracked files at the pinned TensorFlow commit."
+  },
+  "memoryRepository": {
+    "name": "ar-tensorflow",
+    "url": "https://github.com/Foxfire1st/ar-tensorflow.git",
+    "commit": "45682df2b28e671b5e6377ca3d005351611d3094"
+  },
+  "sourceTicket": {
+    "system": "GitHub",
+    "repository": "tensorflow/tensorflow",
+    "number": 117319,
+    "title": "`tf.debugging.check_numerics` silently passes NaN/Inf under `jit_compile=True`",
+    "url": "https://github.com/tensorflow/tensorflow/issues/117319",
+    "referencePath": "ticket.md"
+  },
+  "workspace": {
+    "fixturePath": "workspaces/tensorflow-check-numerics-xla",
+    "sourceOnlyRoot": "source-only",
+    "withMemoryRoot": "with-memory",
+    "repoRelativePath": "repos/tensorflow",
+    "coordinationRoot": "ar-coordination"
+  },
+  "prompts": [
+    {
+      "id": "triage-check-numerics-xla",
+      "name": "Triage check_numerics under jit_compile",
+      "runs": 3,
+      "variants": [
+        {
+          "id": "no-onboarding",
+          "promptPath": "prompts/triage-check-numerics-xla.no-onboarding.md",
+          "cwd": "workspaces/tensorflow-check-numerics-xla/source-only",
+          "allowMemory": false
+        },
+        {
+          "id": "with-onboarding",
+          "promptPath": "prompts/triage-check-numerics-xla.with-onboarding.md",
+          "cwd": "workspaces/tensorflow-check-numerics-xla/with-memory",
+          "allowMemory": true
+        },
+        {
+          "id": "with-onboarding-warm",
+          "promptPath": "prompts/triage-check-numerics-xla.with-onboarding-warm.md",
+          "cwd": "workspaces/tensorflow-check-numerics-xla/with-memory",
+          "allowMemory": true,
+          "providers": [
+            "grepai-memory",
+            "codegraphcontext-code"
+          ]
+        }
+      ]
+    }
+  ],
+  "authorResults": [
+    {
+      "id": "2026-05-draft",
+      "summaryPath": "author-results/2026-05-draft/summary.md",
+      "notes": "Initial draft fixture. The ticket and verifier evidence are documented in ticket.md; prompts intentionally omit those verifier file pointers."
+    }
+  ]
+}

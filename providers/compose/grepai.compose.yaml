@@ -1,0 +1,24 @@
+services:
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: grepai
+      POSTGRES_PASSWORD: grepai
+      POSTGRES_DB: grepai
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grepai -d grepai"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ollama:
+    restart: unless-stopped
+
+  watcher:
+    restart: unless-stopped
+    entrypoint: ["grepai"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started

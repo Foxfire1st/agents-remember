@@ -28,6 +28,11 @@ Receive the developer's raw request and identify the active repository.
 Request intake changes nothing. It only establishes which repository the next
 checkpoint must inspect.
 
+The upcoming `Trust Checkpoint` reveals whether or not the request is related to repositories managed by Agents Remember. If not then the lifecycle exits early and the agent can work as usual.
+
+However if later work is to enter the boundary of repositories being managed by Agents Remember,
+the lifecycle must be re-entered.
+
 ---
 
 ## 1 — Trust Checkpoint
@@ -73,9 +78,9 @@ format exists.
 
 1. **Gather evidence for the reframe** through reading the
    `c-04-retrieval-strategy-router` skill. Pick the strategy by the question:
-   - *Semantics* (grepai over onboarding) — "where does X live / what handles Y."
-   - *Relationship* (cgc) — callers/callees/dependencies/impact.
-   - *Intent* (onboarding + bounded source confirmation) — hidden contracts, invariants,
+   - _Semantics_ (grepai over onboarding) — "where does X live / what handles Y."
+   - _Relationship_ (cgc) — callers/callees/dependencies/impact.
+   - _Intent_ (onboarding + bounded source confirmation) — hidden contracts, invariants,
      branch-valid truths, behavioral expectations. This is a workflow of paired
      source+onboarding reads: read the source file together with its verified onboarding.
      Use the memory-repo root overview.md file to gain a birds view of a code repo.

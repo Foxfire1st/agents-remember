@@ -43,6 +43,8 @@ class CodeQualityCheckTests(unittest.TestCase):
                 ["ruff", "pyright", "radon", "radon", "pytest"],
             )
             pyright_command = commands[1]
+            self.assertIn("--pythonpath", pyright_command)
+            self.assertIn(sys.executable, pyright_command)
             self.assertIn(source.as_posix(), pyright_command)
             self.assertIn((root / "tests").as_posix(), pyright_command)
             self.assertTrue(any("CRAP-Calculator" in line for line in output))

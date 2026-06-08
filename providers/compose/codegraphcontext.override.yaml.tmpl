@@ -1,0 +1,32 @@
+services:
+  falkordb:
+    image: @FALKORDB_IMAGE@
+    container_name: @FALKORDB_CONTAINER_NAME@
+    labels:
+@SERVICE_LABELS@
+    ports:
+      - @FALKORDB_PORT@
+      - @BROWSER_PORT@
+    volumes:
+      - @FALKORDB_DATA_VOLUME@
+
+  runner:
+    image: @RUNNER_IMAGE@
+    labels:
+@SERVICE_LABELS@
+    build:
+      context: @RUNNER_BUILD_CONTEXT@
+      dockerfile: Dockerfile
+@RUNNER_USER_BLOCK@    working_dir: @RUNNER_WORKING_DIR@
+    volumes:
+      - @RUNNER_RUNTIME_VOLUME@
+      - @RUNNER_REPO_VOLUME@
+    environment:
+@RUNNER_ENVIRONMENT@
+
+@WATCHER_SERVICES@
+networks:
+  default:
+    name: @NETWORK_NAME@
+    labels:
+@SERVICE_LABELS@

@@ -97,15 +97,19 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 - `skills/` is the canonical skill source tree. Edit skills here first.
 - `scripts/sync-skills.py` copies root `skills/` into the MCP package-data copy
   and all harness starter package skill folders. Run it after any skill edit.
+- `agents-md-files/`, `benchmarks/`, `providers/`, and `system/` are canonical
+  runtime asset source folders. Edit them at the root and run
+  `python3 scripts/sync-runtime.py` to refresh MCP package data.
 - `mcp/` contains the MCP server, tool surface, and package-owned runtime
   services.
-- `mcp/src/agents_remember/package_data/runtime/agents-md-files/` contains
-  package-owned `AGENTS.md` templates for the installed coordinator runtime.
+- `mcp/src/agents_remember/package_data/runtime/agents-md-files/` contains the
+  generated package-owned copy of root `agents-md-files/`.
 - `mcp/src/agents_remember/package_data/runtime/skills/` is the generated
   package-owned skill copy used by `runtime_install`.
-- `mcp/src/agents_remember/package_data/runtime/system/defaults/` contains
-  starter examples that initialization skills may use when creating user-owned
-  settings.
+- `mcp/src/agents_remember/package_data/runtime/providers/`,
+  `mcp/src/agents_remember/package_data/runtime/system/`, and
+  `mcp/src/agents_remember/package_data/benchmarks/` are generated package-data
+  copies of the matching root runtime asset folders.
 - `README.md` documents the current user-facing install and usage model.
 - `roadmap/` contains future design notes, not active runtime behavior.
 
@@ -115,6 +119,8 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 - Keep installed coordinator instructions in `runtime/agents-md-files/`.
 - Do not edit generated skill copies directly; edit root `skills/` and run
   `python3 scripts/sync-skills.py`.
+- Do not edit generated runtime asset copies directly; edit the matching root
+  folder and run `python3 scripts/sync-runtime.py`.
 - Keep user-specific behavior, project notes, and repo policy in the resolved
   memory layer, not in package-owned installed `AGENTS.md` templates.
 - Do not create, close out, integrate, push, or clean up worktrees without the

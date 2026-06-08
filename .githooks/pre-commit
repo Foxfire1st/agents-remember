@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+# Pre-commit generated-copy gate. Keep this lightweight: it only verifies that
+# generated package/harness copies were refreshed from their canonical roots.
+
+root="$(git rev-parse --show-toplevel)" || exit 1
+cd "$root" || exit 1
+
+common_git="$(git rev-parse --git-common-dir 2>/dev/null)"
+main_root=""
+if [ -n "$common_git" ]; then
+  main_root="$(CDPATH= cd -- "$common_git/.." 2>/dev/null && pwd)"
+fi
+
+if [ -x ".venv/bin/python" ]; then
+  py=".venv/bin/python"
+elif [ -n "$main_root" ] && [ -x "$main_root/.venv/bin/python" ]; then
+  py="$main_root/.venv/bin/python"
+else
+  py="$(command -v python3 || command -v python)"
+fi
+if [ -z "$py" ]; then
+  echo "[pre-commit] no python found; install the dev env: pip install -e 'mcp[dev]'" >&2
+  exit 1
+fi
+
+echo "[pre-commit] checking generated skill copies..."
+"$py" scripts/sync-skills.py --check || exit 1
+echo "[pre-commit] checking generated runtime asset copies..."
+"$py" scripts/sync-runtime.py --check || exit 1
