@@ -16,9 +16,13 @@ Official references:
 ## Root Starter Package
 
 The repository includes a Codex starter package at `.codex/`. Copy that folder
-to your workspace root, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, then
-restart Codex once.
+to your workspace root, then render the copied package. The
+`.codex/render-starter` script is a convenience: with a single `--repo` list
+such as `--repo my-app shared-lib`, it infers the workspace root from the copied
+`.codex/` folder, fills path and repository placeholders, writes the Python hook
+command, and validates that each requested repository exists. If you prefer not
+to run the renderer, make those same replacements by hand and verify that no
+placeholder tokens remain. Restart Codex once after rendering.
 
 The package contains:
 

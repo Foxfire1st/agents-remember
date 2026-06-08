@@ -133,9 +133,11 @@ def optional_yaml_line(name: str, value: str | None, *, indent: int = 4) -> str:
 
 
 def host_user() -> str | None:
-    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if not callable(getuid) or not callable(getgid):
         return None
-    return f"{os.getuid()}:{os.getgid()}"
+    return f"{getuid()}:{getgid()}"
 
 
 def host_user_block() -> str:

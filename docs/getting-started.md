@@ -9,9 +9,10 @@ Setup is agent-driven. Once the MCP server is wired in, you ask your agent to do
 Ask your agent to:
 
 1. **Copy the harness package** — Use the install guide for your harness and copy
-   its native starter files from this repo into the workspace. Replace every
-   placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
-   `<YOUR_REPOSITORY_FOLDER_NAME>`.
+   its native starter files from this repo into the workspace. Either run the
+   copied package's `render-starter` script with a single `--repo` list, for
+   example `--repo my-app shared-lib`, or replace the package placeholders by
+   hand.
 2. **Wire the MCP server** — Register Agents Remember MCP with this harness using
    `uvx` and the copied `agents-remember-settings.json`, then **restart the
    harness once** so it loads the MCP server, skills, hooks/rules/instructions,
@@ -53,7 +54,8 @@ projects/
 
 Different tools discover instructions, hooks, MCP settings, and skills in
 different native locations. Use the install page for your harness, copy its
-starter package into the workspace, and replace every placeholder:
+starter package into the workspace, and render that copied package by running
+its local `render-starter` script or by replacing the placeholders manually:
 
 | Harness | Setup guide |
 | --- | --- |
@@ -67,13 +69,20 @@ starter package into the workspace, and replace every placeholder:
 | OpenClaw | [install/openclaw.md](install/openclaw.md) |
 
 The starter packages are intentionally copy-pasteable. They carry the initial
-skills and harness-native hooks/rules/instructions, so first-run setup does not
-need `skills_install()` or a harness-specific hook installer.
+skills, harness-native hooks/rules/instructions, and a renderer that fills the
+copied settings. The renderer infers the workspace root from the copied harness
+folder. Pass every repository folder the MCP server should cover after one
+`--repo`, for example:
 
-In the copied `agents-remember-settings.json`, replace
-`<YOUR_REPOSITORY_FOLDER_NAME>` with the folder name of the repository the agent
-should be allowed to work on. Add more repository keys only when you intentionally
-want the MCP server to cover more checkouts.
+```text
+python .codex/render-starter.py --repo my-app shared-lib
+```
+
+The renderer is only a convenience for the edits you would otherwise make by
+hand: workspace paths, repository names, and harness-specific hook or context
+commands. If you prefer manual setup, replace those placeholders yourself and
+verify that no `<PATH/TO/YOUR/PROJECTS_FOLDER>`,
+`<YOUR_REPOSITORY_FOLDER_NAME>`, or hook-command placeholder remains.
 
 ## Manual Wire Of The MCP Server
 

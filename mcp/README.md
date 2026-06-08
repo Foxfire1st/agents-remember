@@ -14,10 +14,12 @@ Setup is agent-driven. Ask your agent to:
 1. **Copy the harness package** — Pick your harness guide under
    [docs/install](https://github.com/Foxfire1st/agents-remember-md/tree/main/docs/install),
    copy that harness's native starter files from the source repo into the
-   workspace, and replace every placeholder, including
-   `<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`. These
-   packages include the harness-visible skills, hooks/rules/instructions, and
-   MCP settings templates.
+   workspace, then render the copied package. The `render-starter` script is a
+   convenience: it infers the workspace root from the copied harness folder and
+   fills the copied package's path, repository, and hook-command placeholders
+   from a single `--repo` list such as `--repo my-app shared-lib`. You can also
+   do those replacements by hand. These packages include the harness-visible skills,
+   hooks/rules/instructions, MCP settings templates, and local renderers.
 2. **Wire the MCP server** — Register Agents Remember MCP with `uvx` and the
    copied settings file:
 
@@ -51,10 +53,10 @@ copying the harness package and wiring the MCP server.
 - Docker (running) when provider tools are enabled. The grepai embedder runs
   Ollama as a Docker container and pulls an embedding model (`nomic-embed-text`)
   on first setup — no host Ollama install is required.
-- `jq` for the Claude Code `SessionStart` hook. Install it with your distro's
-  package manager: `apt install jq` (Debian/Ubuntu), `brew install jq` (macOS),
-  `pacman -S jq` (Arch), `dnf install jq` (Fedora), or `apk add jq` (Alpine). If
-  `jq` is missing the hook installs but silently injects nothing.
+
+Claude Code hooks do not require `jq`. Older starter packages used a `jq`
+one-liner to encode hook output; the current starter packages use Python
+renderers and Python hook scripts.
 
 ## Install And Run
 

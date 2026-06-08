@@ -425,9 +425,11 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertNotIn(f'HOME: "{layout.home_root.as_posix()}"', render.override_yaml)
         self.assertIn('agents-remember.provider: "grepai-memory"', render.override_yaml)
         self.assertNotIn("legacy-provider-settings", render.override_yaml)
-        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+        getuid = getattr(os, "getuid", None)
+        getgid = getattr(os, "getgid", None)
+        if callable(getuid) and callable(getgid):
             self.assertIn(
-                f'user: "{os.getuid()}:{os.getgid()}"',
+                f'user: "{getuid()}:{getgid()}"',
                 render.override_yaml,
             )
         self.assertIn('"127.0.0.1::5432"', render.override_yaml)

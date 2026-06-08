@@ -16,10 +16,14 @@ Official references:
 ## Root Starter Package
 
 The repository includes an OpenClaw starter package at `.openclaw/`. Copy that
-folder to your shared workspace root, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, merge
-`.openclaw/openclaw.merge.json` into `~/.openclaw/openclaw.json`, then restart
-the gateway or start OpenClaw.
+folder to your shared workspace root, then render the copied package. The
+`.openclaw/render-starter` script is a convenience: with a single `--repo` list
+such as `--repo my-app shared-lib`, it infers the workspace root from the copied
+`.openclaw/` folder, fills path and repository placeholders, validates that each
+requested repository exists, and leaves `.openclaw/openclaw.merge.json` ready to
+merge into `~/.openclaw/openclaw.json` before you restart the gateway or start
+OpenClaw. If you prefer not to run the renderer, make those same replacements by
+hand and verify that no placeholder tokens remain.
 
 The package contains:
 

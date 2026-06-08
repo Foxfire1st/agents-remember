@@ -16,9 +16,13 @@ Official references:
 The repository includes a VS Code + GitHub Copilot starter package at
 `.github-vscode/` and `.vscode/`. Copy `.vscode/` to your workspace root, then
 copy the contents of `.github-vscode/` into your workspace `.github/` folder.
-Replace every placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
-`<YOUR_REPOSITORY_FOLDER_NAME>`, install/register the MCP server, then open or
-restart the workspace in VS Code once.
+Then render the copied package. The `.github/render-starter` script is a
+convenience: with a single `--repo` list such as `--repo my-app shared-lib`, it
+infers the workspace root from the copied `.github/` folder, fills path and
+repository placeholders, writes the OS-specific Python hook command, and
+validates that each requested repository exists before you open or restart the
+workspace in VS Code once. If you prefer not to run the renderer, make those
+same replacements by hand and verify that no placeholder tokens remain.
 
 The starter package uses `.github-vscode/` only to avoid mixing harness files
 with this source checkout's real `.github/workflows/`. VS Code and Copilot still
