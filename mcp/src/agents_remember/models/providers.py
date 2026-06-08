@@ -63,7 +63,7 @@ class ContextProviderItem(StrictResponseModel):
     id: str
     capability: ProviderCapability
     state: ProviderState
-    ok: bool | None
+    ok: bool | None = None
     runtime: ProviderRuntime = "unknown"
     identity: ProviderIdentity
     runtimeRoot: str | None = None
@@ -76,7 +76,7 @@ class ProviderSummary(StrictResponseModel):
     configured: bool
     enabled: bool
     state: ProviderState
-    ok: bool | None
+    ok: bool | None = None
     partial: bool = False
     currentStateFile: str | None = None
     processNamespace: dict[str, Any] | None = None
