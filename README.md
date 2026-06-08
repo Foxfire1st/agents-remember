@@ -144,20 +144,30 @@ agents-remember-md/
   README.md                         # public front door
   skills/                           # canonical skill source tree
   scripts/sync-skills.py            # sync skills into package/harness copies
+  scripts/sync-runtime.py           # sync runtime assets into package data
+  agents-md-files/                  # canonical installed AGENTS.md templates
+  benchmarks/                       # canonical optional benchmark package source
+  providers/                        # canonical provider runtime assets
+  system/defaults/examples/         # canonical scaffold examples
   mcp/                              # package-local MCP server and services
     src/agents_remember/package_data/
       runtime/
-        agents-md-files/            # installed AGENTS.md templates
+        agents-md-files/            # generated copy of root agents-md-files/
         skills/                     # generated package copy of root skills/
-        providers/                  # provider runtime assets (images, runners)
-        system/defaults/examples/   # scaffold examples used by initialization
-      benchmarks/                   # optional benchmark package source
+        providers/                  # generated copy of root providers/
+        system/defaults/examples/   # generated copy of root system/defaults/examples/
+      benchmarks/                   # generated copy of root benchmarks/
   docs/                             # user-facing documentation
 ```
 
 Edit skills in root `skills/`, then run `python3 scripts/sync-skills.py` to
-refresh the MCP package data and every harness starter package. The pre-push
-hook runs `python3 scripts/sync-skills.py --check`.
+refresh the MCP package data and every harness starter package. The pre-commit
+and pre-push hooks run `python3 scripts/sync-skills.py --check`.
+
+Edit runtime assets in root `agents-md-files/`, `benchmarks/`, `providers/`,
+and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
+data only. The pre-commit and pre-push hooks run
+`python3 scripts/sync-runtime.py --check`.
 
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The

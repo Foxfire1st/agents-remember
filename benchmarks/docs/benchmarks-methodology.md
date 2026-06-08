@@ -1,0 +1,98 @@
+# Benchmark Methodology
+
+Agents Remember benchmarks compare paired Codex headless runs against the same pinned repository commit:
+
+- a source-only `no-onboarding` variant
+- a `with-onboarding` variant that resolves a pinned external-memory repo from an isolated benchmark workspace
+
+Cases may add a `with-onboarding-warm` variant. That variant uses the same
+memory-enabled workspace but treats the benchmark-local memory as already
+validated, which isolates steady-state memory use from resolver and drift-gate
+startup cost.
+
+The suite is meant to show whether mature path-derived memory changes exploration efficiency and answer quality. It is not a universal model evaluation, a leaderboard, or a claim that every prompt benefits from onboarding.
+
+## Case Design
+
+Each case pins:
+
+- repository URL
+- commit hash
+- approximate file-count band
+- prompt set
+- benchmark workspace path
+- external memory repository URL and commit
+- author-provided result reports
+
+The source package does not commit case workspaces. It commits manifests, prompts, author results, and workspace templates. `prepare` generates the case workspace as resettable state with a source-only environment and a memory-enabled environment. Each environment gets a benchmark root marker and rendered harness `AGENTS.md` so Codex treats that environment as the project root. Beyond those harness files, the source-only environment contains only the pinned source checkout under `repos/` and no active memory context. The memory-enabled environment clones the same pinned source checkout under `repos/`, clones the pinned memory repository under the benchmark-local `ar-coordination/` root, copies benchmark-local runtime skills under `.codex/skills/agents-remember-md`, and registers the benchmark-local MCP server under `.codex/config.toml` for harness discovery. Reinstalling the benchmark package can prune and refresh generated workspaces when the pinned commit, prompt, memory, template, or author results change. User-generated outputs live separately under `benchmarks/user-runs/`.
+
+Agents Remember path rules should exclude resettable benchmark workspaces from onboarding. In particular, workspace-local cloned repos, workspace-local `ar-coordination/` trees, cloned benchmark memory snapshots, and `benchmarks/user-runs/` are benchmark state, not source files that should receive onboarding companions. This prevents benchmark memory from recursively producing more onboarding for itself.
+
+Benchmark assets are package data. When developing from a source checkout without installing the MCP package into the child benchmark environment, set `AGENTS_REMEMBER_BENCHMARK_MCP_SRC` to the checkout's `mcp/src` path so the generated child `.codex/config.toml` uses that explicit development source.
+
+## Task Selection
+
+Prefer tasks with stable completion criteria:
+
+- exploratory architecture explanations
+- debugging investigations
+- workflow or data-flow explanations
+- bug localization without requiring a source edit
+
+Avoid using feature-building tasks as primary benchmark evidence. A coding agent can make many valid implementation choices, which makes exact comparison less repeatable.
+
+## Run Shape
+
+Each prompt should run the source-only and memory-enabled variants. The default repetition count is three runs per prompt and variant. For each repetition, the selected variants share one dated run root and are submitted together when the configured job count allows parallelism.
+
+The runner accepts `--skill-exposure-mode copy|none` on `prepare` and `run`.
+`copy` is the default and exposes benchmark-local skills under
+`.codex/skills/agents-remember-md`. `none` is only for preconfigured
+workspaces where skill discovery is handled outside the benchmark harness.
+
+The runner records:
+
+- raw JSONL
+- stderr
+- final message text
+- process metadata
+- parsed metrics
+- a Markdown summary
+
+## Metrics
+
+The analyzer reports metrics when they are available in the JSONL stream or runner metadata:
+
+- duration
+- event count
+- detected command/tool events
+- input tokens
+- fresh input tokens
+- output tokens
+- reasoning tokens
+- JSONL size
+- exit code
+- detected errors
+
+Token fields are parsed defensively because Codex JSONL schemas can evolve. When cumulative token fields appear more than once, the analyzer keeps the largest observed value for each field.
+
+## Validity Checks
+
+A useful result report should state whether the variant boundary held:
+
+- The `no-onboarding` run should not read `ar-coordination/memory-repos/`, `ar-memory/`, or target onboarding files.
+- The `with-onboarding` run should resolve the benchmark-local coordination root, not the user's normal workspace.
+- Both variants should use the same pinned source commit.
+- The final answer should complete the primary task, not stop after startup checks.
+
+## Limitations
+
+These benchmarks are evidence, not proof in the mathematical sense.
+
+- Model behavior is stochastic.
+- Codex versions, model choices, and tool behavior can change.
+- Hardware, filesystem, shell, network, and cache state can affect duration.
+- A mature memory snapshot reflects the author's curation choices.
+- Benchmarks can become stale when a pinned repo commit or memory fixture changes.
+
+The most useful comparison is a pattern across cases of different sizes: small repositories may not benefit, while larger or more architecturally confusing repositories may show better efficiency and fewer wrong conclusions.

@@ -55,7 +55,20 @@ def quality_commands(config: CheckConfig, coverage_json: Path) -> list[tuple[str
     test_args = [path.as_posix() for path in config.test_paths]
     return [
         ("ruff", [sys.executable, "-m", "ruff", "check", *source_args, *test_args]),
-        ("pyright", [sys.executable, "-m", "pyright", "--project", ".", *source_args, *test_args]),
+        (
+            "pyright",
+            [
+                sys.executable,
+                "-m",
+                "pyright",
+                "--project",
+                ".",
+                "--pythonpath",
+                sys.executable,
+                *source_args,
+                *test_args,
+            ],
+        ),
         (
             "radon-cc",
             [

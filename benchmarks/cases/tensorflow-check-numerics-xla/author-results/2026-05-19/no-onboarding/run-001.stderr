@@ -1,0 +1,634 @@
+Reading prompt from stdin...
+2026-05-19T03:18:07.891116Z  WARN codex_core_plugins::manager: failed to warm featured plugin ids cache error=remote plugin sync request to https://chatgpt.com/backend-api/plugins/featured failed with status 403 Forbidden: <html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style global>body{font-family:Arial,Helvetica,sans-serif}.container{align-items:center;display:flex;flex-direction:column;gap:2rem;height:100%;justify-content:center;width:100%}@keyframes enlarge-appear{0%{opacity:0;transform:scale(75%) rotate(-90deg)}to{opacity:1;transform:scale(100%) rotate(0deg)}}.logo{color:#8e8ea0}.scale-appear{animation:enlarge-appear .4s ease-out}@media (min-width:768px){.scale-appear{height:48px;width:48px}}.data:empty{display:none}.data{border-radius:5px;color:#8e8ea0;text-align:center}@media (prefers-color-scheme:dark){body{background-color:#343541}.logo{color:#acacbe}}</style>
+  <meta http-equiv="refresh" content="360"></head>
+  <body>
+    <div class="container">
+      <div class="logo">
+        <svg
+          width="41"
+          height="41"
+          viewBox="0 0 41 41"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          strokeWidth="2"
+          class="scale-appear"
+        >
+          <path
+            d="M37.5324 16.8707C37.9808 15.5241 38.1363 14.0974 37.9886 12.6859C37.8409 11.2744 37.3934 9.91076 36.676 8.68622C35.6126 6.83404 33.9882 5.3676 32.0373 4.4985C30.0864 3.62941 27.9098 3.40259 25.8215 3.85078C24.8796 2.7893 23.7219 1.94125 22.4257 1.36341C21.1295 0.785575 19.7249 0.491269 18.3058 0.500197C16.1708 0.495044 14.0893 1.16803 12.3614 2.42214C10.6335 3.67624 9.34853 5.44666 8.6917 7.47815C7.30085 7.76286 5.98686 8.3414 4.8377 9.17505C3.68854 10.0087 2.73073 11.0782 2.02839 12.312C0.956464 14.1591 0.498905 16.2988 0.721698 18.4228C0.944492 20.5467 1.83612 22.5449 3.268 24.1293C2.81966 25.4759 2.66413 26.9026 2.81182 28.3141C2.95951 29.7256 3.40701 31.0892 4.12437 32.3138C5.18791 34.1659 6.8123 35.6322 8.76321 36.5013C10.7141 37.3704 12.8907 37.5973 14.9789 37.1492C15.9208 38.2107 17.0786 39.0587 18.3747 39.6366C19.6709 40.2144 21.0755 40.5087 22.4946 40.4998C24.6307 40.5054 26.7133 39.8321 28.4418 38.5772C30.1704 37.3223 31.4556 35.5506 32.1119 33.5179C33.5027 33.2332 34.8167 32.6547 35.9659 31.821C37.115 30.9874 38.0728 29.9178 38.7752 28.684C39.8458 26.8371 40.3023 24.6979 40.0789 22.5748C39.8556 20.4517 38.9639 18.4544 37.5324 16.8707ZM22.4978 37.8849C20.7443 37.8874 19.0459 37.2733 17.6994 36.1501C17.7601 36.117 17.8666 36.0586 17.936 36.0161L25.9004 31.4156C26.1003 31.3019 26.2663 31.137 26.3813 30.9378C26.4964 30.7386 26.5563 30.5124 26.5549 30.2825V19.0542L29.9213 20.998C29.9389 21.0068 29.9541 21.0198 29.9656 21.0359C29.977 21.052 29.9842 21.0707 29.9867 21.0902V30.3889C29.9842 32.375 29.1946 34.2791 27.7909 35.6841C26.3872 37.0892 24.4838 37.8806 22.4978 37.8849ZM6.39227 31.0064C5.51397 29.4888 5.19742 27.7107 5.49804 25.9832C5.55718 26.0187 5.66048 26.0818 5.73461 26.1244L13.699 30.7248C13.8975 30.8408 14.1233 30.902 14.3532 30.902C14.583 30.902 14.8088 30.8408 15.0073 30.7248L24.731 25.1103V28.9979C24.7321 29.0177 24.7283 29.0376 24.7199 29.0556C24.7115 29.0736 24.6988 29.0893 24.6829 29.1012L16.6317 33.7497C14.9096 34.7416 12.8643 35.0097 10.9447 34.4954C9.02506 33.9811 7.38785 32.7263 6.39227 31.0064ZM4.29707 13.6194C5.17156 12.0998 6.55279 10.9364 8.19885 10.3327C8.19885 10.4013 8.19491 10.5228 8.19491 10.6071V19.808C8.19351 20.0378 8.25334 20.2638 8.36823 20.4629C8.48312 20.6619 8.64893 20.8267 8.84863 20.9404L18.5723 26.5542L15.206 28.4979C15.1894 28.5089 15.1703 28.5155 15.1505 28.5173C15.1307 28.5191 15.1107 28.516 15.0924 28.5082L7.04046 23.8557C5.32135 22.8601 4.06716 21.2235 3.55289 19.3046C3.03862 17.3858 3.30624 15.3413 4.29707 13.6194ZM31.955 20.0556L22.2312 14.4411L25.5976 12.4981C25.6142 12.4872 25.6333 12.4805 25.6531 12.4787C25.6729 12.4769 25.6928 12.4801 25.7111 12.4879L33.7631 17.1364C34.9967 17.849 36.0017 18.8982 36.6606 20.1613C37.3194 21.4244 37.6047 22.849 37.4832 24.2684C37.3617 25.6878 36.8382 27.0432 35.9743 28.1759C35.1103 29.3086 33.9415 30.1717 32.6047 30.6641C32.6047 30.5947 32.6047 30.4733 32.6047 30.3889V21.188C32.6066 20.9586 32.5474 20.7328 32.4332 20.5338C32.319 20.3348 32.154 20.1698 31.955 20.0556ZM35.3055 15.0128C35.2464 14.9765 35.1431 14.9142 35.069 14.8717L27.1045 10.2712C26.906 10.1554 26.6803 10.0943 26.4504 10.0943C26.2206 10.0943 25.9948 10.1554 25.7963 10.2712L16.0726 15.8858V11.9982C16.0715 11.9783 16.0753 11.9585 16.0837 11.9405C16.0921 11.9225 16.1048 11.9068 16.1207 11.8949L24.1719 7.25025C25.4053 6.53903 26.8158 6.19376 28.2383 6.25482C29.6608 6.31589 31.0364 6.78077 32.2044 7.59508C33.3723 8.40939 34.2842 9.53945 34.8334 10.8531C35.3826 12.1667 35.5464 13.6095 35.3055 15.0128ZM14.2424 21.9419L10.8752 19.9981C10.8576 19.9893 10.8423 19.9763 10.8309 19.9602C10.8195 19.9441 10.8122 19.9254 10.8098 19.9058V10.6071C10.8107 9.18295 11.2173 7.78848 11.9819 6.58696C12.7466 5.38544 13.8377 4.42659 15.1275 3.82264C16.4173 3.21869 17.8524 2.99464 19.2649 3.1767C20.6775 3.35876 22.0089 3.93941 23.1034 4.85067C23.0427 4.88379 22.937 4.94215 22.8668 4.98473L14.9024 9.58517C14.7025 9.69878 14.5366 9.86356 14.4215 10.0626C14.3065 10.2616 14.2466 10.4877 14.2479 10.7175L14.2424 21.9419ZM16.071 17.9991L20.4018 15.4978L24.7325 17.9975V22.9985L20.4018 25.4983L16.071 22.9985V17.9991Z"
+            fill="currentColor"
+          />
+        </svg>
+      </div>
+      <div class="data"><div class="main-wrapper" role="main"><div class="main-content"><noscript><div class="h2"><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></div></noscript></div></div><script>(function(){window._cf_chl_opt = {cFPWv: 'g',cH: 'UjCYSVhxnR.GLYmNXI_2HkLlaRPPm6Jqj.xjJ7Hgyyo-1779160688-1.2.1.1-R4sczRvMeLzgzMAYJaqyaMVU.ocEIlIoK2FV3WwXuTvGkEdZ8lUs078E9MYKeRu4',cITimeS: '1779160688',cRay: '9fdff3dd6ed6c800',cTplB: '0',cTplC:1,cTplO:0,cTplV:5,cType: 'managed',cUPMDTk:"/backend-api/plugins/featured?platform=codex&__cf_chl_tk=27bg_j4izN1cqOyppAZAUmc_0aexUvWfCRWGv3je.RM-1779160688-1.0.1.1-i61LKIdlMgdWu3LWG278vfyKQgGHkDgRhDYcSx.5fm8",cvId: '3',cZone: 'chatgpt.com',fa:"/backend-api/plugins/featured?platform=codex&__cf_chl_f_tk=27bg_j4izN1cqOyppAZAUmc_0aexUvWfCRWGv3je.RM-1779160688-1.0.1.1-i61LKIdlMgdWu3LWG278vfyKQgGHkDgRhDYcSx.5fm8",md: 'xByt.yhAsE6A0JKKyxVwSQsrE12bg20aimhCld0c0DI-1779160688-1.2.1.1-YBBgfxN3umfnRfuNGLTqV9pm2FX12rt_78n30xmGux78WWvAKeOraj7Gkq3kT188UGlqgXFZ9TGyVWPcvsGjp6acHXNCao3QO76C7tIJVxcfgSGgwDgKKfvGA5isXkpbNwtkHeWij0kUO4cYCA4KwkzeWyLxxpLVH_jXru7dw3Qrpl.SrezqPGxVjvqqCDKLKJyHgE300em768JIw5qDBJDKDmUbVlRV.9DrfKYWmGDNOCUj2p2t90wSKPy7rFFZ.nQp1Tn.lctkf6hDyTZP1wze5B5XqGW38zkzJZZ08lBOL5q_y2OaxqeS61CSCyjlfOezmTqx35jUc3xBleXf5o5ZkckEpbj_LRDDcG.obBIHMqKoukEMT0e5LA95LHZG6DB2_TPEOINuIEXTFpxxRzJGh2b41H2nlRiSs_g923TGr7NtiGi02U5QSzlkw3YQFt3FAt3xHBpVstKMXiu0NT.LESwsvq2Gw8p5Jt1dUHWqV_BcBm.FBF.QSOI2QA4zESwiElsD0_BYIyH1BXbsnJLoT_cozgi3gdNWCeoRIu5G3NCYbIeLV3kmZSeFH8j91e4zWw4S2tZiYeD1CoGi9RUeyYhnwr3uR6uwLHCMNv99PDHX2urnrOWjbufEzDhtkwxOuWkjIsZt0raGqIYVUEQhjkzSHmSwgBD_zovTTI2.3a_2xmnfd.mZNb88AQQbpX4903x5cus2MME_ReGl0SeBlTJagK2.7eX.0K1sN153TxB2eCGTNrDhWggvRHluHIpqb5SK7VKWvkvdXCAKai9TizfR0IuPlUu6KS9oTlrajXWDH1oIQpGzlPppin01e7vffLD2LwGBA1_FtZArMBPC47PGxTt_ILFSmSc3U7CfvtrF2zpaXblGYP4AEskps0vdSxJaj3c4mCheBPz1RkzWbirdNqeVbhBRmhBaqhR_bv9TiumXkPAsgy9kiQlj..q0ZZ.wyhYiC6ypmI1tkor5zoLvTXysNu6u0jcF6nGIjA6gWd0knMEvH.USInRlUBocc1frm005CF5zbR3hGw',mdrd: 'jjO.PKyZji8QwRAY65e6sn6VLGEV328PAjGbxYQu8T0-1779160688-1.2.1.1-Empv5Hv.yGRhS1RGsANzx2GOqTISOeHcLQoakg6wU7CyoieaIYi9ZYyKCsBvmESZWs6tBiXUHII4WI4UGVXlcuAXqLfo8SWtCB1djIYmMzkB1antrraIP1eUDv28gEqmFXftJdD5CCkp.3_fMKB9asQfwaqM4wyVsmSWHQYCDeCK8vWXyNi5r2FXCiaGfBiJ8x8Px9h_Nko4AkiU8g2yrDqOorcl2TGSwB.y2vG1uPcmMJmG.3H.29u_KEr6nIy5Nafh72hMow6qRRUkUKonqMriA2GU8yIsuxEXlNeHJbnC0e25vJLjc.3icYsQM1CJavglpyEU2q9ahSjU3CcndHiObv8E1I6S8Cq6tu37EwvTAAMXJL5ahSeANqf7RbtTae_U0.SZ8WzJ7j13g754iyoGyKrQwQoGenTDUjgn4Yu41DzT.EAlrcRevltwjqsb5C0zD9NoIXV74ZtSXGwzuYhvyaBuu.DpgK2z2Z.h2yaOG5rZ5No1TBH87TlkD4qbIZ8_ZhV3cg6vk.EDDaS4dKpJvcgIzEs.GH_IUqhMdGCg8UfIDy9mKOgHFKj7cjxNWNExee5xeuK9ix6jQNEDSfMgBPhIsvpFCcl4IA.TjXRNnggZijINE7a.n2wWNGR802JhzQmCCXlQtiPoatRhKVGsAoHYmf.4I36eYr6UhJEcTTd4KzqgzkDp2ErN4NSGiKWcU5dQdd3hrhxqbXwA4O4SES4CDSD0if4iZO_A6S4Gj0SXOBjKyMbCrQJirwZ7Ii8Hpvxq91U9.zDB9H3fLEAf_h9CEwnPz4k0iFaIMGJVs8bc6h9kDNRsdFOtgkAOi54QyHtr6WE8XIwdO_617nRtIbcFl8mUwOnzDgLm1c2ITR8eNwvfttek8HxhUINZQQujwZcGQrSXzxtaRnk05PtzrNi38pvzPqyO7bT5jTGzhgCxCsm1IN.RDvkuS_QKcYyq1mo1xZMpZ.YyH6CEHycURaqKVUySizGJS4eFXDqJ74M.M0QH0RttdmsWuve0fbAvpNTrlcxikQIz4Q8mHCw3BLrfgtJ2qcTaDVj1OZ9SmoSjihhZaHizI._orakTdIoJhihNf9dcM.ybwb4eUoewLILUWnVcGFEh4xm5u5_y.q1sOCNf9bbu20hFxG4gZ_l9Sulb72zfYtNTTA0NPYbVLidpSVsid8qRLPGIpkRcJSgPcvoUornNJeNekDcHigKBpy7QPDYh0xNkt3f.oS7YKLtZgI_J5qFVOXVgsQvMjYW3_FgXT81LZMI5I8GSiR10UAlfS3WZz_FBIEXLPfKT6r_pGWSzM4gZBMUkdBMTnOqhj0dtOQHfh0xP.zRpQps4C9e.0dhVUNlsuu2hSlfVeiV5sDuuK.Y2576QtywwPK_B9L3AVXi2IGCBFdlEJFo7fW0d08c6qt0slYKvDBE6fWOxq5JgJkfpFYetQdKzRHHgb3r3HaLwT3bbG2UHWx_wGsZ9wQ9xCWM3OdyPL3_J8tvrbt57cxbRSS1IBuac0DoDL7oJPrlr4eIZlGJ8.7.bBz9Huu_SYgc21wDvNwzRb.wmvmFz8XMLzaroqnm1vIfTffItRGZrjlWPJzNXGQ5QPp0Ry22p8AdViv6y.9.oMTeD3_Jrlcmg36FmeDOxV9bqp92XhvCxRlafb0PPtgorvSgAkLowNnSRjJiCOf.Dc90f2UukWx89I4T._0ntQ.Q2.6NYs2Vlm80La3wUI5lbqtW6X0ISWjmuPo9nOKCjZo3Nz1U2QvMZk8oLHLqYytJDoNffr4ofDiSCxfg1ZqM0NW7eB3QwrqscjsLzPhwXwCjzZNDd742aV9gLr.gCSit5ZwmE7PaAjINOBTz.s4FSJt74EoFEQ7LqAcK33FGitRtvUE3iwMNIY0Qlg45FxmKDOjMBIFoDMfxuZVkfYd.DHh3P7tDqPCPcyQK26EinTXCdtyG7kp1oi_4cXsCo_74RaRGlVGXDmgXoISXgC65vrNDt7zNbKktPg1dpx1vEkTnwiv1Fy9UbCOK5YdovnFuRt7nqwFmZ6YGCGw0ncmyzFpolNyQW7t6tFrh5A1OlxRsitlYAmqJX92kbWMzt.nt0fAsqsHRvMC7BzdyzFbPqMx9g8DBGU0aKEL37MID6nOIBdPoJaW4ze4r.KlwisuuB9Q5Jws1ke10QlVXq99pJwOCHLdBXmSu.P3U4wtycPMQFRIdC41bFso3bIviFkDu.Lrm09s5nKRle8uf8LcuHSvs2tMK1MK8..0CuNg',};var a = document.createElement('script');a.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=9fdff3dd6ed6c800';window._cf_chl_opt.cOgUHash = location.hash === '' && location.href.indexOf('#') !== -1 ? '#' : location.hash;window._cf_chl_opt.cOgUQuery = location.search === '' && location.href.slice(0, location.href.length - window._cf_chl_opt.cOgUHash.length).indexOf('?') !== -1 ? '?' : location.search;if (window.history && window.history.replaceState) {var ogU = location.pathname + window._cf_chl_opt.cOgUQuery + window._cf_chl_opt.cOgUHash;history.replaceState(null, null,"/backend-api/plugins/featured?platform=codex&__cf_chl_rt_tk=27bg_j4izN1cqOyppAZAUmc_0aexUvWfCRWGv3je.RM-1779160688-1.0.1.1-i61LKIdlMgdWu3LWG278vfyKQgGHkDgRhDYcSx.5fm8"+ window._cf_chl_opt.cOgUHash);a.onload = function() {history.replaceState(null, null, ogU);}}document.getElementsByTagName('head')[0].appendChild(a);}());</script></div>
+    </div>
+  </body>
+</html>
+
+2026-05-19T03:18:07.892735Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:07.904336Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:08.290931Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:18:08.291546Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:18:08.296273Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:18:08.296360Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:18:08.316272Z  WARN codex_core_plugins::manager: failed to refresh curated plugin cache after sync: failed to refresh curated plugin cache for github@openai-curated: failed to back up plugin cache entry: Zugriff verweigert (os error 5)
+2026-05-19T03:18:08.867957Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell
+2026-05-19T03:18:08.954377Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:08.965061Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:11.333208Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:11.341573Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:11.352016Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:18:11.352648Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:18:11.357018Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:18:11.357106Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:18:11.386826Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:11.386849Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:11.387746Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:11.387762Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:11.388592Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:11.388605Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:11.389709Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:11.389723Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:11.390525Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:11.390536Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:11.391292Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:11.391300Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:12.173314Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:12.182680Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:12.193677Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:18:12.194297Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:18:12.198866Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:18:12.198963Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:18:12.230851Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:12.230875Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:12.231874Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:12.231890Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:12.232800Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:12.232814Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:12.233703Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:12.233717Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:12.234763Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:12.234779Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:12.235780Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:12.235798Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:25.672125Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.5 seconds
+Output:
+
+2026-05-19T03:18:29.596106Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:29.605190Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:29.617250Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:18:29.617879Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:18:29.622782Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:18:29.622887Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:18:29.657582Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:29.657605Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:29.658500Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:29.658512Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:29.659635Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:29.659652Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:29.660756Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:29.660771Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:29.661707Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:29.661726Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:29.662704Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:29.662716Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:45.292890Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:45.302545Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:45.314785Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:18:45.315370Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:18:45.319826Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:18:45.319905Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:18:45.353391Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:45.353411Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:45.354320Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:45.354337Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:45.355274Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:45.355290Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:45.356519Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:45.356534Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:45.357462Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:45.357473Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:45.358340Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:18:45.358350Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:18:59.898153Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.3 seconds
+Output:
+rg: regex parse error:
+    (?:REGISTER_KERNEL_BUILDER|class CheckNumericsOp|void Compute|InvalidArgument|message_|Name\(\)
+    ^
+error: unclosed group
+
+2026-05-19T03:18:59.922939Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.3 seconds
+Output:
+
+2026-05-19T03:18:59.948838Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:59.957803Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:18:59.970071Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:18:59.970685Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:18:59.975197Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:18:59.975285Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:19:00.008091Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:00.008112Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:00.009183Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:00.009199Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:00.010363Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:00.010378Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:00.011266Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:00.011276Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:00.012131Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:00.012140Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:00.013097Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:00.013116Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:16.619311Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:16.628086Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:16.639397Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:19:16.639948Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:19:16.644370Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:19:16.644464Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:19:16.676626Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:16.676648Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:16.677574Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:16.677587Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:16.678402Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:16.678411Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:16.679243Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:16.679257Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:16.680634Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:16.680650Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:16.681618Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:16.681630Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:30.356094Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:30.365822Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:30.377702Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:19:30.378285Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:19:30.382871Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:19:30.382956Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:19:30.415740Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:30.415761Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:30.416729Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:30.416746Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:30.418001Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:30.418021Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:30.419114Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:30.419130Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:30.420056Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:30.420070Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:30.421133Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:30.421147Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:42.761836Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.2 seconds
+Output:
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:56:  // If true, insert CheckNumerics nodes for every floating point typed input to
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:60:  // If true, insert CheckNumerics nodes for every floating point typed output
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:150:        ops::CheckNumerics check_numerics_op(
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:155:            absl::StrCat("CheckNumerics failed for output ", oidx, "(",
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:157:        new_output = check_numerics_op;
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:393:      ops::CheckNumerics check_numerics_op(
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:395:          absl::StrCat("CheckNumerics failed for input ", input_idx, "(",
+repos/tensorflow/tensorflow/compiler/jit\build_xla_ops_pass.cc:397:      xla_run_args.push_back(check_numerics_op);
+repos/tensorflow/tensorflow/compiler/jit\compilability_check_util.cc:469:      IsAssertOrCheckNumerics(node.type_string())) {
+repos/tensorflow/tensorflow/compiler/jit\compilability_check_util.cc:470:    absl::string_view uncompilable_reason = "Assert or CheckNumerics";
+repos/tensorflow/tensorflow/compiler/jit\compilability_check_util.h:108:    // Whether it is okay to "cluster" Assert and CheckNumerics by simply
+repos/tensorflow/tensorflow/compiler/jit\compilability_check_util.h:113:    // implementation. Currently Assert and CheckNumerics ops have dummy XLA
+repos/tensorflow/tensorflow/compiler/jit\compilability_check_util.h:248:  bool IsAssertOrCheckNumerics(absl::string_view op_name) const {
+repos/tensorflow/tensorflow/compiler/jit\compilability_check_util.h:249:    return op_name == "Assert" || op_name == "CheckNumerics";
+repos/tensorflow/tensorflow/compiler/jit\flags.cc:305:            "If true then insert CheckNumerics nodes to check all cluster "
+repos/tensorflow/tensorflow/compiler/jit\flags.cc:309:            "If true then insert CheckNumerics nodes to check all cluster "
+repos/tensorflow/tensorflow/compiler/jit\flags.h:264:  // If true, insert CheckNumerics nodes for every floating point typed input to
+repos/tensorflow/tensorflow/compiler/jit\flags.h:268:  // If true, insert CheckNumerics nodes for every floating point typed output
+repos/tensorflow/tensorflow/compiler/jit\mark_for_compilation_pass.cc:2090:      "CheckNumerics",
+repos/tensorflow/tensorflow/compiler/jit\mark_for_compilation_pass_test.cc:1312:      ops::CheckNumerics(root.WithOpName("test/check"), a, "test/check");
+repos/tensorflow/tensorflow/compiler/jit\mark_for_compilation_pass_test.cc:1337:      ops::CheckNumerics(root.WithOpName("test/check"), a, "test/check");
+repos/tensorflow/tensorflow/compiler/tf2xla\kernels\BUILD:524:        "check_numerics_op.cc",
+repos/tensorflow/tensorflow/compiler/tf2xla\kernels\check_numerics_op.cc:21:REGISTER_XLA_OP(Name("CheckNumerics"), MlirXlaOpKernel);
+repos/tensorflow/tensorflow/compiler/tf2xla\xla_op_registry.h:168:    // If we should cluster Assert and CheckNumerics by eliding them (XLA does
+repos/tensorflow/tensorflow/compiler/tf2xla\xla_op_registry.h:169:    // not natively support Assert or CheckNumerics).
+rg: repos/tensorflow/tensorflow/compiler/xla: Das System kann die angegebene Datei nicht finden. (os error 2)
+
+2026-05-19T03:19:42.816868Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:42.827072Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:42.838635Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:19:42.839250Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:19:42.843941Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:19:42.844040Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:19:42.881030Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:42.881056Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:42.882100Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:42.882119Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:42.883057Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:42.883072Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:42.884050Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:42.884067Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:42.885450Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:42.885470Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:42.886472Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:42.886486Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:56.501334Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:56.516520Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:19:56.534544Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:19:56.535162Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:19:56.540295Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:19:56.540392Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:19:56.595148Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:56.595173Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:56.596748Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:56.596794Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:56.598414Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:56.598437Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:56.599648Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:56.599666Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:56.601747Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:56.601771Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:19:56.603230Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:19:56.603249Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:11.986194Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:11.995965Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:12.008088Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:20:12.008720Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:20:12.013252Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:20:12.013331Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:20:12.048047Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:12.048069Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:12.049001Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:12.049018Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:12.050205Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:12.050220Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:12.051509Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:12.051529Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:12.052599Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:12.052609Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:12.053517Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:12.053531Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:18.326696Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:18.336277Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:18.347742Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:20:18.348335Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:20:18.352729Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:20:18.352808Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:20:18.386038Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:18.386059Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:18.386899Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:18.386910Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:18.388162Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:18.388184Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:18.389308Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:18.389323Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:18.390317Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:18.390327Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:18.391212Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:18.391227Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:28.118963Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:28.127779Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:28.139036Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:20:28.139609Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:20:28.144094Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:20:28.144174Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:20:28.176257Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:28.176282Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:28.177274Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:28.177290Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:28.178243Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:28.178253Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:28.179226Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:28.179240Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:28.180344Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:28.180358Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:28.181303Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:28.181315Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:40.554802Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:40.575807Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:40.598109Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:20:40.598741Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:20:40.604501Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:20:40.604601Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:20:40.653715Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:40.653747Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:40.655536Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:40.655560Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:40.656870Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:40.656898Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:40.658274Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:40.658294Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:40.659878Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:40.659897Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:40.660966Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:40.660982Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:52.772775Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2 seconds
+Output:
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_test.cc:32:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_test.cc:78:    pm->addPass(mlir::mhlo::createLegalizeTFPass(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_test.cc:80:        /* prefer_tf2xla=*/false));
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_test.cc:93:      "/tensorflow/core/tf2xla/v1/mlir_failed_xla_legalize_tf_pass_count");
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_test.cc:108:      "/tensorflow/core/tf2xla/v1/mlir_failed_xla_legalize_tf_pass_count");
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\infeed_ops_xla_adjust_layout.cc:42:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:39:#include "tensorflow/compiler/mlir/tf2xla/transforms/legalization_op_config.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:40:#include "tensorflow/compiler/mlir/tf2xla/transforms/legalize_tf_with_tf2xla_passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:41:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:42:#include "tensorflow/compiler/mlir/tf2xla/transforms/tf2xla_rewriter.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:43:#include "tensorflow/compiler/tf2xla/xla_compilation_device.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:44:#include "tensorflow/compiler/tf2xla/xla_context.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:45:#include "tensorflow/compiler/tf2xla/xla_expression.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:46:#include "tensorflow/compiler/tf2xla/xla_helpers.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:47:#include "tensorflow/compiler/tf2xla/xla_op_registry.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:105:class Tf2XlaRewritePattern : public ConversionPattern {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:107:  explicit Tf2XlaRewritePattern(MLIRContext* ctx, TypeConverter& converter,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:109:                                bool prefer_tf2xla)
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:112:        prefer_tf2xla_(prefer_tf2xla) {}
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:129:          (prefer_tf2xla_ &&
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:134:    return hlo::Tf2XlaRewriter::RewriteOp(op, rewriter, device_type_);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:139:  bool prefer_tf2xla_;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:140:  bool use_tf2xla_hlo_importer_;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:211:Tf2XlaTypeConverter::Tf2XlaTypeConverter() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:229:void PopulateLegalizeTfWithTf2XlaPatterns(llvm::StringRef device_type,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:232:                                          Tf2XlaTypeConverter& converter,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:233:                                          bool prefer_tf2xla) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:235:  patterns.add<Tf2XlaRewritePattern>(ctx, converter, device_type.str(),
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla.cc:236:                                     prefer_tf2xla);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:132:        "//tensorflow/compiler/mlir/tf2xla/internal/passes:__pkg__",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:253:        ":xla_legalize_tf_with_tf2xla",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:259:        "//tensorflow/compiler/tf2xla/kernels:rng_converter_utils",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:304:    name = "tf2xla_rewriter",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:306:        "tf2xla_rewriter.cc",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:309:        "tf2xla_rewriter.h",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:320:        "//tensorflow/compiler/tf2xla:xla_compilation_device",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:321:        "//tensorflow/compiler/tf2xla:xla_context",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:322:        "//tensorflow/compiler/tf2xla:xla_expression",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:323:        "//tensorflow/compiler/tf2xla:xla_helpers",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:324:        "//tensorflow/compiler/tf2xla:xla_op_registry",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:364:    name = "tf2xla_rewriter_test",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:366:        "tf2xla_rewriter_test.cc",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:370:        ":tf2xla_rewriter",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:372:        "//tensorflow/compiler/tf2xla:xla_op_registry",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:373:        "//tensorflow/compiler/tf2xla/kernels:xla_ops",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:396:    name = "xla_legalize_tf_with_tf2xla",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:398:        "legalize_tf_with_tf2xla.cc",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:401:        "legalize_tf_with_tf2xla_passes.h",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:406:        ":tf2xla_rewriter",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:413:        "//tensorflow/compiler/tf2xla:xla_compilation_device",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:414:        "//tensorflow/compiler/tf2xla:xla_context",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:415:        "//tensorflow/compiler/tf2xla:xla_expression",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:416:        "//tensorflow/compiler/tf2xla:xla_helpers",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:417:        "//tensorflow/compiler/tf2xla:xla_op_registry",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:446:        "//tensorflow/compiler/tf2xla:xla_compilation_device",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:447:        "//tensorflow/compiler/tf2xla:xla_context",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:448:        "//tensorflow/compiler/tf2xla:xla_expression",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:449:        "//tensorflow/compiler/tf2xla:xla_helpers",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:450:        "//tensorflow/compiler/tf2xla:xla_op_registry",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:472:        "//tensorflow/compiler/mlir/tf2xla/internal:__subpackages__",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:491:        "//tensorflow/compiler/tf2xla:xla_op_registry",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\BUILD:492:        "//tensorflow/compiler/tf2xla/kernels:xla_ops",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/legalization_op_config.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:43:      // Ops that are legalized in the old bridge using MlirXlaOpKernel
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:130:bool IsOpTypeAllowedTf2XlaFallback(const TypeID& type_id) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:131:  // Allowlisted TensorFlow ops are known to have well behaved tf2xla kernels
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:134:  // all tf2xla kernels.
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:406:/// prefer_tf2xla. All other ops not in this list should use MLIR legalization
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:408:bool IsOpTypeAllowedTf2XlaPreferred(const TypeID& type_id) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:542:bool HasTf2XlaFallback(const TypeID& type_id) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:543:  return IsOpTypeAllowedTf2XlaFallback(type_id) ||
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:544:         IsOpTypeAllowedTf2XlaPreferred(type_id);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:552:  return IsOpTypeAllowedTf2XlaFallback(type_id);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.cc:556:  return IsOpTypeAllowedTf2XlaPreferred(type_id);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\test_utils.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/test_utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:20:def LegalizeTF : Pass<"xla-legalize-tf", "ModuleOp"> {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:26:    When `tf2xla_fallback_device_type` is not `None`, also uses legalization
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:28:    legalize_tf_with_tf2xla.cc for details). By default, TF2XLA fallback is not
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:34:    Option<"use_tf2xla_fallback_", "use-tf2xla-fallback", "bool",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:40:        "use-tf2xla-fallback is true, otherwise not used">,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:41:    Option<"prefer_tf2xla_", "prefer-tf2xla", "bool",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:43:        "Prioritize tf2xla fallback legalization over MLIR legalization "
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:47:  let constructor = "mlir::mhlo::createLegalizeTFPass()";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:60:def LegalizeTFCollective : Pass<"xla-legalize-tf-collective", "ModuleOp"> {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf_passes.td:63:  let constructor = "mlir::mhlo::CreateLegalizeTFCollectivePass()";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_targets.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_targets.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_targets.cc:49:  // These ops are legalized in LegalizeTFCommunication after this and that pass
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\split_into_island_per_op_pass.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/split_into_island_per_op_pass.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config.h:32:bool HasTf2XlaFallback(const TypeID& type_id);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_communication.cc:66:#include "tensorflow/compiler/mlir/tf2xla/transforms/tf_xla_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_communication.cc:73:class LegalizeTFCommunication
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_communication.cc:74:    : public impl::LegalizeTFCommunicationPassBase<LegalizeTFCommunication> {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_communication.cc:955:void LegalizeTFCommunication::runOnOperation() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_communication.cc:989:std::unique_ptr<OperationPass<ModuleOp>> CreateLegalizeTFCommunicationPass() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_communication.cc:990:  return std::make_unique<LegalizeTFCommunication>();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_targets_test.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_targets.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:43:/// Converter to be used along with the fallback Tf2Xla patterns below.
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:44:class Tf2XlaTypeConverter : public TypeConverter {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:46:  Tf2XlaTypeConverter();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:50:/// `prefer_tf2xla` means an op will be included iff it is not in
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:51:/// `MlirLegalizedUnderPreferTf2XlaSet`. `!prefer_tf2xla` mean an op will be
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:53:void PopulateLegalizeTfWithTf2XlaPatterns(llvm::StringRef device_type,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:56:                                          Tf2XlaTypeConverter& converter,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_with_tf2xla_passes.h:57:                                          bool prefer_tf2xla = false);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:47:#include "tensorflow/compiler/mlir/tf2xla/transforms/legalization_op_config.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:48:#include "tensorflow/compiler/mlir/tf2xla/transforms/legalize_tf_with_tf2xla_passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:49:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:50:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_targets.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:62:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:65:    "/tensorflow/core/tf2xla/v1/mlir_failed_xla_legalize_tf_count",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:69:    "/tensorflow/core/tf2xla/v1/mlir_failed_xla_legalize_tf_pass_count",
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:72:class LegalizeTF : public impl::LegalizeTFBase<LegalizeTF> {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:74:  explicit LegalizeTF(bool legalize_chlo,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:75:                      std::optional<StringRef> tf2xla_fallback_device_type,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:76:                      bool prefer_tf2xla) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:78:    prefer_tf2xla_ = prefer_tf2xla;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:79:    use_tf2xla_fallback_ = tf2xla_fallback_device_type.has_value();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:80:    if (tf2xla_fallback_device_type.has_value()) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:81:      device_type_ = tf2xla_fallback_device_type.value().str();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:89:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:176:/// When `tf2xla_fallback_device_type` is not `None`, also uses legalization
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:178:/// legalize_tf_with_tf2xla.cc for details). By default, TF2XLA fallback is
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:181:                         std::optional<StringRef> tf2xla_fallback_device_type,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:182:                         bool prefer_tf2xla) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:202:  if (tf2xla_fallback_device_type && prefer_tf2xla) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:206:  } else if (tf2xla_fallback_device_type) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:215:  RewritePatternSet patterns = (tf2xla_fallback_device_type && prefer_tf2xla)
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:219:  Tf2XlaTypeConverter converter;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:220:  if (tf2xla_fallback_device_type) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:222:    PopulateLegalizeTfWithTf2XlaPatterns(tf2xla_fallback_device_type.value(),
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:224:                                         prefer_tf2xla);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:249:void LegalizeTF::runOnOperation() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:251:  VLOG(3) << "LegalizeTF(legalize_chlo=" << legalize_chlo_
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:252:          << ", prefer_tf2xla=" << prefer_tf2xla_ << ") on module:\n"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:256:  std::optional<StringRef> tf2xla_fallback_device_type = std::nullopt;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:257:  if (use_tf2xla_fallback_) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:258:    tf2xla_fallback_device_type = device_type_;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:260:  if (failed(legalizeTF(op, legalize_chlo_, tf2xla_fallback_device_type,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:261:                        prefer_tf2xla_))) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:268:std::unique_ptr<OperationPass<ModuleOp>> createLegalizeTFPass(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:269:    bool legalize_chlo, std::optional<StringRef> tf2xla_fallback_device_type,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:270:    bool prefer_tf2xla) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:271:  return std::make_unique<LegalizeTF>(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\xla_legalize_tf.cc:272:      legalize_chlo, tf2xla_fallback_device_type, prefer_tf2xla);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:40:#include "tensorflow/compiler/mlir/tf2xla/transforms/utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:52:    "tf2xla.collective_info.group_size";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:54:    "tf2xla.collective_info.group_key";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:57:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:59:class LegalizeTFCollective
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:60:    : public impl::LegalizeTFCollectiveBase<LegalizeTFCollective> {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:390:void LegalizeTFCollective::runOnOperation() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:408:std::unique_ptr<OperationPass<ModuleOp>> CreateLegalizeTFCollectivePass() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf_collective.cc:409:  return std::make_unique<LegalizeTFCollective>();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\utils.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization_test.cc:28:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization_test.cc:29:#include "tensorflow/compiler/mlir/tf2xla/transforms/test_utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization_test.cc:44:    "/tensorflow/core/tf2xla/mlir_second_phase_failed_legalization_op_count";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization_test.cc:46:    "/tensorflow/core/tf2xla/mlir_second_phase_non_static_op_count";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization_test.cc:48:    "/tensorflow/core/tf2xla/mlir_second_phase_non_static_op_skip_count";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:15:#include "tensorflow/compiler/mlir/tf2xla/transforms/tf2xla_rewriter.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:62:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:63:#include "tensorflow/compiler/tf2xla/xla_compilation_device.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:64:#include "tensorflow/compiler/tf2xla/xla_context.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:65:#include "tensorflow/compiler/tf2xla/xla_expression.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:66:#include "tensorflow/compiler/tf2xla/xla_helpers.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:67:#include "tensorflow/compiler/tf2xla/xla_op_registry.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:138:LogicalResult Tf2XlaRewriter::RewriteOp(Operation* op,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:141:  Tf2XlaRewriter tf2xla_rewriter(op, rewriter, device_type);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:142:  return tf2xla_rewriter.LegalizeOp();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:145:Tf2XlaRewriter::Tf2XlaRewriter(Operation* op, PatternRewriter& rewriter,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:155:Tf2XlaRewriter::~Tf2XlaRewriter() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:159:absl::StatusOr<stablehlo::TupleOp> Tf2XlaRewriter::ImportXlaComputation(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:190:  // time when we have a model with thousands of tf2xla op fallbacks. At time
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:208:LogicalResult Tf2XlaRewriter::PrepareParams() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:290:LogicalResult Tf2XlaRewriter::PrepareKernelInputs(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:329:LogicalResult Tf2XlaRewriter::LegalizeOp() {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:365:           << "failed to create tf2xla kernel: " << status.ToString();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:429:absl::StatusOr<stablehlo::TupleOp> Tf2XlaRewriter::CompileWithHloImporter(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:451:mlir::LogicalResult Tf2XlaRewriter::VerifyOpResults(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:472:mlir::LogicalResult Tf2XlaRewriter::UnpackTupleResults(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:487:mlir::LogicalResult Tf2XlaRewriter::GetKernelOutputs(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.cc:495:tensorflow::XlaExpression Tf2XlaRewriter::GetExprForOperand(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:58:/// When `tf2xla_fallback_device_type` is not `None`, also uses legalization
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:60:/// legalize_tf_with_tf2xla.cc for details). By default, TF2XLA fallback is not
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:65:std::unique_ptr<OperationPass<ModuleOp>> createLegalizeTFPass(
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:67:    std::optional<StringRef> tf2xla_fallback_device_type = std::nullopt,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:68:    bool prefer_tf2xla = false);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:81:/// When `tf2xla_fallback_device_type` is not `None`, also uses legalization
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:83:/// legalize_tf_with_tf2xla.cc for details). By default, TF2XLA fallback is not
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:88:    std::optional<StringRef> tf2xla_fallback_device_type = std::nullopt,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:89:    bool prefer_tf2xla = false);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:93:std::unique_ptr<OperationPass<ModuleOp>> CreateLegalizeTFCommunicationPass();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:97:std::unique_ptr<OperationPass<ModuleOp>> CreateLegalizeTFCollectivePass();
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:102:    std::optional<StringRef> tf2xla_fallback_device_type = std::nullopt);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:116:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\passes.h:120:#include "tensorflow/compiler/mlir/tf2xla/transforms/tf_xla_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:15:#include "tensorflow/compiler/mlir/tf2xla/transforms/tf2xla_rewriter.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:40:#include "tensorflow/compiler/mlir/tf2xla/transforms/test_utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:41:#include "tensorflow/compiler/tf2xla/xla_op_registry.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:96:class Tf2XlaRewriterTestPeer {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:98:  explicit Tf2XlaRewriterTestPeer() = delete;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:99:  explicit Tf2XlaRewriterTestPeer(mlir::Operation* op)
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:102:        tf2xla_rewriter_(op, empty_rewriter_,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:107:    return tf2xla_rewriter_.ImportXlaComputation(computation);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:113:  Tf2XlaRewriter tf2xla_rewriter_;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:118:class Tf2XlaRewriterTest : public ::testing::Test {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:139:        Tf2XlaRewriter::RewriteOp(&op, pattern_rewriter,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:193:    Tf2XlaRewriterTestPeer test_peer(&first_op);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:203:TEST_F(Tf2XlaRewriterTest, LegalizesOpWithTf2xlaHloImporter) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:213:TEST_F(Tf2XlaRewriterTest, ImportsXlaComputationIntoModule) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:226:TEST_F(Tf2XlaRewriterTest, FailsWithoutRootTuple) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:237:TEST_F(Tf2XlaRewriterTest, ImportsSingleComputation) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:276:TEST_F(Tf2XlaRewriterTest, InsertsConstantParameters) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:289:TEST_F(Tf2XlaRewriterTest, DoesntEnforceCompileTimeConstantCheck) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:302:TEST_F(Tf2XlaRewriterTest, CreatesDefaultValues) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:320:TEST_F(Tf2XlaRewriterTest, OpWithLocationDoesntBreakNodeDefName) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter_test.cc:336:TEST_F(Tf2XlaRewriterTest, ErrorsWithInvalidNumberOfParametersToArgs) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf_xla_passes.td:18:def LegalizeTFCommunicationPass : Pass<"xla-legalize-tf-communication", "ModuleOp"> {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf_xla_passes.td:22:  let constructor = "::mlir::mhlo::CreateLegalizeTFCommunicationPass()";
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\split_into_island_per_op_pass_test.cc:15:#include "tensorflow/compiler/mlir/tf2xla/transforms/split_into_island_per_op_pass.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tfxla_device_specific_transforms.cc:22:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tfxla_device_specific_transforms.cc:23:#include "tensorflow/compiler/tf2xla/kernels/rng_converter_utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tfxla_device_specific_transforms.cc:32:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:16:#include "tensorflow/compiler/mlir/tf2xla/transforms/legalization_op_config.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:31:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:32:#include "tensorflow/compiler/tf2xla/xla_op_registry.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:40:  EXPECT_FALSE(HasTf2XlaFallback(TypeID::get<TF::ModOp>()));
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:46:  EXPECT_TRUE(HasTf2XlaFallback(TypeID::get<TF::AllOp>()));
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:63:  int tf2xla_fallback_count = 0;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:75:    } else if (HasTf2XlaFallback(operation.getTypeID())) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:76:      tf2xla_fallback_count++;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:86:  EXPECT_EQ(tf2xla_fallback_count, 333);
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:104:        HasTf2XlaFallback(operation.getTypeID())) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalization_op_config_test.cc:133:    if (!HasTf2XlaFallback(pat_op_name->getRegisteredInfo()->getTypeID())) {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization.cc:33:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization.cc:34:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_targets.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization.cc:45:#include "tensorflow/compiler/mlir/tf2xla/transforms/xla_legalize_tf_passes.h.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization.cc:49:        "/tensorflow/core/tf2xla/"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization.cc:54:    "/tensorflow/core/tf2xla/"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\verify_tfxla_legalization.cc:59:    "/tensorflow/core/tf2xla/"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf.cc:67:#include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf.cc:68:#include "tensorflow/compiler/mlir/tf2xla/transforms/utils.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\legalize_tf.cc:6939:#include "tensorflow/compiler/mlir/tf2xla/transforms/generated_legalize_tf.inc"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:33:#include "tensorflow/compiler/tf2xla/xla_context.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:34:#include "tensorflow/compiler/tf2xla/xla_expression.h"
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:42:class Tf2XlaRewriterTestPeer;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:44:class Tf2XlaRewriter {
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:51:  friend class Tf2XlaRewriterTestPeer;
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:53:  Tf2XlaRewriter(mlir::Operation* op, mlir::PatternRewriter& rewriter,
+repos/tensorflow/tensorflow/compiler/mlir/tf2xla/transforms\tf2xla_rewriter.h:56:  ~Tf2XlaRewriter();
+rg: repos/tensorflow/tensorflow/compiler/tf2xla/mlir_xla_op_kernel.*: Die Syntax für den Dateinamen, Verzeichnisnamen oder die Datenträgerbezeichnung ist falsch. (os error 123)
+
+2026-05-19T03:20:52.822509Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:52.831345Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:20:52.842301Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:20:52.842861Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:20:52.847285Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:20:52.847379Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:20:52.878474Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:52.878494Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:52.879676Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:52.879695Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:52.880689Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:52.880701Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:52.881671Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:52.881683Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:52.882696Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:52.882706Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:20:52.883863Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:20:52.883879Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:05.163253Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2 seconds
+Output:
+repos/tensorflow/tensorflow/core/api_def/python_api/api_def_CheckNumerics.pbtxt:2:  graph_op_name: "CheckNumerics"
+rg: repos/tensorflow/tensorflow/python/ops/gen_array_ops.py: Das System kann die angegebene Datei nicht finden. (os error 2)
+
+2026-05-19T03:21:05.210467Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:21:05.219070Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:21:05.230475Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:21:05.231073Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:21:05.235630Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:21:05.235719Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:21:05.267622Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:05.267647Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:05.268520Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:05.268531Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:05.269534Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:05.269547Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:05.270638Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:05.270656Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:05.271912Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:05.271930Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:05.272906Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:05.272921Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:13.743515Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:21:13.752876Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\plugins\cache\openai-curated\openai-developers\dc902811\.codex-plugin/plugin.json
+2026-05-19T03:21:13.764705Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=C:\Users\reado\.codex\.tmp\plugins\plugins\build-ios-apps\.codex-plugin/plugin.json
+2026-05-19T03:21:13.765284Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\plugin-eval\.codex-plugin/plugin.json
+2026-05-19T03:21:13.770839Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\twilio-developer-kit\.codex-plugin/plugin.json
+2026-05-19T03:21:13.770943Z  WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported path=C:\Users\reado\.codex\.tmp\plugins\plugins\openai-developers\.codex-plugin/plugin.json
+2026-05-19T03:21:13.806174Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:13.806195Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:13.807169Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:13.807187Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:13.808512Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:13.808533Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:13.809723Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:13.809739Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:13.810735Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:13.810746Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+2026-05-19T03:21:13.811870Z  WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-19T03:21:13.811885Z  WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'

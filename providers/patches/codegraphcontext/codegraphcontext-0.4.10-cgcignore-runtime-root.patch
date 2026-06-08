@@ -1,0 +1,13 @@
+--- a/codegraphcontext/core/cgcignore.py
++++ b/codegraphcontext/core/cgcignore.py
+@@
+-    if local_cgcignore_path is None:
+-        local_cgcignore_path = ignore_root / ".cgcignore"
+-        ensure_default_cgcignore(local_cgcignore_path, default_patterns)
++    if local_cgcignore_path is None:
++        # Agents Remember patch: prefer explicit .cgcignore path before repo-local creation.
++        if explicit_cgcignore_path is not None:
++            local_cgcignore_path = explicit_cgcignore_path
++        else:
++            local_cgcignore_path = ignore_root / ".cgcignore"
++        ensure_default_cgcignore(local_cgcignore_path, default_patterns)

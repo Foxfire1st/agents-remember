@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "onboarding": {
+    "storage": {
+      "mode": "memory-repo"
+    },
+    "pathRules": {
+      "include": {
+        "paths": ["README.md", "docs/**", "src/**"],
+        "fileTypes": [".md", ".py", ".ts", ".tsx"]
+      },
+      "exclude": {
+        "paths": [
+          "node_modules/**",
+          "vendor/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".cache/**",
+          ".pytest_cache/**",
+          ".venv/**",
+          ".idea/**",
+          ".vscode/**",
+          ".env",
+          ".env.*",
+          "**/generated/**",
+          "**/*.generated.*",
+          "**/*.Zone.Identifier",
+          "**/*:Zone.Identifier"
+        ],
+        "fileTypes": [".png", ".jpg", ".jpeg", ".gif", ".zip"]
+      }
+    }
+  },
+  "crossRepo": {
+    "allow": [
+      {
+        "repo": "neighbor-repo",
+        "expectedBranch": "dev",
+        "includeCode": true,
+        "includeMemory": false
+      }
+    ]
+  }
+}
