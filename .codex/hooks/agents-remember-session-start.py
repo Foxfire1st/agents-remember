@@ -7,19 +7,11 @@ import json
 import os
 from pathlib import Path
 
-
-WORKSPACE_ROOT_TEMPLATE = "<PATH/TO/YOUR/PROJECTS_FOLDER>"
-WORKSPACE_ROOT = Path(WORKSPACE_ROOT_TEMPLATE)
-DIRECTIVE_PATH = WORKSPACE_ROOT / ".codex" / "hooks" / "agents-remember-session-start.md"
+WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+DIRECTIVE_PATH = Path(__file__).resolve().with_suffix(".md")
 
 
 def main() -> None:
-    if WORKSPACE_ROOT_TEMPLATE.startswith("<"):
-        raise SystemExit(
-            "Replace <PATH/TO/YOUR/PROJECTS_FOLDER> in "
-            ".codex/hooks/agents-remember-session-start.py"
-        )
-
     cwd = Path(os.environ.get("PWD", Path.cwd())).resolve()
     try:
         cwd.relative_to(WORKSPACE_ROOT)

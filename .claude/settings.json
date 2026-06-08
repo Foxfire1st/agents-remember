@@ -5,7 +5,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:.}}' <PATH/TO/YOUR/PROJECTS_FOLDER>/.claude/hooks/agents-remember-session-start.md",
+            "command": "<PYTHON_EXECUTABLE>",
+            "args": [
+              "<CLAUDE_HOOK_SCRIPT>"
+            ],
             "statusMessage": "Loading ar-coordination first-action directive"
           }
         ]

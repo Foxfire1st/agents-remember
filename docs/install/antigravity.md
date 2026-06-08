@@ -16,10 +16,17 @@ Official references:
 ## Root Starter Package
 
 The repository includes an Antigravity starter package at `.agents/`. Copy that
-folder to your workspace root, copy `.agents/GEMINI.md` to the workspace root as
-`GEMINI.md`, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, then start
-or reload Antigravity from that workspace once.
+folder to your workspace root, then render the copied package. The
+`.agents/render-starter` script is a convenience: with a single `--repo` list
+such as `--repo my-app shared-lib`, it infers the workspace root from the copied
+`.agents/` folder, fills path and repository placeholders, writes the installed
+`GEMINI.md`, and validates that each requested repository exists before you
+start or reload Antigravity from that workspace once. If you prefer not to run
+the renderer, make those same replacements by hand, copy or merge the directive
+into `GEMINI.md`, and verify that no placeholder tokens remain.
+
+If the workspace root already has a different `GEMINI.md`, merge the rendered
+Agents Remember directive into that file before rerunning the renderer.
 
 The source checkout keeps the template under `.agents/` so the repository root
 remains reserved for source-project files such as its own `AGENTS.md`.

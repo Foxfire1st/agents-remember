@@ -16,17 +16,21 @@ Official references:
 ## Root Starter Package
 
 The repository includes a Claude Code starter package at `.claude/`. Copy that
-folder to your workspace root, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, make sure
-`jq` is installed for the hook command, then restart Claude Code once.
+folder to your workspace root, then render the copied package. The
+`.claude/render-starter` script is a convenience: with a single `--repo` list
+such as `--repo my-app shared-lib`, it infers the workspace root from the copied
+`.claude/` folder, fills path and repository placeholders, writes the Python
+hook command/args, and validates that each requested repository exists. If you
+prefer not to run the renderer, make those same replacements by hand and verify
+that no placeholder tokens remain. Restart Claude Code once after rendering.
 Also copy `.claude/mcp/mcp.json` to `<workspace>/.mcp.json`; Claude Code will
 not detect the MCP registration if the file only lives under `.claude/mcp/`.
 
 The package contains:
 
 - `.claude/settings.json` - `SessionStart` hook registration.
-- `.claude/hooks/agents-remember-session-start.md` - startup directive emitted
-  as `additionalContext`.
+- `.claude/hooks/agents-remember-session-start.py` and `.md` - Python startup
+  hook that emits the directive as `additionalContext`.
 - `.claude/mcp/mcp.json` - MCP registration template to copy to root
   `.mcp.json`.
 - `.claude/mcp/agents-remember-settings.json` - Agents Remember MCP authority
@@ -55,8 +59,9 @@ relevant" disclaimer, so the coordinator doctrine reads as optional and is easil
 skipped. The hook instead injects the directive as authoritative
 `additionalContext`.
 
-Prerequisite: the hook command below uses `jq` to JSON-encode the directive file.
-Install it first if needed (for example `apt install jq` or `brew install jq`).
+Claude Code itself does not require `jq` for hooks. The starter package uses a
+Python hook, and the renderer writes the local Python executable into
+`.claude/settings.json`.
 
 The starter package includes `.claude/hooks/agents-remember-session-start.md`
 with the directive text:
@@ -78,7 +83,10 @@ The starter package registers the hook in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:.}}' \"<PATH/TO/YOUR/PROJECTS_FOLDER>/.claude/hooks/agents-remember-session-start.md\""
+            "command": "<PYTHON_EXECUTABLE>",
+            "args": [
+              "<PATH/TO/YOUR/PROJECTS_FOLDER>/.claude/hooks/agents-remember-session-start.py"
+            ]
           }
         ]
       }
@@ -99,8 +107,7 @@ on the new session.
 
 ### Fallback Without The Hook
 
-If you cannot install `jq` or run a hook, add the same import to a root
-`CLAUDE.md`:
+If you cannot run a hook, add the same import to a root `CLAUDE.md`:
 
 ```markdown
 # Workspace Agent Instructions

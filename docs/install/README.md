@@ -6,8 +6,22 @@ agent harness.
 The normal first-run path is:
 
 1. Copy the harness-native package files from this repo into your workspace.
-2. Replace every placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
-   `<YOUR_REPOSITORY_FOLDER_NAME>`.
+2. Render the copied package. The `render-starter` script is a convenience for
+   replacing placeholders in the copied files: it infers the workspace root from
+   the copied harness folder, fills repository names and hook/context commands,
+   and validates that each requested repository folder exists. Pass every
+   repository folder name after one `--repo`, for example:
+
+   ```text
+   python .codex/render-starter.py --repo my-repo shared-lib
+   ```
+
+   On POSIX systems you can use `render-starter.sh`; on native Windows you can
+   use `render-starter.ps1`.
+
+   If you prefer not to run the renderer, manually replace every placeholder in
+   the copied package and validate that no `<PATH/TO/YOUR/PROJECTS_FOLDER>`,
+   `<YOUR_REPOSITORY_FOLDER_NAME>`, or hook-command placeholder remains.
 3. Register the Agents Remember MCP server, usually:
 
    ```text

@@ -16,9 +16,14 @@ Official references:
 ## Root Starter Package
 
 The repository includes a Pi starter package at `.pi/`. Copy that folder to
-your workspace root, replace every placeholder, including
-`<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`, then start
-or reload Pi from the workspace once.
+your workspace root, then render the copied package. The `.pi/render-starter`
+script is a convenience: with a single `--repo` list such as
+`--repo my-app shared-lib`, it infers the workspace root from the copied `.pi/`
+folder, fills path and repository placeholders, renders the project extension
+constant, and validates that each requested repository exists before you start
+or reload Pi from the workspace once. If you prefer not to run the renderer,
+make those same replacements by hand and verify that no placeholder tokens
+remain.
 
 The package contains:
 

@@ -79,12 +79,11 @@ Before the Quickstart, make sure the host has:
 - **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.11+** — the agent runs the MCP server with `uvx`, which picks a compatible interpreter.
 - **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
 - **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
-- **`jq`**, only when using the Claude Code starter package's `SessionStart`
-  hook: `apt install jq` (Debian/Ubuntu), `brew install jq` (macOS),
-  `pacman -S jq` (Arch), `dnf install jq` (Fedora), or `apk add jq` (Alpine).
-  Without it the copied Claude hook injects nothing.
 
-Providers, Docker, Ollama, and `jq` are only needed for the optional Docker-backed providers and the Claude Code package hook; the core by-path memory works without them. Full detail and troubleshooting live in the [MCP package README](https://pypi.org/project/agents-remember-mcp/).
+Providers, Docker, and Ollama are only needed for the optional Docker-backed
+providers; the core by-path memory works without them. Claude Code hooks do not
+require `jq`; the current starter package uses a Python hook. Full detail and
+troubleshooting live in the [MCP package README](https://pypi.org/project/agents-remember-mcp/).
 
 ## Quickstart
 
@@ -94,10 +93,13 @@ Ask your agent to:
 
 1. **Copy the harness package** — Pick your harness guide under
    [docs/install](docs/install/README.md), copy that harness's native starter
-   files from this repo into the workspace, and replace every
-   placeholder, including `<PATH/TO/YOUR/PROJECTS_FOLDER>` and
-   `<YOUR_REPOSITORY_FOLDER_NAME>`. These packages include the harness-visible
-   skills, hooks/rules/instructions, and MCP settings templates.
+   files from this repo into the workspace, then render the copied package.
+   The `render-starter` script is a convenience: it infers the workspace root
+   from the copied harness folder and fills the copied package's path,
+   repository, and hook-command placeholders from a single `--repo` list such as
+   `--repo my-app shared-lib`. You can also do those replacements by hand. These
+   packages include the harness-visible skills, hooks/rules/instructions, and
+   MCP settings templates.
 2. **Wire the MCP server** — Register Agents Remember MCP from
    [PyPI](https://pypi.org/project/agents-remember-mcp/) with `uvx`:
 
@@ -178,7 +180,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `2.3.3` and actively developed. The `2.0.0` major release reshaped the session job lifecycle: every session now enters the `l-01-session-job-lifecycle` skill, the chat (W-03) and heavy (W-01) workflows were retired in favor of the light task plus master + light sub-task series composition, the skill tree went flat, and some public contracts changed (removed skill IDs, the `skills_install` MCP tool's `layout` input, and heavy `workflow_kind` values). `2.1.0` builds on that with workspace-first install-location defaults, a consistent skill-name/MCP-tool reference convention, and provider/quality fixes; `2.2.0` refreshes the lifecycle collaboration loop around context-packet grounding, developer-facing reframes, deeper-research evidence, and clearer C-09 source-branch discipline; `2.3.0` adds harness-native starter packages, package-first skills/hooks/instructions, root-level canonical skill sources, and a one-restart first-run path, `2.3.1` corrects the MCP package README shown on PyPI to match that setup flow, `2.3.2` packages the refreshed runtime skills with the C-09 worktree intent approval gate and integration checkout prerequisite reminder, and `2.3.3` makes runtime reinstalls stop and restart enabled provider watchers around managed runner refreshes and normalizes dotted worktree names for Docker-backed provider setup — all backward-compatible. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `2.4.0` and actively developed. The `2.0.0` major release reshaped the session job lifecycle: every session now enters the `l-01-session-job-lifecycle` skill, the chat (W-03) and heavy (W-01) workflows were retired in favor of the light task plus master + light sub-task series composition, the skill tree went flat, and some public contracts changed (removed skill IDs, the `skills_install` MCP tool's `layout` input, and heavy `workflow_kind` values). `2.1.0` builds on that with workspace-first install-location defaults, a consistent skill-name/MCP-tool reference convention, and provider/quality fixes; `2.2.0` refreshes the lifecycle collaboration loop around context-packet grounding, developer-facing reframes, deeper-research evidence, and clearer C-09 source-branch discipline; `2.3.0` adds harness-native starter packages, package-first skills/hooks/instructions, root-level canonical skill sources, and a one-restart first-run path, `2.3.1` corrects the MCP package README shown on PyPI to match that setup flow, `2.3.2` packages the refreshed runtime skills with the C-09 worktree intent approval gate and integration checkout prerequisite reminder, `2.3.3` makes runtime reinstalls stop and restart enabled provider watchers around managed runner refreshes and normalizes dotted worktree names for Docker-backed provider setup, and `2.4.0` adds harness-local starter renderers, Python hook command rendering, and clearer manual placeholder-replacement install docs that remove the legacy Claude Code `jq` misconception — all backward-compatible. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the release notes before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 ## Stability
 

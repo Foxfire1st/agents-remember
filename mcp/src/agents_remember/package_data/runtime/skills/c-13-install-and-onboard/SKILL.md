@@ -12,7 +12,8 @@ The harness package owns harness-native files: skills, hooks, rules,
 instructions, MCP registration templates, and settings templates. This skill does
 not install or repair those files during first-run setup. If they are missing,
 stop and tell the developer to copy the correct starter package from this repo,
-replace placeholders, restart the harness, and invoke this skill again.
+render the copied package with its `render-starter` script or by hand, restart
+the harness, and invoke this skill again.
 
 The MCP layer still exposes deterministic maintenance tools such as
 `runtime_install()` and `skills_install()`. In the normal first-run path,
@@ -26,9 +27,10 @@ coordinator scaffold under `ar-coordination/`.
 Use this skill after these prerequisites are in place:
 
 1. The developer copied the harness-native starter package for the active
-   harness into the workspace and replaced every
-   `<PATH/TO/YOUR/PROJECTS_FOLDER>` and `<YOUR_REPOSITORY_FOLDER_NAME>`
-   placeholders.
+   harness into the workspace and ran that package's `render-starter` script
+   with an explicit `--repo` list, or manually replaced every path, repository,
+   and hook-command placeholder. The renderer infers the workspace root from the
+   copied harness folder.
 2. The Agents Remember MCP server is registered with the harness, typically with
    a command like:
 
@@ -91,8 +93,9 @@ Check, in order:
    memory initialization silently choose internal memory when settings clearly
    describe an external-memory layout.
 
-Do not check for hook prerequisites such as `jq`. Hook and instruction files are
-part of the copied harness package; this skill no longer installs them.
+Do not check for legacy hook prerequisites such as `jq`. Hook and instruction
+files are part of the copied, rendered harness package; this skill no longer
+installs them.
 
 ## Stage 1 - Runtime Scaffold
 
