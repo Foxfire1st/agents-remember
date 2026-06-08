@@ -195,6 +195,8 @@ def _provider_summary_items(
     detail_limit: int,
     target_repo_id: str | None,
 ) -> list[ContextProviderItem]:
+    if projection.state == "skipped":
+        return []
     states = _current_provider_states(projection)
     items: list[ContextProviderItem] = []
     for provider_id in ("codegraphcontext-code", "grepai-memory"):

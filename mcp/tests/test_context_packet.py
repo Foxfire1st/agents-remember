@@ -20,6 +20,7 @@ from agents_remember.controllers.context_packet import (
     build_context_packet,
 )
 from agents_remember.mcp.config import load_config
+from agents_remember.mcp.tools.core import context_packet_payload
 from agents_remember.worktrees.git_worktree_manager import status_payload
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
@@ -66,6 +67,26 @@ class ContextPacketTests(unittest.TestCase):
             self.assertNotIn("rawStatus", packet["providers"])
             self.assertNotIn("rawStatus", packet["providers"]["items"][0])
             self.assertEqual(packet["drift"], {"status": "notChecked"})
+
+    def test_public_payload_can_skip_provider_details_without_validation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            config = write_and_load_config(root)
+
+            packet = context_packet_payload(
+                config,
+                "agents-remember-md",
+                include_providers=False,
+                include_drift=False,
+            )
+
+            self.assertTrue(packet["ok"])
+            self.assertEqual(packet["providers"]["state"], "skipped")
+            self.assertTrue(packet["providers"]["configured"])
+            self.assertTrue(packet["providers"]["enabled"])
+            self.assertEqual(packet["providers"]["items"], [])
+            self.assertNotIn("currentStateFile", packet["providers"])
 
     def test_builds_drift_summary_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
