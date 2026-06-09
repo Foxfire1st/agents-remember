@@ -249,6 +249,7 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
                 "falkordb",
             ).as_posix(),
             "dataRoot": "<backendRuntimeRoot>/data",
+            "dataDestination": "/var/lib/falkordb/data",
             "containerName": backend_container,
             "ports": {
                 "falkordb": {

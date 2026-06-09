@@ -163,6 +163,10 @@ def cgc_current_state(provider: ProviderScope, result: dict[str, Any]) -> dict[s
         repos[repo_id] = cgc_repo_state(child)
     resources = [backend, *repos.values()]
     state = provider_state(result.get("ok"), resources)
+    if state == "ready" and any(repo.get("state") != "ready" for repo in repos.values()):
+        # The raw status ok only proves images/artifacts/containers; a repo
+        # target degraded by graph content must degrade the provider too.
+        state = "degraded"
     return {
         "id": provider.provider_id,
         "state": state,
@@ -184,13 +188,19 @@ def cgc_repo_state(result: dict[str, Any]) -> dict[str, Any]:
     container_state = process.get("containerState")
     container = normalize_container_state(container_state if isinstance(container_state, dict) else {})
     watcher_up = process.get("alive") is True
+    indexing_state = str(result.get("indexingState") or "unknown")
     state = "ready" if result.get("ok") and watcher_up else ("failed" if not watcher_up else "degraded")
+    if state == "ready" and indexing_state in {"empty", "backend-unreachable"}:
+        # A live watcher over an empty or unreachable graph serves no queries;
+        # readiness must reflect graph content, not container liveness. An
+        # in-progress initial scan ("indexing") stays ready.
+        state = "degraded"
     return {
         "state": state,
         "ok": state == "ready",
         "repoId": result.get("repoId"),
         "watcherUp": watcher_up,
-        "indexingState": str(result.get("indexingState") or "unknown"),
+        "indexingState": indexing_state,
         "lastRefresh": result.get("lastRefresh"),
         "containerName": process.get("containerName"),
         **container,

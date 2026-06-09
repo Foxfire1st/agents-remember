@@ -15,6 +15,7 @@ from agents_remember.providers.cgc.context.constants import (
     CGC_NETWORK_NAME,
     CGC_PROVIDER,
     CGC_REQUIREMENTS,
+    CGC_RUNNER_IMAGE_LAYER_REVISION,
     CGC_RUNNER_IMAGE_REPOSITORY,
     CGC_WATCHER_CONTAINER_PREFIX,
 )
@@ -334,7 +335,7 @@ def _cgc_version() -> str:
 
 
 def _cgc_runner_image() -> str:
-    return f"{CGC_RUNNER_IMAGE_REPOSITORY}:{_cgc_version()}"
+    return f"{CGC_RUNNER_IMAGE_REPOSITORY}:{_cgc_version()}-{CGC_RUNNER_IMAGE_LAYER_REVISION}"
 
 
 def _template_path(value: Any, variables: dict[str, str]) -> Path:

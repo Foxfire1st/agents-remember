@@ -13,4 +13,6 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 COPY patch_cgc.py /tmp/patch_cgc.py
 RUN python /tmp/patch_cgc.py && rm /tmp/patch_cgc.py
 
+COPY watch_guard.py /usr/local/bin/cgc-watch-guard.py
+
 ENTRYPOINT ["cgc"]

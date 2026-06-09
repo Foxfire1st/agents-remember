@@ -33,8 +33,10 @@ from agents_remember.providers.context import (
     source_provider_artifacts,
     write_provider_state,
 )
+from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import compose_plan, run_compose
 from agents_remember.providers.lifecycle.docker_runtime import (
+    docker_command,
     docker_container_running,
     docker_container_state_summary,
 )
@@ -216,6 +218,94 @@ def cgc_install_all(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+CGC_SCAN_STARTED_MARKER = "Performing initial scan"
+CGC_SCAN_COMPLETE_MARKER = "Initial scan complete"
+CGC_EMPTY_GRAPH_ERROR = "empty key"
+
+
+def cgc_initial_scan_in_progress(
+    layout: CgcRuntimeLayout, inspect_data: dict[str, Any] | None
+) -> bool:
+    """True when the watcher logged a scan start since its container started
+    without a matching completion marker."""
+    if not inspect_data:
+        return False
+    started_at = docker_container_state_summary(inspect_data).get("startedAt")
+    if not started_at:
+        return False
+    try:
+        result = run_command(
+            [
+                docker_command(),
+                "logs",
+                "--since",
+                str(started_at),
+                layout.watcher_container_name,
+            ],
+            cwd=layout.coordination_root,
+            timeout=15,
+        )
+    except (ContextProviderError, subprocess.TimeoutExpired, OSError):
+        return False
+    text = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+    return CGC_SCAN_STARTED_MARKER in text and CGC_SCAN_COMPLETE_MARKER not in text
+
+
+def cgc_graph_content_state(layout: CgcRuntimeLayout) -> str:
+    """Probe actual graph content with a read-only query.
+
+    GRAPH.RO_QUERY never auto-creates the graph key (plain GRAPH.QUERY does,
+    which would plant the very poison state this probe exists to detect)."""
+    graph_name = layout.env()["FALKORDB_GRAPH_NAME"]
+    try:
+        result = run_command(
+            [
+                docker_command(),
+                "exec",
+                layout.backend_container_name,
+                "redis-cli",
+                "GRAPH.RO_QUERY",
+                graph_name,
+                "MATCH (f:File) RETURN count(f)",
+            ],
+            cwd=layout.coordination_root,
+            timeout=15,
+        )
+    except (ContextProviderError, subprocess.TimeoutExpired, OSError):
+        return "backend-unreachable"
+    text = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+    if result.get("returncode") != 0:
+        return "backend-unreachable"
+    # redis-cli exits 0 on error replies; classify from the reply text.
+    if CGC_EMPTY_GRAPH_ERROR in text:
+        return "empty"
+    if "ERR" in text or "LOADING" in text:
+        return "backend-unreachable"
+    count = cgc_first_integer_line(text)
+    if count is None:
+        return "unknown"
+    return "indexed" if count > 0 else "empty"
+
+
+def cgc_first_integer_line(text: str) -> int | None:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
+def cgc_indexing_state_probe(
+    layout: CgcRuntimeLayout,
+    inspect_data: dict[str, Any] | None,
+    *,
+    watcher_running: bool,
+) -> str:
+    if watcher_running and cgc_initial_scan_in_progress(layout, inspect_data):
+        return "indexing"
+    return cgc_graph_content_state(layout)
+
+
 def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
     layout = cgc_layout_from_args(args)
     artifacts = [path.as_posix() for path in source_provider_artifacts(layout.code_repo_root)]
@@ -240,7 +330,9 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
         "watchCwd": layout.watch_cwd.as_posix(),
         "watchLog": layout.watch_log_file.as_posix(),
         "lastRefresh": state.get("lastRefresh"),
-        "indexingState": "unknown",
+        "indexingState": cgc_indexing_state_probe(
+            layout, inspect_data, watcher_running=running
+        ),
         "sourceArtifacts": artifacts,
         "patch": patch,
         "process": {

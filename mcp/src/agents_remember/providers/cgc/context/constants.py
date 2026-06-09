@@ -7,6 +7,9 @@ from pathlib import Path
 CGC_PROVIDER = "codegraphcontext"
 CGC_PIN = "codegraphcontext==0.4.10"
 CGC_RUNNER_IMAGE_REPOSITORY = "agents-remember/codegraphcontext"
+# Bump when the runner Docker layer changes without a cgc version change
+# (runtime_install skips building image tags that already exist).
+CGC_RUNNER_IMAGE_LAYER_REVISION = "ar1"
 CGC_WATCHER_CONTAINER_PREFIX = "ar-cgc-watcher"
 CGC_NETWORK_NAME = "ar-cgc-code"
 CGC_REQUIREMENTS = (

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -83,13 +84,24 @@ def digest(path: Path) -> str:
     return hasher.hexdigest()
 
 
+def extended_length(path: Path) -> Path:
+    """Windows extended-length (\\\\?\\) form so file operations work past the
+    legacy 260-char MAX_PATH even when LongPathsEnabled is off; identity on
+    other platforms."""
+    text = str(path)
+    if os.name == "nt" and not text.startswith("\\\\?\\"):
+        return Path(f"\\\\?\\{os.path.abspath(text)}")
+    return path
+
+
 def file_digests(root: Path) -> dict[Path, str]:
-    if not root.exists():
+    walk_root = extended_length(root)
+    if not walk_root.exists():
         return {}
 
     files: dict[Path, str] = {}
-    for path in root.rglob("*"):
-        rel_path = path.relative_to(root)
+    for path in walk_root.rglob("*"):
+        rel_path = path.relative_to(walk_root)
         if ignored(rel_path) or not path.is_file():
             continue
         files[rel_path] = digest(path)
@@ -118,11 +130,30 @@ def copy_ignore(_directory: str, names: list[str]) -> list[str]:
 def sync_target(target: RuntimeTarget) -> None:
     if target.path.resolve() == target.source.resolve():
         raise RuntimeError(f"refusing to sync {repo_relative(target.source)} onto itself")
+    replace_tree(target.source, target.path)
 
-    if target.path.exists():
-        shutil.rmtree(target.path)
-    target.path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(target.source, target.path, ignore=copy_ignore)
+
+def replace_tree(source: Path, target: Path) -> None:
+    """Copy-then-swap so no crash window leaves a missing or partial target.
+
+    The previous delete-then-copy left the target gutted when the copy (or the
+    delete itself) failed mid-way — a real incident on a Windows host without
+    long-path support. The staged copy is built first; the live target is only
+    renamed aside once a complete replacement exists, and a re-run cleans any
+    leftovers from an earlier crash."""
+    staging = extended_length(target.parent / f"{target.name}.ar-sync-new")
+    retired = extended_length(target.parent / f"{target.name}.ar-sync-old")
+    target_ext = extended_length(target)
+    for leftover in (staging, retired):
+        if leftover.exists():
+            shutil.rmtree(leftover)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(extended_length(source), staging, ignore=copy_ignore)
+    if target_ext.exists():
+        os.rename(target_ext, retired)
+    os.rename(staging, target_ext)
+    if retired.exists():
+        shutil.rmtree(retired)
 
 
 def print_diff(target: RuntimeTarget, diff: RuntimeDiff) -> None:

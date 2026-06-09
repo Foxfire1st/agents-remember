@@ -47,7 +47,7 @@ from agents_remember.providers.lifecycle.state_files import read_json, write_jso
 def cgc_start_dry_run_result(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
-    command_args = ["up", "-d", cgc_watcher_service_name(layout)]
+    command_args = ["up", "-d", "--remove-orphans", cgc_watcher_service_name(layout)]
     return {
         "provider": "codegraphcontext",
         "action": "start",
@@ -91,7 +91,9 @@ def cgc_start_watch_process(args: argparse.Namespace, layout: CgcRuntimeLayout, 
     watch_log.parent.mkdir(parents=True, exist_ok=True)
     return run_compose(
         render,
-        ["up", "-d", cgc_watcher_service_name(layout)],
+        # The render contains every configured watcher service, so
+        # --remove-orphans removes exactly the watchers of de-configured repos.
+        ["up", "-d", "--remove-orphans", cgc_watcher_service_name(layout)],
         cwd=layout.coordination_root,
         timeout=args.timeout,
     )
@@ -106,7 +108,7 @@ def cgc_start_all_watch_process(
         layout.watch_log_file.parent.mkdir(parents=True, exist_ok=True)
     return run_compose(
         render,
-        ["up", "-d", *(cgc_watcher_service_name(layout) for layout in layouts)],
+        ["up", "-d", "--remove-orphans", *(cgc_watcher_service_name(layout) for layout in layouts)],
         cwd=layouts[0].coordination_root,
         timeout=args.timeout,
     )
@@ -356,7 +358,12 @@ def cgc_start_all_dry_results(
     migrations: dict[str, dict[str, Any] | None],
     backend: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    command_args = ["up", "-d", *(cgc_watcher_service_name(layout) for layout in layouts)]
+    command_args = [
+        "up",
+        "-d",
+        "--remove-orphans",
+        *(cgc_watcher_service_name(layout) for layout in layouts),
+    ]
     command = compose_plan(render, command_args, cwd=layouts[0].coordination_root)
     results = [
         {

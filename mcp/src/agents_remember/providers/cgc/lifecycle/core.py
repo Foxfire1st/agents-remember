@@ -162,6 +162,11 @@ def cgc_backend_settings(provider_settings: dict[str, Any], layout: CgcRuntimeLa
         "image": image,
         "imageLockFile": image_lock_path,
         "containerName": str(backend_settings.get("containerName", "ar-cgc-falkordb")),
+        # FalkorDB v4 writes to /var/lib/falkordb/data, not /data; binding the
+        # wrong destination leaves graphs in the ephemeral container layer.
+        "dataDestination": str(
+            backend_settings.get("dataDestination", "/var/lib/falkordb/data")
+        ),
         "networkName": str(network.get("name", layout.network_name)),
         "falkordbHost": falkordb_host,
         "falkordbHostPort": falkordb_port.get("hostPort", "auto"),

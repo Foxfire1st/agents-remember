@@ -13,4 +13,8 @@
       - @WATCHER_REPO_VOLUME@
     environment:
 @WATCHER_ENVIRONMENT@
+    # The guard waits for a genuine PONG and clears empty/partial graph keys
+    # before exec'ing cgc, so a daemon-restart race can never latch the watcher
+    # into watch-only mode over a poisoned graph.
+    entrypoint: ["python", "/usr/local/bin/cgc-watch-guard.py"]
     command: ["watch", @WATCHER_REPO_PATH@]
