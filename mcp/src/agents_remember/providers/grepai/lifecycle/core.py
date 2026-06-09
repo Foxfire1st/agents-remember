@@ -8,7 +8,17 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers.context import (
+# Import from the grepai context package and the common leaf module directly,
+# not the providers.context aggregator: the aggregator star-imports this
+# provider's context back, so routing through it creates a circular import
+# that breaks any entry point touching grepai modules first (surfaced by the
+# seed timeout tests).
+from agents_remember.providers.context.common import (
+    ContextProviderError,
+    expand_template,
+    stable_provider_id,
+)
+from agents_remember.providers.grepai.context import (
     GREPAI_NETWORK_NAME,
     GREPAI_OLLAMA_CONTAINER_NAME,
     GREPAI_OLLAMA_DEFAULT_HOST,
@@ -19,14 +29,11 @@ from agents_remember.providers.context import (
     GREPAI_POSTGRES_DEFAULT_HOST,
     GREPAI_RUNNER_CONTAINER_NAME,
     GREPAI_RUNNER_IMAGE_REPOSITORY,
-    ContextProviderError,
     GrepaiMemoryRoot,
     GrepaiRuntimeLayout,
     ensure_grepai_root_gitignore,
-    expand_template,
     grepai_runtime_layout,
     grepai_runtime_layout_from_provider_settings,
-    stable_provider_id,
     write_grepai_workspace_config,
 )
 from agents_remember.providers.lifecycle.provider_settings import (

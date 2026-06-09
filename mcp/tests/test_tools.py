@@ -177,9 +177,15 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "provider_diagnostics")
             self.assertEqual(payload["state"], "ready")
-            self.assertEqual(payload["currentState"]["state"], "ready")
-            self.assertIn("rawStatus", payload)
-            self.assertIn("rawStatus", payload["items"][0])
+            # The raw status trees and the currentState body are filed, not
+            # inlined (S4 response budgets); the report carries the detail.
+            self.assertNotIn("rawStatus", payload)
+            self.assertNotIn("currentState", payload)
+            self.assertNotIn("rawStatus", payload["items"][0])
+            self.assertTrue(Path(payload["currentStateFile"]).exists())
+            report = json.loads(Path(payload["reportPath"]).read_text(encoding="utf-8"))
+            self.assertIn("rawStatus", report)
+            self.assertEqual(report["currentState"]["state"], "ready")
 
     def test_provider_watchers_status_reports_current_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -197,8 +203,11 @@ class McpToolTests(unittest.TestCase):
             service_config = run_watchers.call_args.args[0]
             self.assertFalse(service_config.dry_run)
             self.assertEqual(payload["state"], "ready")
-            self.assertEqual(payload["currentState"]["state"], "ready")
+            # The currentState body is filed, not inlined (S4 response budgets).
+            self.assertNotIn("currentState", payload)
             self.assertTrue(Path(payload["currentStateFile"]).exists())
+            report = json.loads(Path(payload["reportPath"]).read_text(encoding="utf-8"))
+            self.assertEqual(report["currentState"]["state"], "ready")
 
     def test_runtime_install_tool_uses_configured_coordination_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

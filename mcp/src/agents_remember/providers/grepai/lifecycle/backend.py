@@ -9,10 +9,11 @@ import time
 from pathlib import Path
 from typing import Any, NoReturn
 
-from agents_remember.providers.context import (
-    ContextProviderError,
-    ensure_grepai_runtime_layout,
-)
+# Leaf imports, not the providers.context aggregator: the aggregator
+# star-imports grepai context back, which is a circular import for any entry
+# point that touches grepai modules first.
+from agents_remember.providers.context.common import ContextProviderError
+from agents_remember.providers.grepai.context import ensure_grepai_runtime_layout
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_project,
     grepai_compose_render,

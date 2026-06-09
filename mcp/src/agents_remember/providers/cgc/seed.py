@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
-from agents_remember.providers.lifecycle.command_runner import UNLIMITED_TIMEOUT
 from agents_remember.providers.setup_common import (
     expand_template,
     load_settings,
@@ -209,6 +208,7 @@ def git_head_or_none(repo_root: Path) -> str | None:
             "HEAD",
         ],
         text=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -457,7 +457,10 @@ def _seed_export(args: Any, context: CgcSeedContext, source_bundle: Path) -> dic
         context.source_coordination_root,
         "cgc",
         "run",
-        timeout=UNLIMITED_TIMEOUT,
+        # Bounded by the provider-setup cap (timeoutCaps.providerSetupSeconds):
+        # an unbounded export let a wedged docker exec hang worktree_start
+        # indefinitely (GitHub #49 family). Raise the cap for huge graphs.
+        timeout=args.timeout,
         dry_run=args.dry_run,
         extra_args=[
             *cgc_seed_source_extra_args(
@@ -501,7 +504,8 @@ def _seed_load(args: Any, context: CgcSeedContext, rewritten_bundle: Path) -> di
         context.target_coordination_root,
         "cgc",
         "run",
-        timeout=UNLIMITED_TIMEOUT,
+        # Bounded by the provider-setup cap; see _seed_export.
+        timeout=args.timeout,
         dry_run=args.dry_run,
         extra_args=[*cgc_extra_args(args), "--repo-id", str(context.target_repo_id)],
         native_args=["--", "bundle", "import", rewritten_bundle.as_posix()],

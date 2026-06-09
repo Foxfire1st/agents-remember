@@ -73,6 +73,10 @@ def grepai_runner_image_build(
     }
 
 
+GREPAI_SCAN_PROGRESS_MARKERS = ("Indexing [", "Initial scan", "Embedding")
+GREPAI_SCAN_COMPLETE_MARKER = "Initial scan complete"
+
+
 def grepai_watcher_container_status(args: argparse.Namespace) -> dict[str, Any]:
     settings_path, provider_settings, layout = grepai_layout_from_args(args)
     runner = grepai_runner_settings(provider_settings, layout)
@@ -98,7 +102,43 @@ def grepai_watcher_container_status(args: argparse.Namespace) -> dict[str, Any]:
             "containerNetworks": connected_networks,
         },
         "workspaceStatus": workspace_status,
+        "initialScan": grepai_watcher_initial_scan(args, layout, runner, inspect_data, running),
     }
+
+
+def grepai_watcher_initial_scan(
+    args: argparse.Namespace,
+    layout: GrepaiRuntimeLayout,
+    runner: dict[str, Any],
+    inspect_data: dict[str, Any] | None,
+    running: bool,
+) -> dict[str, Any]:
+    """Read the watcher's own scan markers from its container log.
+
+    The watcher prints `Indexing [...] N% (i/n)` lines during the initial scan
+    and `Initial scan complete` when done — the same marker mechanism the CGC
+    probe uses, giving GrepAI indexing-state parity instead of `unknown`."""
+    if not running or args.dry_run or not inspect_data:
+        return {"state": "unknown"}
+    started_at = docker_container_state_summary(inspect_data).get("startedAt")
+    if not started_at:
+        return {"state": "unknown"}
+    result = run_command(
+        [docker_command(), "logs", "--since", str(started_at), runner["containerName"]],
+        cwd=layout.coordination_root,
+        timeout=15,
+        allow_timeout=True,
+    )
+    text = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+    return {"state": grepai_scan_state_from_log(text)}
+
+
+def grepai_scan_state_from_log(text: str) -> str:
+    if GREPAI_SCAN_COMPLETE_MARKER in text:
+        return "complete"
+    if any(marker in text for marker in GREPAI_SCAN_PROGRESS_MARKERS):
+        return "in-progress"
+    return "unknown"
 
 
 def grepai_watcher_inspect(

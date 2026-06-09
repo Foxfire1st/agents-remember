@@ -17,6 +17,7 @@ from agents_remember.controllers.provider_tools import (
     provider_status_tool,
     provider_watchers_tool,
 )
+from agents_remember.mcp.tool_reports import write_tool_report
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 
 from ..config import McpRuntimeConfig
@@ -35,10 +36,34 @@ def provider_diagnostics_payload(
     *,
     detail_limit: int = 20,
 ) -> dict[str, Any]:
+    full = provider_diagnostics_tool(config, detail_limit=detail_limit)
+    report_path = write_tool_report(
+        config.coordination_root, "provider_diagnostics", full, label="diagnostics"
+    )
     return _tool_payload(
         "provider_diagnostics",
-        provider_diagnostics_tool(config, detail_limit=detail_limit),
+        compact_diagnostics_payload(full, report_path.as_posix()),
     )
+
+
+def compact_diagnostics_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+    """Keep the diagnosis, file the evidence.
+
+    ``rawStatus`` trees and the ``currentState`` body (a verbatim copy of the
+    already-on-disk current.json) were thousands of tokens per call; the report
+    carries them, the response carries the path."""
+    compact = {
+        key: value
+        for key, value in full.items()
+        if key not in {"rawStatus", "currentState"}
+    }
+    compact["items"] = [
+        {key: value for key, value in item.items() if key != "rawStatus"}
+        for item in full.get("items", [])
+        if isinstance(item, dict)
+    ]
+    compact["reportPath"] = report_path
+    return compact
 
 
 def provider_watchers_payload(
@@ -47,10 +72,56 @@ def provider_watchers_payload(
     action: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    full = provider_watchers_tool(config, action=action, dry_run=dry_run)
+    report_path = write_tool_report(
+        config.coordination_root, "provider_watchers", full, label=action
+    )
+    summarized = summarize_command_logs(full)
     return _tool_payload(
         "provider_watchers",
-        summarize_command_logs(provider_watchers_tool(config, action=action, dry_run=dry_run)),
+        compact_watchers_payload(summarized, report_path.as_posix()),
     )
+
+
+def compact_watchers_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+    """Per-provider outcomes inline; raw provider payloads in the report."""
+    compact = {
+        key: value
+        for key, value in full.items()
+        if key not in {"steps", "results", "currentState"}
+    }
+    if "steps" in full:
+        compact["steps"] = [_compact_watcher_step(step) for step in full["steps"]]
+    elif "results" in full:
+        compact["results"] = _compact_watcher_results(full.get("results"))
+    compact["reportPath"] = report_path
+    return compact
+
+
+def _compact_watcher_step(step: Any) -> dict[str, Any]:
+    if not isinstance(step, dict):
+        return {"ok": None}
+    compact = {
+        key: step[key]
+        for key in ("provider", "action", "ok", "partial", "dryRun", "state", "currentStateFile")
+        if key in step
+    }
+    compact["results"] = _compact_watcher_results(step.get("results"))
+    return compact
+
+
+def _compact_watcher_results(results: Any) -> list[dict[str, Any]]:
+    if not isinstance(results, list):
+        return []
+    return [
+        {
+            key: result[key]
+            for key in ("provider", "action", "ok", "repoId", "containerName", "workspace")
+            if key in result
+        }
+        for result in results
+        if isinstance(result, dict)
+    ]
 
 
 def grepai_search_payload(

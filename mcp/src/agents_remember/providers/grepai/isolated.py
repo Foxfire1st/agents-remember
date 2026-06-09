@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers.context import (
+# Leaf import; see grepai/lifecycle/backend.py for the aggregator-cycle rationale.
+from agents_remember.providers.grepai.context import (
     GREPAI_NETWORK_NAME,
     GREPAI_OLLAMA_IMAGE,
     GREPAI_PIN,

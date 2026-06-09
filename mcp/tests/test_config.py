@@ -10,6 +10,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.config import ConfigError, load_config, require_config_path
+from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
@@ -37,6 +38,26 @@ def settings_payload(root: Path) -> dict:
         },
         "benchmarksEnabled": True,
     }
+
+
+class LifecycleSettingsDerivationTests(unittest.TestCase):
+    def test_cgc_runner_image_matches_single_derivation(self) -> None:
+        """Regression for GitHub #50: settings must not derive the runner image
+        independently — that dropped the image layer revision, so upgrading
+        hosts kept a cached guard-less image under the guard entrypoint."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "workspace" / "agents-remember-md").mkdir(parents=True)
+            path = root / ".harness" / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            settings = lifecycle_settings_from_config(config)
+
+        cgc = settings["contextProviders"]["providers"]["codegraphcontext-code"]
+        generated = cgc["runtime"]["runner"]["image"]
+        self.assertEqual(generated, cgc_runner_image())
+        self.assertRegex(generated, r":[\d.]+-\w+$")  # version-layerrevision
 
 
 class McpConfigTests(unittest.TestCase):

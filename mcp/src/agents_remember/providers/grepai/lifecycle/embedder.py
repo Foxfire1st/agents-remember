@@ -10,9 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers.context import (
-    ContextProviderError,
-)
+# Leaf import; see backend.py for the aggregator-cycle rationale.
+from agents_remember.providers.context.common import ContextProviderError
 from agents_remember.providers.grepai.lifecycle.backend import grepai_project_migration
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_render,

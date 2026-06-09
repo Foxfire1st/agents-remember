@@ -8,6 +8,7 @@ from agents_remember.controllers.context_packet import ContextPacketRequest, bui
 from agents_remember.controllers.coordination_tools import resolve_context_tool
 from agents_remember.controllers.runtime_install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.controllers.skill_tools import skills_install_tool
+from agents_remember.mcp.tool_reports import write_tool_report
 
 from .. import SERVER_NAME, SERVER_VERSION
 from ..config import McpRuntimeConfig
@@ -77,18 +78,51 @@ def runtime_install_payload(
     install_provider_deps: bool = True,
     no_cache: bool = False,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "runtime_install",
-        run_runtime_install(
-            config,
-            RuntimeInstallRequest(
-                dry_run=dry_run,
-                include_benchmarks=include_benchmarks,
-                install_provider_deps=install_provider_deps,
-                no_cache=no_cache,
-            ),
+    full = run_runtime_install(
+        config,
+        RuntimeInstallRequest(
+            dry_run=dry_run,
+            include_benchmarks=include_benchmarks,
+            install_provider_deps=install_provider_deps,
+            no_cache=no_cache,
         ),
     )
+    report_path = write_tool_report(
+        config.coordination_root,
+        "runtime_install",
+        full,
+        label="dry-run" if dry_run else "install",
+    )
+    return _tool_payload(
+        "runtime_install",
+        compact_runtime_install_payload(full, report_path.as_posix()),
+    )
+
+
+def compact_runtime_install_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+    """Keep the install outcome inline; the rebind runs (compose renders, docker
+    argv, container transcripts — historically >50k chars) live in the report."""
+    compact = {key: value for key, value in full.items() if key != "providerWatcherRebind"}
+    messages = full.get("messages")
+    if isinstance(messages, list) and len(messages) > 5:
+        compact["messages"] = [*messages[:5], f"... {len(messages) - 5} more in the report"]
+    rebind = full.get("providerWatcherRebind")
+    if isinstance(rebind, dict):
+        compact["providerWatcherRebind"] = {
+            "attempted": rebind.get("attempted"),
+            "ok": rebind.get("ok"),
+            "phases": [
+                {
+                    "phase": run.get("phase"),
+                    "action": run.get("action"),
+                    "ok": run.get("ok"),
+                }
+                for run in rebind.get("runs", [])
+                if isinstance(run, dict)
+            ],
+        }
+    compact["reportPath"] = report_path
+    return compact
 
 
 def resolve_context_payload(
