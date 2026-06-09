@@ -9,12 +9,14 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import lifecycle, lifecycle_service
 from agents_remember.providers.cgc.context.core import to_container_path
+from agents_remember.providers.cgc.lifecycle import installation
 from agents_remember.providers.cgc.lifecycle import query as cgc_query
 from agents_remember.providers.cgc.lifecycle import refresh as cgc_refresh_lifecycle
 from agents_remember.providers.cgc.lifecycle.runner import cgc_runner_patch_script
@@ -493,7 +495,131 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertNotIn("legacy-provider-settings", render.override_yaml)
         self.assertNotIn(":auto:", render.override_yaml)
         self.assertIn(':ro"', render.override_yaml)
+        # FalkorDB v4 writes to /var/lib/falkordb/data; binding /data leaves
+        # graphs in the ephemeral container layer and loses them on recreate.
+        self.assertIn(':/var/lib/falkordb/data"', render.override_yaml)
+        self.assertNotIn(':/data"', render.override_yaml)
+        self.assertIn("cgc-watch-guard.py", render.override_yaml)
         self.assertEqual(len(render.override_sha256), 64)
+
+    def test_cgc_compose_honors_configured_data_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--repo-id",
+                    "repo-a",
+                    "--dry-run",
+                ]
+            )
+            _, provider_settings, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+            provider_settings["backend"]["dataDestination"] = "/custom/falkordb/data"
+
+            render = lifecycle.cgc_compose_render(provider_settings, layouts)
+
+        self.assertIn(':/custom/falkordb/data"', render.override_yaml)
+
+    def test_cgc_indexing_state_probe_classifies_graph_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--repo-id",
+                    "repo-a",
+                    "--dry-run",
+                ]
+            )
+            _, _, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+            layout = layouts[0]
+
+            cases = [
+                ({"returncode": 0, "stdout": "count(f)\n10472\nCached execution: 1", "stderr": ""}, "indexed"),
+                ({"returncode": 0, "stdout": "count(f)\n0\nCached execution: 0", "stderr": ""}, "empty"),
+                (
+                    {
+                        "returncode": 0,
+                        "stdout": "(error) ERR Invalid graph operation on empty key",
+                        "stderr": "",
+                    },
+                    "empty",
+                ),
+                (
+                    {
+                        "returncode": 0,
+                        "stdout": "(error) LOADING Redis is loading the dataset in memory",
+                        "stderr": "",
+                    },
+                    "backend-unreachable",
+                ),
+                ({"returncode": 1, "stdout": "", "stderr": "no such container"}, "backend-unreachable"),
+            ]
+            for result, expected in cases:
+                with mock.patch.object(installation, "run_command", return_value=result):
+                    self.assertEqual(
+                        installation.cgc_graph_content_state(layout),
+                        expected,
+                        msg=f"result={result}",
+                    )
+
+    def test_cgc_indexing_state_probe_reports_in_progress_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service_config = self.service_config(Path(tmp_dir))
+            args = self.parse_cgc(
+                [
+                    "status",
+                    "--coordination-root",
+                    str(service_config.coordination_root),
+                    "--from-settings",
+                    str(service_config.settings_path),
+                    "--repo-id",
+                    "repo-a",
+                    "--dry-run",
+                ]
+            )
+            _, _, layouts = lifecycle.cgc_all_layouts_from_settings(args)
+            layout = layouts[0]
+            inspect_data = {
+                "State": {
+                    "Status": "running",
+                    "Running": True,
+                    "StartedAt": "2026-06-09T18:22:32.879967779Z",
+                }
+            }
+            scan_logs = {
+                "returncode": 0,
+                "stdout": "Watching /repo for changes...\n⚠  Not indexed yet. Performing initial scan...\n",
+                "stderr": "",
+            }
+
+            with mock.patch.object(installation, "run_command", return_value=scan_logs):
+                state = installation.cgc_indexing_state_probe(
+                    layout, inspect_data, watcher_running=True
+                )
+            self.assertEqual(state, "indexing")
+
+            done_logs = {
+                "returncode": 0,
+                "stdout": (
+                    "⚠  Not indexed yet. Performing initial scan...\n"
+                    "✓ Initial scan complete\ncount(f)\n42\n"
+                ),
+                "stderr": "",
+            }
+            with mock.patch.object(installation, "run_command", return_value=done_logs):
+                state = installation.cgc_indexing_state_probe(
+                    layout, inspect_data, watcher_running=True
+                )
+            self.assertEqual(state, "indexed")
 
     def test_cgc_compose_rejects_missing_instance_labels(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -564,6 +690,9 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         command = result["command"]["command"]
         self.assertIn("up", command)
         self.assertIn("-d", command)
+        # The render carries every configured watcher service, so orphan
+        # removal targets exactly the watchers of de-configured repos.
+        self.assertIn("--remove-orphans", command)
         self.assertLess(command.index("watcher-repo-a"), command.index("watcher-repo-b"))
         self.assertEqual(command.count("watcher-repo-a"), 1)
         self.assertEqual(command.count("watcher-repo-b"), 1)

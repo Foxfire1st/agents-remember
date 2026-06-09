@@ -229,6 +229,119 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertEqual(diagnostics["currentState"]["state"], "ready")
             self.assertNotIn("lastSetup", diagnostics["currentState"])
 
+    def test_current_state_degrades_cgc_repo_with_empty_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
+            # Containers and raw status stay green; only graph content is bad.
+            cgc["results"][0]["indexingState"] = "empty"
+
+            payload = current_state.build_current_provider_state(config, status)
+
+            cgc_state = payload["providers"]["codegraphcontext-code"]
+            repo_state = cgc_state["resources"]["watchers"]["agents-remember-md"]
+            self.assertEqual(repo_state["state"], "degraded")
+            self.assertFalse(repo_state["ok"])
+            self.assertEqual(repo_state["indexingState"], "empty")
+            self.assertEqual(cgc_state["state"], "degraded")
+            self.assertEqual(payload["state"], "degraded")
+            self.assertFalse(payload["ok"])
+
+    def test_current_state_keeps_indexing_cgc_repo_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
+            cgc["results"][0]["indexingState"] = "indexing"
+
+            payload = current_state.build_current_provider_state(config, status)
+
+            cgc_state = payload["providers"]["codegraphcontext-code"]
+            repo_state = cgc_state["resources"]["watchers"]["agents-remember-md"]
+            self.assertEqual(repo_state["state"], "ready")
+            self.assertEqual(repo_state["indexingState"], "indexing")
+            self.assertEqual(cgc_state["state"], "ready")
+            self.assertEqual(payload["state"], "ready")
+            self.assertTrue(payload["ok"])
+
+    def test_provider_status_degrades_global_summary_for_empty_cgc_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
+            cgc["results"][0]["indexingState"] = "empty"
+
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=status,
+            ):
+                packet = provider_status.provider_status_packet(config)
+
+            providers = packet["providers"]
+            self.assertEqual(providers["state"], "degraded")
+            self.assertFalse(providers["ok"])
+            self.assertTrue(providers["partial"])
+            self.assertEqual(providers["indexing"], [])
+            recovery = [
+                action
+                for action in providers["recoveryActions"]
+                if action.get("provider") == "codegraphcontext-code"
+            ]
+            self.assertEqual(recovery[0]["repoId"], "agents-remember-md")
+            self.assertIn("provider_watchers(action='restart')", recovery[0]["recoveryAction"])
+
+    def test_provider_summary_lists_indexing_targets_without_degrading(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
+            cgc["results"][0]["indexingState"] = "indexing"
+
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=status,
+            ):
+                packet = provider_status.provider_status_packet(config)
+
+            providers = packet["providers"]
+            self.assertEqual(providers["state"], "ready")
+            self.assertTrue(providers["ok"])
+            self.assertEqual(
+                providers["indexing"],
+                ["codegraphcontext-code:agents-remember-md"],
+            )
+            self.assertEqual(
+                [
+                    action
+                    for action in providers["recoveryActions"]
+                    if action.get("provider") == "codegraphcontext-code"
+                ],
+                [],
+            )
+
 
 def ready_status_payload(root: Path) -> dict:
     return {

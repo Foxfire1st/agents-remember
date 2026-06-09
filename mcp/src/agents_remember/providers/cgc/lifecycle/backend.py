@@ -89,7 +89,7 @@ def cgc_backend_runtime_details(
     state: dict[str, Any],
     inspect_data: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    actual_data_mount = docker_data_mount_source(inspect_data)
+    actual_data_mount = docker_data_mount_source(inspect_data, backend["dataDestination"])
     return {
         "actualDataMount": actual_data_mount,
         "dataMountMatches": cgc_backend_data_mount_matches(
@@ -260,7 +260,10 @@ def cgc_backend_remove_mismatched_container(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     if not inspect_data:
         return inspect_data, None, None
-    if docker_host_path_matches(docker_data_mount_source(inspect_data), layout.backend_data_root):
+    if docker_host_path_matches(
+        docker_data_mount_source(inspect_data, backend["dataDestination"]),
+        layout.backend_data_root,
+    ):
         return inspect_data, None, None
     result = run_command(
         [docker_command(), "rm", "-f", backend["containerName"]],

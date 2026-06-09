@@ -129,6 +129,7 @@ def provider_summary(
             detail_limit=detail_limit,
             target_repo_id=target_repo_id,
         ),
+        indexing=_provider_indexing_targets(projection),
         recoveryActions=_provider_recovery_actions(projection),
     )
 
@@ -158,12 +159,26 @@ def _provider_status_projection(
 
     status = _watchers_status(config)
     current_state = write_current_provider_state(config, status)
+    aggregated = current_state["state"]
+    # The raw watchers ok only proves containers; the aggregated current-state
+    # ok also reflects graph/workspace content, so both must hold for a green
+    # global summary.
+    raw_ok = status.get("ok")
+    ok = bool(aggregated.get("ok")) if raw_ok is None else bool(raw_ok) and bool(aggregated.get("ok"))
+    providers_map = aggregated.get("providers", {})
+    partial = status.get("partial", False) or (
+        not ok
+        and any(
+            isinstance(provider, dict) and provider.get("state") == "ready"
+            for provider in providers_map.values()
+        )
+    )
     return ProviderStatusProjection(
         configured=True,
         enabled=any(status.get("enabled", {}).values()),
-        state=current_state["state"]["state"],
-        ok=status.get("ok"),
-        partial=status.get("partial", False),
+        state=aggregated["state"],
+        ok=ok,
+        partial=partial,
         settings_file=status.get("settingsFile", ""),
         current_state_file=current_state["path"],
         current_state=current_state["state"],
@@ -215,7 +230,8 @@ def _provider_summary_items(
 
 def _provider_recovery_actions(projection: ProviderStatusProjection) -> list[dict[str, Any]]:
     actions = list(projection.recovery_actions or [])
-    grepai_state = _current_provider_states(projection).get("grepai-memory", {})
+    states = _current_provider_states(projection)
+    grepai_state = states.get("grepai-memory", {})
     if grepai_state.get("indexingState") == "noWorkspace":
         actions.append(
             {
@@ -224,7 +240,49 @@ def _provider_recovery_actions(projection: ProviderStatusProjection) -> list[dic
                 "recoveryAction": PROVIDER_WATCHER_RESTART_RECOVERY,
             }
         )
+    for repo_id, watcher in _cgc_watchers_map(states.get("codegraphcontext-code", {})).items():
+        if watcher.get("indexingState") in {"empty", "backend-unreachable"}:
+            actions.append(
+                {
+                    "provider": "codegraphcontext-code",
+                    "repoId": repo_id,
+                    "action": "restart",
+                    "recoveryAction": PROVIDER_WATCHER_RESTART_RECOVERY,
+                }
+            )
     return actions
+
+
+def _cgc_watchers_map(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    resources = state.get("resources")
+    resources = resources if isinstance(resources, dict) else {}
+    watchers = resources.get("watchers")
+    if not isinstance(watchers, dict):
+        return {}
+    return {
+        str(repo_id): watcher
+        for repo_id, watcher in watchers.items()
+        if isinstance(watcher, dict)
+    }
+
+
+def _provider_indexing_targets(projection: ProviderStatusProjection) -> list[str]:
+    """Busy "<provider-id>:<repo-id>" targets with an initial scan in progress.
+
+    Indexing is healthy-but-busy: it must not degrade state/ok, but agents
+    reading only the compact summary still need to know results are partial."""
+    states = _current_provider_states(projection)
+    targets = [
+        f"codegraphcontext-code:{repo_id}"
+        for repo_id, watcher in sorted(
+            _cgc_watchers_map(states.get("codegraphcontext-code", {})).items()
+        )
+        if watcher.get("indexingState") == "indexing"
+    ]
+    grepai_state = states.get("grepai-memory", {})
+    if grepai_state.get("indexingState") == "indexing":
+        targets.append("grepai-memory")
+    return targets
 
 
 def _provider_summary_item(

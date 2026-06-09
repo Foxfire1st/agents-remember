@@ -61,7 +61,7 @@ def cgc_compose_render(
             backend["browserHost"], browser_port, backend["browserContainerPort"]
         ),
         "FALKORDB_DATA_VOLUME": yaml_scalar(
-            f"{layout.backend_data_root.as_posix()}:/data"
+            f"{layout.backend_data_root.as_posix()}:{backend['dataDestination']}"
         ),
         "RUNNER_IMAGE": yaml_scalar(layout.runner_image),
         "RUNNER_BUILD_CONTEXT": yaml_scalar(

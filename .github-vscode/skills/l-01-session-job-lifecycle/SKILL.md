@@ -69,7 +69,9 @@ Establish whether memory and providers are trustworthy enough to use.
 5. If providers are stopped or degraded, use the matching MCP provider/runtime
    operations, then re-run the provider check. If providers are ready, report
    readiness and continue. If issues persist, report it to the developer and
-   wait for instructions.
+   wait for instructions. If the packet's providers summary lists `indexing`
+   targets, report them to the developer: those providers are healthy but
+   busy, and their results may be partial until the scan completes.
 6. After the trust checkpoint passes, read committed-state onboarding for the
    in-scope anchors as needed. A file dirty in another chat is still valid for
    HEAD and worth comparing, but its dirty-source drift remains active work.

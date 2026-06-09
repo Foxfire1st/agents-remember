@@ -13,7 +13,9 @@ services:
       # image defaults (this env replaces FALKORDB_ARGS wholesale).
       FALKORDB_ARGS: "MAX_QUEUED_QUERIES 1024 TIMEOUT 1000 RESULTSET_SIZE 10000"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # redis-cli exits 0 even on a LOADING error reply, so a bare ping marks
+      # the service healthy while the dataset is still loading; require PONG.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 20

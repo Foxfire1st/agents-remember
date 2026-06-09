@@ -81,6 +81,14 @@ class ProviderSummary(StrictResponseModel):
     currentStateFile: str | None = None
     processNamespace: dict[str, Any] | None = None
     items: list[ContextProviderItem] = Field(default_factory=list)
+    indexing: list[str] = Field(
+        default_factory=list,
+        description=(
+            'Busy "<provider-id>:<repo-id>" targets with an initial scan in '
+            "progress. Healthy-but-busy: state/ok stay green, but provider "
+            "results may be partial until this list is empty."
+        ),
+    )
     recoveryActions: list[dict[str, Any]] = Field(default_factory=list)
     diagnosticsTool: str = "provider_diagnostics"
 
