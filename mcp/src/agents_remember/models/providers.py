@@ -127,6 +127,14 @@ class ProviderDiagnosticsResponse(ToolResponse):
     items: list[ProviderDiagnosticsItem] = Field(default_factory=list)
     recoveryActions: list[dict[str, Any]] = Field(default_factory=list)
     rawStatus: ProviderRawStatus | None = None
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "Temp report file carrying the full raw status trees; `rawStatus` "
+            "and the `currentState` body now live there (currentStateFile "
+            "already points at the on-disk state)."
+        ),
+    )
 
 
 ProviderWatcherAction = Literal["status", "start", "stop", "restart", "refresh", "shutdown-all"]
@@ -141,6 +149,13 @@ class ProviderWatchersResponse(FlexibleToolResponse):
     currentState: dict[str, Any] | None = None
     steps: list[dict[str, Any]] = Field(default_factory=list)
     recoveryActions: list[dict[str, Any]] = Field(default_factory=list)
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "Temp report file with the full raw provider payloads (compose "
+            "renders, command transcripts); inline steps carry outcomes only."
+        ),
+    )
 
 
 class ProviderNativeToolResponse(FlexibleToolResponse):

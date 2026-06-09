@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import time
@@ -205,6 +206,15 @@ def _target_backend_start(args: Any, context: GrepaiCloneContext) -> dict[str, A
     )
 
 
+# A wedge's signature is silence, not duration: the clone deliberately has no
+# total-time cap (it scales with index size by design — moving index data is
+# what makes rapid worktree provider deployment viable), but zero progress for
+# this long means a wedged docker exec and gets killed with a structured,
+# phase-named result instead of hanging worktree_start forever.
+GREPAI_CLONE_STALL_SECONDS = 300
+GREPAI_CLONE_POLL_SECONDS = 10.0
+
+
 def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
     commands = {
         "dump": _dump_command(context, dry_run=args.dry_run),
@@ -213,28 +223,32 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
     if args.dry_run:
         return {"ok": True, "dryRun": True, "commands": commands}
     started = time.monotonic()
+    stall_seconds = int(getattr(args, "seed_stall_seconds", 0) or 0) or GREPAI_CLONE_STALL_SECONDS
     with tempfile.NamedTemporaryFile(prefix="agents-remember-grepai-", suffix=".sql") as dump_file:
-        dump = subprocess.run(
+        dump = _run_with_stall_watchdog(
             commands["dump"],
             cwd=context.target_coordination_root,
             stdout=dump_file,
-            stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            timeout=None,  # clone scales with index size; never capped
-            check=False,
+            progress=lambda: os.fstat(dump_file.fileno()).st_size,
+            stall_seconds=stall_seconds,
         )
+        if dump is None:
+            return _clone_stall_result("dump", started, stall_seconds, commands)
         if dump.returncode != 0:
             return _command_result("dump", dump, started, commands)
         dump_file.flush()
         dump_file.seek(0)
-        restore = subprocess.run(
+        restore = _run_with_stall_watchdog(
             commands["restore"],
             cwd=context.target_coordination_root,
+            stdout=subprocess.PIPE,
             stdin=dump_file,
-            capture_output=True,
-            timeout=None,  # clone scales with index size; never capped
-            check=False,
+            progress=lambda: _target_database_size(context),
+            stall_seconds=stall_seconds,
         )
+        if restore is None:
+            return _clone_stall_result("restore", started, stall_seconds, commands)
         if restore.returncode != 0:
             return _command_result("restore", restore, started, commands)
     return {
@@ -242,6 +256,109 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
         "durationSeconds": round(time.monotonic() - started, 3),
         "commands": commands,
     }
+
+
+def _run_with_stall_watchdog(
+    command: list[str],
+    *,
+    cwd: Path,
+    stdout: Any,
+    stdin: Any,
+    progress: Any,
+    stall_seconds: int,
+    poll_seconds: float = GREPAI_CLONE_POLL_SECONDS,
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a command without a total-time cap, killing it only after
+    ``stall_seconds`` of zero progress. Returns None when killed for stalling.
+
+    stderr goes to a temp file (not a pipe) so an unread pipe buffer can never
+    deadlock the child while the watchdog waits."""
+    with tempfile.TemporaryFile() as stderr_file:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdout=stdout,
+            stderr=stderr_file,
+            stdin=stdin,
+        )
+        last_progress = progress()
+        last_change = time.monotonic()
+        while True:
+            try:
+                returncode = process.wait(timeout=poll_seconds)
+                break
+            except subprocess.TimeoutExpired:
+                current = progress()
+                if current != last_progress:
+                    last_progress = current
+                    last_change = time.monotonic()
+                elif time.monotonic() - last_change >= stall_seconds:
+                    process.kill()
+                    process.wait()
+                    return None
+        captured_stdout = b""
+        if stdout == subprocess.PIPE and process.stdout is not None:
+            captured_stdout = process.stdout.read()
+        stderr_file.seek(0)
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            stdout=captured_stdout.decode("utf-8", errors="replace"),
+            stderr=stderr_file.read().decode("utf-8", errors="replace"),
+        )
+
+
+def _target_database_size(context: GrepaiCloneContext) -> int:
+    result = subprocess.run(
+        [
+            docker_command(),
+            "exec",
+            "-e",
+            f"PGPASSWORD={context.target_password}",
+            context.target_container,
+            "psql",
+            "-U",
+            context.target_user,
+            "-d",
+            context.target_database,
+            "-tAc",
+            f"SELECT pg_database_size('{context.target_database}');",
+        ],
+        cwd=context.target_coordination_root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return -1
+
+
+def _clone_stall_result(
+    phase: str, started: float, stall_seconds: int, commands: dict[str, list[str]]
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "phase": phase,
+        "stalled": True,
+        "stallSeconds": stall_seconds,
+        "durationSeconds": round(time.monotonic() - started, 3),
+        "error": (
+            f"grepai database clone {phase} made no progress for {stall_seconds}s "
+            "and was killed (a working clone of any size keeps progressing). "
+            "Inspect the source/target postgres containers for a wedged docker exec."
+        ),
+        "commands": commands,
+    }
+
+
+def _stream_text(stream: str | bytes | None) -> str:
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", errors="replace")
+    return stream or ""
 
 
 def _docker_executable(*, dry_run: bool) -> str:
@@ -287,7 +404,7 @@ def _restore_command(context: GrepaiCloneContext, *, dry_run: bool) -> list[str]
 
 def _command_result(
     stage: str,
-    completed: subprocess.CompletedProcess[bytes],
+    completed: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
     started: float,
     commands: dict[str, list[str]],
 ) -> dict[str, Any]:
@@ -295,12 +412,8 @@ def _command_result(
         "ok": False,
         "stage": stage,
         "returncode": completed.returncode,
-        "stdout": completed.stdout.decode("utf-8", errors="replace")
-        if completed.stdout
-        else "",
-        "stderr": completed.stderr.decode("utf-8", errors="replace")
-        if completed.stderr
-        else "",
+        "stdout": _stream_text(completed.stdout),
+        "stderr": _stream_text(completed.stderr),
         "durationSeconds": round(time.monotonic() - started, 3),
         "commands": commands,
     }

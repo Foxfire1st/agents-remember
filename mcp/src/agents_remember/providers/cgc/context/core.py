@@ -199,7 +199,7 @@ def cgc_runtime_layout(
             image_lock_file,
             providers_root / "requirements" / "codegraphcontext-runner-docker.lock",
         ),
-        runner_image=runner_image or _cgc_runner_image(),
+        runner_image=runner_image or cgc_runner_image(),
         watcher_container_name=watcher_container_name
         or f"{CGC_WATCHER_CONTAINER_PREFIX}-{repo_id}",
         state_file=_resolve_optional_path(state_file, runtime_root / "provider-state.json"),
@@ -334,7 +334,12 @@ def _cgc_version() -> str:
     return CGC_REQUIREMENTS[0].split("==", 1)[1]
 
 
-def _cgc_runner_image() -> str:
+def cgc_runner_image() -> str:
+    """Single source of truth for the CGC runner image tag (repository:version-layerrevision).
+
+    providers/settings.py must use this too: deriving the tag independently is
+    what shipped the 2.5.0 upgrade-path bug where cached-image hosts got the
+    guard entrypoint without the guard (GitHub #50)."""
     return f"{CGC_RUNNER_IMAGE_REPOSITORY}:{_cgc_version()}-{CGC_RUNNER_IMAGE_LAYER_REVISION}"
 
 
@@ -410,7 +415,7 @@ def _cgc_runner_settings(
         ),
         variables,
     )
-    runner_image = str(runner_settings.get("image", _cgc_runner_image())).strip()
+    runner_image = str(runner_settings.get("image", cgc_runner_image())).strip()
     if not runner_image or "<" in runner_image or ">" in runner_image:
         raise ContextProviderError("codegraphcontext runner.image must be a concrete Docker tag")
     container_name = expand_template(

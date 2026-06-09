@@ -132,7 +132,7 @@ def grepai_current_state(provider: ProviderScope, result: dict[str, Any]) -> dic
     backend = container_resource(result.get("backend", {}))
     embedder = container_resource(result.get("embedder", {}))
     watcher = container_resource(result.get("watcher", {}))
-    watcher_up = watcher.get("running") is True
+    watcher_up = watcher.get("running") is True and watcher.get("containerState") != "restarting"
     state = provider_state(result.get("ok"), [backend, embedder, watcher])
     if state == "ready" and not grepai_workspace_present(result):
         # Containers are up but the watcher has no searchable workspace, so every
@@ -187,7 +187,9 @@ def cgc_repo_state(result: dict[str, Any]) -> dict[str, Any]:
     process = process if isinstance(process, dict) else {}
     container_state = process.get("containerState")
     container = normalize_container_state(container_state if isinstance(container_state, dict) else {})
-    watcher_up = process.get("alive") is True
+    # A restarting (crash-looping) container reports Running=true between
+    # restarts but is not a live watcher.
+    watcher_up = process.get("alive") is True and container["containerState"] != "restarting"
     indexing_state = str(result.get("indexingState") or "unknown")
     state = "ready" if result.get("ok") and watcher_up else ("failed" if not watcher_up else "degraded")
     if state == "ready" and indexing_state in {"empty", "backend-unreachable"}:
@@ -233,6 +235,11 @@ def normalize_container_state(value: dict[str, Any]) -> dict[str, Any]:
 def resource_state(result: dict[str, Any], container: dict[str, Any]) -> str:
     if container["containerState"] == "missing":
         return "missing"
+    if container["containerState"] == "restarting":
+        # Docker reports a crash-looping container as Running=true between
+        # restarts; it cannot serve anything and must not look ready (observed
+        # during the 2.5.0 rollout: a crash loop surfaced as a ready watcher).
+        return "failed"
     if container["running"] and result.get("ok") is not False:
         return "ready"
     if container["running"]:
@@ -285,9 +292,20 @@ def grepai_workspace_present(result: dict[str, Any]) -> bool:
 def grepai_indexing_state(result: dict[str, Any], *, watcher_up: bool) -> str:
     if not watcher_up:
         return "unavailable"
-    # Workspace present => indexing progress is genuinely unknown (the watcher
-    # status does not report it); absent => nothing is searchable.
-    return "unknown" if grepai_workspace_present(result) else "noWorkspace"
+    if not grepai_workspace_present(result):
+        return "noWorkspace"
+    # The watcher status probes its own container-log scan markers
+    # (`initialScan`), giving GrepAI the same indexed/indexing honesty as the
+    # CGC graph probe instead of a permanent "unknown".
+    watcher = result.get("watcher")
+    watcher = watcher if isinstance(watcher, dict) else {}
+    scan = watcher.get("initialScan")
+    scan_state = str(scan.get("state") or "unknown") if isinstance(scan, dict) else "unknown"
+    if scan_state == "in-progress":
+        return "indexing"
+    if scan_state == "complete":
+        return "indexed"
+    return "unknown"
 
 
 def cgc_indexing_state(repos: dict[str, Any]) -> str:

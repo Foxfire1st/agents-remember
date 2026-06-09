@@ -8,15 +8,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers.context import (
-    GREPAI_PIN,
-    GREPAI_PROVIDER,
+# Leaf imports; see backend.py for the aggregator-cycle rationale.
+from agents_remember.providers.context.common import (
     ContextProviderError,
-    ensure_grepai_requirements_file,
-    ensure_grepai_runtime_layout,
     file_sha256,
     provider_requirements_file,
     read_provider_pin,
+)
+from agents_remember.providers.grepai.context import (
+    GREPAI_PIN,
+    GREPAI_PROVIDER,
+    ensure_grepai_requirements_file,
+    ensure_grepai_runtime_layout,
 )
 from agents_remember.providers.grepai.lifecycle.backend import *
 from agents_remember.providers.grepai.lifecycle.compose import (

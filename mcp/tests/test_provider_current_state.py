@@ -342,6 +342,76 @@ class ProviderCurrentStateTests(unittest.TestCase):
                 [],
             )
 
+    def test_restarting_watcher_is_not_ready(self) -> None:
+        """A crash-looping container reports Running=true between restarts but
+        cannot serve; readiness must not count it as a live watcher."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
+            cgc["results"][0]["process"]["containerState"]["containerState"] = "restarting"
+
+            payload = current_state.build_current_provider_state(config, status)
+
+            repo_state = payload["providers"]["codegraphcontext-code"]["resources"]["watchers"][
+                "agents-remember-md"
+            ]
+            self.assertFalse(repo_state["watcherUp"])
+            self.assertNotEqual(repo_state["state"], "ready")
+            self.assertEqual(payload["providers"]["codegraphcontext-code"]["state"], "degraded")
+            self.assertFalse(payload["ok"])
+
+    def test_grepai_scan_markers_map_to_indexing_states(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+
+            for scan_state, expected in (
+                ("in-progress", "indexing"),
+                ("complete", "indexed"),
+                ("unknown", "unknown"),
+            ):
+                status = ready_status_payload(root)
+                grepai = next(
+                    result for result in status["results"] if result["provider"] == "grepai"
+                )
+                grepai["watcher"]["initialScan"] = {"state": scan_state}
+
+                payload = current_state.build_current_provider_state(config, status)
+
+                grepai_state = payload["providers"]["grepai-memory"]
+                self.assertEqual(grepai_state["indexingState"], expected, msg=scan_state)
+                # Busy-but-healthy never degrades readiness.
+                self.assertEqual(grepai_state["state"], "ready")
+
+    def test_grepai_indexing_feeds_summary_busy_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            grepai = next(result for result in status["results"] if result["provider"] == "grepai")
+            grepai["watcher"]["initialScan"] = {"state": "in-progress"}
+
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=status,
+            ):
+                packet = provider_status.provider_status_packet(config)
+
+            providers = packet["providers"]
+            self.assertTrue(providers["ok"])
+            self.assertIn("grepai-memory", providers["indexing"])
+
 
 def ready_status_payload(root: Path) -> dict:
     return {

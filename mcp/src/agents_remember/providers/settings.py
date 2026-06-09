@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
+from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.context import (
     CGC_NETWORK_NAME,
-    CGC_PIN,
-    CGC_RUNNER_IMAGE_REPOSITORY,
     CGC_WATCHER_CONTAINER_PREFIX,
     GREPAI_NETWORK_NAME,
     GREPAI_OLLAMA_IMAGE,
@@ -179,7 +178,6 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
 
 
 def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str, Any]:
-    version = CGC_PIN.split("==", 1)[1]
     labels = provider_ownership_labels(
         provider_id=provider.provider_id,
         instance_id=provider.instance_id,
@@ -220,7 +218,10 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
             "mode": "docker",
             "composeProject": compose_project,
             "runner": {
-                "image": f"{CGC_RUNNER_IMAGE_REPOSITORY}:{version}",
+                # Single source of truth (GitHub #50): an independent
+                # repository:version f-string here dropped the image layer
+                # revision, so upgrading hosts kept a cached guard-less image.
+                "image": cgc_runner_image(),
                 "buildRoot": provider.runtime_root.joinpath("image").as_posix(),
                 "imageLockFile": config.coordination_root.joinpath(
                     "providers",

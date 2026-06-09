@@ -17,6 +17,14 @@ class RuntimeInstallResponse(FlexibleToolResponse):
     installProviderDeps: bool | None = None
     summary: dict[str, Any] | None = None
     messages: list[str] = Field(default_factory=list)
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "Temp report file with the full install detail (provider watcher "
+            "rebind runs, compose renders, command transcripts); the inline "
+            "payload keeps counts and a compact rebind digest."
+        ),
+    )
 
 
 class ResolveContextResponse(ToolResponse):
