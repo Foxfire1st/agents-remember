@@ -19,6 +19,7 @@ from agents_remember.worktrees.modules.git import (
     ensure_worktree,
     has_changes,
     head_commit,
+    longest_tracked_path_length,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
@@ -214,6 +215,83 @@ def _started_result(
     )
 
 
+# Margin under the legacy Windows 260-char MAX_PATH so separators, suffixes
+# (e.g. memory sidecar ".md"), and tooling scratch names still fit.
+WINDOWS_MAX_PATH_BUDGET = 250
+
+
+def _windows_long_paths_enabled() -> bool:
+    if os.name != "nt":
+        return True
+    import winreg  # noqa: PLC0415 — Windows-only stdlib module
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem"
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+        return bool(value)
+    except OSError:
+        return False
+
+
+def long_path_block_payload(
+    *,
+    label: str,
+    worktree_path: str,
+    longest_tracked: int,
+    budget: int = WINDOWS_MAX_PATH_BUDGET,
+) -> dict[str, object] | None:
+    """Pure decision: block payload when projected paths exceed the budget."""
+    projected = len(worktree_path) + 1 + longest_tracked
+    if projected <= budget:
+        return None
+    excess = projected - budget
+    return {
+        "state": "blocked",
+        "summary": (
+            f"Projected {label} worktree paths reach {projected} characters, but this "
+            f"Windows host caps paths at 260 (LongPathsEnabled=0; budget {budget}). "
+            "Files deeper in the tree would fail to check out or open mid-task."
+        ),
+        "projectedPathLength": projected,
+        "pathBudget": budget,
+        "longestTrackedPathLength": longest_tracked,
+        "worktreePath": worktree_path,
+        "remedies": [
+            "Enable Windows long paths (admin): HKLM\\SYSTEM\\CurrentControlSet\\Control"
+            "\\FileSystem\\LongPathsEnabled=1, then restart the MCP/harness processes.",
+            f"Or choose a worktree name at least {excess} characters shorter.",
+        ],
+    }
+
+
+def _long_path_preflight(contract: WorktreeContract) -> dict[str, object] | None:
+    if _windows_long_paths_enabled():
+        return None
+    checks: list[tuple[str, Path, Path, str]] = [
+        ("code", contract.code_repo_path, contract.code_worktree, contract.code_source_branch)
+    ]
+    if contract.memory_mode == "external" and contract.memory_repo_path and contract.memory_worktree:
+        checks.append(
+            (
+                "memory",
+                contract.memory_repo_path,
+                contract.memory_worktree,
+                contract.memory_source_branch or "HEAD",
+            )
+        )
+    for label, repo, worktree, ref in checks:
+        payload = long_path_block_payload(
+            label=label,
+            worktree_path=str(worktree),
+            longest_tracked=longest_tracked_path_length(repo, ref),
+        )
+        if payload is not None:
+            return payload
+    return None
+
+
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
     repo = context.code_repository_root
@@ -227,6 +305,10 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
             return WorktreeCommandResult(
                 0, {"state": "attached-existing-contract", **status_payload(existing)}
             )
+
+    long_path_block = _long_path_preflight(contract)
+    if long_path_block is not None:
+        return WorktreeCommandResult(2, long_path_block)
 
     code_state = ensure_worktree(
         repo,

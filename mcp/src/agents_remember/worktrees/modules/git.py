@@ -93,6 +93,16 @@ def commit_date(repo: Path, commit: str) -> str:
     return require_git(repo, ["show", "-s", "--format=%cI", commit])
 
 
+def longest_tracked_path_length(repo: Path, ref: str = "HEAD") -> int:
+    """Length of the longest tracked relative path at ref (HEAD fallback)."""
+    result = run_git(repo, ["ls-tree", "-r", "--name-only", ref])
+    if result.returncode != 0 and ref != "HEAD":
+        result = run_git(repo, ["ls-tree", "-r", "--name-only", "HEAD"])
+    if result.returncode != 0:
+        return 0
+    return max((len(line.strip()) for line in result.stdout.splitlines() if line.strip()), default=0)
+
+
 def changed_worktree_paths(repo: Path) -> list[str]:
     tracked = require_git(repo, ["diff", "--name-only", "HEAD", "--"]).splitlines()
     untracked = require_git(repo, ["ls-files", "--others", "--exclude-standard"]).splitlines()

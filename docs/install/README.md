@@ -36,6 +36,21 @@ Initial skills and hooks/rules/instructions come from the copied package. Do not
 run `skills_install()` for first-run setup; that MCP tool remains available for
 manual maintenance and non-package installs.
 
+**Native Windows note:** enable long paths before working with worktree-backed
+tasks — worktree folders nest deeply enough that repos with deep trees exceed
+the legacy 260-character `MAX_PATH`, which breaks Python tooling, pip installs,
+and test fixtures mid-task. Run in an elevated PowerShell, then restart your
+harness:
+
+```text
+Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -Type DWord
+git config --global core.longpaths true
+```
+
+`worktree_start` checks this up front and refuses with the projected path
+length when the host cannot represent the worktree's deepest files. WSL is not
+affected.
+
 Then choose the guide for your tool:
 
 - [Codex](codex.md)
