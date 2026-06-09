@@ -14,90 +14,188 @@ runs mandatory MCP grounding checks, the model presents an evidence-backed
 reframe, and the developer agrees or revises that reframe before deeper research
 or build-mode decisions proceed.
 
-```
-0 Request  developer states the request; model infers the target repo and reports ambiguity
-1 Trust    resolve via context_packet(include_providers=true, include_drift=true); handle drift and providers before relying on memory
-2 Frame    gather c-04 evidence, reframe through tasks/AGENTS.md, get developer agreement, then do deeper research with proof
-3 Decide   changes code? no -> research-only exit · yes -> approve worktree intent, then c-09 worktree; pick build mode
-4 Build    implement in the worktree; refresh onboarding per completed plan-section; checks green per commit
-5 Close    worktree closeout -> land per system/git-workflow.md -> cleanup -> c-11-memory-carryover-from-branch carryover (commit-gated)
-```
-
-Research-only answers, investigations, and code questions can exit after the
-reframe/research phase without opening a worktree or entering closeout.
-
 ## Companion Files
 
-1. `lifecycle.md` — the spine in detail: what each phase does, the doctrine it carries, and its gates.
-2. `job-variants.md` — the four thin job lenses (bug / feature / triage / research).
-3. `deep-research-report-template.md` — the reusable report and evidence-ledger shape for deeper research.
+1. `job-variants.md` — the four thin job lenses (bug / feature / triage / research).
+2. `deep-research-report-template.md` — the reusable report and evidence-ledger shape for deeper research.
 
-## When To Use
+```
+0 Request -> 1 Trust Checkpoint -> 2 Reframe + Research -> 3 Decide -> 4 Build -> 5 Close
+                                                   |
+                                                   +-- research-only (e.g. investigation, code questions...)
+```
 
-Every session. The coordinator routes here first; classify the job as a lens during `frame`, not as a
-gate. The lifecycle owns the whole arc from a developer's first statement to a landed change (or a
-research-only answer). It does not replace the memory/core skills it calls (the `c-02-memory-quality-control`,
-`c-04-retrieval-strategy-router`, `c-05-create-or-update-onboarding-files`, `c-08-ar-coordination-context-resolver`,
-`c-09-git-worktree-manager`, and `c-11-memory-carryover-from-branch` skills); it sequences them.
+## 0 — Request
 
-## The Build-Mode Decision (the only task-format call)
+Receive the developer's raw request and identify the active repository.
 
-Format routing is no longer a top-level choice. It is the `decide` step of this lifecycle:
+1. Treat the developer's statement as raw input, not yet as an implementation plan.
+2. Infer the target code repository from the request and local context. Ask the
+   developer if the target is unclear.
 
-1. **Research-only exit** — the job answers a question or assesses something and changes no code. No
-   worktree, no task artifact, no closeout. May spawn a build job later.
-2. **Chat build** — a code change small enough to carry inline this session. Worktree-backed, **no
-   durable task artifact**. (This path is the one the retired chat workflow used to own.)
-3. **Durable task build** — hand off to `w-02-light-task-workflow`: a `task.md` artifact, checklist,
-   decision log, and proposed code examples. Escalate to a master + light sub-task series when the
-   work outgrows a single-page plan.
+Request intake changes nothing. It only establishes which repository the next
+checkpoint must inspect.
 
-**Build always means a worktree.** Before `worktree_start`, read `c-09-git-worktree-manager`
-and the repo's `system/git-workflow.md`, present the worktree intent packet,
-and wait for explicit approval. The git-landing decision (direct vs PR-gated)
-is deferred to the repo's `system/git-workflow.md`.
+The upcoming `Trust Checkpoint` reveals whether or not the request is related to repositories managed by Agents Remember. If not, then the lifecycle exits early and the agent can work as usual.
 
-## Invariants
+However, if later work is to enter the boundary of repositories being managed by Agents Remember,
+the lifecycle must be re-entered.
 
-1. Every session enters the `l-01-session-job-lifecycle` skill; the job type is a lens, re-pickable, never a gate.
-2. The model runs `context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true)`
-   before trusting onboarding, providers, task files, or source interpretation.
-3. Clean-source onboarding drift is a developer choice point: refresh through
-   `c-05-create-or-update-onboarding-files` before proceeding, or proceed with
-   that onboarding explicitly marked untrusted. Dirty-source drift is reported as
-   active work-in-progress and is not taken over unless the developer says so.
-4. Degraded providers are handled with the matching MCP provider/runtime
-   operations and then re-checked; ready providers are reported before evidence
-   gathering continues.
-5. Retrieval routes through `c-04-retrieval-strategy-router` (Semantics / Relationship / Intent), not a
-   blanket "read all onboarding."
-6. The model reframes the developer request through `tasks/AGENTS.md`, presents
-   the reframe, and waits for developer agreement or revision before deeper
-   research proceeds.
-7. Deeper research reports use `deep-research-report-template.md` and list the onboarding docs read,
-   semantic queries, code graph queries, source files inspected, and remaining truth gaps.
-8. `build => worktree`. `durable task => worktree + task.md`. `chat build => worktree, no artifact`.
-   `research-only => no worktree`.
-9. Before `worktree_start`, the model presents a worktree intent packet naming
-   repo, build mode, branch policy, source branch, work branch, memory mode,
-   landing path, and risks; the developer approves or revises it.
-10. No implementation begins before explicit developer approval (the `frame` plan gate).
-11. Implementation approval is **not** commit approval. Closeout is a separate, explicit commit gate
-   after a preview.
-12. Onboarding is refreshed **live, per completed plan-section** during `build`, never deferred to the
-   end of the job.
-13. Checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` run green before **each** incremental commit; the
+---
+
+## 1 — Trust Checkpoint
+
+Establish whether memory and providers are trustworthy enough to use.
+
+1. For the target repository, resolve coordination/memory context with
+   the MCP tool call:
+
+   ```text
+   context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true)
+   ```
+
+2. Report the packet facts before relying on memory or providers:
+   - repository, branch, and dirty state
+   - memory root and onboarding root
+   - provider state
+   - drift status and actionable drift count
+3. If onboarding for committed source is drifted, missing verification, or
+   orphaned, and the corresponding source file is not dirty in the code
+   worktree, stop and ask the developer whether or not to refresh it through
+   `c-05-create-or-update-onboarding-files`. Drift handling is approval-gated!
+4. If drift is tied to dirty source, report it as active work-in-progress. Do
+   not adopt it as maintenance or silently trust it as current state unless the
+   developer explicitly says this job owns it.
+5. If providers are stopped or degraded, use the matching MCP provider/runtime
+   operations, then re-run the provider check. If providers are ready, report
+   readiness and continue. If issues persist, report it to the developer and
+   wait for instructions.
+6. After the trust checkpoint passes, read committed-state onboarding for the
+   in-scope anchors as needed. A file dirty in another chat is still valid for
+   HEAD and worth comparing, but its dirty-source drift remains active work.
+
+---
+
+## 2 — Reframe And Research
+
+Turn the developer's raw request into an agreed piece of work, then perform the
+deeper research that the agreed frame requires. The `tasks/AGENTS.md`
+collaboration doctrine applies here in plain chat, before any task file or task
+format exists.
+
+1. **Gather evidence for the reframe** through reading the
+   `c-04-retrieval-strategy-router` skill. Pick the strategy by the question:
+   - _Semantics_ (grepai over onboarding) — "where does X live / what handles Y."
+   - _Relationship_ (cgc) — callers/callees/dependencies/impact.
+   - _Intent_ (onboarding + bounded source confirmation) — hidden contracts, invariants,
+     branch-valid truths, behavioral expectations. This is a workflow of paired
+     source+onboarding reads: read the source file together with its verified onboarding.
+     Use the memory-repo root `overview.md` file to gain a bird's-eye view of a code repo.
+2. **Reframe** the request through `tasks/AGENTS.md`: distinguish the surface
+   request, deeper objective, highest-leverage framing, assumptions, boundaries,
+   invariants, and truth gaps. Do not rush a statement into a plan.
+3. Present the reframe to the developer. If the developer disagrees, discuss and
+   revise the reframe. If the developer agrees, proceed to deeper research.
+4. **Perform deeper research** for the agreed frame. This research still uses
+   `c-04-retrieval-strategy-router`, but it is now scoped by the developer-agreed
+   frame rather than by the model's first guess. Use
+   `deep-research-report-template.md` for the report shape; the lifecycle owns
+   the required proof categories, while the template owns evidence formatting.
+5. The deeper research report must list its proof and tie evidence to the claim it supports:
+   - onboarding docs read
+   - semantic queries performed
+   - code graph queries performed
+   - source files inspected
+   - remaining truth gaps
+6. Run the **job opening move** for the job lens (see `job-variants.md`) and use
+   the deeper research to name the truth gaps that remain.
+7. Continue until the developer agrees the design is defined well enough to write
+   down, then produce the **plan**: the steps, and a **code example for every
+   distinct change** you intend to make.
+
+**Plan gate:** stop and wait for explicit developer approval before changing any code. No
+implementation begins before this approval.
+
+---
+
+## 3 — Decide (build mode)
+
+One decision: does this job change code?
+
+- **No -> research-only exit.** Deliver the answer/assessment. No worktree, no task artifact, no closeout.
+  A research-only job may recommend or spawn a follow-up build job; it does not perform one itself.
+- **Yes -> worktree intent gate, then always a worktree.** Read `c-09-git-worktree-manager`
+  and `system/git-workflow.md`, present the worktree intent packet, and wait for
+  explicit developer approval before `worktree_start`. Then open it with
+  `c-09-git-worktree-manager` and pick the build mode:
+  - **Chat build** — small enough to carry inline this session: worktree-backed, **no** `task.md`.
+  - **Durable task build** — hand off to `w-02-light-task-workflow`: `task.md`, checklist, decision
+    log, proposed code examples. Escalate to a master + light sub-task series when the work outgrows a
+    single-page plan.
+
+The worktree intent packet names the target repo, build mode, discovered branch policy, proposed
+`source_branch`, proposed work branch/worktree name, memory mode, landing path, and material risks.
+On PR-gated repos, the packet must prove that the recorded `source_branch` is pushable and that
+protected targets are reached later through the repo's PR flow.
+
+Worktree granularity = the task unit: a single task gets its own worktree; a master multi-task gets
+**one** worktree for the whole series (never one per sub-task); a chat build gets its own worktree
+without a task artifact. The git-landing decision (direct vs PR-gated) is deferred to the repo's
+`system/git-workflow.md` — read it before landing on a gated branch.
+
+---
+
+## 4 — Build
+
+Implement inside the worktree, keeping memory and tests in lockstep with the code.
+
+1. Apply the approved code changes.
+2. **Refresh the matching onboarding in the same editing pass**, per completed plan-section — never
+   deferred to the end of the job. When a change affects durable current-state knowledge, the sidecar
+   is updated alongside it through `c-05-create-or-update-onboarding-files`.
+   - For **changed** (already-onboarded) source files, update the sidecar **body** now: the closeout
+     gate rejects a changed source file whose existing sidecar was not modified this job, because
+     refreshing `lastVerifiedCommitHash` over stale content silently defeats the drift check.
+   - For **new** source files, run `check_missing_onboarding` before the commit and create the
+     reported missing sidecars through the `c-05-create-or-update-onboarding-files` skill; the post-code-commit memory refresh stamps them with
+     the real code commit hash and date.
+3. Run the checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` (lint, typecheck, complexity, tests) and
+   get them **green before each incremental commit**. Testing is never deferred to a final task; the
    pre-commit/pre-push hooks enforce it.
-14. The agent never pushes a protected branch on its own authority; landing follows
-    `system/git-workflow.md` and its gates.
-15. The `l-01-session-job-lifecycle` skill covers everything the retired chat
-    workflow did — task-start trust control, paired source+onboarding reads, the
-    approval gate, and `c-09-git-worktree-manager` closeout — plus the job lens,
-    developer-agreed reframe, proof-bearing research, and the research-only exit. No
-    regression of the default path.
+
+Incremental, pushable commits keep the work-loss window small. Each closeout below is one such commit.
+
+---
+
+## 5 — Close
+
+Land the work. **Implementation approval is not commit approval.**
+
+1. Run the `c-09-git-worktree-manager` closeout **preview** for the worktree (`worktree_closeout_preview`) — or
+   `direct_closeout_preview` only if the repo's `git-workflow.md` permits a direct-checkout build.
+   Relay the proposed code, memory, and ledger commit messages.
+2. **Commit gate:** stop for explicit developer commit approval before any real commit or closeout
+   apply. If required onboarding is missing, run the `c-05-create-or-update-onboarding-files` skill for the affected file and re-run the preview.
+3. On approval, the `c-09-git-worktree-manager` skill owns the external-memory invariant in order: commit code → refresh affected
+   onboarding metadata to the new code commit → run memory quality control → commit memory content →
+   update and commit the ledger.
+4. **Integrate + land** per `c-09-git-worktree-manager` and `system/git-workflow.md`: integrate the
+   worktree branch into the approved source/integration branch, then on a PR-gated repo push that
+   source branch, open the PR, wait for green checks, and merge per the repo convention. Never push a
+   protected branch directly. The agent does not push on its own authority.
+5. **Cleanup + carryover:** reclaim the worktree/provider stack and bring the parked memory home.
+   When the worktree memory branch diverged or the code PR squash-merged, use
+   `c-11-memory-carryover-from-branch`; when it is a clean linear descendant of main-memory, a
+   fast-forward + push is enough.
+6. **Map the ledger to the landed commit.** A PR merge usually lands a **merge commit** on top of the
+   work — tree-identical to the verified tip but a new SHA the ledger does not yet map. Ensure the
+   ledger maps that merge commit so the next worktree can base off the merged branch without a manual
+   reconciliation. `system/git-workflow.md` owns this step.
+
+A research-only exit skips this phase entirely.
 
 ## Relationship To Other Instructions
 
 This skill extends the coordinator `AGENTS.md` and the repository memory layer; it does not replace
-them. Read `lifecycle.md` for phase behavior, `job-variants.md` for the per-job lenses, and
-`deep-research-report-template.md` for the deeper research report shape.
+them. Read `job-variants.md` for the per-job lenses, and `deep-research-report-template.md` for the
+deeper research report shape.
