@@ -41,6 +41,21 @@ class SidecarBodyClassification(TypedDict):
     attested_no_impact: list[str]
 
 
+class RouteOverviewBodyClassification(TypedDict):
+    """Body/history classification of route overviews matched by changed paths.
+
+    Routes that are the nearest governor of a changed source path are
+    domain-evident and classify as stale / untraced / attested_no_impact like
+    sidecars; overviews matched only as ancestors are reported under
+    ``stamped_without_body_review`` instead of gating closeout.
+    """
+
+    stale: list[str]
+    untraced: list[str]
+    attested_no_impact: list[str]
+    stamped_without_body_review: list[str]
+
+
 class EntityFingerprintRow(TypedDict):
     """One parsed row of the entity fingerprint catalog table."""
 

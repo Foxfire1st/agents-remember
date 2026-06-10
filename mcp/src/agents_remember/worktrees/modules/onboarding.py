@@ -30,6 +30,7 @@ from agents_remember.worktrees.modules.models import (
     EntityFingerprintRequiredItem,
     EntityFingerprintRow,
     OnboardingRefreshPlan,
+    RouteOverviewBodyClassification,
     RouteOverviewRefreshPlan,
     SidecarBodyClassification,
 )
@@ -108,8 +109,132 @@ def route_overview_metadata_refresh_plan_for_context(
     }
 
 
+def _nearest_governing_route(source_path: str, routes: list[str]) -> str | None:
+    """The longest route among routes that covers source_path; '.' covers all."""
+    candidates = [
+        route
+        for route in routes
+        if route in {".", source_path} or source_path.startswith(f"{route}/")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda route: (route != ".", len(route), route))
+
+
+def classify_route_overview_updates(
+    context,
+    plan: RouteOverviewRefreshPlan,
+    changed_paths: list[str],
+    *,
+    memory_tree: Path | None = None,
+) -> RouteOverviewBodyClassification:
+    """Classify matched route overviews by meaningful body and history changes.
+
+    Only overviews that are the **nearest governor** of at least one changed
+    source path are domain-evident and classified like sidecars (``stale`` /
+    ``untraced`` / ``attested_no_impact``, with ``No route impact:`` as the
+    marker). Overviews matched only as ancestors — including the repo-root
+    overview matched by happenstance — are reported under
+    ``stamped_without_body_review`` when their body was not reviewed this
+    cycle, and never gate closeout.
+    """
+    classification: RouteOverviewBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+        "stamped_without_body_review": [],
+    }
+    required = plan["required"]
+    if not required:
+        return classification
+    tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
+    if tree is None:
+        return classification
+    memory_root = Path(tree).resolve()
+    changed_memory = set(changed_worktree_paths(memory_root))
+    routes = [normalize_route(item["source_route"]) for item in required]
+    domain_routes = {
+        route
+        for route in (_nearest_governing_route(path, routes) for path in changed_paths)
+        if route is not None
+    }
+    for item in required:
+        route = normalize_route(item["source_route"])
+        overview_path = Path(item["onboarding_file"]).resolve()
+        try:
+            relative = overview_path.relative_to(memory_root).as_posix()
+        except ValueError:
+            continue
+        head_text = head_text_or_none(memory_root, relative)
+        if head_text is None:
+            continue
+        current = filesystem.read_text(overview_path, encoding="utf-8")
+        body_changed = relative in changed_memory and meaningful_body_changed(head_text, current)
+        added_history = new_history_lines(head_text, current)
+        if route not in domain_routes:
+            if not body_changed:
+                classification["stamped_without_body_review"].append(route)
+            continue
+        if body_changed and added_history:
+            continue
+        if body_changed:
+            classification["untraced"].append(route)
+        elif added_history and has_no_impact_marker(added_history):
+            classification["attested_no_impact"].append(route)
+        else:
+            classification["stale"].append(route)
+    return classification
+
+
+def require_updated_route_overview_content(
+    context,
+    plan: RouteOverviewRefreshPlan,
+    changed_paths: list[str],
+    *,
+    memory_tree: Path | None = None,
+) -> list[str]:
+    """Fail closeout when a domain-evident route overview lacks an honest update.
+
+    A route overview that directly governs a changed source path is the front
+    door for that change: stamping its verification header over an untouched
+    body silently presents stale route documentation as current. The overview
+    must therefore pair a meaningful body change with a new Update History
+    entry, or carry an explicit ``No route impact:`` history entry recording
+    that the route was reviewed and intentionally left unchanged. Returns the
+    marker-attested routes so closeout payloads can surface them.
+    """
+    classification = classify_route_overview_updates(
+        context, plan, changed_paths, memory_tree=memory_tree
+    )
+    stale = classification["stale"]
+    untraced = classification["untraced"]
+    if stale or untraced:
+        details: list[str] = []
+        if stale:
+            details.append(
+                "the following governing route overviews have an unmodified or "
+                "metadata/history-only body: " + ", ".join(sorted(stale))
+            )
+        if untraced:
+            details.append(
+                "the following governing route overviews have a body update without a new "
+                "Update History entry: " + ", ".join(sorted(untraced))
+            )
+        raise RuntimeError(
+            "external-memory closeout requires updated route overview content for routes "
+            "whose governed sources changed; "
+            + "; ".join(details)
+            + ". Update each overview body through the c-05-create-or-update-onboarding-files "
+            "skill and record the change in its Update History, or record an explicit "
+            "'No route impact: <reason>' Update History entry when the route was reviewed "
+            "and is unaffected. Advancing lastVerifiedCommitHash on stale content is a "
+            "prohibited metadata-only refresh."
+        )
+    return classification["attested_no_impact"]
+
+
 def validate_route_overview_refresh_plan_for_context(
-    context, changed_paths: list[str]
+    context, changed_paths: list[str], *, memory_tree: Path | None = None
 ) -> RouteOverviewRefreshPlan:
     plan = route_overview_metadata_refresh_plan_for_context(context, changed_paths)
     missing_metadata = plan["missing_metadata"]
@@ -119,6 +244,7 @@ def validate_route_overview_refresh_plan_for_context(
             f"missing lastVerifiedCommitHash or lastVerifiedCommitDate in: {', '.join(missing_metadata)}. "
             "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
+    require_updated_route_overview_content(context, plan, changed_paths, memory_tree=memory_tree)
     return plan
 
 
@@ -334,7 +460,7 @@ def validate_route_overview_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> RouteOverviewRefreshPlan:
     return validate_route_overview_refresh_plan_for_context(
-        contract_context(contract), changed_paths
+        contract_context(contract), changed_paths, memory_tree=contract.memory_worktree
     )
 
 
