@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Carry landed branch onboarding into official external memory.
 
-Requires Python 3.10+ and git. Uses only the Python standard library.
+Requires Python 3.10+ and git.
 """
 
 from __future__ import annotations
@@ -21,8 +21,15 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.kernel.onboarding_doc import (
+    discover_route_overviews,
+    route_contains_changed_path,
+)
+from agents_remember.kernel.route_index import build_route_indexes
 
 PROVEN_EVIDENCE = {"exact-landed-commit", "patch-id-match", "final-content-match"}
+FILE_SIDECAR_KIND = "file-sidecar"
+ROUTE_OVERVIEW_KIND = "route-overview"
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,7 @@ class CarryoverCandidate:
     decision: str
     reason: str
     official_exists: bool
+    kind: str = FILE_SIDECAR_KIND
 
 
 @dataclass(frozen=True)
@@ -244,6 +252,54 @@ def candidate_for_path(
     )
 
 
+def overview_candidates(
+    *,
+    official_memory: Path,
+    source_memory: Path,
+    landed_paths: list[str],
+) -> list[CarryoverCandidate]:
+    """Route-overview carryover candidates for routes covering landed paths.
+
+    Overviews are model-authored aggregates, so a differing body is always
+    ``review-required`` regardless of per-path evidence; identical branch and
+    official content auto-carries for metadata re-verification only. Candidate
+    identity is the normalized code route ('.' for the repo root), matching the
+    ``include_review_required`` selection contract.
+    """
+    candidates: list[CarryoverCandidate] = []
+    for route, rel in discover_route_overviews(source_memory / "onboarding"):
+        covered = sorted(
+            path for path in landed_paths if route_contains_changed_path(route, [path])
+        )
+        if not covered:
+            continue
+        branch_file = source_memory / "onboarding" / rel
+        official_file = official_memory / "onboarding" / rel
+        official_exists = official_file.exists()
+        identical = official_exists and branch_file.read_text(
+            encoding="utf-8"
+        ) == official_file.read_text(encoding="utf-8")
+        candidates.append(
+            CarryoverCandidate(
+                source_path=route,
+                branch_onboarding=branch_file.as_posix(),
+                official_onboarding=official_file.as_posix(),
+                evidence="route-covers-landed-paths",
+                decision="auto-carry" if identical else "review-required",
+                reason=(
+                    "branch and official route overview content match; "
+                    "metadata re-verification only"
+                    if identical
+                    else "route overview body differs from official; model re-review "
+                    f"required (covers landed: {', '.join(covered[:5])})"
+                ),
+                official_exists=official_exists,
+                kind=ROUTE_OVERVIEW_KIND,
+            )
+        )
+    return candidates
+
+
 def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
     code_repository_root = request.code_repository_root.resolve()
     official_memory = request.official_memory.resolve()
@@ -284,6 +340,13 @@ def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
                 official_exists=onboarding_path(official_memory, source_path).exists(),
             )
         )
+    candidates.extend(
+        overview_candidates(
+            official_memory=official_memory,
+            source_memory=source_memory,
+            landed_paths=sorted(source_changed & official_changed),
+        )
+    )
     counts: dict[str, int] = {}
     for candidate in candidates:
         counts[candidate.decision] = counts.get(candidate.decision, 0) + 1
@@ -338,6 +401,40 @@ def selected_candidates(
         ):
             selected.append(candidate)
     return selected
+
+
+def _refresh_official_route_indexes(
+    request: CarryoverRequest, official_head: str
+) -> dict[str, object]:
+    """Regenerate official-side route indexes after carrying onboarding.
+
+    ``overview.index.json`` files are derived artifacts: they are regenerated on
+    the official side, never copied from the branch. ``build_route_indexes``
+    scans the code working tree, so regeneration only runs when the code
+    repository is a clean checkout of the official ref; otherwise the skip is
+    reported instead of silently baking wrong coverage into official memory.
+    """
+    code_root = request.code_repository_root.resolve()
+    if head_commit(code_root, "HEAD") != official_head or has_changes(code_root):
+        return {
+            "state": "skipped",
+            "reason": "code repository is not a clean checkout of the official ref; "
+            "check out the official ref and rerun carryover, or regenerate via "
+            "route_index_refresh",
+        }
+    onboarding_root = request.official_memory.resolve() / "onboarding"
+    if not onboarding_root.is_dir():
+        return {
+            "state": "skipped",
+            "reason": "official memory has no onboarding directory",
+        }
+    result = build_route_indexes(
+        code_root=code_root,
+        onboarding_root=onboarding_root,
+        repository=request.code_repository_name,
+        dry_run=False,
+    )
+    return {"state": "refreshed", **result.to_dict()}
 
 
 def _nothing_to_carry_result(
@@ -413,17 +510,26 @@ def apply_carryover_for_request(
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         refresh_onboarding_metadata(target, official_head, official_date)
         carried.append(candidate)
+    route_index_refresh: dict[str, object] = {
+        "state": "skipped",
+        "reason": "no onboarding was carried over",
+    }
+    if carried:
+        route_index_refresh = _refresh_official_route_indexes(request, official_head)
     if not carried or not has_changes(official_memory):
-        return _nothing_to_carry_result(
-            plan=plan,
-            cleaned_note=cleaned_note,
-            carried=carried,
-            ledger=ledger,
-            ledger_path=ledger_path,
-            official_memory=official_memory,
-            official_head=official_head,
-            ledger_commit_message=ledger_commit_message,
-        )
+        return {
+            **_nothing_to_carry_result(
+                plan=plan,
+                cleaned_note=cleaned_note,
+                carried=carried,
+                ledger=ledger,
+                ledger_path=ledger_path,
+                official_memory=official_memory,
+                official_head=official_head,
+                ledger_commit_message=ledger_commit_message,
+            ),
+            "route_index_refresh": route_index_refresh,
+        }
     memory_content_commit = commit_if_dirty(official_memory, memory_commit_message)
     write_ledger(ledger_path, prepend_mapping(ledger, official_head, memory_content_commit))
     require_git(official_memory, ["add", "memory.md"])
@@ -433,6 +539,7 @@ def apply_carryover_for_request(
         "state": "carried-over",
         "intent_note": cleaned_note,
         "carried": carried,
+        "route_index_refresh": route_index_refresh,
         "memory_content_commit": memory_content_commit,
         "ledger_commit": ledger_commit,
     }

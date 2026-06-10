@@ -7,29 +7,36 @@ from typing import Any
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.onboarding_doc import (
+    ROUTE_OVERVIEW_DOC_TYPES,
+    has_no_impact_marker,
+    markdown_table_cells,
+    meaningful_body_changed,
+    new_history_lines,
+    normalize_route,
+    onboarding_metadata_row,
+    route_contains_changed_path,
+    table_metadata,
+)
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.worktrees.modules.context import contract_context
-from agents_remember.worktrees.modules.git import changed_worktree_paths, require_git
+from agents_remember.worktrees.modules.git import (
+    changed_worktree_paths,
+    head_text_or_none,
+    require_git,
+)
 from agents_remember.worktrees.modules.models import (
     EntityFingerprintRefreshPlan,
     EntityFingerprintRequiredItem,
     EntityFingerprintRow,
     OnboardingRefreshPlan,
+    RouteOverviewBodyClassification,
     RouteOverviewRefreshPlan,
+    SidecarBodyClassification,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ENTITY_FINGERPRINT_ALGORITHM = "git-blob-set-v1"
-ROUTE_OVERVIEW_DOC_TYPES = {"repo-overview", "route-local-overview"}
-
-
-def onboarding_metadata_row(
-    text: str, field: str, value: str, *, code: bool = False
-) -> tuple[str, bool]:
-    rendered = f"`{value}`" if code else value
-    pattern = re.compile(rf"(\|\s*{re.escape(field)}\s*\|\s*)`?[^|`]*`?(\s*\|)")
-    updated, count = pattern.subn(rf"\g<1>{rendered}\g<2>", text, count=1)
-    return updated, count > 0
 
 
 def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
@@ -68,45 +75,8 @@ def onboarding_refresh_plan_for_context(
     }
 
 
-def markdown_table_cells(line: str) -> list[str]:
-    return [cell.strip() for cell in line.strip().strip("|").split("|")]
-
-
 def normalized_table_cell(cell: str) -> str:
     return re.sub(r"[^a-z0-9]", "", cell.lower())
-
-
-def table_metadata(path: Path) -> dict[str, str]:
-    metadata: dict[str, str] = {}
-    for line in filesystem.read_text(path, encoding="utf-8").splitlines():
-        if not line.lstrip().startswith("|"):
-            continue
-        cells = markdown_table_cells(line)
-        if len(cells) < 2:
-            continue
-        field = cells[0].strip()
-        value = cells[1].strip().strip("`")
-        if not field or set(field) <= {"-"} or field.lower() == "field":
-            continue
-        metadata[field] = value
-    return metadata
-
-
-def normalize_route(route: str) -> str:
-    normalized = route.strip().strip("`").replace("\\", "/").strip("/")
-    if normalized in {"", ".", "<repo-root>"}:
-        return "."
-    return normalized
-
-
-def route_contains_changed_path(route: str, changed_paths: list[str]) -> bool:
-    if not changed_paths:
-        return False
-    normalized_route = normalize_route(route)
-    if normalized_route == ".":
-        return True
-    prefix = f"{normalized_route}/"
-    return any(path == normalized_route or path.startswith(prefix) for path in changed_paths)
 
 
 def route_overview_metadata_refresh_plan_for_context(
@@ -139,8 +109,132 @@ def route_overview_metadata_refresh_plan_for_context(
     }
 
 
+def _nearest_governing_route(source_path: str, routes: list[str]) -> str | None:
+    """The longest route among routes that covers source_path; '.' covers all."""
+    candidates = [
+        route
+        for route in routes
+        if route in {".", source_path} or source_path.startswith(f"{route}/")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda route: (route != ".", len(route), route))
+
+
+def classify_route_overview_updates(
+    context,
+    plan: RouteOverviewRefreshPlan,
+    changed_paths: list[str],
+    *,
+    memory_tree: Path | None = None,
+) -> RouteOverviewBodyClassification:
+    """Classify matched route overviews by meaningful body and history changes.
+
+    Only overviews that are the **nearest governor** of at least one changed
+    source path are domain-evident and classified like sidecars (``stale`` /
+    ``untraced`` / ``attested_no_impact``, with ``No route impact:`` as the
+    marker). Overviews matched only as ancestors — including the repo-root
+    overview matched by happenstance — are reported under
+    ``stamped_without_body_review`` when their body was not reviewed this
+    cycle, and never gate closeout.
+    """
+    classification: RouteOverviewBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+        "stamped_without_body_review": [],
+    }
+    required = plan["required"]
+    if not required:
+        return classification
+    tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
+    if tree is None:
+        return classification
+    memory_root = Path(tree).resolve()
+    changed_memory = set(changed_worktree_paths(memory_root))
+    routes = [normalize_route(item["source_route"]) for item in required]
+    domain_routes = {
+        route
+        for route in (_nearest_governing_route(path, routes) for path in changed_paths)
+        if route is not None
+    }
+    for item in required:
+        route = normalize_route(item["source_route"])
+        overview_path = Path(item["onboarding_file"]).resolve()
+        try:
+            relative = overview_path.relative_to(memory_root).as_posix()
+        except ValueError:
+            continue
+        head_text = head_text_or_none(memory_root, relative)
+        if head_text is None:
+            continue
+        current = filesystem.read_text(overview_path, encoding="utf-8")
+        body_changed = relative in changed_memory and meaningful_body_changed(head_text, current)
+        added_history = new_history_lines(head_text, current)
+        if route not in domain_routes:
+            if not body_changed:
+                classification["stamped_without_body_review"].append(route)
+            continue
+        if body_changed and added_history:
+            continue
+        if body_changed:
+            classification["untraced"].append(route)
+        elif added_history and has_no_impact_marker(added_history):
+            classification["attested_no_impact"].append(route)
+        else:
+            classification["stale"].append(route)
+    return classification
+
+
+def require_updated_route_overview_content(
+    context,
+    plan: RouteOverviewRefreshPlan,
+    changed_paths: list[str],
+    *,
+    memory_tree: Path | None = None,
+) -> list[str]:
+    """Fail closeout when a domain-evident route overview lacks an honest update.
+
+    A route overview that directly governs a changed source path is the front
+    door for that change: stamping its verification header over an untouched
+    body silently presents stale route documentation as current. The overview
+    must therefore pair a meaningful body change with a new Update History
+    entry, or carry an explicit ``No route impact:`` history entry recording
+    that the route was reviewed and intentionally left unchanged. Returns the
+    marker-attested routes so closeout payloads can surface them.
+    """
+    classification = classify_route_overview_updates(
+        context, plan, changed_paths, memory_tree=memory_tree
+    )
+    stale = classification["stale"]
+    untraced = classification["untraced"]
+    if stale or untraced:
+        details: list[str] = []
+        if stale:
+            details.append(
+                "the following governing route overviews have an unmodified or "
+                "metadata/history-only body: " + ", ".join(sorted(stale))
+            )
+        if untraced:
+            details.append(
+                "the following governing route overviews have a body update without a new "
+                "Update History entry: " + ", ".join(sorted(untraced))
+            )
+        raise RuntimeError(
+            "external-memory closeout requires updated route overview content for routes "
+            "whose governed sources changed; "
+            + "; ".join(details)
+            + ". Update each overview body through the c-05-create-or-update-onboarding-files "
+            "skill and record the change in its Update History, or record an explicit "
+            "'No route impact: <reason>' Update History entry when the route was reviewed "
+            "and is unaffected. Advancing lastVerifiedCommitHash on stale content is a "
+            "prohibited metadata-only refresh."
+        )
+    return classification["attested_no_impact"]
+
+
 def validate_route_overview_refresh_plan_for_context(
-    context, changed_paths: list[str]
+    context, changed_paths: list[str], *, memory_tree: Path | None = None
 ) -> RouteOverviewRefreshPlan:
     plan = route_overview_metadata_refresh_plan_for_context(context, changed_paths)
     missing_metadata = plan["missing_metadata"]
@@ -150,6 +244,7 @@ def validate_route_overview_refresh_plan_for_context(
             f"missing lastVerifiedCommitHash or lastVerifiedCommitDate in: {', '.join(missing_metadata)}. "
             "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
+    require_updated_route_overview_content(context, plan, changed_paths, memory_tree=memory_tree)
     return plan
 
 
@@ -365,32 +460,36 @@ def validate_route_overview_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> RouteOverviewRefreshPlan:
     return validate_route_overview_refresh_plan_for_context(
-        contract_context(contract), changed_paths
+        contract_context(contract), changed_paths, memory_tree=contract.memory_worktree
     )
 
 
-def require_updated_sidecar_content(
+def classify_sidecar_updates(
     context, plan: OnboardingRefreshPlan, *, memory_tree: Path | None = None
-) -> None:
-    """Fail closeout when a changed source file's existing sidecar was not updated.
+) -> SidecarBodyClassification:
+    """Classify changed-source sidecars by meaningful body and history changes.
 
-    Refreshing only verification metadata on an unchanged sidecar silently
-    defeats the commit-hash-based drift check, so a changed source file must be
-    paired with a changed sidecar body before its metadata is advanced. The
-    check is a no-op when no sidecar onboarding is required for the changed
-    files, and it safely skips sidecars that do not resolve under the memory
-    tree rather than reporting a false stale finding.
+    ``stale`` collects unchanged sidecars, metadata-only edits, and history-only
+    edits without the no-impact marker; ``untraced`` collects body edits that
+    lack a new Update History entry; ``attested_no_impact`` collects
+    history-only edits whose new entry carries the explicit
+    ``No content impact:`` marker. New sidecars absent from the memory tree's
+    HEAD pass without classification, and sidecars that do not resolve under
+    the memory tree are skipped rather than reported as false findings.
     """
-
+    classification: SidecarBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+    }
     required = plan["required"]
     if not required:
-        return
+        return classification
     tree = memory_tree if memory_tree is not None else getattr(context, "memory_root", None)
     if tree is None:
-        return
+        return classification
     memory_root = Path(tree).resolve()
     changed_memory = set(changed_worktree_paths(memory_root))
-    stale: list[str] = []
     for item in required:
         onboarding_path = Path(item["onboarding_file"]).resolve()
         try:
@@ -398,17 +497,67 @@ def require_updated_sidecar_content(
         except ValueError:
             continue
         if relative not in changed_memory:
-            stale.append(item["source_path"])
-    if stale:
+            classification["stale"].append(item["source_path"])
+            continue
+        head_text = head_text_or_none(memory_root, relative)
+        if head_text is None:
+            continue
+        current = filesystem.read_text(onboarding_path, encoding="utf-8")
+        body_changed = meaningful_body_changed(head_text, current)
+        added_history = new_history_lines(head_text, current)
+        if body_changed and added_history:
+            continue
+        if body_changed:
+            classification["untraced"].append(item["source_path"])
+        elif added_history and has_no_impact_marker(added_history):
+            classification["attested_no_impact"].append(item["source_path"])
+        else:
+            classification["stale"].append(item["source_path"])
+    return classification
+
+
+def require_updated_sidecar_content(
+    context, plan: OnboardingRefreshPlan, *, memory_tree: Path | None = None
+) -> list[str]:
+    """Fail closeout when a changed source file's sidecar lacks an honest update.
+
+    Refreshing only verification metadata (or only the Update History) on an
+    unchanged sidecar body silently defeats the commit-hash-based drift check,
+    and a body edit without a new Update History entry loses traceability. A
+    changed source file's sidecar must therefore pair a meaningful body change
+    with a new history entry; a history-only edit passes only when the new
+    entry carries the explicit ``No content impact:`` marker. Returns the
+    marker-attested source paths so closeout payloads can surface them. The
+    check is a no-op when no sidecar onboarding is required for the changed
+    files.
+    """
+
+    classification = classify_sidecar_updates(context, plan, memory_tree=memory_tree)
+    stale = classification["stale"]
+    untraced = classification["untraced"]
+    if stale or untraced:
+        details: list[str] = []
+        if stale:
+            details.append(
+                "the following changed sources have an unmodified or metadata/history-only "
+                "sidecar body: " + ", ".join(stale)
+            )
+        if untraced:
+            details.append(
+                "the following changed sources have a sidecar body update without a new "
+                "Update History entry: " + ", ".join(untraced)
+            )
         raise RuntimeError(
             "external-memory closeout requires updated onboarding content for changed source "
-            "files, not only refreshed verification metadata; the following changed sources have "
-            "an unmodified sidecar body: "
-            + ", ".join(stale)
-            + ". Update each sidecar through the c-05-create-or-update-onboarding-files skill to the approved current state and record the "
-            "change in its Update History before closeout. Advancing lastVerifiedCommitHash on "
-            "stale content is a prohibited metadata-only refresh."
+            "files, not only refreshed verification metadata; "
+            + "; ".join(details)
+            + ". Update each sidecar body through the c-05-create-or-update-onboarding-files "
+            "skill and record the change in its Update History, or record an explicit "
+            "'No content impact: <reason>' Update History entry when the body is verified "
+            "current. Advancing lastVerifiedCommitHash on stale content is a prohibited "
+            "metadata-only refresh."
         )
+    return classification["attested_no_impact"]
 
 
 def validate_onboarding_refresh_plan_for_context(
