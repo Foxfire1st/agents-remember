@@ -25,6 +25,7 @@ def worktree_start_tool(
     work_branch: str | None = None,
     memory_mode: str | None = None,
     memory_choice: str | None = None,
+    stale_base_choice: str | None = None,
     skip_provider_setup: bool = False,
     retry_provider_setup: bool = False,
     dry_run: bool = False,
@@ -53,6 +54,7 @@ def worktree_start_tool(
         work_branch=work_branch,
         memory_mode=memory_mode,
         memory_choice=memory_choice,
+        stale_base_choice=stale_base_choice,
         custom_instruction=None,
         skip_provider_setup=skip_provider_setup,
         retry_provider_setup=retry_provider_setup,
@@ -118,6 +120,21 @@ def worktree_status_tool(
         else None,
     )
     return _worktree_result("worktree_status", git_worktree_manager.status_result(args))
+
+
+def worktree_sync_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    memory_sync_choice: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        memory_sync_choice=memory_sync_choice,
+        dry_run=dry_run,
+    )
+    return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
 
 
 def worktree_closeout_preview_tool(

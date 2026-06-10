@@ -77,6 +77,26 @@ class MemorySummary(StrictResponseModel):
     crossRepo: CrossRepoSummary = Field(default_factory=CrossRepoSummary)
 
 
+class BranchFreshness(StrictResponseModel):
+    branch: str
+    upstream: str | None = None
+    fetched: bool = False
+    ahead: int | None = None
+    behind: int | None = None
+    state: Literal[
+        "current", "behind", "ahead", "diverged", "no-upstream", "no-branch", "unknown", "unavailable"
+    ]
+    error: str | None = None
+
+
+class FreshnessSummary(StrictResponseModel):
+    status: Literal["checked", "not-checked"] = "not-checked"
+    code: BranchFreshness | None = None
+    memory: BranchFreshness | None = None
+    ledgerMapsCodeHead: bool | None = None
+    ledgerError: str | None = None
+
+
 class ContextDiagnosticsHint(StrictResponseModel):
     providerDiagnosticsTool: str = "provider_diagnostics"
 
@@ -90,4 +110,5 @@ class ContextPacketV2(ToolResponse):
     worktree: WorktreeSummary
     providers: ProviderSummary
     drift: DriftSummary
+    freshness: FreshnessSummary = Field(default_factory=FreshnessSummary)
     diagnostics: ContextDiagnosticsHint = Field(default_factory=ContextDiagnosticsHint)

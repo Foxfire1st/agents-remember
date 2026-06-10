@@ -65,6 +65,7 @@ from agents_remember.models.worktree import (
     WorktreeIntegrateResponse,
     WorktreeStartResponse,
     WorktreeStatusResponse,
+    WorktreeSyncResponse,
 )
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
@@ -92,6 +93,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "worktree_start": WorktreeStartResponse,
     "worktree_attach": WorktreeAttachResponse,
     "worktree_status": WorktreeStatusResponse,
+    "worktree_sync": WorktreeSyncResponse,
     "worktree_closeout_preview": WorktreeCloseoutPreviewResponse,
     "worktree_closeout_apply": WorktreeCloseoutApplyResponse,
     "direct_closeout_preview": DirectCloseoutPreviewResponse,

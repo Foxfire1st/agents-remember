@@ -19,6 +19,7 @@ from agents_remember.controllers.context_packet import (
     ContextPacketRequest,
     build_context_packet,
 )
+from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.mcp.config import load_config
 from agents_remember.mcp.tools.core import context_packet_payload
 from agents_remember.worktrees.git_worktree_manager import status_payload
@@ -174,6 +175,90 @@ class ContextPacketTests(unittest.TestCase):
             self.assertEqual(packet["worktree"]["phase"], "worktree-started")
             self.assertEqual(packet["worktree"]["taskId"], status_payload(contract)["task_id"])
             self.assertNotIn("rawStatus", packet["worktree"])
+
+    def test_freshness_not_checked_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md"),
+            )
+
+            self.assertEqual(packet["freshness"], {"status": "not-checked"})
+
+    def test_freshness_reports_no_upstream_without_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md", include_freshness=True),
+            )
+
+            freshness = packet["freshness"]
+            self.assertEqual(freshness["status"], "checked")
+            self.assertEqual(freshness["code"]["state"], "no-upstream")
+            self.assertNotIn("memory", freshness)  # fixture memory root is not a git repo
+            self.assertNotIn("ledgerMapsCodeHead", freshness)  # no memory.md in fixture
+
+    def test_freshness_reports_behind_code_branch_and_ledger_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            repo = root / "workspace" / "agents-remember-md"
+            bare = root / "origin.git"
+            run_git(repo, ["clone", "--bare", str(repo), str(bare)])
+            run_git(repo, ["remote", "add", "origin", str(bare)])
+            branch = current_branch(repo)
+            run_git(repo, ["fetch", "origin"])
+            run_git(repo, ["branch", f"--set-upstream-to=origin/{branch}", branch])
+            other = root / "other"
+            run_git(repo, ["clone", str(bare), str(other)])
+            run_git(other, ["config", "user.email", "agents-remember@example.invalid"])
+            run_git(other, ["config", "user.name", "Agents Remember"])
+            (other / "new.txt").write_text("new\n", encoding="utf-8")
+            run_git(other, ["add", "new.txt"])
+            run_git(other, ["commit", "-m", "remote change"])
+            run_git(other, ["push", "origin", "HEAD"])
+            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            write_ledger(
+                memory / "memory.md",
+                create_initial_ledger("agents-remember-md", current_head(repo), "0" * 40),
+            )
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md", include_freshness=True),
+            )
+
+            freshness = packet["freshness"]
+            self.assertEqual(freshness["code"]["state"], "behind")
+            self.assertEqual(freshness["code"]["behind"], 1)
+            self.assertTrue(freshness["ledgerMapsCodeHead"])
+
+    def test_freshness_reports_unmapped_code_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            initialize_context_fixture(root)
+            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            write_ledger(
+                memory / "memory.md",
+                create_initial_ledger("agents-remember-md", "1" * 40, "0" * 40),
+            )
+            config = write_and_load_config(root)
+
+            packet = build_context_packet(
+                config,
+                ContextPacketRequest(repo_id="agents-remember-md", include_freshness=True),
+            )
+
+            self.assertFalse(packet["freshness"]["ledgerMapsCodeHead"])
 
     def test_cli_outputs_json_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

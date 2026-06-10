@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agents_remember.errors import AuthorityError
@@ -10,7 +11,9 @@ from agents_remember.kernel.coordination_context_resolver import (
     context_to_dict,
     resolve_coordination_context,
 )
-from agents_remember.kernel.git_facts import git_facts_to_packet, read_git_facts
+from agents_remember.kernel.git_facts import GitFacts, git_facts_to_packet, read_git_facts
+from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
+from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     not_checked,
@@ -20,6 +23,7 @@ from agents_remember.models.context_packet import (
     ContextPacketV2,
     ContextPaths,
     CrossRepoSummary,
+    FreshnessSummary,
     MemorySummary,
     RepoSummary,
     StorageSummary,
@@ -42,8 +46,10 @@ class ContextPacketRequest:
     repo_id: str
     include_providers: bool = True
     include_drift: bool = False
+    include_freshness: bool = False
     provider_detail_limit: int = 20
     drift_detail_limit: int = 10
+    fetch_timeout: int = 30
 
 
 def build_context_packet(
@@ -77,8 +83,41 @@ def build_context_packet(
             )
         ),
         drift=DriftSummary.model_validate(_drift_packet(request, context, repo_scope)),
+        freshness=FreshnessSummary.model_validate(
+            _freshness_packet(request, context_dict, repo_scope, git_facts)
+        ),
     )
     return packet.model_dump(mode="json", exclude_none=True)
+
+
+def _freshness_packet(
+    request: ContextPacketRequest,
+    context_dict: dict[str, Any],
+    repo_scope: RepositoryScope,
+    git_facts: GitFacts,
+) -> dict[str, Any]:
+    if not request.include_freshness:
+        return {"status": "not-checked"}
+    packet: dict[str, Any] = {
+        "status": "checked",
+        "code": freshness_to_packet(
+            read_branch_freshness(repo_scope.path, fetch_timeout=request.fetch_timeout)
+        ),
+    }
+    memory_root = repo_scope.memory_root
+    if memory_root and (memory_root / ".git").exists():
+        packet["memory"] = freshness_to_packet(
+            read_branch_freshness(memory_root, fetch_timeout=request.fetch_timeout)
+        )
+    ledger_path = context_dict.get("ledger_path")
+    if ledger_path and git_facts.head and Path(ledger_path).is_file():
+        try:
+            ledger = load_ledger(Path(ledger_path))
+        except (LedgerError, OSError) as error:
+            packet["ledgerError"] = str(error)
+        else:
+            packet["ledgerMapsCodeHead"] = find_mapping(ledger, git_facts.head) is not None
+    return packet
 
 
 def _context_paths(context_dict: dict[str, Any]) -> ContextPaths:

@@ -36,6 +36,8 @@ class WorktreeArgs:
     work_branch: str | None = None
     memory_mode: str | None = None
     memory_choice: str | None = None
+    stale_base_choice: str | None = None
+    memory_sync_choice: str | None = None
     custom_instruction: str | None = None
 
     # Provider setup

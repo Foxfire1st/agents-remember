@@ -56,6 +56,7 @@ def context_packet_payload(
     *,
     include_providers: bool = True,
     include_drift: bool = False,
+    include_freshness: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "context_packet",
@@ -65,6 +66,7 @@ def context_packet_payload(
                 repo_id=repo_id,
                 include_providers=include_providers,
                 include_drift=include_drift,
+                include_freshness=include_freshness,
             ),
         ),
     )

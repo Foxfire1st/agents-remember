@@ -136,6 +136,9 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_attach"] = tools.worktree_attach_payload(
         config, REPO, contract_path=contract_path
     )
+    payloads["worktree_sync"] = tools.worktree_sync_payload(
+        config, contract_path, dry_run=True
+    )
     payloads["worktree_closeout_preview"] = tools.worktree_closeout_preview_payload(
         config, contract_path, "code commit message"
     )
