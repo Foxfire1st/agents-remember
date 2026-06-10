@@ -67,6 +67,26 @@ def route_contains_changed_path(route: str, changed_paths: list[str]) -> bool:
     return any(path == normalized_route or path.startswith(prefix) for path in changed_paths)
 
 
+def discover_route_overviews(onboarding_root: Path) -> list[tuple[str, str]]:
+    """(normalized route, onboarding-root-relative path) pairs for route overviews.
+
+    Only overview.md files whose doc_type is a route overview count; the repo
+    root overview normalizes to route '.'.
+    """
+    overviews: list[tuple[str, str]] = []
+    if not onboarding_root.is_dir():
+        return overviews
+    for path in sorted(onboarding_root.rglob("overview.md")):
+        if not path.is_file():
+            continue
+        metadata = table_metadata(path)
+        if metadata.get("doc_type", "").strip("`") not in ROUTE_OVERVIEW_DOC_TYPES:
+            continue
+        route = normalize_route(metadata.get("sourceRoute", "."))
+        overviews.append((route, path.relative_to(onboarding_root).as_posix()))
+    return overviews
+
+
 def _is_update_history_heading(line: str) -> bool:
     return line.strip().lower() == UPDATE_HISTORY_HEADING
 
