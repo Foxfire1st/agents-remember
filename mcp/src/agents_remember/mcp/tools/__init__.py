@@ -52,6 +52,7 @@ from .worktree import (
     worktree_integrate_payload,
     worktree_start_payload,
     worktree_status_payload,
+    worktree_sync_payload,
 )
 
 __all__ = [
@@ -95,4 +96,5 @@ __all__ = [
     "worktree_integrate_payload",
     "worktree_start_payload",
     "worktree_status_payload",
+    "worktree_sync_payload",
 ]

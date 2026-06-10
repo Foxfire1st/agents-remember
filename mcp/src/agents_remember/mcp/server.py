@@ -47,6 +47,7 @@ from .tools import (
     worktree_integrate_payload,
     worktree_start_payload,
     worktree_status_payload,
+    worktree_sync_payload,
 )
 
 
@@ -482,6 +483,30 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id,
             task_name=task_name,
             contract_path=contract_path,
+        )
+
+    @server.tool()
+    def worktree_sync(
+        contract_path: str,
+        memory_sync_choice: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Pull the moved official line into a live worktree (issue #54). Mutating: fetches
+        upstreams, merges the source branch into the code work branch (ff when unchanged),
+        fast-forwards the memory work branch under parked memory, and advances the contract's
+        recorded base pair atomically (the new code tip must be ledger-mapped at the official
+        memory tip — a mid-cycle official line blocks with guidance to run carryover first).
+        Preview with dry_run=true. worktree_status's freshness block recommends this tool when
+        the recorded bases fall behind the local source branch tips. If the memory work branch
+        has local commits and official memory moved, the result blocks with
+        memory_sync_choice='merge-memory' (ledger conflicts abort cleanly) or 'skip-memory'
+        (defer to end-of-task carryover). Sync early — before memories are written — for the
+        friction-free fast-forward path."""
+        return worktree_sync_payload(
+            config,
+            contract_path,
+            memory_sync_choice=memory_sync_choice,
+            dry_run=dry_run,
         )
 
     @server.tool()

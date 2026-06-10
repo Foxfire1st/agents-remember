@@ -95,6 +95,10 @@ class WorktreeStatusResponse(WorktreeCommandResponse):
     operation: Literal["worktree_status"] = "worktree_status"
 
 
+class WorktreeSyncResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_sync"] = "worktree_sync"
+
+
 class WorktreeCloseoutPreviewResponse(WorktreeCommandResponse):
     operation: Literal["worktree_closeout_preview"] = "worktree_closeout_preview"
 

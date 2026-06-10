@@ -122,6 +122,21 @@ def worktree_status_tool(
     return _worktree_result("worktree_status", git_worktree_manager.status_result(args))
 
 
+def worktree_sync_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    memory_sync_choice: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        memory_sync_choice=memory_sync_choice,
+        dry_run=dry_run,
+    )
+    return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
+
+
 def worktree_closeout_preview_tool(
     config: McpRuntimeConfig,
     *,

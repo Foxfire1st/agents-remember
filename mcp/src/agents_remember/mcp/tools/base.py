@@ -33,6 +33,7 @@ PUBLIC_TOOLS = (
     "worktree_start",
     "worktree_attach",
     "worktree_status",
+    "worktree_sync",
     "worktree_closeout_preview",
     "worktree_closeout_apply",
     "direct_closeout_preview",

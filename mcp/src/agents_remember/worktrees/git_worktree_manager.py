@@ -101,6 +101,7 @@ from agents_remember.worktrees.modules.start import (
     start_result,
     status_result,
 )
+from agents_remember.worktrees.modules.sync import sync_result
 
 __all__ = [
     "ENTITY_FINGERPRINT_ALGORITHM",
@@ -173,6 +174,7 @@ __all__ = [
     "start_result",
     "status_payload",
     "status_result",
+    "sync_result",
     "teardown_worktree_providers",
     "validate_direct_external_context",
     "validate_integrate_contract",

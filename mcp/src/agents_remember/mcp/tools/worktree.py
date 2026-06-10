@@ -15,6 +15,7 @@ from agents_remember.controllers.worktree_tools import (
     worktree_integrate_tool,
     worktree_start_tool,
     worktree_status_tool,
+    worktree_sync_tool,
 )
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 
@@ -56,6 +57,24 @@ def worktree_start_payload(
                 retry_provider_setup=retry_provider_setup,
                 dry_run=dry_run,
             )
+        ),
+    )
+
+
+def worktree_sync_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    memory_sync_choice: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_sync",
+        worktree_sync_tool(
+            config,
+            contract_path=contract_path,
+            memory_sync_choice=memory_sync_choice,
+            dry_run=dry_run,
         ),
     )
 

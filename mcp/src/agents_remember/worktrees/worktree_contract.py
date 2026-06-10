@@ -7,8 +7,9 @@ scalar top-level fields and one-level nested sections.
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from agents_remember.errors import AgentsRememberError
@@ -58,6 +59,11 @@ class WorktreeContract:
     integrated_memory_content_commit: str = ""
     integrated_ledger_commit: str = ""
     cleanup: str = "pending"
+    # Mid-task base syncs (issue #54): one entry per worktree_sync that advanced
+    # the recorded base pair. A real dataclass field because the closeout/contract
+    # rewrite regenerates the document from this model — freeform contract prose
+    # does not survive.
+    sync_log: tuple[dict[str, str], ...] = field(default=())
 
 
 def slugify(value: str) -> str:
@@ -191,6 +197,30 @@ def _memory_lines(contract: WorktreeContract) -> list[str]:
     return lines
 
 
+def _sync_lines(contract: WorktreeContract) -> list[str]:
+    if not contract.sync_log:
+        return []
+    # One JSON scalar keeps the limited front-matter parser (scalar one-level
+    # sections only) able to round-trip the log.
+    return [
+        "sync:",
+        f"  log: {json.dumps(list(contract.sync_log), separators=(',', ':'))}",
+        "",
+    ]
+
+
+def _parse_sync_log(value: str) -> tuple[dict[str, str], ...]:
+    if not value:
+        return ()
+    try:
+        entries = json.loads(value)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(entries, list):
+        return ()
+    return tuple(entry for entry in entries if isinstance(entry, dict))
+
+
 def _human_review_lines(contract: WorktreeContract, approved: str) -> list[str]:
     lines = [
         "human_review:",
@@ -279,6 +309,7 @@ def contract_to_text(contract: WorktreeContract) -> str:
         "",
         *_memory_lines(contract),
         "",
+        *_sync_lines(contract),
         *_human_review_lines(contract, approved),
         "",
         *_closeout_lines(contract),
@@ -374,6 +405,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     coordination = _section(data, "coordination")
     code = _section(data, "code")
     memory = _section(data, "memory")
+    sync = _section(data, "sync")
     human_review = _section(data, "human_review")
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
@@ -415,4 +447,5 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
         integrated_ledger_commit=integration.get("ledger_commit", ""),
         cleanup=integration.get("cleanup", closeout.get("cleanup", "pending")),
+        sync_log=_parse_sync_log(sync.get("log", "")),
     )
