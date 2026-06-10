@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_exists, run_git
 from agents_remember.worktrees.modules.guidance import status_payload
@@ -159,6 +160,20 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract(args.contract_path)
     if contract.integration_status != "completed":
         raise RuntimeError("cleanup requires integration.status completed")
+    if not args.dry_run and provider_async.provider_setup_running(contract):
+        # Teardown must not race the live background setup thread (GitHub #53);
+        # a dead thread surfaces as a stale heartbeat and does not block.
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                "state": "blocked",
+                "summary": (
+                    "Provider setup is still running for this worktree; wait for a "
+                    "terminal providers state (worktree_status) before cleanup."
+                ),
+            },
+        )
 
     # Reclaim the worktree's isolated provider stack first so the (now provider-free)
     # worktree group dir can be removed below. shutdown-all leaves backends/networks.

@@ -12,6 +12,7 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
 )
 from agents_remember.providers import provider_setup
+from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -195,11 +196,17 @@ def _started_result(
     memory_state: dict[str, object],
     provider_state: dict[str, object],
 ) -> WorktreeCommandResult:
+    summary = "Worktree task started; continue the wrapped workflow before closeout."
+    if provider_state.get("state") == "starting":
+        summary = (
+            "Worktree task started; provider setup is running in the background — "
+            "poll worktree_status until its providers block reaches a terminal state."
+        )
     return WorktreeCommandResult(
         0,
         {
             "state": "started",
-            "summary": "Worktree task started; continue the wrapped workflow before closeout.",
+            "summary": summary,
             **next_guidance(
                 "continue_work",
                 tool="worktree_status",
@@ -302,6 +309,8 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
         # An abandoned contract is a tombstone: its worktrees/branches were discarded,
         # so start must recreate fresh rather than attach to a dead binding.
         if existing.cleanup != "abandoned":
+            if args.retry_provider_setup:
+                return _retry_provider_setup_result(context, existing, args)
             return WorktreeCommandResult(
                 0, {"state": "attached-existing-contract", **status_payload(existing)}
             )
@@ -321,19 +330,45 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if memory_state["state"] == "blocked":
         return _blocked_memory_start_result(context, args, code_state, memory_state)
     contract = _contract_after_memory_start(contract, memory_state)
-    provider_state = prepare_providers_for_start(context, contract, args)
+    provider_plan = plan_providers_for_start(context, contract, args)
+    if provider_plan["state"] == "blocked":
+        return _blocked_provider_start_result(
+            context, args, code_state, memory_state, provider_plan
+        )
+    # The contract is written BEFORE provider setup launches: it is the durable
+    # anchor worktree_status polls while the background thread runs (GitHub #53).
+    if not args.dry_run:
+        write_contract(contract.contract_path, contract)
+    provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(
             context, args, code_state, memory_state, provider_state
         )
-    if not args.dry_run:
-        write_contract(contract.contract_path, contract)
     return _started_result(contract, code_state, memory_state, provider_state)
 
 
 def prepare_providers_for_start(
     context, contract: WorktreeContract, args: WorktreeArgs
 ) -> dict[str, object]:
+    """Preflight + execute/launch in one call (facade/CLI surface).
+
+    `start_result` calls the two halves separately so the contract write lands
+    between them; this wrapper preserves the established public contract.
+    """
+    plan = plan_providers_for_start(context, contract, args)
+    if plan["state"] != "enabled":
+        return plan
+    return run_or_launch_provider_setup(context, contract, args, plan)
+
+
+def plan_providers_for_start(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> dict[str, object]:
+    """Synchronous preflight: skip/enablement/settings checks, no execution.
+
+    Config-level failures still block the start fast; only the long-running
+    setup execution moves to the background launch.
+    """
     skipped = _provider_setup_skip_state(args)
     if skipped:
         return skipped
@@ -345,20 +380,82 @@ def prepare_providers_for_start(
     )
     if provider_state["state"] != "enabled":
         return provider_state
+    return {**provider_state, "paths": paths}
 
-    payload = _run_provider_setup(context, args, paths)
-    if not payload.get("ok"):
+
+def run_or_launch_provider_setup(
+    context, contract: WorktreeContract, args: WorktreeArgs, plan: dict[str, object]
+) -> dict[str, object]:
+    """Dry runs stay synchronous; real setup launches on a background thread."""
+    if plan["state"] != "enabled":
+        return plan
+    paths = plan["paths"]
+    assert isinstance(paths, ProviderStartPaths)
+    request = _provider_setup_request(context, args, paths)
+    if args.dry_run:
+        payload = provider_setup.run_provider_setup(request)
+        if not payload.get("ok"):
+            return {
+                "state": "blocked",
+                "reason": "provider setup failed",
+                "payload": payload,
+            }
+        state_file = _write_provider_state_file(contract, payload, dry_run=True)
         return {
-            "state": "blocked",
-            "reason": "provider setup failed",
+            "state": "planned",
             "payload": payload,
+            "provider_state_file": state_file.as_posix(),
         }
-    state_file = _write_provider_state_file(contract, payload, args.dry_run)
-    return {
-        "state": "planned" if args.dry_run else "prepared",
-        "payload": payload,
-        "provider_state_file": state_file.as_posix(),
-    }
+    setup_config = args.provider_setup_config
+    cleanup = (
+        paths.provider_settings_path
+        if setup_config is not None and setup_config.unlink_settings_after_setup
+        else None
+    )
+    return provider_async.launch_provider_setup(
+        request=request,
+        contract=contract,
+        write_state_file=lambda payload: _write_provider_state_file(
+            contract, payload, dry_run=False
+        ),
+        settings_cleanup=cleanup,
+    )
+
+
+def _retry_provider_setup_result(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> WorktreeCommandResult:
+    if provider_async.provider_setup_running(contract):
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                "summary": (
+                    "Provider setup is still running for this worktree (fresh "
+                    "heartbeat); poll worktree_status instead of retrying."
+                ),
+                "providers": provider_async.provider_setup_status(contract),
+                **next_guidance(
+                    "continue_work",
+                    tool="worktree_status",
+                    args=contract_next_args(contract),
+                ),
+            },
+        )
+    provider_plan = plan_providers_for_start(context, contract, args)
+    if provider_plan["state"] == "blocked":
+        return WorktreeCommandResult(
+            2, {**status_payload(contract), "state": "blocked", "providers": provider_plan}
+        )
+    provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
+    return WorktreeCommandResult(
+        0,
+        {
+            **status_payload(contract),
+            "state": "provider-setup-retried",
+            "providers": provider_state,
+        },
+    )
 
 
 def _write_provider_state_file(
@@ -496,12 +593,12 @@ def _grepai_target_memory_root(contract: WorktreeContract) -> Path | None:
     return None
 
 
-def _run_provider_setup(
+def _provider_setup_request(
     context,
     args: WorktreeArgs,
     paths: ProviderStartPaths,
-) -> dict[str, object]:
-    request = provider_setup.ProviderSetupRequest(
+) -> provider_setup.ProviderSetupRequest:
+    return provider_setup.ProviderSetupRequest(
         action="prepare",
         coordination_root=paths.target_coordination_root,
         settings_path=provider_setup.settings_path(paths.provider_settings_path),
@@ -528,7 +625,6 @@ def _run_provider_setup(
             allow_missing_roots=args.dry_run,
         ),
     )
-    return provider_setup.run_provider_setup(request)
 
 
 def prepare_memory_for_start(

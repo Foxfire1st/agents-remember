@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Any, cast
@@ -16,6 +17,7 @@ from agents_remember.kernel.memory_ledger import create_initial_ledger, ledger_t
 from agents_remember.mcp.config import load_config
 from agents_remember.providers import lifecycle, provider_setup
 from agents_remember.providers.settings import lifecycle_settings_from_config
+from agents_remember.providers.setup_progress import read_setup_progress
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("AGENTS_REMEMBER_PROVIDER_INTEGRATION") != "1",
@@ -265,7 +267,22 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
             dry_run=False,
         )
         assert worktree_payload["state"] == "started", json.dumps(worktree_payload, indent=2)
-        worktree_provider_state = Path(worktree_payload["providers"]["provider_state_file"])
+        # Provider setup now runs on a background thread (GitHub #53): the start
+        # returns `starting` plus a progress file, and readiness is polled.
+        providers_block = worktree_payload["providers"]
+        assert providers_block["state"] == "starting", json.dumps(worktree_payload, indent=2)
+        progress_path = Path(providers_block["progressFile"])
+        deadline = time.monotonic() + _provider_timeout()
+        progress: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            progress = read_setup_progress(progress_path)
+            if progress is not None and progress["state"] != "running":
+                break
+            time.sleep(2)
+        assert progress is not None and progress["state"] == "ok", json.dumps(
+            progress or {"error": "background provider setup never finished"}, indent=2
+        )
+        worktree_provider_state = Path(progress["summary"]["providerStateFile"])
         worktree_state = json.loads(worktree_provider_state.read_text(encoding="utf-8"))
         worktree_settings_info = worktree_state["isolatedProviderSettings"]
         worktree_settings_path = Path(worktree_settings_info["path"])

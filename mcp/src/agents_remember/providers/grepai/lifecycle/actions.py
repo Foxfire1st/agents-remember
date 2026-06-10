@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 # Leaf imports; see backend.py for the aggregator-cycle rationale.
-from agents_remember.providers.context.common import (
+from agents_remember.providers.context_common import (
     ContextProviderError,
     file_sha256,
     provider_requirements_file,

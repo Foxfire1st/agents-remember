@@ -19,6 +19,24 @@ class ContextProviderError(AgentsRememberError):
     """Raised when a provider layout or patch check fails."""
 
 
+def to_container_path(path: Path | str) -> str:
+    """Map a host path to the POSIX path seen inside a Linux provider container.
+
+    Bind mounts and in-container arguments require POSIX paths. On Windows a
+    resolved path renders as ``C:/ew/x`` via :meth:`Path.as_posix`, whose drive
+    colon both breaks Docker's ``host:container`` mount parsing ("too many
+    colons") and is not a valid Linux path. Stripping the leading ``<drive>:``
+    yields ``/ew/x``. On POSIX hosts there is no drive letter, so the value is
+    returned unchanged and Linux/macOS behavior is preserved exactly.
+    """
+
+    posix = path.as_posix() if isinstance(path, Path) else str(path).replace("\\", "/")
+    if len(posix) >= 2 and posix[0].isalpha() and posix[1] == ":":
+        remainder = posix[2:]
+        return remainder if remainder.startswith("/") else f"/{remainder}"
+    return posix
+
+
 def expand_template(value: str, variables: dict[str, str]) -> str:
     """Expand ``<name>`` tokens using the provided values."""
 

@@ -76,6 +76,10 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     taskId: str | None = None
     taskName: str | None = None
     worktreeName: str | None = None
+    # Background provider setup state (GitHub #53): worktree_start returns
+    # 'starting' with a progressFile; worktree_status then projects the live
+    # progress as running / stale (dead heartbeat) / ok /
+    # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
 
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.providers.context.common import (
+from agents_remember.providers.context_common import (
     ContextProviderError,
     ensure_provider_requirements_file,
     expand_template,

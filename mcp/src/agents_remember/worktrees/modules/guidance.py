@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
+from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.git import (
     contract_has_worktree_changes,
     worktree_dirty,
@@ -136,5 +137,8 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "integration_status": contract.integration_status,
         "cleanup": contract.cleanup,
     }
+    providers = provider_async.provider_setup_status(contract)
+    if providers is not None:
+        payload["providers"] = providers
     payload.update(guidance)
     return payload

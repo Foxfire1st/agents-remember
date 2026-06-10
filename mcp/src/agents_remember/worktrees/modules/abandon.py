@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     delete_branch_force,
@@ -45,6 +46,20 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    if not args.dry_run and not args.force and provider_async.provider_setup_running(contract):
+        # Teardown must not race the live background setup thread (GitHub #53);
+        # a dead thread surfaces as a stale heartbeat and does not block.
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                "state": "blocked",
+                "summary": (
+                    "Provider setup is still running for this worktree; wait for a "
+                    "terminal providers state (worktree_status) or pass force=true."
+                ),
+            },
+        )
 
     providers = teardown_worktree_providers(contract, dry_run=args.dry_run)
     removed_worktrees = _abandon_worktrees(contract, dry_run=args.dry_run, force=args.force)

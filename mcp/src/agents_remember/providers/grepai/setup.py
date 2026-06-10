@@ -18,6 +18,7 @@ from agents_remember.providers.setup_common import (
     load_settings,
     run_lifecycle,
     selected_provider_enabled,
+    setup_progress_from,
 )
 
 __all__ = [
@@ -35,16 +36,18 @@ __all__ = [
 def install_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not selected_provider_enabled(args, settings, GREPAI_PROVIDER_ID):
         return []
-    return [
-        run_lifecycle(
-            args.coordination_root,
-            "grepai",
-            "install",
-            timeout=args.timeout,
-            dry_run=args.dry_run,
-            extra_args=grepai_extra_args(args),
-        )
-    ]
+    progress = setup_progress_from(args)
+    progress.phase_start("grepai", "install")
+    result = run_lifecycle(
+        args.coordination_root,
+        "grepai",
+        "install",
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+        extra_args=grepai_extra_args(args),
+    )
+    progress.phase_done(result)
+    return [result]
 
 
 def prepare_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -57,8 +60,12 @@ def prepare_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[s
         target_settings = load_settings(
             getattr(args, "grepai_from_settings", None) or args.from_settings,
         )
+    progress = setup_progress_from(args)
+    progress.phase_start("grepai", "clone-db", note="PostgreSQL database clone (seconds)")
     clone = grepai_clone_bundle(args, target_settings or settings)
-    return [{"provider": "grepai", "action": "clone-db", **clone}]
+    result = {"provider": "grepai", "action": "clone-db", **clone}
+    progress.phase_done(result)
+    return [result]
 
 
 def refresh_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
