@@ -25,6 +25,7 @@ entry point:
 worktree_start(repo_id="<repo-id>", task_name="<task>", worktree_name="<name>", workflow_kind="light-task")
 worktree_attach(repo_id="<repo-id>", task_name="<task>")
 worktree_status(repo_id="<repo-id>", task_name="<task>")
+worktree_sync(contract_path="<contract.md>")
 worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_integrate(contract_path="<contract.md>", strategy="ff-only")
@@ -80,6 +81,18 @@ For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task
 
 The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
 
+Start runs a **stale-base preflight** (GitHub #54) before any worktree exists:
+when the code or memory source branch is `behind` or `diverged` from its remote
+tracking branch, start blocks with `choose_stale_base_recovery` — a stale base
+produces wrong code and silently converts the provider seed fast-path into a
+multi-minute reindex. Recoveries: re-run with
+`stale_base_choice="fast-forward"` (the tool fast-forwards the stale local
+branches, then starts) or `stale_base_choice="proceed-stale"` (explicit
+override). Offline (`unknown`) and `no-upstream` states never block. A missing
+external-memory source branch is no longer a manual step: start auto-creates it
+at the official memory tip using the code source branch name as template
+(reported as `memorySourceBranch` in the result).
+
 The recorded `source_branch` is not merely the base branch. It is the branch
 that `worktree_integrate` will later fast-forward or replay into. For
 protected, PR-gated, or otherwise not-directly-landable flows, `source_branch`
@@ -98,7 +111,28 @@ lands on top of the verified tip with a new SHA the ledger has not mapped. Runni
 commit automatically — even when nothing else needs carrying — so the next worktree starts cleanly
 without needing `reconciliation`.
 
-`worktree_attach` and `worktree_status` read the existing contract and report recoverable state without mutating Git. `worktree_status` includes a lifecycle phase, dirty worktree flags, a summary, and typed next hints such as `nextOperation`, `nextTool`, and `nextArgs`.
+`worktree_attach` and `worktree_status` read the existing contract and report recoverable state without mutating Git. `worktree_status` includes a lifecycle phase, dirty worktree flags, a summary, typed next hints such as `nextOperation`, `nextTool`, and `nextArgs`, and a fetch-free `freshness` block comparing the contract's recorded base commits against the current local source branch tips — when behind, it carries a `syncHint` recommending `worktree_sync`.
+
+## Mid-Task Sync
+
+A live worktree's base pair decays while parallel cycles land (a PR merge
+fast-forwards code main; carryover advances memory main). `worktree_sync`
+(GitHub #54) pulls the moved official line in **atomically**: it fetches the
+source upstreams, requires the new code tip to be ledger-mapped at the official
+memory tip (a mid-cycle official line blocks with guidance to run
+`c-11-memory-carryover-from-branch` first), merges the source branch into the
+code work branch (conflicts abort cleanly), fast-forwards the memory work
+branch, and advances the contract's recorded base pair with a `sync_log` entry.
+Preview with `dry_run=true` first.
+
+**Sync early — before memories are written.** With parked memory the sync is a
+pure fast-forward: the other cycle's sidecars and ledger rows end up beneath
+this task's future memory work, closeout appends on top, and end-of-series
+integration stays `ff-only` with no carryover reconciliation. If the memory
+work branch already has local commits and official memory moved, sync blocks
+with `memory_sync_choice` recoveries: `merge-memory` (merge attempted; ledger
+conflicts abort — the ledger is never auto-merged) or `skip-memory` (memory
+deferred to end-of-task carryover; only the code base advances).
 
 ## Worktree Closeout
 

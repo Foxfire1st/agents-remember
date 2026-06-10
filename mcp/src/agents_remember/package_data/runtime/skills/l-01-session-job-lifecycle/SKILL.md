@@ -51,7 +51,7 @@ Establish whether memory and providers are trustworthy enough to use.
    the MCP tool call:
 
    ```text
-   context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true)
+   context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true, include_freshness=true)
    ```
 
 2. Report the packet facts before relying on memory or providers:
@@ -59,6 +59,12 @@ Establish whether memory and providers are trustworthy enough to use.
    - memory root and onboarding root
    - provider state
    - drift status and actionable drift count
+   - branch freshness: whether the code and memory checkouts are current with
+     their upstreams (`behind`/`diverged` means the local official line is
+     stale — fast-forward it before trusting analysis or basing work on it)
+     and whether the ledger maps code HEAD (`ledgerMapsCodeHead=false` means
+     the memory checkout does not match the code state; run carryover or
+     check out the right memory branch first)
 3. If onboarding for committed source is drifted, missing verification, or
    orphaned, and the corresponding source file is not dirty in the code
    worktree, stop and ask the developer whether or not to refresh it through
@@ -164,6 +170,12 @@ Implement inside the worktree, keeping memory and tests in lockstep with the cod
 3. Run the checks from the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` (lint, typecheck, complexity, tests) and
    get them **green before each incremental commit**. Testing is never deferred to a final task; the
    pre-commit/pre-push hooks enforce it.
+4. **Watch the official line and sync early.** `worktree_status`'s `freshness` block reports when the
+   recorded base pair fell behind the local source branch tips (a parallel cycle landed). Pull the
+   moved official line in with `worktree_sync` — preferably **before memories are written**: with
+   parked memory the sync is a pure fast-forward, the other cycle's sidecars and ledger rows end up
+   beneath this task's future work, and end-of-series integration stays `ff-only` with no carryover
+   reconciliation.
 
 Incremental, pushable commits keep the work-loss window small. Each closeout below is one such commit.
 
