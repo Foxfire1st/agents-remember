@@ -54,8 +54,39 @@ class MemoryBaselineAdoptResponse(FlexibleToolResponse):
 class MemoryCarryoverPlanResponse(FlexibleToolResponse):
     operation: Literal["memory_carryover_plan"] = "memory_carryover_plan"
     state: str | None = None
+    decisions: dict[str, list[str]] | None = Field(
+        default=None,
+        description=(
+            "Source paths grouped by carryover decision (auto-carry, "
+            "review-required, reject); the per-record detail lives in reportPath."
+        ),
+    )
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "Temp report file holding the full candidate records (derived "
+            "onboarding paths, evidence, per-path reasons)."
+        ),
+    )
 
 
 class MemoryCarryoverApplyResponse(FlexibleToolResponse):
     operation: Literal["memory_carryover_apply"] = "memory_carryover_apply"
     state: str | None = None
+    decisions: dict[str, list[str]] | None = Field(
+        default=None,
+        description=(
+            "Source paths grouped by carryover decision (auto-carry, "
+            "review-required, reject); the per-record detail lives in reportPath."
+        ),
+    )
+    carriedPaths: list[str] | None = Field(
+        default=None,
+        description="Source paths whose onboarding was actually carried over.",
+    )
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "Temp report file holding the full candidate and carried records."
+        ),
+    )

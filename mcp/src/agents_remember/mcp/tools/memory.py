@@ -14,6 +14,7 @@ from agents_remember.controllers.memory_tools import (
     memory_quality_check_tool,
     route_index_refresh_tool,
 )
+from agents_remember.mcp.tool_reports import write_tool_report
 
 from ..config import McpRuntimeConfig
 from .base import _tool_payload
@@ -108,6 +109,42 @@ def memory_baseline_adopt_payload(
     )
 
 
+MAX_INLINE_CARRYOVER_PATHS = 25
+
+
+def _capped_paths(paths: list[str]) -> list[str]:
+    if len(paths) <= MAX_INLINE_CARRYOVER_PATHS:
+        return paths
+    overflow = len(paths) - MAX_INLINE_CARRYOVER_PATHS
+    return [*paths[:MAX_INLINE_CARRYOVER_PATHS], f"... (+{overflow} more in report)"]
+
+
+def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
+    """Keep the decisions, file the evidence.
+
+    Every candidate record repeats two onboarding paths derivable from
+    ``source_path`` plus the memory roots, and the same evidence/reason strings
+    per entry; apply additionally duplicates every candidate verbatim in
+    ``carried``. The response keeps per-decision ``source_path`` lists (the
+    facts the model acts on), capped per decision so giant carryovers stay
+    under budget; the report keeps the full records."""
+    compact = {key: value for key, value in full.items() if key not in {"candidates", "carried"}}
+    decisions: dict[str, list[str]] = {}
+    for candidate in full.get("candidates", []):
+        decisions.setdefault(str(candidate.get("decision")), []).append(
+            str(candidate.get("source_path"))
+        )
+    compact["decisions"] = {
+        decision: _capped_paths(paths) for decision, paths in decisions.items()
+    }
+    if "carried" in full:
+        compact["carriedPaths"] = _capped_paths(
+            [str(candidate.get("source_path")) for candidate in full["carried"]]
+        )
+    compact["reportPath"] = report_path
+    return compact
+
+
 def memory_carryover_plan_payload(
     config: McpRuntimeConfig,
     repo_id: str,
@@ -118,17 +155,21 @@ def memory_carryover_plan_payload(
     *,
     replace_existing: bool = False,
 ) -> dict[str, Any]:
+    full = memory_carryover_plan_tool(
+        config,
+        repo_id=repo_id,
+        source_memory=source_memory,
+        official_code_ref=official_code_ref,
+        source_code_ref=source_code_ref,
+        old_base=old_base,
+        replace_existing=replace_existing,
+    )
+    report_path = write_tool_report(
+        config.coordination_root, "memory_carryover_plan", full, label="plan"
+    )
     return _tool_payload(
         "memory_carryover_plan",
-        memory_carryover_plan_tool(
-            config,
-            repo_id=repo_id,
-            source_memory=source_memory,
-            official_code_ref=official_code_ref,
-            source_code_ref=source_code_ref,
-            old_base=old_base,
-            replace_existing=replace_existing,
-        ),
+        compact_carryover_payload(full, report_path.as_posix()),
     )
 
 
@@ -146,19 +187,23 @@ def memory_carryover_apply_payload(
     memory_commit_message: str = "Carry over landed branch memory",
     ledger_commit_message: str = "Record branch memory carryover",
 ) -> dict[str, Any]:
+    full = memory_carryover_apply_tool(
+        config,
+        repo_id=repo_id,
+        source_memory=source_memory,
+        official_code_ref=official_code_ref,
+        source_code_ref=source_code_ref,
+        old_base=old_base,
+        intent_note=intent_note,
+        replace_existing=replace_existing,
+        include_review_required=include_review_required,
+        memory_commit_message=memory_commit_message,
+        ledger_commit_message=ledger_commit_message,
+    )
+    report_path = write_tool_report(
+        config.coordination_root, "memory_carryover_apply", full, label="apply"
+    )
     return _tool_payload(
         "memory_carryover_apply",
-        memory_carryover_apply_tool(
-            config,
-            repo_id=repo_id,
-            source_memory=source_memory,
-            official_code_ref=official_code_ref,
-            source_code_ref=source_code_ref,
-            old_base=old_base,
-            intent_note=intent_note,
-            replace_existing=replace_existing,
-            include_review_required=include_review_required,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-        ),
+        compact_carryover_payload(full, report_path.as_posix()),
     )
