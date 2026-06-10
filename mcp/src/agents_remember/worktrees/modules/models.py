@@ -33,6 +33,14 @@ class RouteOverviewRefreshPlan(TypedDict):
     missing_metadata: list[str]
 
 
+class SidecarBodyClassification(TypedDict):
+    """Body/history classification of changed-source sidecars in the memory tree."""
+
+    stale: list[str]
+    untraced: list[str]
+    attested_no_impact: list[str]
+
+
 class EntityFingerprintRow(TypedDict):
     """One parsed row of the entity fingerprint catalog table."""
 

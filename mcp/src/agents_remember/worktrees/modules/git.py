@@ -103,6 +103,12 @@ def longest_tracked_path_length(repo: Path, ref: str = "HEAD") -> int:
     return max((len(line.strip()) for line in result.stdout.splitlines() if line.strip()), default=0)
 
 
+def head_text_or_none(repo: Path, relative_path: str) -> str | None:
+    """Text of relative_path at the repo's HEAD, or None when absent at HEAD."""
+    result = run_git(repo, ["show", f"HEAD:{relative_path}"])
+    return result.stdout if result.returncode == 0 else None
+
+
 def changed_worktree_paths(repo: Path) -> list[str]:
     tracked = require_git(repo, ["diff", "--name-only", "HEAD", "--"]).splitlines()
     untracked = require_git(repo, ["ls-files", "--others", "--exclude-standard"]).splitlines()

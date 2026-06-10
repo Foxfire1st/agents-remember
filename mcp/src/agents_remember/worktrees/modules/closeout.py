@@ -30,9 +30,11 @@ from agents_remember.worktrees.modules.models import (
     EntityFingerprintRefreshPlan,
     OnboardingRefreshPlan,
     RouteOverviewRefreshPlan,
+    SidecarBodyClassification,
     WorktreeCommandResult,
 )
 from agents_remember.worktrees.modules.onboarding import (
+    classify_sidecar_updates,
     entity_fingerprint_refresh_plan,
     entity_fingerprint_refresh_plan_for_context,
     onboarding_refresh_plan,
@@ -111,6 +113,19 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "indexes": [],
         }
     )
+    sidecar_body_gate: SidecarBodyClassification = (
+        classify_sidecar_updates(
+            _closeout_contract_context(contract),
+            metadata_refresh,
+            memory_tree=contract.memory_worktree,
+        )
+        if contract.memory_mode == "external"
+        else {
+            "stale": [],
+            "untraced": [],
+            "attested_no_impact": [],
+        }
+    )
     return {
         "state": "would-closeout",
         **status_payload(contract),
@@ -141,6 +156,8 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         ],
         "changed_code_paths": changed_paths,
         "onboarding_metadata_refresh": metadata_refresh,
+        "sidecar_body_gate": sidecar_body_gate,
+        "sidecars_attested_no_impact": sidecar_body_gate["attested_no_impact"],
         "entity_fingerprint_refresh": entity_refresh,
         "route_overview_metadata_refresh": route_overview_refresh,
         "route_index_refresh": route_index_refresh,
@@ -308,8 +325,12 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     approval_note = _closeout_approval_note(args)
 
     changed_paths = changed_worktree_paths(contract.code_worktree)
+    attested_sidecars: list[str] = []
     if contract.memory_mode == "external":
-        validate_onboarding_refresh_plan(contract, changed_paths)
+        sidecar_plan = validate_onboarding_refresh_plan(contract, changed_paths)
+        attested_sidecars = classify_sidecar_updates(
+            contract_context(contract), sidecar_plan, memory_tree=contract.memory_worktree
+        )["attested_no_impact"]
         validate_route_overview_refresh_plan(contract, changed_paths)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)
@@ -353,6 +374,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "memory_content_commit": memory_commit,
             "ledger_commit": ledger_commit,
             "refreshed_onboarding": refreshed_onboarding,
+            "sidecars_attested_no_impact": attested_sidecars,
             "refreshed_entities": refreshed_entities,
             "refreshed_route_overviews": refreshed_route_overviews,
             "route_index_refresh": route_index_refresh,
@@ -391,6 +413,9 @@ def direct_closeout_preview_payload(
         context, changed_paths
     )
     route_index_refresh = route_index_refresh_plan_for_context(context)
+    sidecar_body_gate = classify_sidecar_updates(
+        context, metadata_refresh, memory_tree=context.memory_root
+    )
     ledger_message = (
         args.ledger_commit_message
         or "[direct-closeout] Ledger sync: <code_commit> -> <memory_commit>"
@@ -429,6 +454,8 @@ def direct_closeout_preview_payload(
         ],
         "changed_code_paths": changed_paths,
         "onboarding_metadata_refresh": metadata_refresh,
+        "sidecar_body_gate": sidecar_body_gate,
+        "sidecars_attested_no_impact": sidecar_body_gate["attested_no_impact"],
         "entity_fingerprint_refresh": entity_refresh,
         "route_overview_metadata_refresh": route_overview_refresh,
         "route_index_refresh": route_index_refresh,
@@ -483,7 +510,10 @@ def direct_closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     memory_was_dirty = worktree_dirty(context.memory_root)
     if not changed_paths and not memory_was_dirty:
         raise RuntimeError("direct closeout found no code or memory changes to commit")
-    validate_onboarding_refresh_plan_for_context(context, changed_paths)
+    direct_sidecar_plan = validate_onboarding_refresh_plan_for_context(context, changed_paths)
+    attested_sidecars = classify_sidecar_updates(
+        context, direct_sidecar_plan, memory_tree=context.memory_root
+    )["attested_no_impact"]
     validate_route_overview_refresh_plan_for_context(context, changed_paths)
 
     code_commit = commit_if_dirty(context.code_repository_root, args.code_commit_message)
@@ -523,6 +553,7 @@ def direct_closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "memory_content_commit": memory_commit,
             "ledger_commit": ledger_commit,
             "refreshed_onboarding": refreshed_onboarding,
+            "sidecars_attested_no_impact": attested_sidecars,
             "refreshed_entities": refreshed_entities,
             "refreshed_route_overviews": refreshed_route_overviews,
             "route_index_refresh": route_index_refresh,

@@ -327,7 +327,9 @@ def direct_external_memory_fixture(
     onboarding_file = memory_repo / "onboarding" / "feature.txt.md"
     if include_feature_onboarding:
         onboarding_file.write_text(
-            onboarding_file.read_text(encoding="utf-8") + "Updated behavior notes.\n",
+            onboarding_file.read_text(encoding="utf-8")
+            + "Updated behavior notes.\n\n## Update History\n\n"
+            + "- 2026-06-10T04:00 — Documented the new feature behavior.\n",
             encoding="utf-8",
         )
     return code_repo, memory_repo, code_base
@@ -2849,6 +2851,10 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
         }
         return memory_repo, sidecar, plan
 
+    @staticmethod
+    def _append(sidecar: Path, text: str) -> None:
+        sidecar.write_text(sidecar.read_text(encoding="utf-8") + text, encoding="utf-8")
+
     def test_blocks_when_changed_source_sidecar_not_updated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             memory_repo, _sidecar, plan = self._setup(Path(tmp_dir))
@@ -2857,22 +2863,81 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
                 require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
             self.assertIn("src/app.py", str(caught.exception))
 
-    def test_passes_when_sidecar_content_updated(self) -> None:
+    def test_blocks_metadata_only_edit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
             sidecar.write_text(
-                sidecar.read_text(encoding="utf-8") + "\nUpdated body.\n", encoding="utf-8"
+                sidecar.read_text(encoding="utf-8").replace("0" * 40, "1" * 40),
+                encoding="utf-8",
             )
-            require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            with self.assertRaises(RuntimeError) as caught:
+                require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertIn("metadata/history-only", str(caught.exception))
+
+    def test_blocks_history_only_edit_without_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
+            self._append(sidecar, "\n## Update History\n\n- 2026-06-10T04:00 — Stamped.\n")
+            with self.assertRaises(RuntimeError) as caught:
+                require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertIn("metadata/history-only", str(caught.exception))
+            self.assertIn("No content impact:", str(caught.exception))
+
+    def test_passes_history_only_edit_with_no_impact_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
+            self._append(
+                sidecar,
+                "\n## Update History\n\n"
+                "- 2026-06-10T04:00 — No content impact: version bump only; body verified.\n",
+            )
+            attested = require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertEqual(attested, ["src/app.py"])
+
+    def test_blocks_body_update_without_history_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
+            self._append(sidecar, "\nUpdated body.\n")
+            with self.assertRaises(RuntimeError) as caught:
+                require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertIn("without a new Update History entry", str(caught.exception))
+
+    def test_passes_when_body_and_history_updated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
+            self._append(
+                sidecar,
+                "\nUpdated body.\n\n## Update History\n\n"
+                "- 2026-06-10T04:00 — Documented the new retry contract.\n",
+            )
+            attested = require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertEqual(attested, [])
+
+    def test_passes_new_untracked_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, _sidecar, _plan = self._setup(Path(tmp_dir))
+            onboarding_root = memory_repo / "onboarding"
+            write_file_onboarding(onboarding_root, "demo-repo", "src/new.py", "0" * 40)
+            new_sidecar = onboarding_root / "src" / "new.py.md"
+            plan: OnboardingRefreshPlan = {
+                "required": [
+                    {"source_path": "src/new.py", "onboarding_file": new_sidecar.as_posix()}
+                ],
+                "missing": [],
+                "unsupported": [],
+            }
+            attested = require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertEqual(attested, [])
 
     def test_noop_when_no_required_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             memory_repo, _sidecar, _plan = self._setup(Path(tmp_dir))
-            require_updated_sidecar_content(
+            attested = require_updated_sidecar_content(
                 None,
                 {"required": [], "missing": [], "unsupported": []},
                 memory_tree=memory_repo,
             )
+            self.assertEqual(attested, [])
 
 
 if __name__ == "__main__":
