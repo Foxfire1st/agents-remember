@@ -6,7 +6,7 @@ from typing import Any
 
 from agents_remember.controllers._guards import require_repo, require_within_coordination
 from agents_remember.mcp.config import (
-    DEFAULT_DOCKER_CONTROL_SECONDS,
+    DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
     RepositoryScope,
 )
@@ -26,6 +26,7 @@ def worktree_start_tool(
     memory_mode: str | None = None,
     memory_choice: str | None = None,
     skip_provider_setup: bool = False,
+    retry_provider_setup: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
@@ -37,6 +38,9 @@ def worktree_start_tool(
             coordination_root=config.coordination_root,
             settings_path=settings_path,
             seed_source_coordination_root=config.coordination_root,
+            # The temp settings file must outlive this controller call: the
+            # background setup thread reads it and owns the unlink (GitHub #53).
+            unlink_settings_after_setup=True,
         )
     )
     args = _worktree_namespace(
@@ -51,15 +55,31 @@ def worktree_start_tool(
         memory_choice=memory_choice,
         custom_instruction=None,
         skip_provider_setup=skip_provider_setup,
+        retry_provider_setup=retry_provider_setup,
         provider_setup_config=provider_setup_config,
-        provider_timeout=DEFAULT_DOCKER_CONTROL_SECONDS,
+        # Setup-flow bound: the documented timeoutCaps.providerSetupSeconds cap
+        # (matching runtime_install), not the docker-control default — the seed
+        # export of a large graph is legitimate setup work (GitHub #53/#58).
+        provider_timeout=config.timeout_caps.get(
+            "providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS
+        ),
         dry_run=dry_run,
     )
+    result: dict[str, Any] | None = None
     try:
-        return _worktree_result("worktree_start", git_worktree_manager.start_result(args))
+        result = _worktree_result("worktree_start", git_worktree_manager.start_result(args))
+        return result
     finally:
-        if settings_path is not None:
+        if settings_path is not None and not _settings_owned_by_background(result):
             settings_path.unlink(missing_ok=True)
+
+
+def _settings_owned_by_background(result: dict[str, Any] | None) -> bool:
+    """True when a launched background setup took over the temp settings file."""
+    if result is None:
+        return False
+    providers = result.get("providers")
+    return isinstance(providers, dict) and providers.get("state") == "starting"
 
 
 def worktree_attach_tool(

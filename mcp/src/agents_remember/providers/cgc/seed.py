@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
+from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.setup_common import (
     expand_template,
     load_settings,
@@ -144,8 +145,8 @@ def _seed_target_runtime_root(
     """Runtime root the rewritten target bundle is written under.
 
     In an isolated worktree seed the `bundle import` runs inside the worktree's cgc runner,
-    which only bind-mounts the cgc instance runtime root (host:host) and is handed the bundle
-    path verbatim (no host->container translation). The bundle must therefore live under that
+    which only bind-mounts the cgc instance runtime root, and is handed the bundle path in
+    container form (`to_container_path`; GitHub #58). The bundle must therefore live under that
     instance root. The caller's `settings` resolve against the workspace coordination_root and
     land the bundle under the workspace runner root, which the worktree runner cannot see -- the
     import then fails with "Bundle file not found" and silently falls back to a full re-index.
@@ -469,12 +470,16 @@ def _seed_export(args: Any, context: CgcSeedContext, source_bundle: Path) -> dic
             "--repo-id",
             str(context.source_repo_id),
         ],
+        # Everything after "--" executes inside the Linux runner container; host paths
+        # must be rendered in container form (drive letter stripped on Windows) or the
+        # export dies on a nonexistent C:/ path and start silently pays the full
+        # reindex fallback (GitHub #58).
         native_args=[
             "--",
             "export",
-            source_bundle.as_posix(),
+            to_container_path(source_bundle),
             "--repo",
-            context.source_repo_root.as_posix(),
+            to_container_path(context.source_repo_root),
             "--no-stats",
         ],
     )
@@ -508,7 +513,8 @@ def _seed_load(args: Any, context: CgcSeedContext, rewritten_bundle: Path) -> di
         timeout=args.timeout,
         dry_run=args.dry_run,
         extra_args=[*cgc_extra_args(args), "--repo-id", str(context.target_repo_id)],
-        native_args=["--", "bundle", "import", rewritten_bundle.as_posix()],
+        # Container-form path for the in-container import; see _seed_export (GitHub #58).
+        native_args=["--", "bundle", "import", to_container_path(rewritten_bundle)],
     )
 
 

@@ -18,6 +18,7 @@ from agents_remember.providers.cgc.seed import CgcSeedOptions
 from agents_remember.providers.cgc.setup import IsolatedCgcOptions
 from agents_remember.providers.grepai import setup as grepai_setup
 from agents_remember.providers.grepai.setup import GrepaiSeedOptions, IsolatedGrepaiOptions
+from agents_remember.providers.setup_progress import SetupProgress
 
 load_settings = setup_common.load_settings
 provider_enabled = setup_common.provider_enabled
@@ -213,24 +214,21 @@ def prepare_enabled_providers(
 def _watcher_results(args: argparse.Namespace, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if args.skip_watchers or not _watchers_needed(args, settings):
         return []
-    return [
-        run_lifecycle(
+    progress = setup_common.setup_progress_from(args)
+    results: list[dict[str, Any]] = []
+    for action in ("start", "status"):
+        progress.phase_start("watchers", action)
+        result = run_lifecycle(
             args.coordination_root,
             "watchers",
-            "start",
+            action,
             timeout=args.timeout,
             dry_run=args.dry_run,
             extra_args=provider_settings_extra_args(args),
-        ),
-        run_lifecycle(
-            args.coordination_root,
-            "watchers",
-            "status",
-            timeout=args.timeout,
-            dry_run=args.dry_run,
-            extra_args=provider_settings_extra_args(args),
-        ),
-    ]
+        )
+        progress.phase_done(result)
+        results.append(result)
+    return results
 
 
 def provider_settings_extra_args(args: argparse.Namespace) -> list[str]:
@@ -249,8 +247,15 @@ def _watchers_needed(args: argparse.Namespace, settings: dict[str, Any]) -> bool
     ) or selected_provider_enabled(args, settings, cgc_setup.CGC_PROVIDER_ID)
 
 
-def run_provider_setup(request: ProviderSetupRequest) -> dict[str, Any]:
-    return _action_payload_from_args(args_from_request(request))
+def run_provider_setup(
+    request: ProviderSetupRequest,
+    progress: SetupProgress | None = None,
+) -> dict[str, Any]:
+    args = args_from_request(request)
+    # The sink rides on the namespace (like provider_from_settings) so the
+    # install/prepare functions keep their (args, settings) signatures.
+    args.setup_progress = progress
+    return _action_payload_from_args(args)
 
 
 def action_payload(args: argparse.Namespace) -> dict[str, Any]:

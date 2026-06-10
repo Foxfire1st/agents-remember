@@ -25,8 +25,10 @@ from agents_remember.providers.setup_common import (
     provider_settings,
     run_lifecycle,
     selected_provider_enabled,
+    setup_progress_from,
     stable_provider_id,
 )
+from agents_remember.providers.setup_progress import SetupProgress
 
 
 @dataclass(frozen=True)
@@ -227,28 +229,44 @@ def write_isolated_cgc_settings(
 def install_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not selected_provider_enabled(args, settings, CGC_PROVIDER_ID):
         return []
-    return [
-        run_lifecycle(
-            args.coordination_root,
-            "cgc",
-            "install-all",
-            timeout=args.timeout,
-            dry_run=args.dry_run,
-            extra_args=cgc_extra_args(args),
-        )
-    ]
+    progress = setup_progress_from(args)
+    progress.phase_start("codegraphcontext", "install-all")
+    result = run_lifecycle(
+        args.coordination_root,
+        "cgc",
+        "install-all",
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+        extra_args=cgc_extra_args(args),
+    )
+    progress.phase_done(result)
+    return [result]
 
 
 def prepare_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not selected_provider_enabled(args, settings, CGC_PROVIDER_ID):
         return []
+    progress = setup_progress_from(args)
+    progress.phase_start("codegraphcontext", "seed", note="graph copy from workspace (seconds)")
     seed = cgc_seed_bundle(args, settings)
-    results = [{"provider": "codegraphcontext", "action": "seed", **seed}]
-    results.append(_refresh_after_seed(args, seed))
+    seed_result = {"provider": "codegraphcontext", "action": "seed", **seed}
+    progress.phase_done(seed_result)
+    results = [seed_result]
+    results.append(_refresh_after_seed(args, seed, progress))
     return results
 
 
-def _refresh_after_seed(args: Any, seed: dict[str, Any]) -> dict[str, Any]:
+def _seed_failure_reason(seed: dict[str, Any]) -> str:
+    reason = seed.get("reason")
+    if reason:
+        return str(reason)
+    stage = seed.get("stage")
+    return f"seed failed at {stage}" if stage else "seed failed"
+
+
+def _refresh_after_seed(
+    args: Any, seed: dict[str, Any], progress: SetupProgress
+) -> dict[str, Any]:
     if seed.get("ok"):
         return {
             "ok": True,
@@ -258,7 +276,16 @@ def _refresh_after_seed(args: Any, seed: dict[str, Any]) -> dict[str, Any]:
             "reason": "CGC seed loaded successfully",
         }
     if args.cgc_refresh_fallback:
-        return run_lifecycle(
+        # The single most important transition to surface (GitHub #53): a refused
+        # seed changes the expected duration from ~1 minute to N minutes, and the
+        # reindex itself emits nothing the orchestrator can see.
+        progress.phase_start(
+            "codegraphcontext",
+            "refresh-all",
+            note="full reindex fallback; duration scales with repo size (minutes)",
+            seed_fallback={"active": True, "reason": _seed_failure_reason(seed)},
+        )
+        result = run_lifecycle(
             args.coordination_root,
             "cgc",
             "refresh-all",
@@ -266,6 +293,8 @@ def _refresh_after_seed(args: Any, seed: dict[str, Any]) -> dict[str, Any]:
             dry_run=args.dry_run,
             extra_args=cgc_extra_args(args),
         )
+        progress.phase_done(result)
+        return result
     return {
         "ok": False,
         "provider": "codegraphcontext",

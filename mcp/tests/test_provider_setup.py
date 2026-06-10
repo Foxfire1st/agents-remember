@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 
@@ -14,7 +15,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import provider_setup
+from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.identity import provider_instance_id
+from agents_remember.providers.setup_progress import SetupProgress
 
 
 class ProviderSetupTests(unittest.TestCase):
@@ -56,6 +59,87 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertEqual(payload["results"], [])
             self.assertFalse(payload["setupSummary"]["written"])
             self.assertEqual(payload["setupSummary"]["reason"], "dry-run")
+
+    def test_prepare_announces_phases_in_order_with_seed_fallback(self) -> None:
+        class RecordingProgress(SetupProgress):
+            def __init__(self) -> None:
+                self.events: list[tuple] = []
+
+            def phase_start(self, provider, action, *, note=None, seed_fallback=None):
+                self.events.append(("start", provider, action, seed_fallback, note))
+
+            def phase_update(self, metrics):
+                self.events.append(("update", metrics))
+
+            def phase_done(self, result):
+                self.events.append(("done", result.get("provider"), result.get("action")))
+
+        recorder = RecordingProgress()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings_path = root / "provider-settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "contextProviders": {
+                            "enabled": True,
+                            "providers": {
+                                "grepai-memory": {"enabled": True},
+                                "codegraphcontext-code": {"enabled": True},
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            refused_seed = {"ok": False, "skipped": True, "reason": "HEAD commits differ"}
+            with (
+                unittest.mock.patch.object(
+                    provider_setup.cgc_setup, "cgc_seed_bundle", return_value=refused_seed
+                ),
+                unittest.mock.patch.object(
+                    provider_setup.grepai_setup,
+                    "grepai_clone_bundle",
+                    return_value={"ok": True, "seeded": True},
+                ),
+            ):
+                payload = provider_setup.run_provider_setup(
+                    provider_setup.ProviderSetupRequest(
+                        action="prepare",
+                        coordination_root=root,
+                        settings_path=settings_path,
+                        dry_run=True,
+                        grepai_seed=provider_setup.GrepaiSeedOptions(
+                            source_coordination_root=root,
+                            project_id="repo-a",
+                            target_memory_root=root / "memory",
+                        ),
+                    ),
+                    progress=recorder,
+                )
+
+        self.assertTrue(payload["ok"])
+        starts = [event for event in recorder.events if event[0] == "start"]
+        self.assertEqual(
+            [(provider, action) for _, provider, action, *_ in starts],
+            [
+                ("grepai", "install"),
+                ("codegraphcontext", "install-all"),
+                ("grepai", "clone-db"),
+                ("codegraphcontext", "seed"),
+                ("codegraphcontext", "refresh-all"),
+                ("watchers", "start"),
+                ("watchers", "status"),
+            ],
+        )
+        fallback = starts[4][3]
+        self.assertEqual(fallback, {"active": True, "reason": "HEAD commits differ"})
+        self.assertEqual(
+            [event[3] for event in starts[:4] + starts[5:]], [None] * 6,
+            "only the refresh-all fallback start carries seedFallback",
+        )
+        dones = [event for event in recorder.events if event[0] == "done"]
+        self.assertEqual(len(dones), 7)
 
     def test_run_provider_setup_writes_compact_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -358,13 +442,32 @@ class ProviderSetupTests(unittest.TestCase):
         export_command = " ".join(result["export"]["command"])
         load_command = " ".join(result["load"]["command"])
         self.assertIn("bundle import", load_command)
+        # Argv after "--" executes inside the Linux runner container, so bundle and repo
+        # paths must be container-form: drive letter stripped on Windows, identical on
+        # POSIX (GitHub #58 — host-form C:/ paths made every Windows seed export fail
+        # and silently forced the full reindex fallback).
         self.assertIn(
-            (source_coordination / "providers" / "runners" / "cgc" / "repo-a" / "seed-bundles").as_posix(),
+            to_container_path(
+                source_coordination / "providers" / "runners" / "cgc" / "repo-a" / "seed-bundles"
+            ),
             export_command,
         )
         self.assertIn(
-            (target_coordination / "providers" / "runners" / "cgc" / "repo-a" / "seed-bundles").as_posix(),
+            to_container_path(
+                target_coordination / "providers" / "runners" / "cgc" / "repo-a" / "seed-bundles"
+            ),
             load_command,
+        )
+        for label, command in (("export", export_command), ("load", load_command)):
+            native_part = command.split(" -- ", 1)[1]
+            self.assertNotRegex(
+                native_part,
+                r"[A-Za-z]:/",
+                f"{label} in-container argv must not carry a drive-lettered host path",
+            )
+        self.assertIn(
+            to_container_path(source_repo),
+            export_command.split(" -- ", 1)[1],
         )
 
     def test_isolated_cgc_settings_targets_worktree_backend(self) -> None:

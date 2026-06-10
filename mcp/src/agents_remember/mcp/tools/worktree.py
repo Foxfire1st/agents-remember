@@ -34,6 +34,7 @@ def worktree_start_payload(
     memory_mode: str | None = None,
     memory_choice: str | None = None,
     skip_provider_setup: bool = False,
+    retry_provider_setup: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -50,6 +51,7 @@ def worktree_start_payload(
                 memory_mode=memory_mode,
                 memory_choice=memory_choice,
                 skip_provider_setup=skip_provider_setup,
+                retry_provider_setup=retry_provider_setup,
                 dry_run=dry_run,
             )
         ),

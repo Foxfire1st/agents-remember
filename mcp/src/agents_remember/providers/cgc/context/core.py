@@ -19,30 +19,18 @@ from agents_remember.providers.cgc.context.constants import (
     CGC_RUNNER_IMAGE_REPOSITORY,
     CGC_WATCHER_CONTAINER_PREFIX,
 )
-from agents_remember.providers.context.common import (
+
+# ``to_container_path`` is unused here but re-exported for existing
+# ``cgc.context.core``/facade importers; its canonical source is
+# ``providers.context.common`` (provider-agnostic, and importable from
+# ``cgc/seed.py`` without tripping the facade star-import diamond; GitHub #58).
+from agents_remember.providers.context_common import (
     ContextProviderError,
     expand_template,
     provider_requirements_file,
     stable_provider_id,
+    to_container_path,
 )
-
-
-def to_container_path(path: Path | str) -> str:
-    """Map a host path to the POSIX path seen inside a Linux provider container.
-
-    Bind mounts and in-container arguments require POSIX paths. On Windows a
-    resolved path renders as ``C:/ew/x`` via :meth:`Path.as_posix`, whose drive
-    colon both breaks Docker's ``host:container`` mount parsing ("too many
-    colons") and is not a valid Linux path. Stripping the leading ``<drive>:``
-    yields ``/ew/x``. On POSIX hosts there is no drive letter, so the value is
-    returned unchanged and Linux/macOS behavior is preserved exactly.
-    """
-
-    posix = path.as_posix() if isinstance(path, Path) else str(path).replace("\\", "/")
-    if len(posix) >= 2 and posix[0].isalpha() and posix[1] == ":":
-        remainder = posix[2:]
-        return remainder if remainder.startswith("/") else f"/{remainder}"
-    return posix
 
 
 @dataclass(frozen=True)

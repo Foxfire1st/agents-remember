@@ -16,6 +16,20 @@ from agents_remember.providers import lifecycle
 # Re-exported for ``from agents_remember.providers.setup_common import stable_provider_id``;
 # canonical source is ``providers.identity``.
 from agents_remember.providers.identity import stable_provider_id  # noqa: F401
+from agents_remember.providers.setup_progress import SetupProgress
+
+_NOOP_PROGRESS = SetupProgress()
+
+
+def setup_progress_from(args: Any) -> SetupProgress:
+    """The progress sink riding on the args namespace, or the shared no-op.
+
+    Provider setup state already travels on the argparse namespace (e.g.
+    ``provider_from_settings``); the progress sink follows that pattern so the
+    install/prepare functions keep their ``(args, settings)`` signatures.
+    """
+    progress = getattr(args, "setup_progress", None)
+    return progress if progress is not None else _NOOP_PROGRESS
 
 
 def load_json(path: Path) -> dict[str, Any]:

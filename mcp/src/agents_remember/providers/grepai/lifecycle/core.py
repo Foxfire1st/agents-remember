@@ -13,7 +13,7 @@ from typing import Any
 # provider's context back, so routing through it creates a circular import
 # that breaks any entry point touching grepai modules first (surfaced by the
 # seed timeout tests).
-from agents_remember.providers.context.common import (
+from agents_remember.providers.context_common import (
     ContextProviderError,
     expand_template,
     stable_provider_id,

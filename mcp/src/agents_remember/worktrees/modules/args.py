@@ -42,6 +42,7 @@ class WorktreeArgs:
     skip_provider_setup: bool = False
     provider_setup_config: WorktreeProviderSetupConfig | None = None
     provider_timeout: int = 1800
+    retry_provider_setup: bool = False
 
     # Lifecycle flags
     dry_run: bool = False

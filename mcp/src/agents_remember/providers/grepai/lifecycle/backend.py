@@ -12,7 +12,7 @@ from typing import Any, NoReturn
 # Leaf imports, not the providers.context aggregator: the aggregator
 # star-imports grepai context back, which is a circular import for any entry
 # point that touches grepai modules first.
-from agents_remember.providers.context.common import ContextProviderError
+from agents_remember.providers.context_common import ContextProviderError
 from agents_remember.providers.grepai.context import ensure_grepai_runtime_layout
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_project,

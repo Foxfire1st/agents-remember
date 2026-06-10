@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.providers.cgc.context.constants import *
-from agents_remember.providers.context.common import ContextProviderError
+from agents_remember.providers.context_common import ContextProviderError
 
 
 def cgc_cgcignore_patch_applied(path: Path) -> bool:

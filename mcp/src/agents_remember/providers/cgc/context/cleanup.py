@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agents_remember.providers.cgc.context.constants import SOURCE_ARTIFACT_NAMES
 from agents_remember.providers.cgc.context.core import CgcRuntimeLayout
-from agents_remember.providers.context.common import ContextProviderError, remove_runtime_path
+from agents_remember.providers.context_common import ContextProviderError, remove_runtime_path
 
 
 def source_provider_artifacts(code_repo_root: Path) -> list[Path]:

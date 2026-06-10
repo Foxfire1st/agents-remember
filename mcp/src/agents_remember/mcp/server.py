@@ -409,12 +409,20 @@ def create_server(config: McpRuntimeConfig) -> Any:
         memory_mode: str | None = None,
         memory_choice: str | None = None,
         skip_provider_setup: bool = False,
+        retry_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Create or load a task contract plus code (and external-memory) git worktrees. Mutating:
         creates branches/worktrees on disk. Preview with dry_run=true. Driven by the
         c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
-        memory_mode is 'internal', 'external', or 'disabled'."""
+        memory_mode is 'internal', 'external', or 'disabled'.
+
+        Returns within seconds: provider setup runs in the background and the response's
+        providers block reports state 'starting' with a progressFile. Poll worktree_status
+        until providers reaches a terminal state (seed copy = seconds; a refused seed falls
+        back to a full reindex = minutes, flagged as seedFallback). On a failed or stale
+        setup, re-run with retry_provider_setup=true to relaunch it for the existing
+        contract."""
         return worktree_start_payload(
             config,
             repo_id,
@@ -426,6 +434,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             memory_mode=memory_mode,
             memory_choice=memory_choice,
             skip_provider_setup=skip_provider_setup,
+            retry_provider_setup=retry_provider_setup,
             dry_run=dry_run,
         )
 
@@ -450,7 +459,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         task_name: str | None = None,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
-        """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only."""
+        """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only.
+        While background provider setup runs, the providers block carries the live phase,
+        heartbeat age, and seedFallback; terminal states are ok / ready-with-failed-phases /
+        failed (stale = setup thread died; retry via worktree_start retry_provider_setup)."""
         return worktree_status_payload(
             config,
             repo_id,
