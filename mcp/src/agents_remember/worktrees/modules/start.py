@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     MemoryLedger,
@@ -16,11 +17,14 @@ from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
+    branch_exists,
     current_branch,
     ensure_worktree,
     has_changes,
     head_commit,
     longest_tracked_path_length,
+    require_git,
+    run_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
@@ -299,6 +303,100 @@ def _long_path_preflight(contract: WorktreeContract) -> dict[str, object] | None
     return None
 
 
+def _branch_freshness_findings(contract: WorktreeContract) -> list[dict[str, object]]:
+    targets: list[tuple[str, Path, str]] = [
+        ("code", contract.code_repo_path, contract.code_source_branch)
+    ]
+    if (
+        contract.memory_mode == "external"
+        and contract.memory_repo_path is not None
+        and (contract.memory_repo_path / ".git").exists()
+        and contract.memory_source_branch
+    ):
+        targets.append(("memory", contract.memory_repo_path, contract.memory_source_branch))
+    return [
+        {"side": side, **freshness_to_packet(read_branch_freshness(repo, branch))}
+        for side, repo, branch in targets
+    ]
+
+
+def _stale_base_preflight(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> dict[str, object] | None:
+    """Refuse to base a new worktree on a source branch behind its upstream (issue #54).
+
+    Only `behind`/`diverged` block; `unknown` (offline) and `no-upstream` are reported
+    by callers via worktree_status freshness, never blocked on. `stale_base_choice`
+    recoveries: `fast-forward` (ff the stale local branches, then proceed) or
+    `proceed-stale` (explicit override).
+    """
+    if args.stale_base_choice == "proceed-stale":
+        return None
+    stale = [
+        finding
+        for finding in _branch_freshness_findings(contract)
+        if finding["state"] in ("behind", "diverged")
+    ]
+    if not stale:
+        return None
+    if args.stale_base_choice == "fast-forward":
+        failures = _fast_forward_stale_branches(contract, stale, args.dry_run)
+        if not failures:
+            return None
+        stale = failures
+    return {
+        "state": "blocked",
+        "summary": "Source branches are behind their upstream; a worktree started now "
+        "would base on stale code/memory and silently defeat the provider seed "
+        "fast-path. Choose fast-forward or proceed-stale.",
+        **next_guidance(
+            "choose_stale_base_recovery",
+            tool="worktree_start",
+            args={
+                "repo_id": context.code_repository_name,
+                "task_name": args.task_name,
+                "worktree_name": args.worktree_name,
+                "workflow_kind": args.workflow_kind,
+            },
+            required_args=["stale_base_choice"],
+        ),
+        "staleBases": stale,
+    }
+
+
+def _fast_forward_stale_branches(
+    contract: WorktreeContract, stale: list[dict[str, object]], dry_run: bool
+) -> list[dict[str, object]]:
+    """Fast-forward `behind` branches to their upstream; return findings that could not be."""
+    failures: list[dict[str, object]] = []
+    for finding in stale:
+        if finding["state"] != "behind":
+            failures.append(
+                {**finding, "recovery_error": "diverged branches cannot be fast-forwarded"}
+            )
+            continue
+        if dry_run:
+            continue
+        repo = (
+            contract.code_repo_path if finding["side"] == "code" else contract.memory_repo_path
+        )
+        assert repo is not None
+        branch = str(finding["branch"])
+        upstream = str(finding["upstream"])
+        if current_branch(repo) == branch:
+            result = run_git(repo, ["merge", "--ff-only", upstream])
+        else:
+            # state == "behind" proves the branch is an ancestor of its upstream,
+            # so the forced update is a fast-forward; git still refuses branches
+            # checked out in another worktree, which lands in failures.
+            result = run_git(repo, ["branch", "-f", branch, upstream])
+        if result.returncode != 0:
+            failures.append(
+                {**finding, "recovery_error": (result.stderr or result.stdout).strip()}
+            )
+    return failures
+
+
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
     repo = context.code_repository_root
@@ -314,6 +412,14 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
             return WorktreeCommandResult(
                 0, {"state": "attached-existing-contract", **status_payload(existing)}
             )
+
+    stale_base_block = _stale_base_preflight(context, contract, args)
+    if stale_base_block is not None:
+        return WorktreeCommandResult(2, stale_base_block)
+    if args.stale_base_choice == "fast-forward":
+        # A fast-forward recovery may have moved the source branches; rebuild the
+        # contract so the recorded base commits reflect the recovered tips.
+        contract = _build_start_contract(context, args)
 
     long_path_block = _long_path_preflight(contract)
     if long_path_block is not None:
@@ -646,6 +752,7 @@ def prepare_memory_for_start(
     if mapping is None:
         return _missing_mapping_state(contract, ledger)
     assert contract.memory_worktree is not None
+    memory_source_branch = _ensure_memory_source_branch(contract, args.dry_run)
     memory_branch_state = ensure_worktree(
         contract.memory_repo_path,
         contract.memory_worktree,
@@ -657,9 +764,38 @@ def prepare_memory_for_start(
     return {
         "state": "compatible",
         "worktree": memory_branch_state,
+        "memorySourceBranch": memory_source_branch,
         "mtimeSync": mtime_sync,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
+    }
+
+
+def _ensure_memory_source_branch(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
+    """Auto-create a missing memory source branch off the official memory tip (issue #54).
+
+    The code source branch name is the template; agents previously had to create the
+    matching memory branch by hand before worktree_start would succeed. The branch
+    bases on the validated official checkout HEAD (`memory_base_commit`), whose ledger
+    was just proven to map `code_base_commit`.
+    """
+    assert contract.memory_repo_path is not None
+    if branch_exists(contract.memory_repo_path, contract.memory_source_branch):
+        return {"state": "existing", "branch": contract.memory_source_branch}
+    if dry_run:
+        return {
+            "state": "would-create-from-official-tip",
+            "branch": contract.memory_source_branch,
+            "base": contract.memory_base_commit,
+        }
+    require_git(
+        contract.memory_repo_path,
+        ["branch", contract.memory_source_branch, contract.memory_base_commit],
+    )
+    return {
+        "state": "created-from-official-tip",
+        "branch": contract.memory_source_branch,
+        "base": contract.memory_base_commit,
     }
 
 

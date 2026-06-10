@@ -412,6 +412,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         work_branch: str | None = None,
         memory_mode: str | None = None,
         memory_choice: str | None = None,
+        stale_base_choice: str | None = None,
         skip_provider_setup: bool = False,
         retry_provider_setup: bool = False,
         dry_run: bool = False,
@@ -420,6 +421,14 @@ def create_server(config: McpRuntimeConfig) -> Any:
         creates branches/worktrees on disk. Preview with dry_run=true. Driven by the
         c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
         memory_mode is 'internal', 'external', or 'disabled'.
+
+        Stale-base preflight (issue #54): start refuses when a source branch is behind or
+        diverged from its remote tracking branch (a stale base produces wrong code and
+        defeats the provider seed fast-path). On a blocked 'choose_stale_base_recovery'
+        result, re-run with stale_base_choice='fast-forward' (ff the local branches, then
+        start) or 'proceed-stale' (explicit override). A missing external-memory source
+        branch is auto-created off the official memory tip using the code source branch
+        name as template.
 
         Returns within seconds: provider setup runs in the background and the response's
         providers block reports state 'starting' with a progressFile. Poll worktree_status
@@ -437,6 +446,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             work_branch=work_branch,
             memory_mode=memory_mode,
             memory_choice=memory_choice,
+            stale_base_choice=stale_base_choice,
             skip_provider_setup=skip_provider_setup,
             retry_provider_setup=retry_provider_setup,
             dry_run=dry_run,
