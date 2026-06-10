@@ -28,8 +28,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Request the drift summary section.",
     )
+    parser.add_argument(
+        "--include-freshness",
+        action="store_true",
+        help="Request the branch freshness section (fetches remote-tracking refs).",
+    )
     parser.add_argument("--provider-detail-limit", type=int, default=20)
     parser.add_argument("--drift-detail-limit", type=int, default=10)
+    parser.add_argument("--fetch-timeout", type=int, default=30)
     args = parser.parse_args(argv)
 
     try:
@@ -40,8 +46,10 @@ def main(argv: list[str] | None = None) -> int:
                 repo_id=args.repo,
                 include_providers=not args.skip_providers,
                 include_drift=args.include_drift,
+                include_freshness=args.include_freshness,
                 provider_detail_limit=args.provider_detail_limit,
                 drift_detail_limit=args.drift_detail_limit,
+                fetch_timeout=args.fetch_timeout,
             ),
         )
     except (ConfigError, ContextPacketError, ValueError) as error:

@@ -71,15 +71,19 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         include_providers: bool = True,
         include_drift: bool = False,
+        include_freshness: bool = False,
     ) -> dict[str, Any]:
         """Bundle a repository's current state into one packet: repo/git state, resolved paths,
-        memory mode/storage, worktree state, and (optionally) provider status and drift. Read-only.
-        Preferred single call to orient at task start."""
+        memory mode/storage, worktree state, and (optionally) provider status, drift, and branch
+        freshness (include_freshness fetches remote-tracking refs and reports ahead/behind for the
+        code and memory checkouts plus whether the ledger maps code HEAD). Read-only apart from
+        that optional fetch. Preferred single call to orient at task start."""
         return context_packet_payload(
             config,
             repo_id,
             include_providers=include_providers,
             include_drift=include_drift,
+            include_freshness=include_freshness,
         )
 
     @server.tool()
