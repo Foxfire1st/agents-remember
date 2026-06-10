@@ -313,5 +313,89 @@ class CarryoverOverviewApplyTests(unittest.TestCase):
             self.assertIn("no onboarding was carried over", str(index_refresh["reason"]))
 
 
+class MemoryMainAdvanceTests(unittest.TestCase):
+    """Issue #54: carryover fast-forwards memory main after code landed officially."""
+
+    def test_apply_fast_forwards_memory_main_from_non_main_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CarryoverFixture(Path(tmp))
+            git(fixture.official_memory, "checkout", "-b", "cycle/source")
+            payload = apply_carryover_for_request(
+                fixture.request(),
+                intent_note="developer approved sidecar carryover",
+            )
+            self.assertEqual(payload["state"], "carried-over")
+            advance = payload["memory_main_advance"]
+            assert isinstance(advance, dict)
+            self.assertEqual(advance["state"], "fast-forwarded")
+            self.assertEqual(
+                git(fixture.official_memory, "rev-parse", "main"),
+                git(fixture.official_memory, "rev-parse", "cycle/source"),
+            )
+
+    def test_nothing_to_carry_still_advances_memory_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CarryoverFixture(Path(tmp))
+            (fixture.source_memory / "onboarding" / "src" / "app" / "feature.py.md").unlink()
+            git(fixture.official_memory, "checkout", "-b", "cycle/source")
+            payload = apply_carryover_for_request(
+                fixture.request(),
+                intent_note="developer approved carryover check",
+            )
+            self.assertEqual(payload["state"], "ledger-mapped-head")
+            advance = payload["memory_main_advance"]
+            assert isinstance(advance, dict)
+            self.assertEqual(advance["state"], "fast-forwarded")
+            self.assertEqual(
+                git(fixture.official_memory, "rev-parse", "main"),
+                git(fixture.official_memory, "rev-parse", "cycle/source"),
+            )
+
+    def test_apply_on_main_checkout_reports_already_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CarryoverFixture(Path(tmp))
+            payload = apply_carryover_for_request(
+                fixture.request(),
+                intent_note="developer approved sidecar carryover",
+            )
+            advance = payload["memory_main_advance"]
+            assert isinstance(advance, dict)
+            self.assertEqual(advance["state"], "already-current")
+
+    def test_diverged_memory_main_is_reported_and_left_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CarryoverFixture(Path(tmp))
+            git(fixture.official_memory, "checkout", "-b", "cycle/source")
+            git(fixture.official_memory, "checkout", "main")
+            commit_file(
+                fixture.official_memory,
+                "onboarding/other.md",
+                "# independent official change\n",
+                "Independent change on main",
+            )
+            main_before = git(fixture.official_memory, "rev-parse", "main")
+            git(fixture.official_memory, "checkout", "cycle/source")
+            payload = apply_carryover_for_request(
+                fixture.request(),
+                intent_note="developer approved sidecar carryover",
+            )
+            advance = payload["memory_main_advance"]
+            assert isinstance(advance, dict)
+            self.assertEqual(advance["state"], "diverged")
+            self.assertEqual(git(fixture.official_memory, "rev-parse", "main"), main_before)
+
+    def test_missing_main_branch_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CarryoverFixture(Path(tmp))
+            git(fixture.official_memory, "branch", "-m", "main", "trunk")
+            payload = apply_carryover_for_request(
+                fixture.request(),
+                intent_note="developer approved sidecar carryover",
+            )
+            advance = payload["memory_main_advance"]
+            assert isinstance(advance, dict)
+            self.assertEqual(advance["state"], "skipped")
+
+
 if __name__ == "__main__":
     unittest.main()

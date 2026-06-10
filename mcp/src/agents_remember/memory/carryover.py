@@ -156,6 +156,46 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     return run_git(repo, ["merge-base", "--is-ancestor", ancestor, descendant]).returncode == 0
 
 
+def branch_exists(repo: Path, branch: str) -> bool:
+    return run_git(repo, ["rev-parse", "--verify", "--quiet", branch]).returncode == 0
+
+
+def current_branch(repo: Path) -> str:
+    return require_git(repo, ["branch", "--show-current"])
+
+
+def _advance_memory_main(official_memory: Path, main_branch: str = "main") -> dict[str, object]:
+    """Fast-forward memory main to the official checkout tip after a carryover (issue #54).
+
+    Code main advances via the GitHub PR merge, but memory has no PR flow: when a
+    cycle runs on a non-main source branch, nothing moves memory main and it falls
+    behind indefinitely. Carryover by definition runs after code landed officially,
+    so it is the natural place to bring memory main forward. ff-only: a diverged
+    main (or one pinned by another worktree) is reported, never forced.
+    """
+    if not branch_exists(official_memory, main_branch):
+        return {"state": "skipped", "reason": f"memory repo has no {main_branch!r} branch"}
+    if current_branch(official_memory) == main_branch:
+        return {"state": "already-current", "branch": main_branch}
+    tip = head_commit(official_memory, "HEAD")
+    if head_commit(official_memory, main_branch) == tip:
+        return {"state": "already-current", "branch": main_branch}
+    if not is_ancestor(official_memory, main_branch, tip):
+        return {
+            "state": "diverged",
+            "branch": main_branch,
+            "reason": "memory main holds commits the official checkout tip does not",
+        }
+    result = run_git(official_memory, ["branch", "-f", main_branch, tip])
+    if result.returncode != 0:
+        return {
+            "state": "failed",
+            "branch": main_branch,
+            "reason": (result.stderr or result.stdout).strip(),
+        }
+    return {"state": "fast-forwarded", "branch": main_branch, "to": tip}
+
+
 def patch_id(repo: Path, base_ref: str, head_ref: str, source_path: str) -> str | None:
     diff_text = require_git(repo, ["diff", base_ref, head_ref, "--", source_path])
     if not diff_text.strip():
@@ -529,6 +569,7 @@ def apply_carryover_for_request(
                 ledger_commit_message=ledger_commit_message,
             ),
             "route_index_refresh": route_index_refresh,
+            "memory_main_advance": _advance_memory_main(official_memory),
         }
     memory_content_commit = commit_if_dirty(official_memory, memory_commit_message)
     write_ledger(ledger_path, prepend_mapping(ledger, official_head, memory_content_commit))
@@ -542,6 +583,7 @@ def apply_carryover_for_request(
         "route_index_refresh": route_index_refresh,
         "memory_content_commit": memory_content_commit,
         "ledger_commit": ledger_commit,
+        "memory_main_advance": _advance_memory_main(official_memory),
     }
 
 
