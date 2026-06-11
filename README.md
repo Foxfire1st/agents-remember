@@ -10,8 +10,8 @@
 </p>
 
 <p align="center"> 
-📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember-md/</br>
-🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember-md/llms.txt
+📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember/</br>
+🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember/llms.txt
 </p>
 
 ##
