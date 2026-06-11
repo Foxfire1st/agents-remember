@@ -10,8 +10,9 @@
 </p>
 
 <p align="center"> 
-📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember/</br>
-🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember/llms.txt
+  📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember/</br>
+  🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember/llms.txt
+  <i>Note: caches and search snippets may serve an outdated copy of this README — the docs site above is canonical and always current.</i>
 </p>
 
 ##
