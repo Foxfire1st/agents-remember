@@ -10,12 +10,11 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.context import contract_context, resolve_context
+from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
     commit_date,
     commit_if_dirty,
-    current_branch,
     head_commit,
     require_git,
     worktree_dirty,
@@ -37,21 +36,15 @@ from agents_remember.worktrees.modules.onboarding import (
     classify_route_overview_updates,
     classify_sidecar_updates,
     entity_fingerprint_refresh_plan,
-    entity_fingerprint_refresh_plan_for_context,
     onboarding_refresh_plan,
-    onboarding_refresh_plan_for_context,
     refresh_entity_fingerprints_for_context,
     refresh_onboarding_metadata,
-    refresh_onboarding_metadata_for_context,
     refresh_route_indexes_for_context,
     refresh_route_overview_metadata_for_context,
     route_index_refresh_plan_for_context,
     route_overview_metadata_refresh_plan,
-    route_overview_metadata_refresh_plan_for_context,
     validate_onboarding_refresh_plan,
-    validate_onboarding_refresh_plan_for_context,
     validate_route_overview_refresh_plan,
-    validate_route_overview_refresh_plan_for_context,
 )
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 

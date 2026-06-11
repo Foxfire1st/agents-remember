@@ -946,6 +946,94 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
+    def test_closeout_blocks_memory_commit_when_memory_quality_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = dirty_open_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            memory_head = git(contract.memory_worktree, "rev-parse", "HEAD")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            failed_quality = {
+                "ok": False,
+                "findingCount": 1,
+                "findings": [
+                    {
+                        "code": "onboarding_drift_test",
+                        "path": "feature.txt.md",
+                        "message": "test drift",
+                    }
+                ],
+            }
+            with mock.patch(
+                "agents_remember.worktrees.modules.closeout.run_memory_quality_check",
+                return_value=failed_quality,
+            ), self.assertRaisesRegex(RuntimeError, "clean memory_quality_check"):
+                worktree_manager.command_closeout(args)
+            self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_refreshes_entity_fingerprint_after_code_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = open_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            (contract.code_worktree / "feature.txt").write_text("old\n", encoding="utf-8")
+            git(contract.code_worktree, "add", "feature.txt")
+            git(contract.code_worktree, "commit", "-m", "Add feature baseline")
+            baseline_commit = git(contract.code_worktree, "rev-parse", "HEAD")
+            write_file_onboarding(
+                contract.memory_worktree / "onboarding",
+                contract.repo_name,
+                "feature.txt",
+                baseline_commit,
+            )
+            seed_fingerprint = drift.compute_git_blob_set_fingerprint(
+                contract.code_worktree, ["feature.txt"]
+            )
+            catalog = write_entity_catalog(
+                contract.memory_worktree / "onboarding",
+                contract.repo_name,
+                [("Feature", drift.GIT_BLOB_SET_ALGORITHM, seed_fingerprint, ["feature.txt"])],
+            )
+            (contract.code_worktree / "feature.txt").write_text("new\n", encoding="utf-8")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Update feature",
+                memory_commit_message="Document feature update",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            expected = drift.compute_git_blob_set_fingerprint(
+                contract.code_worktree, ["feature.txt"]
+            )
+            self.assertNotEqual(expected, seed_fingerprint)
+            self.assertEqual(payload["refreshed_entities"][0]["entity"], "Feature")
+            self.assertIn(expected, catalog.read_text(encoding="utf-8"))
+            self.assertIn(
+                "entities.md",
+                git(
+                    contract.memory_worktree,
+                    "show",
+                    "--name-only",
+                    "--format=",
+                    payload["memory_content_commit"],
+                ),
+            )
+
     def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
