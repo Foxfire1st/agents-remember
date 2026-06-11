@@ -258,7 +258,7 @@ The server exposes tools for:
 - runtime and skill installation
 - memory initialization, memory quality checks, and route index refresh
 - provider status, watcher control, GrepAI search, and CodeGraphContext queries
-- chat/direct closeout and worktree-backed task workflows
+- worktree-backed closeout and task workflows
 - benchmark preparation and execution (opt-in; see the note below)
 
 Provider tools only work when the MCP settings enable the provider and the

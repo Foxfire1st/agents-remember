@@ -36,8 +36,8 @@ Adapt to your repo; a gated-`main` repo typically does:
 2. Cut `feat/<slug>` | `fix/<slug>` from the spear.
 3. The `c-09-git-worktree-manager` skill creates a worktree on that branch (task adds `task.md`; chat doesn't).
 4. Work in the worktree; memory parks on the worktree memory branch.
-5. **Commit gate (human)** — nothing is committed before explicit developer approval (the `c-12-closeout` skill /
-   direct-closeout preview first).
+5. **Commit gate (human)** — nothing is committed before explicit developer approval (the `c-12-closeout` skill
+   worktree closeout preview first).
 6. **Push gate (human — one question)** — after commit approval, a single "push?" approval hands the
    tail to the agent.
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →

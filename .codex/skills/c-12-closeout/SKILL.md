@@ -1,6 +1,6 @@
 ---
 name: c-12-closeout
-description: "Close out approved Agents Remember edits by preserving explicit commit approval, missing-onboarding checks, external-memory onboarding refresh, memory quality, ledger alignment, and no automatic push for both direct checkout and worktree-backed tasks."
+description: "Close out approved Agents Remember edits by preserving explicit commit approval, missing-onboarding checks, external-memory onboarding refresh, memory quality, ledger alignment, and no automatic push for worktree-backed tasks."
 ---
 
 # c-12-closeout Closeout
@@ -8,29 +8,25 @@ description: "Close out approved Agents Remember edits by preserving explicit co
 Use this skill when approved Agents Remember edits need to be committed and the
 repository uses external memory.
 
-The `c-12-closeout` skill owns closeout sequencing for both direct current-checkout edits and
-worktree-backed tasks. Use the `c-09-git-worktree-manager` skill for worktree start,
-attach, status, integration, and cleanup; use this skill for the closeout gate
-and code-memory-ledger commit order.
+The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
+**Closeout is worktree-only:** every change affecting the code repo runs through a
+`c-09-git-worktree-manager` dual worktree (code + memory) — there is no
+direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
+worktree start, attach, status, integration, and cleanup; use this skill for the
+closeout gate and code-memory-ledger commit order.
 
 ## MCP Tools
 
-Use the matching MCP closeout tools for the current work shape:
+Use the worktree closeout tools against the task contract:
 
 ```text
-direct_closeout_preview(repo_id="<repo-id>", task_name="<task>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-direct_closeout_apply(repo_id="<repo-id>", task_name="<task>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 ```
 
-Use direct closeout for small approved edits made in the current checkout or
-memory-only polish that does not need isolated branches, replay bookkeeping,
-integration, or cleanup.
-
-Use worktree closeout when the `c-09-git-worktree-manager` skill created or attached a task contract. Worktree
-closeout records closeout state in the contract; the `c-09-git-worktree-manager` skill owns later integration
-and cleanup.
+Worktree closeout records closeout state in the contract the
+`c-09-git-worktree-manager` skill created or attached; the
+`c-09-git-worktree-manager` skill owns later integration and cleanup.
 
 ## Approval Gate
 
@@ -88,7 +84,7 @@ External-memory closeout order is:
 10. commit memory-content changes and capture `M2`
 11. prepend `C2 | M2` to `memory.md`
 12. commit the ledger update as `L2`
-13. for worktree-backed closeout, update the task contract closeout state
+13. update the task contract closeout state
 
 Entity fingerprints must be refreshed after the code commit and before the
 memory-content commit because `git-blob-set-v1` uses `HEAD:<path>` Git blobs.

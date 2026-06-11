@@ -26,7 +26,7 @@ The default setup stores durable memory in the target repository under `ar-memor
 - [Features](features.md) - the concentrated product tour: by-path memory, drift, providers, worktrees, harness setup, and operational guardrails.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
-- [Workflows](workflows.md) - the `l-01-session-job-lifecycle` lifecycle, its build modes, worktrees, and direct closeout.
+- [Workflows](workflows.md) - the `l-01-session-job-lifecycle` lifecycle, its build modes, and worktrees.
 - [Benchmark Methodology](benchmarks-methodology.md) - paired benchmark runs, metrics, validity checks, and limitations.
 - [FAQ](FAQ.md) - design principles, objections, and comparisons.
 

@@ -19,8 +19,6 @@ from .tools import (
     codex_benchmark_prepare_payload,
     codex_benchmark_run_payload,
     context_packet_payload,
-    direct_closeout_apply_payload,
-    direct_closeout_preview_payload,
     drift_check_payload,
     grepai_search_payload,
     grepai_trace_payload,
@@ -543,53 +541,6 @@ def create_server(config: McpRuntimeConfig) -> Any:
             contract_path,
             intent_note,
             code_commit_message,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-            dry_run=dry_run,
-        )
-
-    @server.tool()
-    def direct_closeout_preview(
-        repo_id: str,
-        task_name: str,
-        code_commit_message: str,
-        source_branch: str | None = None,
-        memory_commit_message: str = "",
-        ledger_commit_message: str = "",
-    ) -> dict[str, Any]:
-        """Non-mutating preview of a direct (current-checkout, no worktree) closeout. Nothing is
-        committed. Pair with direct_closeout_apply."""
-        return direct_closeout_preview_payload(
-            config,
-            repo_id,
-            task_name,
-            code_commit_message,
-            source_branch=source_branch,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-        )
-
-    @server.tool()
-    def direct_closeout_apply(
-        repo_id: str,
-        task_name: str,
-        intent_note: str,
-        code_commit_message: str,
-        source_branch: str | None = None,
-        memory_commit_message: str = "",
-        ledger_commit_message: str = "",
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        """Apply a direct closeout on the current checkout: commits code, then memory, then ledger.
-        MUTATING and commit-gated — only after explicit developer commit approval; preview first
-        (direct_closeout_preview or dry_run=true). Requires intent_note."""
-        return direct_closeout_apply_payload(
-            config,
-            repo_id,
-            task_name,
-            intent_note,
-            code_commit_message,
-            source_branch=source_branch,
             memory_commit_message=memory_commit_message,
             ledger_commit_message=ledger_commit_message,
             dry_run=dry_run,

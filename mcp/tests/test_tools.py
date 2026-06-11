@@ -298,8 +298,6 @@ class McpToolTests(unittest.TestCase):
             "worktree_status",
             "worktree_closeout_preview",
             "worktree_closeout_apply",
-            "direct_closeout_preview",
-            "direct_closeout_apply",
             "worktree_integrate",
             "worktree_cleanup",
             "memory_baseline_status",
