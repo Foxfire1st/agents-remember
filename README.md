@@ -9,6 +9,13 @@
   <img alt="NPM License" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FFoxfire1st%2Fagents-remember-md%2Fmain%2Fmcp%2Fpyproject.toml">
 </p>
 
+<p align="center"> 
+📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember-md/</br>
+🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember-md/llms.txt
+</p>
+
+##
+
 ## Table of Contents
 
 1. [Why It Exists](#why-it-exists)
