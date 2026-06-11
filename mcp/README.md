@@ -1,18 +1,23 @@
-# Agents Remember MCP
+<h1 align="center">Agents Remember MCP</h1>
+
+<p align="center"> 
+📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember/</br>
+🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember/llms.txt</br>
+📦 <b>Repository:</b> https://github.com/Foxfire1st/agents-remember</br>
+<i>Note: caches and search snippets may serve an outdated copy of this README — the docs site above is canonical and always current.</i>
+</p>
 
 `agents-remember-mcp` is the installable Model Context Protocol server for
 Agents Remember. It lets an MCP-capable coding harness call Agents Remember
 operations from the host instead of asking the model to edit or execute
 coordinator scripts directly.
 
-Source: [github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st/agents-remember-md)
-
 ## Quickstart
 
 Setup is agent-driven. Ask your agent to:
 
 1. **Copy the harness package** — Pick your harness guide under
-   [docs/install](https://github.com/Foxfire1st/agents-remember-md/tree/main/docs/install),
+   [docs/install](https://github.com/Foxfire1st/agents-remember/tree/main/docs/install),
    copy that harness's native starter files from the source repo into the
    workspace, then render the copied package. The `render-starter` script is a
    convenience: it infers the workspace root from the copied harness folder and
@@ -110,7 +115,7 @@ is never silent or guessed. List each repo you
 want Agents Remember to manage under `repositories`. Omit or empty the
 `providers` block if you do not want the Docker-backed providers. Full field
 reference:
-[settings-json.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/settings-json.md).
+[settings-json.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/reference/settings-json.md).
 
 > **Upgrading?** `timeoutCaps.providerSeconds` was renamed to
 > `providerSetupSeconds`. The old key is rejected with a fail-loud `ConfigError`
@@ -136,7 +141,7 @@ inside `ar-coordination/`.
 | OpenClaw | `.openclaw/` | `.openclaw/mcp/agents-remember-settings.json` |
 
 See your harness page under
-[docs/install/](https://github.com/Foxfire1st/agents-remember-md/tree/main/docs/install)
+[docs/install/](https://github.com/Foxfire1st/agents-remember/tree/main/docs/install)
 for the exact registration folder.
 
 ## Harness Setup
@@ -167,14 +172,14 @@ page, don't guess:
 
 | Harness | Setup guide |
 | --- | --- |
-| Claude Code | [docs/install/claude-code.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/claude-code.md) |
-| Codex | [docs/install/codex.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/codex.md) |
-| Cursor | [docs/install/cursor.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/cursor.md) |
-| Antigravity | [docs/install/antigravity.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/antigravity.md) |
-| VS Code + Copilot | [docs/install/vscode-copilot.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/vscode-copilot.md) |
-| Hermes | [docs/install/hermes.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/hermes.md) |
-| Pi.dev | [docs/install/pi.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/pi.md) |
-| OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/install/openclaw.md) |
+| Claude Code | [docs/install/claude-code.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/claude-code.md) |
+| Codex | [docs/install/codex.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/codex.md) |
+| Cursor | [docs/install/cursor.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/cursor.md) |
+| Antigravity | [docs/install/antigravity.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/antigravity.md) |
+| VS Code + Copilot | [docs/install/vscode-copilot.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/vscode-copilot.md) |
+| Hermes | [docs/install/hermes.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/hermes.md) |
+| Pi.dev | [docs/install/pi.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/pi.md) |
+| OpenClaw | [docs/install/openclaw.md](https://github.com/Foxfire1st/agents-remember/blob/main/docs/install/openclaw.md) |
 
 **One flat folder per skill.** The copied starter package already includes the
 skills in the harness-native skill root. `skills_install()` remains available for
@@ -263,7 +268,7 @@ The server exposes tools for:
 
 Provider tools only work when the MCP settings enable the provider and the
 required Docker services are available. Full tool list:
-[MCP Tool Reference](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/mcp-tools.md).
+[MCP Tool Reference](https://github.com/Foxfire1st/agents-remember/blob/main/docs/reference/mcp-tools.md).
 
 > **Benchmark execution is opt-in and runs untrusted code.** The `codex_benchmark_prepare`
 > and `codex_benchmark_run` MCP tools are refused unless the MCP settings set
@@ -274,6 +279,6 @@ required Docker services are available. Full tool list:
 
 ## More
 
-- [Project README](https://github.com/Foxfire1st/agents-remember-md/blob/main/README.md)
-- [Getting Started](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/getting-started.md)
-- [Settings Reference](https://github.com/Foxfire1st/agents-remember-md/blob/main/docs/reference/settings-json.md)
+- [Project README](https://github.com/Foxfire1st/agents-remember/blob/main/README.md)
+- [Getting Started](https://github.com/Foxfire1st/agents-remember/blob/main/docs/getting-started.md)
+- [Settings Reference](https://github.com/Foxfire1st/agents-remember/blob/main/docs/reference/settings-json.md)
