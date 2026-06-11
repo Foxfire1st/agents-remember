@@ -24,13 +24,27 @@ reviewing the candidate report. Apply mutates official memory only; it does not
 move code branches. The skill tree is instruction-only; installed and
 development workflows use the MCP/package route.
 
+## Candidate Kinds
+
+Candidates are kind-tagged; `include_review_required` selects each by its selection key.
+
+- `file-sidecar`: per-file onboarding for a code path in the diff; key = the source path.
+- `route-overview`: route overview whose route covers a landed path (GitHub #56); key = the normalized route (`.` for the repo root).
+- `memory-only-doc`: a sidecar or overview changed only in branch memory while its source path is outside the code diff (e.g. a pre-existing drift re-verified mid-task); key = the doc's source path or route.
+- `entity-catalog`: the repo entity catalog (`onboarding/entities.md`); key = the literal `entity-catalog`. Always review-required when differing — whole-file carry, no entry-level merging. On carry, every `git-blob-set-v1` fingerprint row is recomputed against the official code ref and the apply result reports `entity_fingerprint_validation` (`validated` / `mismatch` / `skipped`, with per-entity detail); fingerprints are derived values and are validated, never trusted as copied.
+
 ## Evidence Tiers
 
-- `exact-landed-commit`: at least one commit that touched the source path on the source branch is an ancestor of the official code ref.
+- `exact-landed-commit`: every commit that touched the source path on the source branch is an ancestor of the official code ref — a single landed commit is not enough, so a later unlanded commit to the same path cannot be carried as landed.
 - `patch-id-match`: the old-base-to-source-branch patch for the source path matches the old-base-to-official patch.
 - `final-content-match`: the source file content at the source branch ref matches the content at the official ref.
 - `same-path-changed`: both branches changed the same source path, but the `c-11-memory-carryover-from-branch` skill did not prove equivalent code.
-- `not-landed`: the source path changed on the source branch but not on the official branch.
+- `not-landed`: the source path changed on the source branch but not on the official branch (or, for `memory-only-doc`, does not exist on the official ref).
+
+`memory-only-doc` candidates use their own evidence values:
+
+- `memory-only-reverification-valid` (auto-carry): the source object at the branch doc's `lastVerifiedCommitHash` matches the official ref AND official memory has not changed the doc since the memory merge-base.
+- `source-diverged`, `official-memory-moved`, `unverifiable` (review-required): the source moved under the doc; official memory changed it independently (or no merge-base resolves, e.g. the source memory is not a git checkout sharing history); or the branch doc's verification commit cannot be resolved.
 
 Only proven tiers are auto-carry candidates. Same-path overlap is review-required by default because another developer may have changed the same file independently.
 

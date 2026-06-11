@@ -26,10 +26,28 @@ from agents_remember.kernel.onboarding_doc import (
     route_contains_changed_path,
 )
 from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.memory_quality.integrity.onboarding_drift_check.entities import (
+    parse_entity_fingerprint_rows,
+)
+from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
+    compute_git_blob_set_fingerprint,
+)
+from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
+    GIT_BLOB_SET_ALGORITHM,
+)
 
 PROVEN_EVIDENCE = {"exact-landed-commit", "patch-id-match", "final-content-match"}
 FILE_SIDECAR_KIND = "file-sidecar"
 ROUTE_OVERVIEW_KIND = "route-overview"
+ENTITY_CATALOG_KIND = "entity-catalog"
+MEMORY_ONLY_DOC_KIND = "memory-only-doc"
+# Selection key for the entity catalog in include_review_required: a stable
+# token instead of "entities.md" so it can never collide with a code path.
+ENTITY_CATALOG_KEY = "entity-catalog"
+ENTITY_CATALOG_REL = "entities.md"
+VERIFIED_HASH_PATTERN = re.compile(
+    r"\|\s*lastVerifiedCommitHash\s*\|\s*`?([0-9a-fA-F]{7,40})`?\s*\|"
+)
 
 
 @dataclass(frozen=True)
@@ -340,6 +358,186 @@ def overview_candidates(
     return candidates
 
 
+def object_id_at_ref(repo: Path, ref: str, source_path: str) -> str | None:
+    """Git object id of a file blob or directory tree at a ref; None if absent.
+
+    The repo-root route ('.') resolves to the commit's root tree because
+    ``<ref>:.`` is not valid rev syntax.
+    """
+    target = f"{ref}^{{tree}}" if source_path in {"", "."} else f"{ref}:{source_path}"
+    result = run_git(repo, ["rev-parse", target])
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def verified_commit_of(doc: Path) -> str | None:
+    match = VERIFIED_HASH_PATTERN.search(doc.read_text(encoding="utf-8"))
+    return match.group(1) if match else None
+
+
+def memory_merge_base(official_memory: Path, source_memory: Path) -> str | None:
+    source_head = run_git(source_memory, ["rev-parse", "HEAD"])
+    if source_head.returncode != 0:
+        return None
+    result = run_git(official_memory, ["merge-base", "HEAD", source_head.stdout.strip()])
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _memory_only_evidence(
+    *,
+    code_repository_root: Path,
+    official_ref: str,
+    official_memory: Path,
+    branch_doc: Path,
+    official_file: Path,
+    rel: str,
+    source_path: str,
+    mem_base: str | None,
+) -> tuple[str, str, str]:
+    """(evidence, decision, reason) for one memory-only doc candidate."""
+    if object_id_at_ref(code_repository_root, official_ref, source_path) is None:
+        return "not-landed", "reject", "source path is not present on official code ref"
+    verified = verified_commit_of(branch_doc)
+    if verified is None:
+        return (
+            "unverifiable",
+            "review-required",
+            "branch doc has no resolvable lastVerifiedCommitHash; model re-review required",
+        )
+    verified_object = object_id_at_ref(code_repository_root, verified, source_path)
+    if verified_object is None:
+        return (
+            "unverifiable",
+            "review-required",
+            f"verification commit {verified[:12]} or its source object is not "
+            "resolvable in the code repository; model re-review required",
+        )
+    if verified_object != object_id_at_ref(code_repository_root, official_ref, source_path):
+        return (
+            "source-diverged",
+            "review-required",
+            "source content changed between the branch verification commit and the "
+            "official ref; model re-review required",
+        )
+    base_blob = (
+        blob_at_ref(official_memory, mem_base, f"onboarding/{rel}") if mem_base else None
+    )
+    official_text = (
+        official_file.read_text(encoding="utf-8") if official_file.exists() else None
+    )
+    if mem_base is None or base_blob != official_text:
+        return (
+            "official-memory-moved",
+            "review-required",
+            "official memory changed this doc independently since the memory "
+            "merge-base (or no merge-base is resolvable); model re-review required",
+        )
+    return (
+        "memory-only-reverification-valid",
+        "auto-carry",
+        "source content at the branch verification commit matches the official ref "
+        "and official memory has not changed this doc since the merge-base",
+    )
+
+
+def memory_only_doc_candidates(
+    *,
+    code_repository_root: Path,
+    official_ref: str,
+    official_memory: Path,
+    source_memory: Path,
+    existing: set[str],
+) -> list[CarryoverCandidate]:
+    """Candidates for onboarding docs changed only in branch memory.
+
+    Closeout can legitimately improve docs whose source path is outside the
+    code diff (e.g. re-verifying a pre-existing drift), which the diff-derived
+    candidate builders structurally cannot see. Auto-carry needs two proofs:
+    the source object at the branch doc's verification commit must match the
+    official ref, and official memory must not have changed the doc since the
+    memory merge-base — a parallel official change is always review-required.
+    """
+    source_onboarding = source_memory / "onboarding"
+    if not source_onboarding.is_dir():
+        return []
+    route_by_rel = {
+        rel: route for route, rel in discover_route_overviews(source_onboarding)
+    }
+    mem_base = memory_merge_base(official_memory, source_memory)
+    candidates: list[CarryoverCandidate] = []
+    for branch_doc in sorted(source_onboarding.rglob("*.md")):
+        if not branch_doc.is_file():
+            continue
+        rel = branch_doc.relative_to(source_onboarding).as_posix()
+        if rel == ENTITY_CATALOG_REL:
+            continue
+        source_path = route_by_rel.get(rel, rel[: -len(".md")])
+        if source_path in existing:
+            continue
+        official_file = official_memory / "onboarding" / rel
+        if official_file.exists() and official_file.read_text(
+            encoding="utf-8"
+        ) == branch_doc.read_text(encoding="utf-8"):
+            continue
+        evidence, decision, reason = _memory_only_evidence(
+            code_repository_root=code_repository_root,
+            official_ref=official_ref,
+            official_memory=official_memory,
+            branch_doc=branch_doc,
+            official_file=official_file,
+            rel=rel,
+            source_path=source_path,
+            mem_base=mem_base,
+        )
+        candidates.append(
+            CarryoverCandidate(
+                source_path=source_path,
+                branch_onboarding=branch_doc.as_posix(),
+                official_onboarding=official_file.as_posix(),
+                evidence=evidence,
+                decision=decision,
+                reason=reason,
+                official_exists=official_file.exists(),
+                kind=MEMORY_ONLY_DOC_KIND,
+            )
+        )
+    return candidates
+
+
+def entity_catalog_candidate(
+    *, official_memory: Path, source_memory: Path
+) -> CarryoverCandidate | None:
+    """Review-required candidate when the branch entity catalog differs.
+
+    The catalog is a single model-authored aggregate covering many entities,
+    so it is never auto-carried and never merged entry-by-entry; an identical
+    catalog yields no candidate because it has no per-doc verification
+    metadata to bump. Selected via the stable ``entity-catalog`` key.
+    """
+    branch_catalog = source_memory / "onboarding" / ENTITY_CATALOG_REL
+    if not branch_catalog.exists():
+        return None
+    official_catalog = official_memory / "onboarding" / ENTITY_CATALOG_REL
+    official_exists = official_catalog.exists()
+    if official_exists and official_catalog.read_text(
+        encoding="utf-8"
+    ) == branch_catalog.read_text(encoding="utf-8"):
+        return None
+    return CarryoverCandidate(
+        source_path=ENTITY_CATALOG_KEY,
+        branch_onboarding=branch_catalog.as_posix(),
+        official_onboarding=official_catalog.as_posix(),
+        evidence="entity-catalog-differs",
+        decision="review-required",
+        reason=(
+            "entity catalog body differs from official; whole-file carry after "
+            "model review (fingerprints are validated against the official ref "
+            "on apply)"
+        ),
+        official_exists=official_exists,
+        kind=ENTITY_CATALOG_KIND,
+    )
+
+
 def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
     code_repository_root = request.code_repository_root.resolve()
     official_memory = request.official_memory.resolve()
@@ -387,6 +585,20 @@ def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
             landed_paths=sorted(source_changed & official_changed),
         )
     )
+    candidates.extend(
+        memory_only_doc_candidates(
+            code_repository_root=code_repository_root,
+            official_ref=request.official_code_ref,
+            official_memory=official_memory,
+            source_memory=source_memory,
+            existing={candidate.source_path for candidate in candidates},
+        )
+    )
+    catalog_candidate = entity_catalog_candidate(
+        official_memory=official_memory, source_memory=source_memory
+    )
+    if catalog_candidate is not None:
+        candidates.append(catalog_candidate)
     counts: dict[str, int] = {}
     for candidate in candidates:
         counts[candidate.decision] = counts.get(candidate.decision, 0) + 1
@@ -477,6 +689,38 @@ def _refresh_official_route_indexes(
     return {"state": "refreshed", **result.to_dict()}
 
 
+def _validate_entity_fingerprints(
+    code_repository_root: Path, official_ref: str, catalog: Path
+) -> dict[str, object]:
+    """Recompute every catalog fingerprint row against the official code ref.
+
+    Fingerprints are derived values: a carried catalog is validated against
+    the official ref instead of being trusted as copied. Mismatches are
+    reported, not blocking — the reviewer selected the carry, and the next
+    memory quality check keeps them visible.
+    """
+    mismatches: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+    rows = parse_entity_fingerprint_rows(catalog)
+    for row in rows:
+        if row.algorithm != GIT_BLOB_SET_ALGORITHM:
+            errors.append({"entity": row.entity, "reason": f"unsupported algorithm {row.algorithm!r}"})
+            continue
+        try:
+            computed = compute_git_blob_set_fingerprint(
+                code_repository_root, row.evidence_paths, ref=official_ref
+            )
+        except RuntimeError as error:
+            errors.append({"entity": row.entity, "reason": str(error)})
+            continue
+        if computed != row.fingerprint:
+            mismatches.append(
+                {"entity": row.entity, "recorded": row.fingerprint, "computed": computed}
+            )
+    state = "validated" if not mismatches and not errors else "mismatch"
+    return {"state": state, "rows": len(rows), "mismatches": mismatches, "errors": errors}
+
+
 def _nothing_to_carry_result(
     *,
     plan: dict[str, object],
@@ -539,6 +783,10 @@ def apply_carryover_for_request(
     official_date = commit_date(request.code_repository_root.resolve(), official_head)
     included_review_required = set(include_review_required or [])
     carried = []
+    entity_fingerprint_validation: dict[str, object] = {
+        "state": "skipped",
+        "reason": "entity catalog was not carried",
+    }
     for candidate in selected_candidates(plan, included_review_required):
         source = Path(str(candidate["branch_onboarding"]))
         target = Path(str(candidate["official_onboarding"]))
@@ -548,7 +796,16 @@ def apply_carryover_for_request(
             )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-        refresh_onboarding_metadata(target, official_head, official_date)
+        if candidate["kind"] == ENTITY_CATALOG_KIND:
+            # The catalog has no per-doc verification metadata table; its
+            # integrity check is the fingerprint validation instead.
+            entity_fingerprint_validation = _validate_entity_fingerprints(
+                request.code_repository_root.resolve(),
+                request.official_code_ref,
+                target,
+            )
+        else:
+            refresh_onboarding_metadata(target, official_head, official_date)
         carried.append(candidate)
     route_index_refresh: dict[str, object] = {
         "state": "skipped",
@@ -581,6 +838,7 @@ def apply_carryover_for_request(
         "intent_note": cleaned_note,
         "carried": carried,
         "route_index_refresh": route_index_refresh,
+        "entity_fingerprint_validation": entity_fingerprint_validation,
         "memory_content_commit": memory_content_commit,
         "ledger_commit": ledger_commit,
         "memory_main_advance": _advance_memory_main(official_memory),
