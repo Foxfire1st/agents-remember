@@ -69,14 +69,16 @@ def git_stdout(repo_root: Path, args: list[str]) -> str:
     return result.stdout.strip()
 
 
-def git_blob_hash(repo_root: Path, source_path: str) -> str:
-    return git_stdout(repo_root, ["rev-parse", f"HEAD:{source_path}"])
+def git_blob_hash(repo_root: Path, source_path: str, *, ref: str = "HEAD") -> str:
+    return git_stdout(repo_root, ["rev-parse", f"{ref}:{source_path}"])
 
 
-def compute_git_blob_set_fingerprint(repo_root: Path, evidence_paths: list[str]) -> str:
+def compute_git_blob_set_fingerprint(
+    repo_root: Path, evidence_paths: list[str], *, ref: str = "HEAD"
+) -> str:
     lines: list[str] = []
     for source_path in sorted(evidence_paths):
-        blob_hash = git_blob_hash(repo_root, source_path)
+        blob_hash = git_blob_hash(repo_root, source_path, ref=ref)
         lines.append(f"{source_path}\0{blob_hash}\n")
     digest = hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
