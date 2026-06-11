@@ -85,7 +85,7 @@ runtime settings live under the selected `ar-coordination/` or memory root.
 ### Memory Retrieval Strategies
 
 - `Semantics`: Fuzzy search use GrepAI to search over onboardings. Leads to code routes & files using 1-to-1 file mapping backward.
-- `Relationship`: For code-relationsship questions use Code Graph Context (cgc).
+- `Relationship`: For code-relationship questions use Code Graph Context (cgc).
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation.
