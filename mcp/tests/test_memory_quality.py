@@ -63,7 +63,7 @@ def write_file_level_onboarding(
                 "",
                 "| Field                  | Value                                      |",
                 "| ---------------------- | ------------------------------------------ |",
-                "| repository             | agents-remember-md                         |",
+                "| repository             | agents-remember                         |",
                 f"| path                   | `{source_path}` |",
                 "| doc_type               | `file-level-onboarding`                    |",
                 f"| lastVerifiedCommitHash | `{commit_hash}` |",
@@ -204,7 +204,7 @@ class MemoryQualityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             onboarding = (
-                root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md" / "onboarding"
+                root / "ar-coordination" / "memory-repos" / "ar-agents-remember" / "onboarding"
             )
             write_onboarding(
                 onboarding / "example.md",
@@ -221,13 +221,13 @@ class MemoryQualityTests(unittest.TestCase):
 
             payload = memory_quality_check_payload(
                 config,
-                "agents-remember-md",
+                "agents-remember",
                 checks=["style.update_history.history_order"],
             )
 
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["operation"], "memory_quality_check")
-            self.assertEqual(payload["repoId"], "agents-remember-md")
+            self.assertEqual(payload["repoId"], "agents-remember")
             self.assertEqual(payload["findingCount"], 1)
             self.assertEqual(
                 payload["findings"][0]["check"],
@@ -242,7 +242,7 @@ class MemoryQualityTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = memory_quality_check_payload(config, "agents-remember-md")
+            payload = memory_quality_check_payload(config, "agents-remember")
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["findingCount"], 0)
@@ -254,8 +254,8 @@ class MemoryQualityTests(unittest.TestCase):
 
 
 def initialize_clean_memory_fixture(root: Path) -> None:
-    repo = root / "workspace" / "agents-remember-md"
-    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+    repo = root / "workspace" / "agents-remember"
+    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
     (memory / "system").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")

@@ -9,7 +9,7 @@ ar-coordination/skills/
 The canonical source copies live under:
 
 ```text
-agents-remember-md/skills/
+agents-remember/skills/
 ```
 
 After editing root `skills/`, run:

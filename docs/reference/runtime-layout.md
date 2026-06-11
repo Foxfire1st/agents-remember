@@ -7,7 +7,7 @@ MCP `runtime_install` tool reconciles those assets into `ar-coordination/`.
 ## Source Checkout
 
 ```text
-agents-remember-md/
+agents-remember/
   skills/                         # canonical skill source tree
   scripts/
     sync-skills.py                # copies root skills into generated targets

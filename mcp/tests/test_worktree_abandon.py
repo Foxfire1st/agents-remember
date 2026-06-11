@@ -38,10 +38,10 @@ def _settings() -> dict:
                         }
                     },
                     "backend": {
-                        "containerName": "ar-cgc-falkordb-projects-demo-ar-agents-remember-md",
+                        "containerName": "ar-cgc-falkordb-projects-demo-ar-agents-remember",
                         "network": {"name": "ar-cgc-code-projects-demo-ar"},
                     },
-                    "roots": [{"repoId": "agents-remember-md"}],
+                    "roots": [{"repoId": "agents-remember"}],
                 },
                 "grepai-memory": {
                     "runtime": {
@@ -52,7 +52,7 @@ def _settings() -> dict:
                     "embedder": {
                         "backend": {"containerName": "ar-grepai-ollama-projects-demo-ar"}
                     },
-                    "roots": [{"projectId": "agents-remember-md"}],
+                    "roots": [{"projectId": "agents-remember"}],
                 },
             }
         }
@@ -65,8 +65,8 @@ class DockerResourceDerivationTests(unittest.TestCase):
         self.assertEqual(
             set(containers),
             {
-                "ar-cgc-watcher-projects-demo-ar-agents-remember-md",  # template expanded per repo
-                "ar-cgc-falkordb-projects-demo-ar-agents-remember-md",
+                "ar-cgc-watcher-projects-demo-ar-agents-remember",  # template expanded per repo
+                "ar-cgc-falkordb-projects-demo-ar-agents-remember",
                 "ar-grepai-watcher-projects-demo-ar",
                 "ar-grepai-postgres-projects-demo-ar",
                 "ar-grepai-ollama-projects-demo-ar",
@@ -125,7 +125,7 @@ class ReclaimOwnershipTests(unittest.TestCase):
 class TeardownDryRunTests(unittest.TestCase):
     def test_dry_run_lists_resources_without_touching_docker_or_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            group = Path(tmp) / "worktrees" / "agents-remember-md" / "demo-ar"
+            group = Path(tmp) / "worktrees" / "agents-remember" / "demo-ar"
             settings_path = group / "provider-runtime" / "settings" / "provider-settings.json"
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             settings_path.write_text(json.dumps(_settings()), encoding="utf-8")
@@ -147,7 +147,7 @@ class TeardownDryRunTests(unittest.TestCase):
 
     def test_missing_settings_reports_not_found(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            group = Path(tmp) / "worktrees" / "agents-remember-md" / "demo-ar"
+            group = Path(tmp) / "worktrees" / "agents-remember" / "demo-ar"
             group.mkdir(parents=True, exist_ok=True)
             contract = cast(
                 WorktreeContract,

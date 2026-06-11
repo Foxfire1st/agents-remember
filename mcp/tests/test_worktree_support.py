@@ -1245,7 +1245,7 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             repo = workspace / "repo-a"
             repo.mkdir()
-            agents_repo = workspace / "agents-remember-md"
+            agents_repo = workspace / "agents-remember"
             agents_repo.mkdir()
             (agents_repo / ".env").write_text(
                 "AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8"
@@ -1291,7 +1291,7 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             repo = workspace / "repo-a"
             repo.mkdir()
-            agents_repo = workspace / "agents-remember-md"
+            agents_repo = workspace / "agents-remember"
             agents_repo.mkdir()
             (agents_repo / ".env.example").write_text(
                 "AR_COORDINATION_ROOT=example-coordination\n", encoding="utf-8"
@@ -1347,7 +1347,7 @@ class WorktreeSupportTests(unittest.TestCase):
             workspace = Path(tmp)
             repo = workspace / "repo-a"
             repo.mkdir()
-            agents_repo = workspace / "agents-remember-md"
+            agents_repo = workspace / "agents-remember"
             agents_repo.mkdir()
             with self.assertRaises(resolver.MissingMemoryError) as raised:
                 resolver.resolve_coordination_context(

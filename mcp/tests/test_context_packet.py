@@ -39,14 +39,14 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md"),
+                ContextPacketRequest(repo_id="agents-remember"),
             )
 
             self.assertTrue(packet["ok"])
             self.assertEqual(packet["operation"], "context_packet")
             self.assertEqual(packet["contextPacketVersion"], 2)
             self.assertEqual(packet["repo"]["state"], "available")
-            self.assertEqual(packet["repo"]["id"], "agents-remember-md")
+            self.assertEqual(packet["repo"]["id"], "agents-remember")
             self.assertTrue(packet["repo"]["head"])
             self.assertFalse(packet["repo"]["dirty"])
             self.assertNotIn("repoId", packet)
@@ -55,7 +55,7 @@ class ContextPacketTests(unittest.TestCase):
             self.assertNotIn("crossRepo", packet)
             self.assertEqual(
                 packet["paths"]["taskRoot"],
-                (root / "ar-coordination" / "tasks" / "agents-remember-md").as_posix(),
+                (root / "ar-coordination" / "tasks" / "agents-remember").as_posix(),
             )
             self.assertEqual(packet["memory"]["mode"], "external")
             self.assertIn("pathRules", packet["memory"]["storage"])
@@ -77,7 +77,7 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = context_packet_payload(
                 config,
-                "agents-remember-md",
+                "agents-remember",
                 include_providers=False,
                 include_drift=False,
             )
@@ -97,7 +97,7 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md", include_drift=True),
+                ContextPacketRequest(repo_id="agents-remember", include_drift=True),
             )
 
             self.assertEqual(packet["drift"]["status"], "checked")
@@ -117,8 +117,8 @@ class ContextPacketTests(unittest.TestCase):
     def test_reports_unavailable_git_facts_for_non_git_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            repo = root / "workspace" / "agents-remember-md"
-            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            repo = root / "workspace" / "agents-remember"
+            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
             repo.mkdir(parents=True, exist_ok=True)
             (memory / "system").mkdir(parents=True, exist_ok=True)
             (memory / "onboarding").mkdir(parents=True, exist_ok=True)
@@ -127,7 +127,7 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md"),
+                ContextPacketRequest(repo_id="agents-remember"),
             )
 
             self.assertFalse(packet["ok"])
@@ -138,11 +138,11 @@ class ContextPacketTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
-            repo = root / "workspace" / "agents-remember-md"
+            repo = root / "workspace" / "agents-remember"
             coordination_root = root / "ar-coordination"
             contract = default_contract(
                 task_name="Context Packet",
-                repo_name="agents-remember-md",
+                repo_name="agents-remember",
                 workflow_kind="light",
                 memory_mode="external",
                 coordination_root=coordination_root,
@@ -151,14 +151,14 @@ class ContextPacketTests(unittest.TestCase):
                 code_work_branch="ar/context-packet",
                 code_base_commit=current_head(repo),
                 worktree_name="context-packet",
-                memory_repo_path=coordination_root / "memory-repos" / "ar-agents-remember-md",
+                memory_repo_path=coordination_root / "memory-repos" / "ar-agents-remember",
                 memory_source_branch="main",
                 memory_work_branch="ar/context-packet-memory",
                 memory_base_commit=current_head(repo),
             )
             write_contract(contract.contract_path, contract)
             payload = settings_payload(root)
-            payload["repositories"]["agents-remember-md"]["contractPath"] = str(
+            payload["repositories"]["agents-remember"]["contractPath"] = str(
                 contract.contract_path
             )
             config_path = root / "mcp-settings.json"
@@ -167,7 +167,7 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md"),
+                ContextPacketRequest(repo_id="agents-remember"),
             )
 
             self.assertEqual(packet["worktree"]["state"], "active")
@@ -184,7 +184,7 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md"),
+                ContextPacketRequest(repo_id="agents-remember"),
             )
 
             self.assertEqual(packet["freshness"], {"status": "not-checked"})
@@ -197,7 +197,7 @@ class ContextPacketTests(unittest.TestCase):
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md", include_freshness=True),
+                ContextPacketRequest(repo_id="agents-remember", include_freshness=True),
             )
 
             freshness = packet["freshness"]
@@ -210,7 +210,7 @@ class ContextPacketTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
-            repo = root / "workspace" / "agents-remember-md"
+            repo = root / "workspace" / "agents-remember"
             bare = root / "origin.git"
             run_git(repo, ["clone", "--bare", str(repo), str(bare)])
             run_git(repo, ["remote", "add", "origin", str(bare)])
@@ -225,16 +225,16 @@ class ContextPacketTests(unittest.TestCase):
             run_git(other, ["add", "new.txt"])
             run_git(other, ["commit", "-m", "remote change"])
             run_git(other, ["push", "origin", "HEAD"])
-            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
             write_ledger(
                 memory / "memory.md",
-                create_initial_ledger("agents-remember-md", current_head(repo), "0" * 40),
+                create_initial_ledger("agents-remember", current_head(repo), "0" * 40),
             )
             config = write_and_load_config(root)
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md", include_freshness=True),
+                ContextPacketRequest(repo_id="agents-remember", include_freshness=True),
             )
 
             freshness = packet["freshness"]
@@ -246,16 +246,16 @@ class ContextPacketTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
-            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+            memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
             write_ledger(
                 memory / "memory.md",
-                create_initial_ledger("agents-remember-md", "1" * 40, "0" * 40),
+                create_initial_ledger("agents-remember", "1" * 40, "0" * 40),
             )
             config = write_and_load_config(root)
 
             packet = build_context_packet(
                 config,
-                ContextPacketRequest(repo_id="agents-remember-md", include_freshness=True),
+                ContextPacketRequest(repo_id="agents-remember", include_freshness=True),
             )
 
             self.assertFalse(packet["freshness"]["ledgerMapsCodeHead"])
@@ -269,7 +269,7 @@ class ContextPacketTests(unittest.TestCase):
 
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                exit_code = cli_main(["--config", str(config_path), "--repo", "agents-remember-md"])
+                exit_code = cli_main(["--config", str(config_path), "--repo", "agents-remember"])
 
             self.assertEqual(exit_code, 0)
             self.assertIn('"operation": "context_packet"', output.getvalue())
@@ -282,8 +282,8 @@ def write_and_load_config(root: Path):
 
 
 def initialize_context_fixture(root: Path) -> None:
-    repo = root / "workspace" / "agents-remember-md"
-    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+    repo = root / "workspace" / "agents-remember"
+    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
     (memory / "system").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
