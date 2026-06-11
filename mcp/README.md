@@ -1,9 +1,20 @@
-# Agents Remember MCP
+<h1 align="center">Agents Remember MCP</h1>
+
+<p align="center"> 
+📖 <b>Current docs:</b> https://foxfire1st.github.io/agents-remember-md/</br>
+🤖 <b>Machine-readable summary:</b> https://foxfire1st.github.io/agents-remember-md/llms.txt</br>
+ <i>Note: caches and search snippets may serve an outdated copy of this README — the docs site above is canonical and always current.</i>
+</p>
+
+##
+
+## What Is This MCP?
 
 `agents-remember-mcp` is the installable Model Context Protocol server for
 Agents Remember. It lets an MCP-capable coding harness call Agents Remember
 operations from the host instead of asking the model to edit or execute
 coordinator scripts directly.
+
 
 Source: [github.com/Foxfire1st/agents-remember-md](https://github.com/Foxfire1st/agents-remember-md)
 
