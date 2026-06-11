@@ -52,7 +52,7 @@ class ResolverCliTests(unittest.TestCase):
 
             context = run_package_resolver(
                 "--code-repository-name",
-                "agents-remember-md",
+                "agents-remember",
                 "--workspace-root",
                 str(fixture["workspace"]),
                 "--coordination-root",
@@ -71,7 +71,7 @@ class ResolverCliTests(unittest.TestCase):
 
             context = run_package_resolver(
                 "--code-repository-name",
-                "agents-remember-md",
+                "agents-remember",
                 "--code-repository-root",
                 str(fixture["repo"]),
                 "--topology",
@@ -92,7 +92,7 @@ class ResolverCliTests(unittest.TestCase):
             memory = fixture["memory"]
             contract = default_contract(
                 task_name="Resolver Parity",
-                repo_name="agents-remember-md",
+                repo_name="agents-remember",
                 workflow_kind="light",
                 memory_mode="external",
                 coordination_root=coordination,
@@ -110,7 +110,7 @@ class ResolverCliTests(unittest.TestCase):
 
             context = run_package_resolver(
                 "--code-repository-name",
-                "agents-remember-md",
+                "agents-remember",
                 "--workspace-root",
                 str(fixture["workspace"]),
                 "--contract-path",
@@ -134,9 +134,9 @@ def assert_context_shape(
 def create_external_fixture(root: Path) -> dict[str, Path]:
     workspace = root / "workspace"
     coordination = root / "ar-coordination"
-    repo = workspace / "agents-remember-md"
+    repo = workspace / "agents-remember"
     adjacent = workspace / "repo-b"
-    memory = coordination / "memory-repos" / "ar-agents-remember-md"
+    memory = coordination / "memory-repos" / "ar-agents-remember"
     initialize_git_repo(repo)
     initialize_git_repo(adjacent)
     create_memory_settings(memory, topology="external", expected_branch=current_branch(adjacent))
@@ -150,7 +150,7 @@ def create_external_fixture(root: Path) -> dict[str, Path]:
 
 def create_internal_fixture(root: Path) -> dict[str, Path]:
     workspace = root / "workspace"
-    repo = workspace / "agents-remember-md"
+    repo = workspace / "agents-remember"
     memory = repo / "ar-memory"
     initialize_git_repo(repo)
     create_memory_settings(memory, topology="internal")

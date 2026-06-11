@@ -43,12 +43,12 @@ another restart point.
 ```text
 projects/
   AGENTS.md
-  agents-remember-md/
+  agents-remember/
   my-app/
   ar-coordination/
 ```
 
-`agents-remember-md` is the source checkout. `ar-coordination` is the installed runtime and local coordination area. `my-app` is the repository you want agents to work on.
+`agents-remember` is the source checkout. `ar-coordination` is the installed runtime and local coordination area. `my-app` is the repository you want agents to work on.
 
 ## Copy The Harness Package
 

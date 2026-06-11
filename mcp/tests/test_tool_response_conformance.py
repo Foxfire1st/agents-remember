@@ -45,7 +45,7 @@ from test_worktree_support import (
     write_file_onboarding,
 )
 
-REPO = "agents-remember-md"
+REPO = "agents-remember"
 
 
 def _write_json(path: Path, data: dict) -> None:

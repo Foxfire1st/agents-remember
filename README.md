@@ -6,7 +6,7 @@
 </h3>
 
 <p align="center">
-  <img alt="NPM License" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FFoxfire1st%2Fagents-remember-md%2Fmain%2Fmcp%2Fpyproject.toml">
+  <img alt="NPM License" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FFoxfire1st%2Fagents-remember%2Fmain%2Fmcp%2Fpyproject.toml">
 </p>
 
 <p align="center"> 
@@ -76,7 +76,7 @@ It then reads the source file and its onboarding note together before proposing 
 ## Live Demo
 
 Agents Remember runs on itself. The companion memory repo is:
-https://github.com/Foxfire1st/ar-agents-remember-md
+https://github.com/Foxfire1st/ar-agents-remember
 
 That repo contains the live onboarding layer, so you can inspect how by-path memory, drift-aware updates, and contribution-time onboarding look in practice.
 
@@ -147,7 +147,7 @@ After that, normal work runs through the `l-01-session-job-lifecycle` skill. The
 ## Repository Layout
 
 ```text
-agents-remember-md/
+agents-remember/
   AGENTS.md                         # source checkout instructions
   README.md                         # public front door
   skills/                           # canonical skill source tree
@@ -208,4 +208,4 @@ Following semantic versioning from `1.0.0`, these public contracts will not chan
 
 Contributions should make the memory layer clearer, safer, and easier to apply consistently. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and keep the core rules intact: drift check before planning, approval before implementation, and onboarding updates only after approved changes.
 
-Agents Remember runs on itself, so the best way to contribute is with the memory layer active. Download or clone this project's own memory at [Foxfire1st/ar-agents-remember-md](https://github.com/Foxfire1st/ar-agents-remember-md) and use it as the Agents Remember memory for your checkout: you get the project's by-path onboarding at the moment you edit, and your onboarding updates land alongside your code changes — the same loop this repo asks of every contribution.
+Agents Remember runs on itself, so the best way to contribute is with the memory layer active. Download or clone this project's own memory at [Foxfire1st/ar-agents-remember](https://github.com/Foxfire1st/ar-agents-remember) and use it as the Agents Remember memory for your checkout: you get the project's by-path onboarding at the moment you edit, and your onboarding updates land alongside your code changes — the same loop this repo asks of every contribution.

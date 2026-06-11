@@ -474,13 +474,13 @@ class ProviderSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             coordination_root = root / "ar-coordination"
-            isolated_root = root / "worktrees" / "agents-remember-md" / "task" / "provider-runtime"
-            target_repo = root / "worktrees" / "agents-remember-md" / "task" / "code"
+            isolated_root = root / "worktrees" / "agents-remember" / "task" / "provider-runtime"
+            target_repo = root / "worktrees" / "agents-remember" / "task" / "code"
             args = argparse.Namespace(
                 coordination_root=coordination_root,
                 cgc_isolated_runtime_root=isolated_root,
                 cgc_seed_target_repo_root=target_repo,
-                cgc_seed_repo_id="agents-remember-md",
+                cgc_seed_repo_id="agents-remember",
                 cgc_isolated_container_name=None,
             )
             settings = {
@@ -502,8 +502,8 @@ class ProviderSetupTests(unittest.TestCase):
                             },
                             "roots": [
                                 {
-                                    "repoId": "agents-remember-md",
-                                    "path": "<workspace_root>/agents-remember-md",
+                                    "repoId": "agents-remember",
+                                    "path": "<workspace_root>/agents-remember",
                                 }
                             ],
                         }
@@ -522,7 +522,7 @@ class ProviderSetupTests(unittest.TestCase):
 
             self.assertEqual(
                 cgc["roots"],
-                [{"repoId": "agents-remember-md", "path": target_repo.resolve().as_posix()}],
+                [{"repoId": "agents-remember", "path": target_repo.resolve().as_posix()}],
             )
             self.assertEqual(cgc["instance"]["id"], instance_id)
             self.assertEqual(cgc["instance"]["scope"], "worktree")
@@ -573,7 +573,7 @@ class ProviderSetupTests(unittest.TestCase):
             )
             self.assertEqual(
                 cgc["backend"]["containerName"],
-                f"ar-cgc-falkordb-{instance_id}-agents-remember-md",
+                f"ar-cgc-falkordb-{instance_id}-agents-remember",
             )
             self.assertEqual(
                 cgc["backend"]["network"]["name"],
@@ -584,14 +584,14 @@ class ProviderSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             coordination_root = root / "ar-coordination"
-            isolated_root = root / "worktrees" / "agents-remember-md" / "task" / "provider-runtime"
-            source_memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
-            target_memory = root / "worktrees" / "agents-remember-md" / "task" / "memory"
+            isolated_root = root / "worktrees" / "agents-remember" / "task" / "provider-runtime"
+            source_memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
+            target_memory = root / "worktrees" / "agents-remember" / "task" / "memory"
             other_memory = root / "ar-coordination" / "memory-repos" / "ar-other-repo"
             args = argparse.Namespace(
                 coordination_root=coordination_root,
                 grepai_isolated_runtime_root=isolated_root,
-                grepai_seed_project_id="agents-remember-md",
+                grepai_seed_project_id="agents-remember",
                 grepai_seed_target_memory_root=target_memory,
                 grepai_allow_missing_roots=True,
             )
@@ -605,7 +605,7 @@ class ProviderSetupTests(unittest.TestCase):
                             "runtimeRoot": "<coordination_root>/providers/runners/grepai",
                             "roots": [
                                 {
-                                    "projectId": "agents-remember-md",
+                                    "projectId": "agents-remember",
                                     "path": source_memory.as_posix(),
                                 },
                                 {"projectId": "other-repo", "path": other_memory.as_posix()},
@@ -653,17 +653,17 @@ class ProviderSetupTests(unittest.TestCase):
                 f"ar-grepai-watcher-{instance_id}",
             )
             roots = {root["projectId"]: root["path"] for root in grepai["roots"]}
-            self.assertEqual(roots["agents-remember-md"], target_memory.resolve().as_posix())
+            self.assertEqual(roots["agents-remember"], target_memory.resolve().as_posix())
             self.assertEqual(roots["other-repo"], other_memory.as_posix())
 
     def test_run_provider_setup_warm_starts_isolated_grepai_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             coordination_root = root / "ar-coordination"
-            source_memory = coordination_root / "memory-repos" / "ar-agents-remember-md"
+            source_memory = coordination_root / "memory-repos" / "ar-agents-remember"
             other_memory = coordination_root / "memory-repos" / "ar-other-repo"
-            target_memory = root / "worktrees" / "agents-remember-md" / "task" / "memory"
-            isolated_root = root / "worktrees" / "agents-remember-md" / "task" / "provider-runtime"
+            target_memory = root / "worktrees" / "agents-remember" / "task" / "memory"
+            isolated_root = root / "worktrees" / "agents-remember" / "task" / "provider-runtime"
             source_memory.mkdir(parents=True)
             other_memory.mkdir(parents=True)
             settings_path = root / "provider-settings.json"
@@ -681,7 +681,7 @@ class ProviderSetupTests(unittest.TestCase):
                                     ).as_posix(),
                                     "roots": [
                                         {
-                                            "projectId": "agents-remember-md",
+                                            "projectId": "agents-remember",
                                             "path": source_memory.as_posix(),
                                         },
                                         {
@@ -706,12 +706,12 @@ class ProviderSetupTests(unittest.TestCase):
                     grepai_seed=provider_setup.GrepaiSeedOptions(
                         source_coordination_root=coordination_root,
                         source_settings_path=settings_path,
-                        project_id="agents-remember-md",
+                        project_id="agents-remember",
                         target_memory_root=target_memory,
                     ),
                     grepai_isolated=provider_setup.IsolatedGrepaiOptions(
                         runtime_root=isolated_root,
-                        project_id="agents-remember-md",
+                        project_id="agents-remember",
                         target_memory_root=target_memory,
                         allow_missing_roots=True,
                     ),
@@ -733,7 +733,7 @@ class ProviderSetupTests(unittest.TestCase):
             target_settings = payload["isolatedProviderSettings"]["settings"]
             grepai = target_settings["contextProviders"]["providers"]["grepai-memory"]
             roots = {root["projectId"]: root["path"] for root in grepai["roots"]}
-            self.assertEqual(roots["agents-remember-md"], target_memory.resolve().as_posix())
+            self.assertEqual(roots["agents-remember"], target_memory.resolve().as_posix())
             self.assertEqual(roots["other-repo"], other_memory.as_posix())
 
     def test_grepai_clone_uses_non_isolated_target_settings(self) -> None:

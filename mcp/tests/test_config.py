@@ -27,7 +27,7 @@ def settings_payload(root: Path) -> dict:
         "version": 1,
         "coordinationRoot": str(coordination_root),
         "workspaceRoot": str(workspace_root),
-        "repositories": {"agents-remember-md": {}},
+        "repositories": {"agents-remember": {}},
         "providers": {
             "codegraphcontext-code": {},
             "grepai-memory": {},
@@ -47,7 +47,7 @@ class LifecycleSettingsDerivationTests(unittest.TestCase):
         hosts kept a cached guard-less image under the guard entrypoint."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            (root / "workspace" / "agents-remember-md").mkdir(parents=True)
+            (root / "workspace" / "agents-remember").mkdir(parents=True)
             path = root / ".harness" / "mcp-settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
@@ -98,7 +98,7 @@ class McpConfigTests(unittest.TestCase):
 
             config = load_config(path)
 
-            self.assertEqual(config.allowed_repo_ids, ("agents-remember-md",))
+            self.assertEqual(config.allowed_repo_ids, ("agents-remember",))
             self.assertEqual(
                 config.allowed_provider_ids,
                 ("codegraphcontext-code", "grepai-memory"),
@@ -110,12 +110,12 @@ class McpConfigTests(unittest.TestCase):
             )
             self.assertEqual(config.harness_skill_root, root / ".codex" / "skills")
             self.assertEqual(
-                config.repositories["agents-remember-md"].path,
-                root / "workspace" / "agents-remember-md",
+                config.repositories["agents-remember"].path,
+                root / "workspace" / "agents-remember",
             )
-            memory_root = config.repositories["agents-remember-md"].memory_root
+            memory_root = config.repositories["agents-remember"].memory_root
             assert memory_root is not None
-            self.assertEqual(memory_root.name, "ar-agents-remember-md")
+            self.assertEqual(memory_root.name, "ar-agents-remember")
             self.assertEqual(config.providers["grepai-memory"].scope, "workspace")
             self.assertEqual(config.providers["grepai-memory"].instance_id, "workspace")
             self.assertEqual(
@@ -252,7 +252,7 @@ class McpConfigTests(unittest.TestCase):
             worktree_runtime = (
                 coordination_root
                 / "worktrees"
-                / "agents-remember-md"
+                / "agents-remember"
                 / "provider-task"
                 / "provider-runtime"
             )
@@ -270,7 +270,7 @@ class McpConfigTests(unittest.TestCase):
     def test_repository_memory_root_prefers_internal_ar_memory_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            repo_root = root / "workspace" / "agents-remember-md"
+            repo_root = root / "workspace" / "agents-remember"
             internal_memory = repo_root / "ar-memory"
             internal_memory.mkdir(parents=True)
             path = root / ".codex" / "mcp" / "settings.json"
@@ -278,13 +278,13 @@ class McpConfigTests(unittest.TestCase):
 
             config = load_config(path)
 
-            self.assertEqual(config.repositories["agents-remember-md"].memory_root, internal_memory)
+            self.assertEqual(config.repositories["agents-remember"].memory_root, internal_memory)
             grepai_roots = lifecycle_settings_from_config(config)["contextProviders"][
                 "providers"
             ]["grepai-memory"]["roots"]
             self.assertEqual(
                 grepai_roots,
-                [{"projectId": "agents-remember-md", "path": internal_memory.as_posix()}],
+                [{"projectId": "agents-remember", "path": internal_memory.as_posix()}],
             )
 
     def test_harness_skill_root_is_none_without_registration_folder(self) -> None:
@@ -313,15 +313,15 @@ class McpConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             payload = settings_payload(root)
-            payload["repositories"]["agents-remember-md"]["contractPath"] = (
-                "tasks/agents-remember-md/task/contract.md"
+            payload["repositories"]["agents-remember"]["contractPath"] = (
+                "tasks/agents-remember/task/contract.md"
             )
             path = root / "mcp-settings.json"
             write_json(path, payload)
 
             config = load_config(path)
 
-            contract_path = config.repositories["agents-remember-md"].contract_path
+            contract_path = config.repositories["agents-remember"].contract_path
             assert contract_path is not None
             self.assertEqual(contract_path.name, "contract.md")
 
@@ -329,12 +329,12 @@ class McpConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             payload = settings_payload(root)
-            payload["repositories"]["agents-remember-md"]["memorySettingsIncludes"] = [
+            payload["repositories"]["agents-remember"]["memorySettingsIncludes"] = [
                 str(
                     root
                     / "ar-coordination"
                     / "memory-repos"
-                    / "ar-agents-remember-md"
+                    / "ar-agents-remember"
                     / "system"
                     / "settings.json"
                 ),
@@ -377,7 +377,7 @@ class McpConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             payload = settings_payload(root)
-            payload["repositories"]["agents-remember-md"]["contractPath"] = str(
+            payload["repositories"]["agents-remember"]["contractPath"] = str(
                 root / "outside" / "contract.md"
             )
             path = root / "mcp-settings.json"

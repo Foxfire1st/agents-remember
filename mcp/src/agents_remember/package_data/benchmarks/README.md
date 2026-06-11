@@ -18,12 +18,12 @@ runtime_install(dry_run=false, include_benchmarks=true)
 Then inspect or run them through the MCP benchmark tools:
 
 ```text
-codex_benchmark_prepare(target="case", case_id="agents-remember-md-drift-workflow")
-codex_benchmark_run(target="case", case_id="agents-remember-md-drift-workflow", dry_run=true)
+codex_benchmark_prepare(target="case", case_id="agents-remember-drift-workflow")
+codex_benchmark_run(target="case", case_id="agents-remember-drift-workflow", dry_run=true)
 ```
 
 For source-package debugging, run the package module from a checkout where
-`agents-remember-md/mcp/src` is on `PYTHONPATH`.
+`agents-remember/mcp/src` is on `PYTHONPATH`.
 
 Benchmark preparation copies the runtime skill tree into the memory-enabled
 workspace by default. Use `--skill-exposure-mode none` only when skill discovery
@@ -33,7 +33,7 @@ is handled outside the benchmark harness.
 
 | Case                                | Size (files) | Repository                                                                                            | Status        |
 | ----------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------- | ------------- |
-| `agents-remember-md-drift-workflow` | 104          | `https://github.com/Foxfire1st/ai-infinite-context.git` at `403883337d2d0479dc2da02d1ce2a1a0f3983b93` | draft fixture |
+| `agents-remember-drift-workflow` | 104          | `https://github.com/Foxfire1st/ai-infinite-context.git` at `403883337d2d0479dc2da02d1ce2a1a0f3983b93` | draft fixture |
 | `tensorflow-check-numerics-xla`     | 36320        | `https://github.com/tensorflow/tensorflow.git` at `2020b5919c5b66b8672438bed85d0ca88d434438`          | draft fixture |
 
 ## Layout
@@ -63,7 +63,7 @@ benchmarks/
           mcp/
             agents-remember-benchmark.settings.json
           skills/
-            agents-remember-md/ # copied tree from ar-coordination/skills
+            agents-remember/ # copied tree from ar-coordination/skills
         AGENTS.md              # rendered from templates/workspace-AGENTS.md
         ar-coordination/
           AGENTS.md
@@ -87,7 +87,7 @@ Each prompt has comparable variants:
 - `with-onboarding`: Codex works from `workspaces/<case-id>/with-memory/`, where `ar-coordination/` resolves to the cloned pinned external memory and `repos/<repo>/` contains the same pinned checkout.
 - `with-onboarding-warm`: when present, Codex starts from the same memory-enabled workspace but treats the benchmark-local memory as already validated, so it can test steady-state memory use without spending the run on startup resolver and drift gates.
 
-The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.codex/skills/agents-remember-md` and registers the benchmark-local MCP server through `.codex/config.toml`, so the harness loads the same skills and MCP surface that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.codex` tree. The runner copies that tree by default.
+The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.codex/skills/agents-remember` and registers the benchmark-local MCP server through `.codex/config.toml`, so the harness loads the same skills and MCP surface that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.codex` tree. The runner copies that tree by default.
 
 Each prompt defaults to three repetitions per variant. For each repetition, the selected variants are placed under the same dated run root and submitted together when the job count allows parallelism. The runner writes raw JSONL, stderr, final messages, metadata, and generated summaries under `user-runs/`.
 

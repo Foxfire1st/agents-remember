@@ -126,9 +126,9 @@ class DriftMainCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_clean_memory_fixture(root)
-            repo = root / "workspace" / "agents-remember-md"
+            repo = root / "workspace" / "agents-remember"
             coordination = root / "ar-coordination"
-            onboarding = coordination / "memory-repos" / "ar-agents-remember-md" / "onboarding"
+            onboarding = coordination / "memory-repos" / "ar-agents-remember" / "onboarding"
 
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):

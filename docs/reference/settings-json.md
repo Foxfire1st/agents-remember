@@ -106,7 +106,7 @@ watch settings internally.
   "workspaceRoot": "C:/absolute/path/to/workspace",
   "transcriptRoot": "C:/absolute/path/to/ar-coordination/logs/mcp",
   "repositories": {
-    "agents-remember-md": {
+    "agents-remember": {
       "memorySettingsIncludes": [],
       "contractPath": null
     }

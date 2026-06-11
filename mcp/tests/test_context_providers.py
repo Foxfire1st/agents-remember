@@ -200,8 +200,8 @@ class ContextProviderLayoutTests(unittest.TestCase):
             root = Path(tmp)
             layout = cgc_runtime_layout(
                 coordination_root=root / "ar-coordination",
-                repo_id="agents-remember-md",
-                code_repo_root=root / "agents-remember-md",
+                repo_id="agents-remember",
+                code_repo_root=root / "agents-remember",
                 cgcignore_patterns=("tools/ffmpeg/",),
             )
 
@@ -244,8 +244,8 @@ class ContextProviderLayoutTests(unittest.TestCase):
             coordination_root = root / "ar-coordination"
             layout = cgc_runtime_layout(
                 coordination_root=coordination_root,
-                repo_id="agents-remember-md",
-                code_repo_root=root / "agents-remember-md",
+                repo_id="agents-remember",
+                code_repo_root=root / "agents-remember",
             )
             ensure_cgc_runtime_layout(layout)
             stale = layout.runtime_root.parent / "my-app" / ".codegraphcontext"

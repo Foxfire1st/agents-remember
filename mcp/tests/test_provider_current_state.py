@@ -99,7 +99,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertEqual(payload["state"], "degraded")
             cgc_state = payload["providers"]["codegraphcontext-code"]
             self.assertEqual(cgc_state["state"], "degraded")
-            repo_state = cgc_state["resources"]["watchers"]["agents-remember-md"]
+            repo_state = cgc_state["resources"]["watchers"]["agents-remember"]
             self.assertFalse(repo_state["watcherUp"])
             self.assertEqual(repo_state["containerState"], "exited")
             self.assertEqual(repo_state["indexingState"], "unknown")
@@ -245,7 +245,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             payload = current_state.build_current_provider_state(config, status)
 
             cgc_state = payload["providers"]["codegraphcontext-code"]
-            repo_state = cgc_state["resources"]["watchers"]["agents-remember-md"]
+            repo_state = cgc_state["resources"]["watchers"]["agents-remember"]
             self.assertEqual(repo_state["state"], "degraded")
             self.assertFalse(repo_state["ok"])
             self.assertEqual(repo_state["indexingState"], "empty")
@@ -268,7 +268,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             payload = current_state.build_current_provider_state(config, status)
 
             cgc_state = payload["providers"]["codegraphcontext-code"]
-            repo_state = cgc_state["resources"]["watchers"]["agents-remember-md"]
+            repo_state = cgc_state["resources"]["watchers"]["agents-remember"]
             self.assertEqual(repo_state["state"], "ready")
             self.assertEqual(repo_state["indexingState"], "indexing")
             self.assertEqual(cgc_state["state"], "ready")
@@ -304,7 +304,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
                 for action in providers["recoveryActions"]
                 if action.get("provider") == "codegraphcontext-code"
             ]
-            self.assertEqual(recovery[0]["repoId"], "agents-remember-md")
+            self.assertEqual(recovery[0]["repoId"], "agents-remember")
             self.assertIn("provider_watchers(action='restart')", recovery[0]["recoveryAction"])
 
     def test_provider_summary_lists_indexing_targets_without_degrading(self) -> None:
@@ -331,7 +331,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertTrue(providers["ok"])
             self.assertEqual(
                 providers["indexing"],
-                ["codegraphcontext-code:agents-remember-md"],
+                ["codegraphcontext-code:agents-remember"],
             )
             self.assertEqual(
                 [
@@ -359,7 +359,7 @@ class ProviderCurrentStateTests(unittest.TestCase):
             payload = current_state.build_current_provider_state(config, status)
 
             repo_state = payload["providers"]["codegraphcontext-code"]["resources"]["watchers"][
-                "agents-remember-md"
+                "agents-remember"
             ]
             self.assertFalse(repo_state["watcherUp"])
             self.assertNotEqual(repo_state["state"], "ready")
@@ -454,11 +454,11 @@ def ready_status_payload(root: Path) -> dict:
                         "provider": "codegraphcontext",
                         "action": "status",
                         "ok": True,
-                        "repoId": "agents-remember-md",
+                        "repoId": "agents-remember",
                         "indexingState": "unknown",
                         "process": {
                             "alive": True,
-                            "containerName": "ar-cgc-watcher-workspace-agents-remember-md",
+                            "containerName": "ar-cgc-watcher-workspace-agents-remember",
                             "containerState": running_container_state(),
                         },
                     }

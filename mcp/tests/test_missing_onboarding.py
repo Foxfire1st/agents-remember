@@ -99,18 +99,18 @@ class MissingOnboardingTests(unittest.TestCase):
     def test_cli_uses_git_common_dir_name_for_renamed_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            repo, _unused_onboarding = initialize_repo(root, repo_name="agents-remember-md")
+            repo, _unused_onboarding = initialize_repo(root, repo_name="agents-remember")
             worktree = root / "worktrees" / "mcp_and_refactor"
             run_git(repo, ["worktree", "add", "-b", "feature/mcp-and-refactor", str(worktree)])
             write_source(worktree / "mcp" / "src" / "new.py")
 
             coordination_root = root / "ar-coordination"
-            memory_root = coordination_root / "memory-repos" / "ar-agents-remember-md"
+            memory_root = coordination_root / "memory-repos" / "ar-agents-remember"
             onboarding = memory_root / "onboarding"
             write_sidecar(
                 onboarding / "mcp" / "src" / "new.py.md",
                 "mcp/src/new.py",
-                repo_name="agents-remember-md",
+                repo_name="agents-remember",
             )
             system_root = memory_root / "system"
             system_root.mkdir(parents=True, exist_ok=True)

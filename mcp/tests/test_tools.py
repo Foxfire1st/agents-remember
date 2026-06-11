@@ -102,7 +102,7 @@ class McpToolTests(unittest.TestCase):
                 payload["harnessSkillRoot"],
                 (root / ".codex" / "skills").as_posix(),
             )
-            self.assertEqual(payload["allowedRepoIds"], ["agents-remember-md"])
+            self.assertEqual(payload["allowedRepoIds"], ["agents-remember"])
             self.assertEqual(
                 payload["allowedProviderIds"],
                 ["codegraphcontext-code", "grepai-memory"],
@@ -150,12 +150,12 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = context_packet_payload(config, "agents-remember-md")
+            payload = context_packet_payload(config, "agents-remember")
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "context_packet")
             self.assertEqual(payload["contextPacketVersion"], 2)
-            self.assertEqual(payload["repo"]["id"], "agents-remember-md")
+            self.assertEqual(payload["repo"]["id"], "agents-remember")
             self.assertNotIn("repoId", payload)
             self.assertEqual(payload["providers"]["state"], "failed")
             self.assertNotIn("currentState", payload["providers"])
@@ -399,10 +399,10 @@ class McpToolTests(unittest.TestCase):
                 ),
             ):
                 payloads = [
-                    memory_baseline_status_payload(config, "agents-remember-md"),
+                    memory_baseline_status_payload(config, "agents-remember"),
                     memory_carryover_plan_payload(
                         config,
-                        "agents-remember-md",
+                        "agents-remember",
                         source_memory=(
                             root / "ar-coordination" / "memory-repos" / "branch-memory"
                         ).as_posix(),
@@ -512,14 +512,14 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = memory_init_payload(config, "agents-remember-md")
+            payload = memory_init_payload(config, "agents-remember")
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "memory_init")
             self.assertFalse(payload["dryRun"])
             self.assertEqual(
                 payload["memoryRoot"],
-                (root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md").as_posix(),
+                (root / "ar-coordination" / "memory-repos" / "ar-agents-remember").as_posix(),
             )
 
     def test_route_index_refresh_payload_applies_by_default(self) -> None:
@@ -530,7 +530,7 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = route_index_refresh_payload(config, "agents-remember-md")
+            payload = route_index_refresh_payload(config, "agents-remember")
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["operation"], "route_index_refresh")
@@ -555,7 +555,7 @@ class McpToolTests(unittest.TestCase):
                     (
                         cgc_symbol_search_payload(
                             config,
-                            "agents-remember-md",
+                            "agents-remember",
                             "resolve_context",
                             dry_run=True,
                         ),
@@ -564,7 +564,7 @@ class McpToolTests(unittest.TestCase):
                     (
                         cgc_callers_payload(
                             config,
-                            "agents-remember-md",
+                            "agents-remember",
                             "resolve_context",
                             file="mcp/src/agents_remember/mcp/tools.py",
                             dry_run=True,
@@ -580,7 +580,7 @@ class McpToolTests(unittest.TestCase):
                     (
                         cgc_callees_payload(
                             config,
-                            "agents-remember-md",
+                            "agents-remember",
                             "resolve_context",
                             dry_run=True,
                         ),
@@ -589,7 +589,7 @@ class McpToolTests(unittest.TestCase):
                     (
                         cgc_dependencies_payload(
                             config,
-                            "agents-remember-md",
+                            "agents-remember",
                             "agents_remember.mcp",
                             dry_run=True,
                         ),
@@ -598,14 +598,14 @@ class McpToolTests(unittest.TestCase):
                     (
                         cgc_complexity_payload(
                             config,
-                            "agents-remember-md",
+                            "agents-remember",
                             function="resolve_context",
                             dry_run=True,
                         ),
                         ["analyze", "complexity", "resolve_context"],
                     ),
                     (
-                        cgc_complexity_payload(config, "agents-remember-md", dry_run=True),
+                        cgc_complexity_payload(config, "agents-remember", dry_run=True),
                         ["analyze", "complexity"],
                     ),
                 ]
@@ -629,7 +629,7 @@ class McpToolTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not allowed"):
                 cgc_callers_payload(config, "other-repo", "resolve_context")
             with self.assertRaisesRegex(ValueError, "function"):
-                cgc_callees_payload(config, "agents-remember-md", "")
+                cgc_callees_payload(config, "agents-remember", "")
 
     def test_grepai_search_builds_workspace_wide_and_multi_repo_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -651,7 +651,7 @@ class McpToolTests(unittest.TestCase):
             scoped_payload = grepai_search_payload(
                 config,
                 "provider lifecycle",
-                repo_ids=["agents-remember-md", "other-repo"],
+                repo_ids=["agents-remember", "other-repo"],
                 limit=5,
                 output_format="toon",
                 dry_run=True,
@@ -685,7 +685,7 @@ class McpToolTests(unittest.TestCase):
                 "5",
                 "--toon",
                 "--project",
-                "agents-remember-md",
+                "agents-remember",
                 "--project",
                 "other-repo",
             ],
@@ -748,7 +748,7 @@ class McpToolTests(unittest.TestCase):
                 config,
                 "graph",
                 "resolve_context",
-                repo_ids=["agents-remember-md"],
+                repo_ids=["agents-remember"],
                 depth=3,
                 dry_run=True,
             )
@@ -767,7 +767,7 @@ class McpToolTests(unittest.TestCase):
                 "--depth",
                 "3",
                 "--project",
-                "agents-remember-md",
+                "agents-remember",
             ],
         )
 
@@ -814,7 +814,7 @@ class RealMcpIntegrationTests(unittest.TestCase):
                 "grepai_search",
                 {
                     "query": "provider lifecycle",
-                    "repo_ids": ["agents-remember-md"],
+                    "repo_ids": ["agents-remember"],
                     "limit": 1,
                     "output_format": "json",
                     "dry_run": False,
@@ -828,7 +828,7 @@ class RealMcpIntegrationTests(unittest.TestCase):
         self.assertIn("--workspace", command)
         self.assertIn("agents-remember-memory", command)
         self.assertIn("--project", command)
-        self.assertIn("agents-remember-md", command)
+        self.assertIn("agents-remember", command)
 
     async def call_tool(self, name: str, arguments: dict[str, object]) -> dict:
         params = StdioServerParameters(
@@ -851,8 +851,8 @@ class RealMcpIntegrationTests(unittest.TestCase):
 
 
 def initialize_context_fixture(root: Path) -> None:
-    repo = root / "workspace" / "agents-remember-md"
-    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember-md"
+    repo = root / "workspace" / "agents-remember"
+    memory = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
     (memory / "system").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")

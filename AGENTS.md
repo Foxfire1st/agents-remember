@@ -10,7 +10,7 @@ on a sibling repository, use the installed runtime instructions instead:
 <workspace>/ar-coordination/AGENTS.md
 ```
 
-When working on this repository itself, use `agents-remember-md` as the target
+When working on this repository itself, use `agents-remember` as the target
 code repository for resolver, onboarding, workflow, and closeout commands.
 
 ## Start Here — Enter the Job Lifecycle
@@ -50,7 +50,7 @@ Agents Remember context with `c-08-ar-coordination-context-resolver`.
 For this source checkout, the normal resolver input is:
 
 ```text
-code_repository_name = agents-remember-md
+code_repository_name = agents-remember
 ```
 
 After the `c-08-ar-coordination-context-resolver` skill resolves the target repository and coordination root, prefer the
@@ -60,7 +60,7 @@ Provider authority comes from the MCP settings file.
 If the MCP settings configure providers, request:
 
 ```text
-context_packet(repo_id="agents-remember-md", include_providers=true)
+context_packet(repo_id="agents-remember", include_providers=true)
 ```
 
 Skip this provider check when no MCP server is configured or the MCP settings
@@ -133,7 +133,7 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 ## Code Quality Instructions
 
 After implementing Python code in this source checkout, run Ruff, Pyright, and
-Radon from the `agents-remember-md/` source repository root. Use the resolved memory
+Radon from the `agents-remember/` source repository root. Use the resolved memory
 layer's `system/tools.md` for the exact Ruff, Pyright, Radon, test, build, smoke-check,
 branch, and local command guidance. Use `system/coding-guidelines.md` when
 present for repo-specific coding rules. Use `system/code-quality-report-template.md`

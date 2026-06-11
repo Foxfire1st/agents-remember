@@ -15,7 +15,7 @@ External memory is useful when:
 
 ```text
 projects/
-  agents-remember-md/
+  agents-remember/
   ar-coordination/
     AGENTS.md
     skills/

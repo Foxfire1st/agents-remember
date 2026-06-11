@@ -2,7 +2,7 @@
 
 Agents Remember separates four surfaces that are easy to confuse:
 
-- the `agents-remember-md` source checkout
+- the `agents-remember` source checkout
 - the installed `ar-coordination` runtime
 - a target code repository
 - the target repository's memory root
@@ -10,7 +10,7 @@ Agents Remember separates four surfaces that are easy to confuse:
 ## Source Checkout
 
 ```text
-agents-remember-md/
+agents-remember/
   mcp/
     src/agents_remember/
       install/
