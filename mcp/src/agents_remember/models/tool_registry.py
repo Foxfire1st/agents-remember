@@ -55,8 +55,6 @@ from agents_remember.models.providers import (
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.worktree import (
-    DirectCloseoutApplyResponse,
-    DirectCloseoutPreviewResponse,
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
     WorktreeCleanupResponse,
@@ -96,8 +94,6 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "worktree_sync": WorktreeSyncResponse,
     "worktree_closeout_preview": WorktreeCloseoutPreviewResponse,
     "worktree_closeout_apply": WorktreeCloseoutApplyResponse,
-    "direct_closeout_preview": DirectCloseoutPreviewResponse,
-    "direct_closeout_apply": DirectCloseoutApplyResponse,
     "worktree_integrate": WorktreeIntegrateResponse,
     "worktree_cleanup": WorktreeCleanupResponse,
     "worktree_abandon": WorktreeAbandonResponse,

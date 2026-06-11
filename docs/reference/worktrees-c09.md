@@ -12,7 +12,6 @@ Use the `c-09-git-worktree-manager` skill when:
 - a task needs isolated code and memory worktrees
 - external-memory closeout needs code and memory commits mapped in `memory.md`
 - the developer wants explicit status, closeout, integration, and cleanup gates
-- a small approved current-checkout edit needs external-memory direct closeout
 
 ## Worktree-Backed Tasks
 

@@ -63,8 +63,6 @@ from agents_remember.models.tokens import (
 from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import (
     CleanupStatus,
-    DirectCloseoutApplyResponse,
-    DirectCloseoutPreviewResponse,
     HumanReviewStatus,
     IntegrationStatus,
     LifecycleStatus,
@@ -102,8 +100,6 @@ __all__ = [
     "CodexBenchmarkRunResponse",
     "ContextPacketV2",
     "ContextProviderItem",
-    "DirectCloseoutApplyResponse",
-    "DirectCloseoutPreviewResponse",
     "DriftCheckResponse",
     "DriftSummary",
     "FlexibleResponseModel",

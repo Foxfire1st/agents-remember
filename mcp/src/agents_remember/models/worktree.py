@@ -107,14 +107,6 @@ class WorktreeCloseoutApplyResponse(WorktreeCommandResponse):
     operation: Literal["worktree_closeout_apply"] = "worktree_closeout_apply"
 
 
-class DirectCloseoutPreviewResponse(WorktreeCommandResponse):
-    operation: Literal["direct_closeout_preview"] = "direct_closeout_preview"
-
-
-class DirectCloseoutApplyResponse(WorktreeCommandResponse):
-    operation: Literal["direct_closeout_apply"] = "direct_closeout_apply"
-
-
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
 

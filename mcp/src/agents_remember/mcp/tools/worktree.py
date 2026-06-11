@@ -1,12 +1,10 @@
-"""Worktree lifecycle and direct-closeout payload builders."""
+"""Worktree lifecycle payload builders."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from agents_remember.controllers.worktree_tools import (
-    direct_closeout_apply_tool,
-    direct_closeout_preview_tool,
     worktree_abandon_tool,
     worktree_attach_tool,
     worktree_cleanup_tool,
@@ -150,58 +148,6 @@ def worktree_closeout_apply_payload(
         worktree_closeout_apply_tool(
             config,
             contract_path=contract_path,
-            intent_note=intent_note,
-            code_commit_message=code_commit_message,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-            dry_run=dry_run,
-        ),
-    )
-
-
-def direct_closeout_preview_payload(
-    config: McpRuntimeConfig,
-    repo_id: str,
-    task_name: str,
-    code_commit_message: str,
-    *,
-    source_branch: str | None = None,
-    memory_commit_message: str = "",
-    ledger_commit_message: str = "",
-) -> dict[str, Any]:
-    return _tool_payload(
-        "direct_closeout_preview",
-        direct_closeout_preview_tool(
-            config,
-            repo_id=repo_id,
-            task_name=task_name,
-            source_branch=source_branch,
-            code_commit_message=code_commit_message,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-        ),
-    )
-
-
-def direct_closeout_apply_payload(
-    config: McpRuntimeConfig,
-    repo_id: str,
-    task_name: str,
-    intent_note: str,
-    code_commit_message: str,
-    *,
-    source_branch: str | None = None,
-    memory_commit_message: str = "",
-    ledger_commit_message: str = "",
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "direct_closeout_apply",
-        direct_closeout_apply_tool(
-            config,
-            repo_id=repo_id,
-            task_name=task_name,
-            source_branch=source_branch,
             intent_note=intent_note,
             code_commit_message=code_commit_message,
             memory_commit_message=memory_commit_message,

@@ -61,8 +61,6 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `worktree_status` | Report worktree lifecycle phase, dirty flags, and next-step hints. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory/ledger commit messages |
 | `worktree_closeout_apply` | Apply a worktree closeout after explicit commit approval. | `contract_path`, `intent_note`, commit messages |
-| `direct_closeout_preview` | Non-mutating preview of a direct (current-checkout) closeout. | `repo_id`, `task_name`, `code_commit_message`, … |
-| `direct_closeout_apply` | Apply a direct closeout (code → memory → ledger) after explicit commit approval. | `repo_id`, `task_name`, `intent_note`, commit messages |
 | `worktree_integrate` | Land closed task branches back onto source branches (`ff-only` or `replay`). | `contract_path`, `strategy`, `dry_run=false` |
 | `worktree_cleanup` | Remove worktrees and merged task branches after integration. | `contract_path`, `dry_run=false` |
 

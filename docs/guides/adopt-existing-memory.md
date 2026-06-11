@@ -27,4 +27,4 @@ When ready, ask the agent to run the `c-10-adopt-memory-baseline` skill adoption
 
 ## After Adoption
 
-Future external-memory work can use `c-09-git-worktree-manager` worktrees or `c-12-closeout` direct closeout. The ledger gives those flows a known baseline for code-memory compatibility.
+Future external-memory work runs through `c-09-git-worktree-manager` worktrees with `c-12-closeout` worktree closeout. The ledger gives that flow a known baseline for code-memory compatibility.

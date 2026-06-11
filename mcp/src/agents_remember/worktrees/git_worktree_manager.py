@@ -21,7 +21,6 @@ from agents_remember.worktrees.modules.cli import (
     command_attach,
     command_cleanup,
     command_closeout,
-    command_direct_closeout,
     command_integrate,
     command_start,
     command_status,
@@ -31,9 +30,6 @@ from agents_remember.worktrees.modules.cli import (
 from agents_remember.worktrees.modules.closeout import (
     closeout_preview_payload,
     closeout_result,
-    direct_closeout_preview_payload,
-    direct_closeout_result,
-    validate_direct_external_context,
 )
 from agents_remember.worktrees.modules.context import contract_context, resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -121,7 +117,6 @@ __all__ = [
     "command_attach",
     "command_cleanup",
     "command_closeout",
-    "command_direct_closeout",
     "command_integrate",
     "command_start",
     "command_status",
@@ -135,8 +130,6 @@ __all__ = [
     "current_branch",
     "delete_branch_force",
     "delete_branch_if_merged",
-    "direct_closeout_preview_payload",
-    "direct_closeout_result",
     "ensure_git_identity",
     "ensure_worktree",
     "entity_fingerprint_refresh_plan",
@@ -176,7 +169,6 @@ __all__ = [
     "status_result",
     "sync_result",
     "teardown_worktree_providers",
-    "validate_direct_external_context",
     "validate_integrate_contract",
     "validate_onboarding_refresh_plan",
     "validate_onboarding_refresh_plan_for_context",
