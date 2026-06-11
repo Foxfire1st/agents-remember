@@ -26,9 +26,8 @@ closeout. Research and triage jobs usually exit here; they may recommend or spaw
 ### Chat build
 
 A code change small enough to carry inline this session: worktree-backed, with no durable task file.
-After approval, small external-memory edits close through `c-12-closeout` direct closeout, which
-commits code first, refreshes onboarding metadata to that code commit, commits memory, then updates
-the ledger. (This is the path the retired chat workflow used to own.)
+After approval, the build closes through the `c-12-closeout` worktree closeout, which commits code
+first, refreshes onboarding metadata to that code commit, commits memory, then updates the ledger.
 
 ### Durable task (`w-02-light-task-workflow`)
 
@@ -58,15 +57,6 @@ lifecycle, integration, and cleanup; `c-12-closeout` runs the closeout itself. A
 Closeout and commit approval are separate from implementation approval. The agent presents a dry-run
 preview before any `c-12-closeout` closeout creates commits. The git-landing flow (direct vs PR-gated) is
 deferred to the repo's `system/git-workflow.md` when present.
-
-## Direct Closeout
-
-The normal 2.0.0 build path is worktree-backed (only read-only exits skip it). The
-`direct_closeout_preview` / `direct_closeout_apply` MCP tools remain available as a
-**controlled exception** for current-checkout maintenance — small memory or doc updates
-where spinning up a worktree adds unnecessary ceremony. Use them only when the developer
-explicitly approves a current-checkout closeout; for normal code changes, prefer the
-worktree-backed path above.
 
 ## Choosing A Build Mode
 

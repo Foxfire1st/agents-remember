@@ -42,8 +42,6 @@ from .providers import (
     provider_watchers_payload,
 )
 from .worktree import (
-    direct_closeout_apply_payload,
-    direct_closeout_preview_payload,
     worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
@@ -68,8 +66,6 @@ __all__ = [
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",
     "context_packet_payload",
-    "direct_closeout_apply_payload",
-    "direct_closeout_preview_payload",
     "drift_check_payload",
     "grepai_search_payload",
     "grepai_trace_payload",

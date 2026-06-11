@@ -39,7 +39,18 @@ Only proven tiers are auto-carry candidates. Same-path overlap is review-require
 - `would-carryover`: dry-run plan with candidate decisions.
 - `carried-over`: official memory content and ledger commits were created.
 - `nothing-to-carryover`: no selected candidate changed official memory.
+- `ledger-mapped-head`: nothing was actionable, but an unmapped official code HEAD (e.g. a PR merge commit) was mapped to the current memory content commit and the ledger committed.
 - `blocked`: apply was requested without approval, dirty official memory, missing ledger, or missing required candidate data.
+
+Every apply result also reports `memory_main_advance` (GitHub #54): after the
+carryover commits exist, memory `main` is fast-forwarded to the official
+checkout tip — code `main` advances via the PR merge, but memory has no PR
+flow, so non-main cycles previously left memory `main` behind indefinitely.
+States: `fast-forwarded`, `already-current` (main checked out or already at
+tip), `diverged` (independent commits on main — reported, never forced),
+`failed` (e.g. main checked out in another worktree), `skipped` (no main
+branch). After carryover, push memory `main` per the repo's git workflow when
+the developer approves.
 
 ## Boundaries
 

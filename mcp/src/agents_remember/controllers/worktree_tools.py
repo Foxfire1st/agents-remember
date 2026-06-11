@@ -179,56 +179,6 @@ def worktree_closeout_apply_tool(
     )
 
 
-def direct_closeout_preview_tool(
-    config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    task_name: str,
-    code_commit_message: str,
-    source_branch: str | None = None,
-    memory_commit_message: str = "",
-    ledger_commit_message: str = "",
-) -> dict[str, Any]:
-    return _direct_closeout(
-        config,
-        operation="direct_closeout_preview",
-        repo_id=repo_id,
-        task_name=task_name,
-        source_branch=source_branch,
-        intent_note="",
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
-        dry_run=True,
-    )
-
-
-def direct_closeout_apply_tool(
-    config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    task_name: str,
-    intent_note: str,
-    code_commit_message: str,
-    source_branch: str | None = None,
-    memory_commit_message: str = "",
-    ledger_commit_message: str = "",
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    return _direct_closeout(
-        config,
-        operation="direct_closeout_apply",
-        repo_id=repo_id,
-        task_name=task_name,
-        source_branch=source_branch,
-        intent_note=intent_note,
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
-        dry_run=dry_run,
-    )
-
-
 def worktree_integrate_tool(
     config: McpRuntimeConfig,
     *,
@@ -324,32 +274,3 @@ def _worktree_closeout(
         dry_run=dry_run,
     )
     return _worktree_result(operation, git_worktree_manager.closeout_result(args))
-
-
-def _direct_closeout(
-    config: McpRuntimeConfig,
-    *,
-    operation: str,
-    repo_id: str,
-    task_name: str,
-    source_branch: str | None,
-    intent_note: str,
-    code_commit_message: str,
-    memory_commit_message: str,
-    ledger_commit_message: str,
-    dry_run: bool,
-) -> dict[str, Any]:
-    repo = require_repo(config, repo_id)
-    args = _worktree_namespace(
-        config,
-        repo,
-        task_name=task_name,
-        source_branch=source_branch,
-        code_commit_message=code_commit_message,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
-        approval_note=intent_note,
-        approved=not dry_run,
-        dry_run=dry_run,
-    )
-    return _worktree_result(operation, git_worktree_manager.direct_closeout_result(args))

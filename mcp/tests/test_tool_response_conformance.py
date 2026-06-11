@@ -166,40 +166,6 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     return payloads
 
 
-def _direct_closeout_payloads(root: Path) -> dict[str, dict]:
-    """External-memory direct-checkout fixture for the direct closeout tools."""
-    code_repo = root / "repo-a"
-    init_repo(code_repo, "main")
-    code_base = commit_file(code_repo, "feature.txt", "old\n", "Add feature baseline")
-    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
-    initialized_memory_repo(memory_repo, "repo-a", "main", "main", code_base)
-    write_file_onboarding(memory_repo / "onboarding", "repo-a", "feature.txt", code_base)
-    git(memory_repo, "add", "onboarding")
-    git(memory_repo, "commit", "-m", "Document feature baseline")
-    (code_repo / "feature.txt").write_text("new\n", encoding="utf-8")
-
-    settings = settings_payload(root)
-    settings["workspaceRoot"] = str(root)
-    settings["repositories"] = {"repo-a": {}}
-    path = root / ".codex" / "mcp" / "settings.json"
-    _write_json(path, settings)
-    config = load_config(path)
-    return {
-        "direct_closeout_preview": tools.direct_closeout_preview_payload(
-            config, "repo-a", "Direct Task", "code commit message", source_branch="main"
-        ),
-        "direct_closeout_apply": tools.direct_closeout_apply_payload(
-            config,
-            "repo-a",
-            "Direct Task",
-            "intent note",
-            "code commit message",
-            source_branch="main",
-            dry_run=True,
-        ),
-    }
-
-
 def _carryover_payloads(root: Path) -> dict[str, dict]:
     """Landed-branch fixture for the c-11-memory-carryover-from-branch skill carryover tools."""
     code_repo = root / "repo-a"
@@ -257,12 +223,11 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(4)]
-        base, worktree, direct, carryover = (Path(d) for d in cls._temp_dirs)
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(3)]
+        base, worktree, carryover = (Path(d) for d in cls._temp_dirs)
         cls.payloads = {}
         cls.payloads.update(_simple_payloads(_base_fixture(base)))
         cls.payloads.update(_worktree_payloads(worktree))
-        cls.payloads.update(_direct_closeout_payloads(direct))
         cls.payloads.update(_carryover_payloads(carryover))
 
     @classmethod

@@ -185,8 +185,8 @@ Incremental, pushable commits keep the work-loss window small. Each closeout bel
 
 Land the work. **Implementation approval is not commit approval.**
 
-1. Run the `c-09-git-worktree-manager` closeout **preview** for the worktree (`worktree_closeout_preview`) — or
-   `direct_closeout_preview` only if the repo's `git-workflow.md` permits a direct-checkout build.
+1. Run the `c-09-git-worktree-manager` closeout **preview** for the worktree (`worktree_closeout_preview`).
+   Every build closes through its worktree — there is no direct-checkout closeout.
    Relay the proposed code, memory, and ledger commit messages.
 2. **Commit gate:** stop for explicit developer commit approval before any real commit or closeout
    apply. If required onboarding is missing, run the `c-05-create-or-update-onboarding-files` skill for the affected file and re-run the preview.
