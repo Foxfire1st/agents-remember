@@ -15,6 +15,7 @@ from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
     commit_date,
     commit_if_dirty,
+    committed_changed_paths,
     head_commit,
     require_git,
     worktree_dirty,
@@ -25,6 +26,7 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import (
+    PATH_SAMPLE_LIMIT,
     EntityFingerprintRefreshPlan,
     OnboardingRefreshPlan,
     RouteOverviewBodyClassification,
@@ -35,6 +37,7 @@ from agents_remember.worktrees.modules.models import (
 from agents_remember.worktrees.modules.onboarding import (
     classify_route_overview_updates,
     classify_sidecar_updates,
+    contract_memory_verified_commit,
     entity_fingerprint_refresh_plan,
     onboarding_refresh_plan,
     refresh_entity_fingerprints_for_context,
@@ -47,6 +50,50 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_route_overview_refresh_plan,
 )
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+
+
+def closeout_changed_paths(contract) -> dict[str, list[str]]:
+    """Closeout worklist: working-tree changes plus the unverified committed range.
+
+    ``committed`` covers commits the task transports (merges, pre-committed
+    slices) that no previous closeout verified; ``working`` keeps the strict
+    dirty-tree tier. A path in both tiers counts as working.
+    """
+    working = changed_worktree_paths(contract.code_worktree)
+    committed = committed_changed_paths(
+        contract.code_worktree, contract.code_base_commit, contract.code_commit
+    )
+    committed_only = sorted(set(committed) - set(working))
+    return {
+        "all": sorted({*working, *committed_only}),
+        "working": working,
+        "committed": committed_only,
+    }
+
+
+def _bounded_paths(paths: list[str]) -> dict[str, object]:
+    """Count plus capped sample so committed-range lists never flood the payload."""
+    return {"count": len(paths), "sample": paths[:PATH_SAMPLE_LIMIT]}
+
+
+def _bounded_refresh_plan_view(plan: OnboardingRefreshPlan) -> dict[str, object]:
+    """Payload view of the sidecar plan: blockers stay full, scaling lists bounded."""
+    return {
+        "required": _bounded_paths([item["source_path"] for item in plan["required"]]),
+        "missing": plan["missing"],
+        "unsupported": plan["unsupported"],
+        "unonboarded": _bounded_paths(plan["unonboarded"]),
+    }
+
+
+def _bounded_classification_view(
+    classification: SidecarBodyClassification,
+) -> dict[str, object]:
+    return {
+        "stale": _bounded_paths(classification["stale"]),
+        "untraced": _bounded_paths(classification["untraced"]),
+        "attested_no_impact": _bounded_paths(classification["attested_no_impact"]),
+    }
 
 
 def _refresh_plans_have_work(
@@ -71,14 +118,16 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     )
     code_dirty = worktree_dirty(contract.code_worktree)
     memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
-    changed_paths = changed_worktree_paths(contract.code_worktree)
+    worklist = closeout_changed_paths(contract)
+    changed_paths = worklist["all"]
     metadata_refresh: OnboardingRefreshPlan = (
-        onboarding_refresh_plan(contract, changed_paths)
+        onboarding_refresh_plan(contract, changed_paths, working_paths=worklist["working"])
         if contract.memory_mode == "external"
         else {
             "required": [],
             "missing": [],
             "unsupported": [],
+            "unonboarded": [],
         }
     )
     entity_refresh: EntityFingerprintRefreshPlan = (
@@ -112,6 +161,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             _closeout_contract_context(contract),
             metadata_refresh,
             memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
         )
         if contract.memory_mode == "external"
         else {
@@ -126,6 +176,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             route_overview_refresh,
             changed_paths,
             memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
         )
         if contract.memory_mode == "external"
         else {
@@ -163,10 +214,11 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "commit-ledger",
             "update-contract",
         ],
-        "changed_code_paths": changed_paths,
-        "onboarding_metadata_refresh": metadata_refresh,
-        "sidecar_body_gate": sidecar_body_gate,
-        "sidecars_attested_no_impact": sidecar_body_gate["attested_no_impact"],
+        "changed_code_paths": _bounded_paths(changed_paths),
+        "changed_code_paths_committed": _bounded_paths(worklist["committed"]),
+        "onboarding_metadata_refresh": _bounded_refresh_plan_view(metadata_refresh),
+        "sidecar_body_gate": _bounded_classification_view(sidecar_body_gate),
+        "sidecars_attested_no_impact": _bounded_paths(sidecar_body_gate["attested_no_impact"]),
         "entity_fingerprint_refresh": entity_refresh,
         "route_overview_metadata_refresh": route_overview_refresh,
         "route_overview_body_gate": route_overview_body_gate,
@@ -284,6 +336,8 @@ def _external_closeout_commits(
     changed_paths: list[str],
     code_commit: str,
     code_commit_date: str,
+    *,
+    working_paths: list[str],
 ) -> tuple[
     str,
     str,
@@ -297,10 +351,15 @@ def _external_closeout_commits(
         raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
     context = _closeout_contract_context(contract)
     refreshed_onboarding = refresh_onboarding_metadata(
-        contract, changed_paths, code_commit, code_commit_date
+        contract, changed_paths, code_commit, code_commit_date, working_paths=working_paths
     )
     refreshed_route_overviews = refresh_route_overview_metadata_for_context(
-        context, changed_paths, code_commit, code_commit_date
+        context,
+        changed_paths,
+        code_commit,
+        code_commit_date,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
     )
     refreshed_entities = refresh_entity_fingerprints_for_context(
         context, changed_paths
@@ -335,14 +394,22 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     approval_note = _closeout_approval_note(args)
 
-    changed_paths = changed_worktree_paths(contract.code_worktree)
+    worklist = closeout_changed_paths(contract)
+    changed_paths = worklist["all"]
     attested_sidecars: list[str] = []
     attested_overviews: list[str] = []
     stamped_overviews: list[str] = []
+    unonboarded_paths: list[str] = []
     if contract.memory_mode == "external":
-        sidecar_plan = validate_onboarding_refresh_plan(contract, changed_paths)
+        sidecar_plan = validate_onboarding_refresh_plan(
+            contract, changed_paths, working_paths=worklist["working"]
+        )
+        unonboarded_paths = sidecar_plan["unonboarded"]
         attested_sidecars = classify_sidecar_updates(
-            contract_context(contract), sidecar_plan, memory_tree=contract.memory_worktree
+            contract_context(contract),
+            sidecar_plan,
+            memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
         )["attested_no_impact"]
         overview_plan = validate_route_overview_refresh_plan(contract, changed_paths)
         overview_gate = classify_route_overview_updates(
@@ -350,6 +417,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             overview_plan,
             changed_paths,
             memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
         )
         attested_overviews = overview_gate["attested_no_impact"]
         stamped_overviews = overview_gate["stamped_without_body_review"]
@@ -371,8 +439,13 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             refreshed_route_overviews,
             route_index_refresh,
             memory_quality,
-        ) = (
-            _external_closeout_commits(contract, args, changed_paths, code_commit, code_commit_date)
+        ) = _external_closeout_commits(
+            contract,
+            args,
+            changed_paths,
+            code_commit,
+            code_commit_date,
+            working_paths=worklist["working"],
         )
     updated = replace(
         contract,
@@ -394,8 +467,11 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "code_commit": code_commit,
             "memory_content_commit": memory_commit,
             "ledger_commit": ledger_commit,
-            "refreshed_onboarding": refreshed_onboarding,
-            "sidecars_attested_no_impact": attested_sidecars,
+            "refreshed_onboarding": _bounded_paths(
+                [item["source_path"] for item in refreshed_onboarding]
+            ),
+            "sidecars_attested_no_impact": _bounded_paths(attested_sidecars),
+            "unonboarded_changed_paths": _bounded_paths(unonboarded_paths),
             "refreshed_entities": refreshed_entities,
             "refreshed_route_overviews": refreshed_route_overviews,
             "route_overviews_attested_no_impact": attested_overviews,

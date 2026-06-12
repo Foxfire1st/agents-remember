@@ -25,6 +25,24 @@ or build-mode decisions proceed.
                                                    +-- research-only (e.g. investigation, code questions...)
 ```
 
+## Gate Protocol — Report Turn, Then Action Turn
+
+Every lifecycle gate — reframe agreement, plan gate, worktree intent, commit
+approval, push approval, integration, cleanup — is **two turns, never one**:
+
+1. **Report turn.** Deliver the complete gate report as plain assistant output
+   (the reframe, the plan, the intent packet, or the closeout relay with
+   preview facts, quality results, proposed commit messages, and
+   attestations), and end the turn with the approval question as the last
+   line of prose.
+2. **Action turn.** Invoke the gated tool only after the developer replies.
+
+The report turn must not contain anything that can raise an approval mechanism
+over the text: no structured question widget, no mutating tool call, no
+permission-triggering operation. Harnesses render approval prompts over or
+instead of same-turn prose, so a report attached to its own approval prompt is
+a report the developer never sees.
+
 ## 0 — Request
 
 Receive the developer's raw request and identify the active repository.

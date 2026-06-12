@@ -40,6 +40,7 @@ from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.integrate import _merge_integrated_commits
 from agents_remember.worktrees.modules.models import (
+    PATH_SAMPLE_LIMIT,
     OnboardingRefreshPlan,
     RouteOverviewRefreshPlan,
 )
@@ -283,6 +284,63 @@ def dirty_open_external_contract_fixture(root: Path):
         "feature.txt",
         contract.code_base_commit,
     )
+    return contract
+
+
+def committed_range_external_contract_fixture(root: Path):
+    """Open external contract whose changes are already committed on the work branch.
+
+    The feature.txt sidecar exists at the memory baseline so the body gate can
+    classify it, feature.txt and raw.txt arrive via work-branch commits
+    (raw.txt has no onboarding), and the working tree is clean.
+    """
+    code_repo = root / "repo-a"
+    code_base = init_repo(code_repo, "main")
+    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
+    memory_seed = init_repo(memory_repo, "main")
+    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
+    write_file_onboarding(memory_repo / "onboarding", "repo-a", "feature.txt", code_base)
+    git(memory_repo, "add", "-A")
+    git(memory_repo, "commit", "-m", "Add memory baseline")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    contract = default_contract(
+        task_name="Committed Range Thing",
+        repo_name="repo-a",
+        workflow_kind="chat",
+        memory_mode="external",
+        coordination_root=root / "ar-coordination",
+        code_repo_path=code_repo,
+        code_source_branch="main",
+        code_work_branch="ar/committed-range-thing",
+        code_base_commit=code_base,
+        worktree_name="committed-range-thing",
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_work_branch="ar/committed-range-thing",
+        memory_base_commit=memory_base,
+    )
+    assert contract.memory_worktree is not None
+    git(
+        code_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.code_work_branch,
+        str(contract.code_worktree),
+        "main",
+    )
+    git(
+        memory_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.memory_work_branch,
+        str(contract.memory_worktree),
+        "main",
+    )
+    commit_file(contract.code_worktree, "feature.txt", "feature v2\n", "Add feature")
+    commit_file(contract.code_worktree, "raw.txt", "raw\n", "Add raw transport")
+    write_contract(contract.contract_path, contract)
     return contract
 
 
@@ -757,10 +815,20 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertIn(
                 "refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"]
             )
-            self.assertEqual(payload["changed_code_paths"], ["feature.txt"])
+            self.assertEqual(
+                payload["changed_code_paths"], {"count": 1, "sample": ["feature.txt"]}
+            )
+            self.assertEqual(
+                payload["changed_code_paths_committed"], {"count": 0, "sample": []}
+            )
             self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
             self.assertEqual(
-                payload["onboarding_metadata_refresh"]["required"][0]["source_path"], "feature.txt"
+                payload["onboarding_metadata_refresh"]["required"],
+                {"count": 1, "sample": ["feature.txt"]},
+            )
+            self.assertEqual(
+                payload["onboarding_metadata_refresh"]["unonboarded"],
+                {"count": 0, "sample": []},
             )
             self.assertEqual(payload["entity_fingerprint_refresh"]["required"], [])
             self.assertTrue(payload["proposed_commits"]["code"]["would_commit"])
@@ -823,6 +891,23 @@ class WorktreeSupportTests(unittest.TestCase):
             paths = worktree_manager.changed_worktree_paths(repo)
 
             self.assertIn(source_path, paths)
+
+    def test_committed_changed_paths_intersects_base_and_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo-a"
+            base = init_repo(repo, "main")
+            first = commit_file(repo, "a.txt", "a\n", "Add a")
+            second = commit_file(repo, "b.txt", "b\n", "Add b")
+
+            self.assertEqual(
+                worktree_manager.committed_changed_paths(repo, base, ""), ["a.txt", "b.txt"]
+            )
+            self.assertEqual(worktree_manager.committed_changed_paths(repo, base, first), ["b.txt"])
+            self.assertEqual(worktree_manager.committed_changed_paths(repo, base, second), [])
+
+            git(repo, "rm", "-q", "a.txt")
+            git(repo, "commit", "-m", "Delete a")
+            self.assertEqual(worktree_manager.committed_changed_paths(repo, base, ""), ["b.txt"])
 
     def test_onboarding_refresh_plan_detects_long_sidecar_paths(self) -> None:
         with long_path_tempdir() as root:
@@ -945,6 +1030,186 @@ class WorktreeSupportTests(unittest.TestCase):
                 worktree_manager.command_closeout(args)
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_preview_covers_committed_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = committed_range_external_contract_fixture(root)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=False,
+                approval_note="",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=True,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(
+                payload["changed_code_paths"],
+                {"count": 2, "sample": ["feature.txt", "raw.txt"]},
+            )
+            self.assertEqual(
+                payload["changed_code_paths_committed"],
+                {"count": 2, "sample": ["feature.txt", "raw.txt"]},
+            )
+            self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
+            self.assertEqual(
+                payload["onboarding_metadata_refresh"]["unonboarded"],
+                {"count": 1, "sample": ["raw.txt"]},
+            )
+            self.assertEqual(
+                payload["sidecar_body_gate"]["stale"],
+                {"count": 1, "sample": ["feature.txt"]},
+            )
+            self.assertFalse(payload["proposed_commits"]["code"]["would_commit"])
+            self.assertTrue(payload["proposed_commits"]["memory"]["would_commit"])
+
+    def test_closeout_apply_stamps_committed_range_to_existing_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = committed_range_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            sidecar = contract.memory_worktree / "onboarding" / "feature.txt.md"
+            sidecar.write_text(
+                sidecar.read_text(encoding="utf-8")
+                + "\nDocumented the transported change.\n\n## Update History\n\n"
+                + "- 2026-06-12T18:00 — Reviewed the merged feature change.\n",
+                encoding="utf-8",
+            )
+            code_head = git(contract.code_worktree, "rev-parse", "HEAD")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["code_commit"], code_head)
+            self.assertEqual(read_onboarding_field(sidecar, "lastVerifiedCommitHash"), code_head)
+            self.assertEqual(
+                payload["refreshed_onboarding"], {"count": 1, "sample": ["feature.txt"]}
+            )
+            self.assertEqual(
+                payload["unonboarded_changed_paths"], {"count": 1, "sample": ["raw.txt"]}
+            )
+            ledger = parse_ledger_text(
+                (contract.memory_worktree / "memory.md").read_text(encoding="utf-8")
+            )
+            self.assertEqual(ledger.last_verified_code_commit, code_head)
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "completed")
+
+    def test_closeout_blocks_stale_sidecar_for_committed_range_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = committed_range_external_contract_fixture(root)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=True,
+                approval_note="developer approved commit preview",
+                code_commit_message="Add feature",
+                memory_commit_message="Document feature",
+                ledger_commit_message="Sync ledger",
+                dry_run=False,
+            )
+            with self.assertRaisesRegex(RuntimeError, "feature.txt"):
+                worktree_manager.command_closeout(args)
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_second_closeout_does_not_regate_prior_closeout_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            commit_file(contract.code_worktree, "second.txt", "second\n", "Add second slice")
+            write_file_onboarding(
+                contract.memory_worktree / "onboarding",
+                contract.repo_name,
+                "second.txt",
+                contract.code_commit,
+            )
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=False,
+                approval_note="",
+                code_commit_message="Add second slice",
+                memory_commit_message="Document second slice",
+                ledger_commit_message="Sync ledger",
+                dry_run=True,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(
+                payload["changed_code_paths"], {"count": 1, "sample": ["second.txt"]}
+            )
+            self.assertEqual(payload["sidecar_body_gate"]["stale"], {"count": 0, "sample": []})
+
+    def test_closeout_excludes_sync_transported_committed_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = closed_external_contract_fixture(root)
+            commit_file(contract.code_repo_path, "other.txt", "other\n", "Parallel landing")
+            new_main = git(contract.code_repo_path, "rev-parse", "HEAD")
+            git(contract.code_worktree, "merge", "--no-ff", "-m", "Sync main", "main")
+            synced = replace(contract, code_base_commit=new_main)
+            write_contract(synced.contract_path, synced)
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=False,
+                approval_note="",
+                code_commit_message="No-op",
+                memory_commit_message="No-op",
+                ledger_commit_message="No-op",
+                dry_run=True,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["changed_code_paths"], {"count": 0, "sample": []})
+            self.assertEqual(
+                payload["changed_code_paths_committed"], {"count": 0, "sample": []}
+            )
+
+    def test_closeout_preview_bounds_committed_path_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = committed_range_external_contract_fixture(root)
+            for index in range(PATH_SAMPLE_LIMIT + 5):
+                (contract.code_worktree / f"bulk-{index:02d}.txt").write_text(
+                    "x\n", encoding="utf-8"
+                )
+            git(contract.code_worktree, "add", "-A")
+            git(contract.code_worktree, "commit", "-m", "Bulk transport")
+            args = Namespace(
+                contract_path=contract.contract_path,
+                approved=False,
+                approval_note="",
+                code_commit_message="Bulk",
+                memory_commit_message="Bulk",
+                ledger_commit_message="Bulk",
+                dry_run=True,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(args), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["changed_code_paths"]["count"], PATH_SAMPLE_LIMIT + 7)
+            self.assertEqual(len(payload["changed_code_paths"]["sample"]), PATH_SAMPLE_LIMIT)
+            unonboarded = payload["onboarding_metadata_refresh"]["unonboarded"]
+            self.assertEqual(unonboarded["count"], PATH_SAMPLE_LIMIT + 6)
+            self.assertEqual(len(unonboarded["sample"]), PATH_SAMPLE_LIMIT)
 
     def test_closeout_blocks_memory_commit_when_memory_quality_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2633,6 +2898,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
             "required": [{"source_path": "src/app.py", "onboarding_file": sidecar.as_posix()}],
             "missing": [],
             "unsupported": [],
+            "unonboarded": [],
         }
         return memory_repo, sidecar, plan
 
@@ -2710,8 +2976,60 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
                 ],
                 "missing": [],
                 "unsupported": [],
+                "unonboarded": [],
             }
             attested = require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
+            self.assertEqual(attested, [])
+
+    def test_passes_committed_sidecar_update_against_verified_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
+            verified = git(memory_repo, "rev-parse", "HEAD")
+            self._append(
+                sidecar,
+                "\nUpdated body.\n\n## Update History\n\n"
+                "- 2026-06-12T18:00 — Documented the merged change.\n",
+            )
+            git(memory_repo, "add", "-A")
+            git(memory_repo, "commit", "-m", "Update sidecar before closeout")
+            attested = require_updated_sidecar_content(
+                None, plan, memory_tree=memory_repo, memory_verified_commit=verified
+            )
+            self.assertEqual(attested, [])
+
+    def test_blocks_committed_sidecar_unchanged_since_verified_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, _sidecar, plan = self._setup(Path(tmp_dir))
+            verified = git(memory_repo, "rev-parse", "HEAD")
+            (memory_repo / "unrelated.md").write_text("# Unrelated\n", encoding="utf-8")
+            git(memory_repo, "add", "-A")
+            git(memory_repo, "commit", "-m", "Unrelated memory change")
+            with self.assertRaises(RuntimeError) as caught:
+                require_updated_sidecar_content(
+                    None, plan, memory_tree=memory_repo, memory_verified_commit=verified
+                )
+            self.assertIn("src/app.py", str(caught.exception))
+
+    def test_passes_new_sidecar_committed_after_verified_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, _sidecar, _plan = self._setup(Path(tmp_dir))
+            verified = git(memory_repo, "rev-parse", "HEAD")
+            onboarding_root = memory_repo / "onboarding"
+            write_file_onboarding(onboarding_root, "demo-repo", "src/new.py", "0" * 40)
+            git(memory_repo, "add", "-A")
+            git(memory_repo, "commit", "-m", "Add sidecar before closeout")
+            new_sidecar = onboarding_root / "src" / "new.py.md"
+            plan: OnboardingRefreshPlan = {
+                "required": [
+                    {"source_path": "src/new.py", "onboarding_file": new_sidecar.as_posix()}
+                ],
+                "missing": [],
+                "unsupported": [],
+                "unonboarded": [],
+            }
+            attested = require_updated_sidecar_content(
+                None, plan, memory_tree=memory_repo, memory_verified_commit=verified
+            )
             self.assertEqual(attested, [])
 
     def test_noop_when_no_required_sidecars(self) -> None:
@@ -2719,7 +3037,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
             memory_repo, _sidecar, _plan = self._setup(Path(tmp_dir))
             attested = require_updated_sidecar_content(
                 None,
-                {"required": [], "missing": [], "unsupported": []},
+                {"required": [], "missing": [], "unsupported": [], "unonboarded": []},
                 memory_tree=memory_repo,
             )
             self.assertEqual(attested, [])

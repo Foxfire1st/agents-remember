@@ -39,6 +39,13 @@ records the developer's explicit commit approval. Agents must not treat
 implementation approval, a previous "looks good", or their own judgment as
 commit approval.
 
+The relay is its own turn, per the `l-01-session-job-lifecycle` skill gate
+protocol: deliver the preview facts and proposed messages as plain output
+ending with the approval question, and never invoke `worktree_closeout_apply`
+— or any approval-prompting mechanism — in the same turn as the relay. A
+report attached to its own approval prompt is a report the developer never
+sees.
+
 ## Preconditions
 
 The `c-12-closeout` skill resolves or consumes the current `c-08-ar-coordination-context-resolver` context, requires external memory
@@ -67,6 +74,19 @@ closeout gate rejects any changed source file whose existing sidecar body was
 not modified in the current task, because advancing verification metadata over
 stale content defeats the commit-hash-based drift check. Update changed sidecars
 during implementation, not at the metadata-refresh step.
+
+The closeout worklist covers the working tree plus the contract-recorded
+committed range: every path changed between the last verified commit (the
+contract's recorded closeout commit, falling back to the task base) and the
+work branch HEAD, scoped by the recorded base so synced-in parallel work and
+previously closed-out slices never re-gate. Already-onboarded artifacts —
+sidecars, route overviews, entity fingerprints — gate on every transported
+change regardless of who authored it, merge requests included. Committed-range
+paths without onboarding are reported as `unonboarded` (count plus capped
+sample) and never block; never-onboarded files are not blanket-onboarded at
+closeout. Relay the `unonboarded` count and sample to the developer at the
+commit-approval gate so important transported files can be onboarded
+deliberately through the `c-05-create-or-update-onboarding-files` skill.
 
 ## External-Memory Order
 
@@ -106,7 +126,11 @@ changes exist.
 
 Closeout also fails without mutation when a changed source file's existing
 sidecar body was not updated in the current task, so verification metadata is
-never advanced over stale onboarding content.
+never advanced over stale onboarding content. This applies to committed-range
+paths exactly as to working-tree paths — who authored the change does not
+matter. Committed-range paths without existing onboarding are the one
+exception: they do not fail closeout and are surfaced as `unonboarded` in the
+preview and apply payloads for the commit-approval relay.
 
 Worktree closeout also fails when the recorded code or external-memory source
 branch moved since task start.

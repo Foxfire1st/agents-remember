@@ -28,6 +28,7 @@ from agents_remember.worktrees.modules.cli import (
     parse_json_stdout,
 )
 from agents_remember.worktrees.modules.closeout import (
+    closeout_changed_paths,
     closeout_preview_payload,
     closeout_result,
 )
@@ -37,6 +38,8 @@ from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
     commit_date,
     commit_if_dirty,
+    commit_text_or_none,
+    committed_changed_paths,
     contract_has_worktree_changes,
     current_branch,
     ensure_git_identity,
@@ -71,6 +74,7 @@ from agents_remember.worktrees.modules.models import (
 from agents_remember.worktrees.modules.onboarding import (
     ENTITY_FINGERPRINT_ALGORITHM,
     compute_git_blob_set_fingerprint,
+    contract_memory_verified_commit,
     entity_fingerprint_refresh_plan,
     entity_fingerprint_refresh_plan_for_context,
     markdown_table_cells,
@@ -112,6 +116,7 @@ __all__ = [
     "build_parser",
     "changed_worktree_paths",
     "cleanup_result",
+    "closeout_changed_paths",
     "closeout_preview_payload",
     "closeout_result",
     "command_attach",
@@ -122,9 +127,12 @@ __all__ = [
     "command_status",
     "commit_date",
     "commit_if_dirty",
+    "commit_text_or_none",
+    "committed_changed_paths",
     "compute_git_blob_set_fingerprint",
     "contract_context",
     "contract_has_worktree_changes",
+    "contract_memory_verified_commit",
     "contract_next_args",
     "contract_payload",
     "current_branch",
