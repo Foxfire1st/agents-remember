@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
+# Payload lists that scale with transported history (committed-range closeouts
+# can carry hundreds of paths) are exposed as count + sample capped at this
+# size; the full lists stay internal to the plans.
+PATH_SAMPLE_LIMIT = 30
+
 
 @dataclass(frozen=True)
 class WorktreeCommandResult:
@@ -23,11 +28,18 @@ class WorktreeProviderSetupConfig:
 
 
 class OnboardingRefreshPlan(TypedDict):
-    """Sidecar onboarding refresh plan for a set of changed source files."""
+    """Sidecar onboarding refresh plan for a set of changed source files.
+
+    ``missing`` and ``unsupported`` block closeout and are scoped to
+    working-tree paths; ``unonboarded`` collects committed-range paths without
+    existing onboarding — reported, never blocking, so transported history does
+    not force whole-repository onboarding.
+    """
 
     required: list[dict[str, str]]
     missing: list[str]
     unsupported: list[str]
+    unonboarded: list[str]
 
 
 class RouteOverviewRefreshPlan(TypedDict):

@@ -22,10 +22,12 @@ from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
-    head_text_or_none,
+    commit_text_or_none,
+    committed_changed_paths,
     require_git,
 )
 from agents_remember.worktrees.modules.models import (
+    PATH_SAMPLE_LIMIT,
     EntityFingerprintRefreshPlan,
     EntityFingerprintRequiredItem,
     EntityFingerprintRow,
@@ -43,12 +45,49 @@ def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
     return onboarding_root / f"{source_path}.md"
 
 
+def contract_memory_verified_commit(contract: WorktreeContract) -> str:
+    """The last memory commit closeout verified against, for body-gate baselines."""
+    return contract.ledger_commit or contract.memory_content_commit or contract.memory_base_commit
+
+
+def _changed_memory_paths(memory_root: Path, memory_verified_commit: str) -> set[str]:
+    """Memory-tree paths changed since the last verified memory commit.
+
+    Dirty paths plus the committed range, so sidecar work committed in the
+    memory worktree before closeout still counts as updated this task.
+    """
+    changed = set(changed_worktree_paths(memory_root))
+    if memory_verified_commit:
+        changed.update(
+            committed_changed_paths(memory_root, memory_verified_commit, memory_verified_commit)
+        )
+    return changed
+
+
+def _joined_sample(paths: list[str]) -> str:
+    """Comma-join capped at PATH_SAMPLE_LIMIT so gate errors never flood payloads."""
+    extra = len(paths) - PATH_SAMPLE_LIMIT
+    joined = ", ".join(paths[:PATH_SAMPLE_LIMIT])
+    return f"{joined}, ... (+{extra} more)" if extra > 0 else joined
+
+
 def onboarding_refresh_plan_for_context(
-    context, changed_paths: list[str]
+    context, changed_paths: list[str], *, working_paths: list[str] | None = None
 ) -> OnboardingRefreshPlan:
+    """Plan sidecar refreshes for changed sources, split by responsibility tier.
+
+    ``working_paths`` names the paths changed in the working tree; paths outside
+    it arrived via commits (merges, pre-committed slices). Working paths without
+    onboarding block closeout (``missing``/``unsupported``); committed-range
+    paths without onboarding are collected as ``unonboarded`` and never block,
+    so transported history cannot force whole-repository onboarding. ``None``
+    keeps the strict legacy semantics: every changed path is treated as working.
+    """
+    working = set(changed_paths if working_paths is None else working_paths)
     required: list[dict[str, str]] = []
     missing: list[str] = []
     unsupported: list[str] = []
+    unonboarded: list[str] = []
     for source_path in changed_paths:
         storage = resolver.resolve_storage_for_source(
             source_path, context.storage, context.code_repository_name
@@ -56,11 +95,11 @@ def onboarding_refresh_plan_for_context(
         if storage == "disabled":
             continue
         if not resolver.is_sidecar_storage(storage):
-            unsupported.append(source_path)
+            (unsupported if source_path in working else unonboarded).append(source_path)
             continue
         onboarding_path = sidecar_onboarding_path(context.onboarding_root, source_path)
         if not filesystem.exists(onboarding_path):
-            missing.append(source_path)
+            (missing if source_path in working else unonboarded).append(source_path)
             continue
         required.append(
             {
@@ -72,6 +111,7 @@ def onboarding_refresh_plan_for_context(
         "required": required,
         "missing": missing,
         "unsupported": unsupported,
+        "unonboarded": unonboarded,
     }
 
 
@@ -127,6 +167,7 @@ def classify_route_overview_updates(
     changed_paths: list[str],
     *,
     memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> RouteOverviewBodyClassification:
     """Classify matched route overviews by meaningful body and history changes.
 
@@ -151,7 +192,8 @@ def classify_route_overview_updates(
     if tree is None:
         return classification
     memory_root = Path(tree).resolve()
-    changed_memory = set(changed_worktree_paths(memory_root))
+    baseline_ref = memory_verified_commit or "HEAD"
+    changed_memory = _changed_memory_paths(memory_root, memory_verified_commit)
     routes = [normalize_route(item["source_route"]) for item in required]
     domain_routes = {
         route
@@ -165,12 +207,14 @@ def classify_route_overview_updates(
             relative = overview_path.relative_to(memory_root).as_posix()
         except ValueError:
             continue
-        head_text = head_text_or_none(memory_root, relative)
-        if head_text is None:
+        baseline_text = commit_text_or_none(memory_root, baseline_ref, relative)
+        if baseline_text is None:
             continue
         current = filesystem.read_text(overview_path, encoding="utf-8")
-        body_changed = relative in changed_memory and meaningful_body_changed(head_text, current)
-        added_history = new_history_lines(head_text, current)
+        body_changed = relative in changed_memory and meaningful_body_changed(
+            baseline_text, current
+        )
+        added_history = new_history_lines(baseline_text, current)
         if route not in domain_routes:
             if not body_changed:
                 classification["stamped_without_body_review"].append(route)
@@ -192,6 +236,7 @@ def require_updated_route_overview_content(
     changed_paths: list[str],
     *,
     memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> list[str]:
     """Fail closeout when a domain-evident route overview lacks an honest update.
 
@@ -204,7 +249,11 @@ def require_updated_route_overview_content(
     marker-attested routes so closeout payloads can surface them.
     """
     classification = classify_route_overview_updates(
-        context, plan, changed_paths, memory_tree=memory_tree
+        context,
+        plan,
+        changed_paths,
+        memory_tree=memory_tree,
+        memory_verified_commit=memory_verified_commit,
     )
     stale = classification["stale"]
     untraced = classification["untraced"]
@@ -234,7 +283,11 @@ def require_updated_route_overview_content(
 
 
 def validate_route_overview_refresh_plan_for_context(
-    context, changed_paths: list[str], *, memory_tree: Path | None = None
+    context,
+    changed_paths: list[str],
+    *,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> RouteOverviewRefreshPlan:
     plan = route_overview_metadata_refresh_plan_for_context(context, changed_paths)
     missing_metadata = plan["missing_metadata"]
@@ -244,7 +297,13 @@ def validate_route_overview_refresh_plan_for_context(
             f"missing lastVerifiedCommitHash or lastVerifiedCommitDate in: {', '.join(missing_metadata)}. "
             "Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
-    require_updated_route_overview_content(context, plan, changed_paths, memory_tree=memory_tree)
+    require_updated_route_overview_content(
+        context,
+        plan,
+        changed_paths,
+        memory_tree=memory_tree,
+        memory_verified_commit=memory_verified_commit,
+    )
     return plan
 
 
@@ -253,8 +312,16 @@ def refresh_route_overview_metadata_for_context(
     changed_paths: list[str],
     verified_commit: str,
     verified_date: str,
+    *,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> list[dict[str, str]]:
-    plan = validate_route_overview_refresh_plan_for_context(context, changed_paths)
+    plan = validate_route_overview_refresh_plan_for_context(
+        context,
+        changed_paths,
+        memory_tree=memory_tree,
+        memory_verified_commit=memory_verified_commit,
+    )
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:
         overview_path = Path(item["onboarding_file"])
@@ -437,9 +504,14 @@ def refresh_entity_fingerprints_for_context(
 
 
 def onboarding_refresh_plan(
-    contract: WorktreeContract, changed_paths: list[str]
+    contract: WorktreeContract,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
 ) -> OnboardingRefreshPlan:
-    return onboarding_refresh_plan_for_context(contract_context(contract), changed_paths)
+    return onboarding_refresh_plan_for_context(
+        contract_context(contract), changed_paths, working_paths=working_paths
+    )
 
 
 def entity_fingerprint_refresh_plan(
@@ -460,12 +532,19 @@ def validate_route_overview_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> RouteOverviewRefreshPlan:
     return validate_route_overview_refresh_plan_for_context(
-        contract_context(contract), changed_paths, memory_tree=contract.memory_worktree
+        contract_context(contract),
+        changed_paths,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
     )
 
 
 def classify_sidecar_updates(
-    context, plan: OnboardingRefreshPlan, *, memory_tree: Path | None = None
+    context,
+    plan: OnboardingRefreshPlan,
+    *,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> SidecarBodyClassification:
     """Classify changed-source sidecars by meaningful body and history changes.
 
@@ -489,7 +568,8 @@ def classify_sidecar_updates(
     if tree is None:
         return classification
     memory_root = Path(tree).resolve()
-    changed_memory = set(changed_worktree_paths(memory_root))
+    baseline_ref = memory_verified_commit or "HEAD"
+    changed_memory = _changed_memory_paths(memory_root, memory_verified_commit)
     for item in required:
         onboarding_path = Path(item["onboarding_file"]).resolve()
         try:
@@ -499,12 +579,12 @@ def classify_sidecar_updates(
         if relative not in changed_memory:
             classification["stale"].append(item["source_path"])
             continue
-        head_text = head_text_or_none(memory_root, relative)
-        if head_text is None:
+        baseline_text = commit_text_or_none(memory_root, baseline_ref, relative)
+        if baseline_text is None:
             continue
         current = filesystem.read_text(onboarding_path, encoding="utf-8")
-        body_changed = meaningful_body_changed(head_text, current)
-        added_history = new_history_lines(head_text, current)
+        body_changed = meaningful_body_changed(baseline_text, current)
+        added_history = new_history_lines(baseline_text, current)
         if body_changed and added_history:
             continue
         if body_changed:
@@ -517,7 +597,11 @@ def classify_sidecar_updates(
 
 
 def require_updated_sidecar_content(
-    context, plan: OnboardingRefreshPlan, *, memory_tree: Path | None = None
+    context,
+    plan: OnboardingRefreshPlan,
+    *,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> list[str]:
     """Fail closeout when a changed source file's sidecar lacks an honest update.
 
@@ -532,7 +616,9 @@ def require_updated_sidecar_content(
     files.
     """
 
-    classification = classify_sidecar_updates(context, plan, memory_tree=memory_tree)
+    classification = classify_sidecar_updates(
+        context, plan, memory_tree=memory_tree, memory_verified_commit=memory_verified_commit
+    )
     stale = classification["stale"]
     untraced = classification["untraced"]
     if stale or untraced:
@@ -540,12 +626,12 @@ def require_updated_sidecar_content(
         if stale:
             details.append(
                 "the following changed sources have an unmodified or metadata/history-only "
-                "sidecar body: " + ", ".join(stale)
+                "sidecar body: " + _joined_sample(stale)
             )
         if untraced:
             details.append(
                 "the following changed sources have a sidecar body update without a new "
-                "Update History entry: " + ", ".join(untraced)
+                "Update History entry: " + _joined_sample(untraced)
             )
         raise RuntimeError(
             "external-memory closeout requires updated onboarding content for changed source "
@@ -561,9 +647,14 @@ def require_updated_sidecar_content(
 
 
 def validate_onboarding_refresh_plan_for_context(
-    context, changed_paths: list[str], *, memory_tree: Path | None = None
+    context,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> OnboardingRefreshPlan:
-    plan = onboarding_refresh_plan_for_context(context, changed_paths)
+    plan = onboarding_refresh_plan_for_context(context, changed_paths, working_paths=working_paths)
     missing = plan["missing"]
     unsupported = plan["unsupported"]
     if missing or unsupported:
@@ -577,7 +668,9 @@ def validate_onboarding_refresh_plan_for_context(
             + "; ".join(details)
             + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
-    require_updated_sidecar_content(context, plan, memory_tree=memory_tree)
+    require_updated_sidecar_content(
+        context, plan, memory_tree=memory_tree, memory_verified_commit=memory_verified_commit
+    )
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
         text = filesystem.read_text(onboarding_path, encoding="utf-8")
@@ -591,10 +684,17 @@ def validate_onboarding_refresh_plan_for_context(
 
 
 def validate_onboarding_refresh_plan(
-    contract: WorktreeContract, changed_paths: list[str]
+    contract: WorktreeContract,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
 ) -> OnboardingRefreshPlan:
     return validate_onboarding_refresh_plan_for_context(
-        contract_context(contract), changed_paths, memory_tree=contract.memory_worktree
+        contract_context(contract),
+        changed_paths,
+        working_paths=working_paths,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
     )
 
 
@@ -603,8 +703,18 @@ def refresh_onboarding_metadata_for_context(
     changed_paths: list[str],
     verified_commit: str,
     verified_date: str,
+    *,
+    working_paths: list[str] | None = None,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> list[dict[str, str]]:
-    plan = validate_onboarding_refresh_plan_for_context(context, changed_paths)
+    plan = validate_onboarding_refresh_plan_for_context(
+        context,
+        changed_paths,
+        working_paths=working_paths,
+        memory_tree=memory_tree,
+        memory_verified_commit=memory_verified_commit,
+    )
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
@@ -629,7 +739,15 @@ def refresh_onboarding_metadata(
     changed_paths: list[str],
     verified_commit: str,
     verified_date: str,
+    *,
+    working_paths: list[str] | None = None,
 ) -> list[dict[str, str]]:
     return refresh_onboarding_metadata_for_context(
-        contract_context(contract), changed_paths, verified_commit, verified_date
+        contract_context(contract),
+        changed_paths,
+        verified_commit,
+        verified_date,
+        working_paths=working_paths,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
     )

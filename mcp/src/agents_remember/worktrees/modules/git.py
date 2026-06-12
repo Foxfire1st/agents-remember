@@ -103,10 +103,15 @@ def longest_tracked_path_length(repo: Path, ref: str = "HEAD") -> int:
     return max((len(line.strip()) for line in result.stdout.splitlines() if line.strip()), default=0)
 
 
+def commit_text_or_none(repo: Path, ref: str, relative_path: str) -> str | None:
+    """Text of relative_path at ref in the repo, or None when absent at that ref."""
+    result = run_git(repo, ["show", f"{ref}:{relative_path}"])
+    return result.stdout if result.returncode == 0 else None
+
+
 def head_text_or_none(repo: Path, relative_path: str) -> str | None:
     """Text of relative_path at the repo's HEAD, or None when absent at HEAD."""
-    result = run_git(repo, ["show", f"HEAD:{relative_path}"])
-    return result.stdout if result.returncode == 0 else None
+    return commit_text_or_none(repo, "HEAD", relative_path)
 
 
 def changed_worktree_paths(repo: Path) -> list[str]:
@@ -118,3 +123,22 @@ def changed_worktree_paths(repo: Path) -> list[str]:
         if path.strip() and filesystem.is_file(repo / path.strip())
     }
     return sorted(paths)
+
+
+def _diff_paths(repo: Path, from_commit: str) -> set[str]:
+    lines = require_git(repo, ["diff", "--name-only", f"{from_commit}..HEAD", "--"]).splitlines()
+    return {line.strip().replace("\\", "/") for line in lines if line.strip()}
+
+
+def committed_changed_paths(repo: Path, base_commit: str, verified_commit: str) -> list[str]:
+    """Paths changed by commits on the work branch that closeout has not yet verified.
+
+    Tree-diff against the recorded base, intersected with the tree-diff against
+    the last verified commit when one exists: content the synced source branch
+    already carries and content a previous closeout already verified both drop
+    out of the worklist.
+    """
+    changed = _diff_paths(repo, base_commit)
+    if verified_commit and verified_commit != base_commit:
+        changed &= _diff_paths(repo, verified_commit)
+    return sorted(path for path in changed if filesystem.is_file(repo / path))
