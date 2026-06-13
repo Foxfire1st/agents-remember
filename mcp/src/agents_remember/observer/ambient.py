@@ -42,18 +42,14 @@ from agents_remember.observer.save_gate import (
     compute_scope,
 )
 from agents_remember.observer.store import EventStore
+from agents_remember.observer.timeutil import (
+    HEARTBEAT_SECONDS,
+    TTL_SECONDS,
+    Clock,
+    age_seconds,
+)
 from agents_remember.observer.ulid import new_ulid
 
-# Configuration defaults (design §8 assigns these to the lifecycle-tools slice).
-# 15s beat mirrors the proven setup-progress cadence; 180s stale is the
-# projection's paused-by-dormancy threshold (consumed by the slice-3 reducer);
-# 3600s is the fleeting-only TTL after which a dormant, never-promoted lifecycle
-# is pruned.
-HEARTBEAT_SECONDS = 15.0
-STALE_AFTER_SECONDS = 180.0
-TTL_SECONDS = 3600.0
-
-Clock = Callable[[], datetime]
 IdFactory = Callable[[], str]
 
 
@@ -429,7 +425,7 @@ class AmbientLifecycle:
             return False
         if any(event.kind == "lifecycle.promoted" for event in events):
             return False
-        age = _age_seconds(events[-1].ts, now)
+        age = age_seconds(events[-1].ts, now)
         return age is not None and age > self._ttl_seconds
 
 
@@ -444,16 +440,6 @@ def build_ask(
     ask = {"kind": kind, "prompt": prompt, "options": options}
     pruned = {key: value for key, value in ask.items() if value is not None}
     return pruned or None
-
-
-def _age_seconds(stamp: str, now: datetime) -> float | None:
-    try:
-        then = datetime.fromisoformat(stamp)
-    except ValueError:
-        return None
-    if then.tzinfo is None:
-        then = then.replace(tzinfo=UTC)
-    return (now - then).total_seconds()
 
 
 # --- process-global registry ----------------------------------------------

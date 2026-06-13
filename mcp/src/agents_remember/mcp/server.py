@@ -6,7 +6,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
-from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient
+from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
 
 from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
@@ -60,7 +60,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
     # One ambient lifecycle per server process; the _tool_payload choke point
     # tags tool calls onto it once a lifecycle is started.
-    install_ambient(AmbientLifecycle(EventStore(config.coordination_root / "logs" / "observer")))
+    install_ambient(AmbientLifecycle(EventStore(observer_root(config))))
     server = FastMCP("Agents Remember")
 
     @server.tool()
