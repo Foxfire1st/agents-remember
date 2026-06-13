@@ -14,6 +14,7 @@ from typing import Any
 
 from agents_remember.observer.ambient import build_ask, require_ambient
 from agents_remember.observer.lifecycle_state import LifecycleState, coerce_phase
+from agents_remember.observer.save_gate import coerce_save_decision
 
 from .base import _tool_payload
 
@@ -77,14 +78,17 @@ def lifecycle_phase_payload(phase: str) -> dict[str, Any]:
     )
 
 
-def switch_lifecycle_payload() -> dict[str, Any]:
-    """Transition the current lifecycle away and adopt a fresh one.
+def switch_lifecycle_payload(on_unsaved: str | None = None) -> dict[str, Any]:
+    """Leave the current lifecycle and adopt a fresh one (no target).
 
-    Slice scope: the create-new path. The contract-resolved worktree target and
-    the save-gate promote path arrive with the worktree-attach wiring; the model
-    never handles the target id.
+    Leaving a *fleeting* lifecycle routes through the save gate: ``on_unsaved``
+    must be ``save`` (promote it) or ``discard`` (abandon it), and omitting it
+    raises ``SaveGateRequired`` so unsaved work is never dropped silently.
+    Adopting an *existing* lifecycle is contract-resolved through
+    ``worktree_attach``; the model never handles ids here.
     """
-    state = require_ambient().switch()
+    decision = coerce_save_decision(on_unsaved) if on_unsaved else None
+    state = require_ambient().switch(on_unsaved=decision)
     return _tool_payload(
         "switch_lifecycle",
         {

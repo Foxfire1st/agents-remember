@@ -59,6 +59,10 @@ class WorktreeContract:
     integrated_memory_content_commit: str = ""
     integrated_ledger_commit: str = ""
     cleanup: str = "pending"
+    # The lifecycle this enclosure anchors (design §1.1): written by worktree_start
+    # promotion, read by worktree_attach to resume. Additive on schema v1 -- old
+    # contracts parse to "" (the v2 schema flip is the deliberate 3.0 cutover).
+    lifecycle_id: str = ""
     # Mid-task base syncs (issue #54): one entry per worktree_sync that advanced
     # the recorded base pair. A real dataclass field because the closeout/contract
     # rewrite regenerates the document from this model — freeform contract prose
@@ -120,6 +124,7 @@ def default_contract(
     memory_source_branch: str = "",
     memory_work_branch: str = "",
     memory_base_commit: str = "",
+    lifecycle_id: str = "",
 ) -> WorktreeContract:
     if memory_mode not in VALID_MEMORY_MODES:
         raise ContractError(f"memory_mode must be one of {sorted(VALID_MEMORY_MODES)}")
@@ -156,6 +161,7 @@ def default_contract(
         memory_worktree=memory_worktree,
         ledger_path=ledger_path,
         memory_state="disabled" if memory_mode == "disabled" else "",
+        lifecycle_id=lifecycle_id,
     )
 
 
@@ -307,6 +313,9 @@ def contract_to_text(contract: WorktreeContract) -> str:
         f"  base_commit: {contract.code_base_commit}",
         f"  worktree: {contract.code_worktree.as_posix()}",
         "",
+        "lifecycle:",
+        f"  id: {contract.lifecycle_id}",
+        "",
         *_memory_lines(contract),
         "",
         *_sync_lines(contract),
@@ -409,6 +418,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     human_review = _section(data, "human_review")
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
+    lifecycle = _section(data, "lifecycle")
     memory_mode = str(data.get("memory_mode") or memory.get("mode") or "").strip()
     return WorktreeContract(
         task_id=str(data.get("task_id", "")).strip(),
@@ -447,5 +457,6 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
         integrated_ledger_commit=integration.get("ledger_commit", ""),
         cleanup=integration.get("cleanup", closeout.get("cleanup", "pending")),
+        lifecycle_id=lifecycle.get("id", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),
     )

@@ -36,6 +36,11 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
+from agents_remember.observer.save_gate import (
+    SaveDecision,
+    SaveGateRequired,
+    compute_scope,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
 
@@ -170,18 +175,24 @@ class AmbientLifecycle:
             self._emit_locked("lifecycle.phase-changed", "declared", "model", phase=phase)
             return self.current
 
-    def switch(self, *, fleeting: bool = True, phase: Phase = INITIAL_PHASE) -> LifecycleState:
-        """Transition the current lifecycle away, then mint a fresh one.
+    def switch(
+        self,
+        *,
+        on_unsaved: SaveDecision | None = None,
+        fleeting: bool = True,
+        phase: Phase = INITIAL_PHASE,
+    ) -> LifecycleState:
+        """Leave the current lifecycle, then mint a fresh one (no target, §1.3).
 
-        Slice scope: this implements the *creates-new* half of ``switch`` plus
-        the current-lifecycle transition -- a persistent ``running`` lifecycle is
-        paused (``switched-away``); a fleeting one is discarded (ended
-        ``abandoned``). Resuming an *existing* target (state replay) and the
-        save-gate *promote* path arrive with the projection reducer and the
-        worktree-contract wiring; the model never handles the target id.
+        Leaving routes through the save gate: a persistent ``running`` lifecycle
+        is paused (``switched-away``); a *fleeting* one needs an explicit
+        ``on_unsaved`` decision -- ``save`` promotes it (then pauses), ``discard``
+        ends it ``abandoned``, and an absent decision raises ``SaveGateRequired``
+        so unsaved work is never dropped silently. Adopting an *existing* target
+        id is :meth:`attach` (contract-resolved); the model never handles ids.
         """
         with self._lock:
-            self._transition_away_locked()
+            self._leave_current_locked(on_unsaved)
             current = LifecycleState(
                 id=self._mint(),
                 state="running",
@@ -196,6 +207,61 @@ class AmbientLifecycle:
             self._start_ticker_locked()
         self._reap_stale_fleeting()
         return current
+
+    def promote(self, *, enclosure: str, repo_id: str | None, scope: str) -> LifecycleState:
+        """Fleeting -> persistent on ``worktree_start`` (§1.3).
+
+        The current lifecycle gains its durable contract anchor (``enclosure``)
+        and scope; ``lifecycle.promoted`` is a first-class v1 event so a reader
+        tells a saved lifecycle from a dormant fleeting one. Not a switch -- the
+        same lifecycle keeps running.
+        """
+        with self._lock:
+            current = self._require_active()
+            self.current = replace(
+                current, fleeting=False, enclosure=enclosure, repo_id=repo_id, scope=scope
+            )
+            self._emit_locked("lifecycle.promoted", "observed", "system", scope=scope)
+            return self.current
+
+    def attach(
+        self,
+        lifecycle_id: str,
+        *,
+        enclosure: str,
+        repo_id: str | None = None,
+        on_unsaved: SaveDecision | None = None,
+        phase: Phase = "build",
+    ) -> LifecycleState:
+        """``worktree_attach`` as ``switch_lifecycle`` with a resolved target (§1.3).
+
+        none active -> adopt; same id -> no-op; otherwise leave the current
+        (persistent: auto-pause; fleeting: save gate) then adopt the target and
+        emit ``lifecycle.resumed`` (``adopted``). Adoption is attribution only --
+        the resolved id becomes ambient so later calls tag correctly; full state
+        replay is the slice-3 reducer, so it adopts at phase ``build`` (attach is
+        mid-work).
+        """
+        with self._lock:
+            current = self.current
+            if current is not None and current.id == lifecycle_id:
+                return current
+            self._leave_current_locked(on_unsaved)
+            adopted = LifecycleState(
+                id=lifecycle_id,
+                state="running",
+                phase=phase,
+                fleeting=False,
+                started_at=self._now(),
+                enclosure=enclosure,
+                repo_id=repo_id,
+                scope=compute_scope(repo_id),
+            )
+            self.current = adopted
+            self._emit_locked("lifecycle.resumed", "observed", "system", cause="adopted")
+            self._start_ticker_locked()
+        self._reap_stale_fleeting()
+        return adopted
 
     # --- ambient attribution ----------------------------------------------
 
@@ -232,15 +298,48 @@ class AmbientLifecycle:
             raise LifecycleError("no active lifecycle; start or switch into one first")
         return self.current
 
-    def _transition_away_locked(self) -> None:
-        """Pause a persistent current, discard a fleeting one (lock held)."""
+    def _leave_current_locked(self, decision: SaveDecision | None) -> None:
+        """Leave the current lifecycle (lock held): pause persistent, save-gate fleeting.
+
+        Persistent -> ``paused`` (``switched-away``). Fleeting -> the save gate
+        (§1.2/§1.5): ``save`` promotes to a landing zone then pauses, ``discard``
+        ends ``abandoned``, and ``None`` raises ``SaveGateRequired`` -- the gate
+        blocks rather than dropping unsaved work, and slice 06 supplies the
+        decision through the interactive return channel.
+        """
         current = self.current
         if current is None:
             return
-        if current.fleeting:
-            self._emit_locked("lifecycle.ended", "declared", "model", outcome="abandoned")
+        if not current.fleeting:
+            self._pause_locked("switched-away")
+            return
+        if decision is None:
+            raise SaveGateRequired(current.id)
+        if decision == "save":
+            self._promote_to_landing_zone_locked()
+            self._pause_locked("switched-away")
         else:
-            self._emit_locked("lifecycle.paused", "observed", "system", cause="switched-away")
+            self._emit_locked("lifecycle.ended", "declared", "model", outcome="abandoned")
+            self._stop_ticker_locked()
+            self.current = None
+
+    def _promote_to_landing_zone_locked(self) -> None:
+        """Save a fleeting lifecycle being left behind (it has no worktree).
+
+        Promotion without a tangible repo lands in a scope zone (§1.5):
+        ``0_unscoped`` by default. The dashboard (slice 4) groups by the scope
+        tag; here we only record it on ``lifecycle.promoted``.
+        """
+        current = self.current
+        if current is None:  # pragma: no cover - guarded by callers
+            return
+        scope = compute_scope(current.repo_id)
+        self.current = replace(current, fleeting=False, scope=scope)
+        self._emit_locked("lifecycle.promoted", "observed", "system", scope=scope)
+
+    def _pause_locked(self, cause: str) -> None:
+        """Leaving -> ``paused``: emit, stop the ticker, release the current."""
+        self._emit_locked("lifecycle.paused", "observed", "system", cause=cause)
         self._stop_ticker_locked()
         self.current = None
 
@@ -256,6 +355,8 @@ class AmbientLifecycle:
                 trust=trust,
                 actor=actor,
                 lifecycleId=current.id,
+                enclosure=current.enclosure,
+                repoId=current.repo_id,
                 data=dict(data),
             )
         )

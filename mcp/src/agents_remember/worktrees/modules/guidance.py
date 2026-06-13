@@ -190,6 +190,7 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "closeout_status": contract.closeout_status,
         "integration_status": contract.integration_status,
         "cleanup": contract.cleanup,
+        "lifecycle_id": contract.lifecycle_id,
     }
     providers = provider_async.provider_setup_status(contract)
     if providers is not None:

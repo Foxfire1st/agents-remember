@@ -83,6 +83,7 @@ def worktree_attach_payload(
     *,
     task_name: str | None = None,
     contract_path: str | None = None,
+    on_unsaved: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_attach",
@@ -91,6 +92,7 @@ def worktree_attach_payload(
             repo_id=repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            on_unsaved=on_unsaved,
         ),
     )
 

@@ -76,6 +76,12 @@ class LifecycleState:
     phase: Phase
     fleeting: bool
     started_at: str
+    # Set when the lifecycle is promoted to persistent (design §1.1, §1.5): the
+    # enclosure (contract path) is the durable resume anchor; repo_id/scope record
+    # where saved work belongs ("<repo_id>" | "0_unscoped" | "1_cross-repo").
+    enclosure: str | None = None
+    repo_id: str | None = None
+    scope: str | None = None
 
     @property
     def is_terminal(self) -> bool:

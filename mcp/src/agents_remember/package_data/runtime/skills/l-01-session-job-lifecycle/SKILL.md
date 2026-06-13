@@ -43,6 +43,30 @@ permission-triggering operation. Harnesses render approval prompts over or
 instead of same-turn prose, so a report attached to its own approval prompt is
 a report the developer never sees.
 
+## Lifecycle Signals — Making The Session Observable
+
+Every session in a managed repo is a **lifecycle**: the six `lifecycle_*` signals
+record where it is and what it is waiting on, so the work is observable and
+resumable across chat deaths (design `docs/design/observable-lifecycle.md`). The
+model **never handles a lifecycle id** — identity is server-side, anchored in the
+worktree contract.
+
+| When (phase) | Signal | Why |
+| --- | --- | --- |
+| Trust Checkpoint passes (managed repo) | `lifecycle_start` | Begin a **fleeting** lifecycle (guarded: one per session; takes no id). |
+| Entering each phase | `lifecycle_phase` | Move the orthogonal phase axis (`request`/`trust-checkpoint`/`reframe-research`/`decide`/`build`/`close`). |
+| At a gate (reframe, plan, commit, …) | `lifecycle_block` (+ optional ask) then `lifecycle_resume` | Record the wait on the developer and its resolution. |
+| `worktree_start` (Decide → Build) | *(promotion — automatic)* | The fleeting lifecycle becomes **persistent**, anchored in the contract; no separate signal. |
+| Resuming an existing task | `worktree_attach` | Re-adopts the contract's lifecycle (contract-resolved); the model passes no id. |
+| Leaving unsaved fleeting work | `switch_lifecycle` (`on_unsaved=save`\|`discard`) | The save gate: promote it or abandon it — never dropped silently. |
+| Close | `lifecycle_end` (`completed`\|`abandoned`) | The terminal record. |
+
+Rules: `lifecycle_start` is guarded (one active lifecycle, no id). `paused` is
+**system-owned** — there is no pause signal. A tool call outside any lifecycle is
+**dropped, never misattributed**. `worktree_start` **promotes** the current
+lifecycle (fleeting → persistent); `worktree_attach` **resumes** the contract's
+lifecycle; both keep identity server-side.
+
 ## 0 — Request
 
 Receive the developer's raw request and identify the active repository.

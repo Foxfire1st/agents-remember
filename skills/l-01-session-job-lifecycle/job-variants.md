@@ -1,14 +1,14 @@
 # l-01-session-job-lifecycle Job Variants — The Lenses
 
-The job type is a **lens**, picked during `frame` and re-pickable at any time. It is not a gate and it
-never changes the spine (`orient -> ground -> frame -> decide -> build -> close`). A lens tunes three
+The job type is a **lens**, picked during `reframe-research` and re-pickable at any time. It is not a gate and it
+never changes the spine (`request -> trust-checkpoint -> reframe-research -> decide -> build -> close`). A lens tunes three
 things only:
 
-- **Opening move** — the first concrete thing `frame` does for this kind of job.
+- **Opening move** — the first concrete thing `reframe-research` does for this kind of job.
 - **Retrieval lean** — which `c-04-retrieval-strategy-router` strategy leads (others are still available).
 - **Decide default** — where this job usually lands at `decide` (still a real decision, not automatic).
 
-| Job        | Opening move (in `frame`)                       | Retrieval lean (`c-04-retrieval-strategy-router`) | `decide` default            |
+| Job        | Opening move (in `reframe-research`)                       | Retrieval lean (`c-04-retrieval-strategy-router`) | `decide` default            |
 | ---------- | ----------------------------------------------- | ---------------------------------- | --------------------------- |
 | `bug`      | reproduce the failure; prove the root cause     | Relationship (cgc) + Intent        | -> build                    |
 | `feature`  | clarify intent, scope, and explicit non-goals   | design doctrine + Intent           | -> build                    |

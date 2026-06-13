@@ -10,6 +10,9 @@ from agents_remember.mcp.config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.observer.ambient import AmbientLifecycle, ambient
+from agents_remember.observer.save_gate import coerce_save_decision
+from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
 
@@ -31,6 +34,10 @@ def worktree_start_tool(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
+    amb = ambient()
+    # worktree_start promotes the active lifecycle to persistent (design §1.3); with
+    # no active lifecycle, mint a fresh anchor so the contract always carries one.
+    lifecycle_id = amb.current.id if amb is not None and amb.current is not None else new_ulid()
     settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
     provider_setup_config = (
         None
@@ -49,6 +56,7 @@ def worktree_start_tool(
         repo,
         task_name=task_name,
         worktree_name=worktree_name,
+        lifecycle_id=lifecycle_id,
         workflow_kind=workflow_kind,
         source_branch=source_branch,
         work_branch=work_branch,
@@ -70,6 +78,7 @@ def worktree_start_tool(
     result: dict[str, Any] | None = None
     try:
         result = _worktree_result("worktree_start", git_worktree_manager.start_result(args))
+        _attribute_start(amb, result, repo_id)
         return result
     finally:
         if settings_path is not None and not _settings_owned_by_background(result):
@@ -84,12 +93,54 @@ def _settings_owned_by_background(result: dict[str, Any] | None) -> bool:
     return isinstance(providers, dict) and providers.get("state") == "starting"
 
 
+def _attribute_start(amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str) -> None:
+    """Promote the active lifecycle into the freshly started worktree (design §1.3).
+
+    Only a clean ``started`` result attributes: the contract now anchors the
+    lifecycle. An active lifecycle is promoted in place; with none active the
+    minted contract id is adopted as a fresh persistent lifecycle. Re-attaching to
+    an existing contract is ``worktree_attach``'s job, not start's.
+    """
+    if amb is None or result.get("state") != "started":
+        return
+    enclosure = result.get("contract_path")
+    if not isinstance(enclosure, str):
+        return
+    if amb.current is not None:
+        amb.promote(enclosure=enclosure, repo_id=repo_id, scope=repo_id)
+        return
+    lifecycle_id = result.get("lifecycle_id")
+    if isinstance(lifecycle_id, str) and lifecycle_id:
+        amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id)
+
+
+def _attribute_attach(
+    amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str, on_unsaved: str | None
+) -> None:
+    """Resume the contract's lifecycle on ``worktree_attach`` (design §1.3 table).
+
+    ``attach`` adopts when none is active, no-ops on the same id, auto-pauses a
+    persistent current, and routes an unsaved fleeting through the save gate --
+    raising ``SaveGateRequired`` when ``on_unsaved`` was not supplied, so unsaved
+    work is never dropped silently (the read-only attach already returned).
+    """
+    if amb is None:
+        return
+    lifecycle_id = result.get("lifecycle_id")
+    enclosure = result.get("contract_path")
+    if not isinstance(lifecycle_id, str) or not lifecycle_id or not isinstance(enclosure, str):
+        return
+    decision = coerce_save_decision(on_unsaved) if on_unsaved else None
+    amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id, on_unsaved=decision)
+
+
 def worktree_attach_tool(
     config: McpRuntimeConfig,
     *,
     repo_id: str,
     task_name: str | None = None,
     contract_path: str | None = None,
+    on_unsaved: str | None = None,
 ) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
     args = _worktree_namespace(
@@ -100,7 +151,9 @@ def worktree_attach_tool(
         if contract_path
         else None,
     )
-    return _worktree_result("worktree_attach", git_worktree_manager.attach_result(args))
+    result = _worktree_result("worktree_attach", git_worktree_manager.attach_result(args))
+    _attribute_attach(ambient(), result, repo_id, on_unsaved)
+    return result
 
 
 def worktree_status_tool(

@@ -118,6 +118,7 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
         memory_source_branch=_external_memory_value(memory_mode, source_branch),
         memory_work_branch=_external_memory_value(memory_mode, work_branch),
         memory_base_commit=memory_base,
+        lifecycle_id=args.lifecycle_id,
     )
 
 

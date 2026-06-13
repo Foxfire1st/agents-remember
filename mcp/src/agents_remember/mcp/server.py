@@ -466,14 +466,17 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str | None = None,
         contract_path: str | None = None,
+        on_unsaved: str | None = None,
     ) -> dict[str, Any]:
-        """Re-attach to an existing task contract without mutating git. Read-only; resume a task by
-        task_name or contract_path."""
+        """Re-attach to an existing task contract without mutating git, resuming its lifecycle.
+        Read-only; resume a task by task_name or contract_path. If an unsaved fleeting lifecycle is
+        active, on_unsaved='save' (promote) or 'discard' (abandon) resolves the save gate."""
         return worktree_attach_payload(
             config,
             repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            on_unsaved=on_unsaved,
         )
 
     @server.tool()
@@ -768,10 +771,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         return lifecycle_end_payload(outcome)
 
     @server.tool()
-    def switch_lifecycle() -> dict[str, Any]:
-        """Transition away from the current lifecycle (a persistent one is paused, a fleeting
-        one is discarded) and begin a fresh one. The model never handles ids."""
-        return switch_lifecycle_payload()
+    def switch_lifecycle(on_unsaved: str | None = None) -> dict[str, Any]:
+        """Leave the current lifecycle and begin a fresh one. A persistent lifecycle is paused;
+        leaving an unsaved fleeting one needs on_unsaved='save' (promote) or 'discard' (abandon).
+        The model never handles ids; resuming an existing lifecycle is worktree_attach."""
+        return switch_lifecycle_payload(on_unsaved)
 
     @server.tool()
     def lifecycle_phase(phase: str) -> dict[str, Any]:

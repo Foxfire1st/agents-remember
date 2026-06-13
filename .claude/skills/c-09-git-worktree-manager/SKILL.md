@@ -37,6 +37,24 @@ workspace root, coordination root, provider setup settings, and path containment
 The skill tree is instruction-only; installed and development workflows use the
 MCP/package route.
 
+## Lifecycle Resume And Promotion
+
+The worktree is the **commitment boundary** for the observable lifecycle (design
+`docs/design/observable-lifecycle.md` §1.5). The worktree verbs carry the
+lifecycle, with identity kept server-side:
+
+- `worktree_start` **promotes** the session's current (fleeting) lifecycle to
+  **persistent** and writes its id into the contract's `lifecycle:` block. The
+  enclosure (`tasks/<repo>/<task>/contract.md`) is the durable anchor that
+  outlives worktree cleanup — one enclosure = one lifecycle, even across a
+  multi-task series.
+- `worktree_attach` **resumes** that lifecycle: it reads the id from the contract
+  and re-adopts it, so a new chat session continues the same observable lifecycle.
+  The model never passes an id.
+- Attaching while still holding an unsaved **fleeting** lifecycle hits the **save
+  gate** — pass `on_unsaved="save"` (promote the fleeting work to a landing zone)
+  or `"discard"` (abandon it). Unsaved work is never dropped silently.
+
 ## Pre-Worktree Intake
 
 The `c-09-git-worktree-manager` skill starts after the normal task intake and onboarding gate, not before them.

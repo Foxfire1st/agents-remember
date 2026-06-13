@@ -39,6 +39,7 @@ class WorktreeArgs:
     stale_base_choice: str | None = None
     memory_sync_choice: str | None = None
     custom_instruction: str | None = None
+    lifecycle_id: str = ""
 
     # Provider setup
     skip_provider_setup: bool = False

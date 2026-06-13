@@ -76,6 +76,10 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     taskId: str | None = None
     taskName: str | None = None
     worktreeName: str | None = None
+    # The lifecycle this enclosure anchors (design §1.1): worktree_start promotes
+    # it, worktree_attach resumes it. Emitted snake_case (lifecycle_id) like its
+    # siblings; declared here for wire discoverability.
+    lifecycleId: str | None = None
     # Background provider setup state (GitHub #53): worktree_start returns
     # 'starting' with a progressFile; worktree_status then projects the live
     # progress as running / stale (dead heartbeat) / ok /

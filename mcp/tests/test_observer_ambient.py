@@ -1,8 +1,10 @@
-"""Tests for the ambient lifecycle (slice 2b).
+"""Tests for the ambient lifecycle (slices 2b-2c).
 
 Covers the signal state machine, guarded start, switch transitions, the
 choke-point emission (tagging an active lifecycle; dropping a lifecycle-less
-call), the TTL project-and-prune sweep, and the heartbeat ticker.
+call), the TTL project-and-prune sweep, and the heartbeat ticker (2b); plus
+promotion, adoption/resume via attach, and the save gate on leaving a fleeting
+lifecycle (2c).
 """
 
 from __future__ import annotations
@@ -23,6 +25,13 @@ from agents_remember.observer.lifecycle_state import (
     GuardedStartError,
     LifecycleError,
     coerce_phase,
+)
+from agents_remember.observer.save_gate import (
+    CROSS_REPO_SCOPE,
+    UNSCOPED_SCOPE,
+    SaveGateRequired,
+    coerce_save_decision,
+    compute_scope,
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
@@ -101,13 +110,29 @@ class StateMachineTests(_AmbientCase):
 
 
 class SwitchTests(_AmbientCase):
-    def test_switch_from_fleeting_discards_then_starts_fresh(self) -> None:
+    def test_switch_from_fleeting_needs_a_save_decision(self) -> None:
+        # The save gate is foundational and blocking: leaving an unsaved fleeting
+        # lifecycle without a decision raises rather than silently discarding.
         first = self.amb.start()
-        second = self.amb.switch()
+        with self.assertRaises(SaveGateRequired):
+            self.amb.switch()
+        self.assertEqual(self.amb.current and self.amb.current.id, first.id)
+
+    def test_switch_discard_ends_then_starts_fresh(self) -> None:
+        first = self.amb.start()
+        second = self.amb.switch(on_unsaved="discard")
         self.assertNotEqual(first.id, second.id)
         self.assertEqual(self.amb.current and self.amb.current.id, second.id)
         self.assertIn("lifecycle.ended", self.kinds(first.id))
         self.assertEqual(second.state, "running")
+
+    def test_switch_save_promotes_then_pauses_the_old(self) -> None:
+        first = self.amb.start()
+        self.amb.switch(on_unsaved="save")
+        kinds = self.kinds(first.id)
+        self.assertIn("lifecycle.promoted", kinds)
+        self.assertIn("lifecycle.paused", kinds)
+        self.assertNotIn("lifecycle.ended", kinds)
 
     def test_switch_from_persistent_pauses_the_old(self) -> None:
         first = self.amb.start(fleeting=False)
@@ -223,6 +248,81 @@ class AskTests(unittest.TestCase):
         self.assertEqual(coerce_phase("build"), "build")
         with self.assertRaises(LifecycleError):
             coerce_phase("not-a-phase")
+
+
+class PromoteTests(_AmbientCase):
+    def test_promote_makes_persistent_and_records_anchor(self) -> None:
+        lc = self.amb.start()
+        promoted = self.amb.promote(
+            enclosure="/c/contract.md", repo_id="agents-remember", scope="agents-remember"
+        )
+        self.assertFalse(promoted.fleeting)
+        self.assertEqual(promoted.enclosure, "/c/contract.md")
+        self.assertEqual(promoted.scope, "agents-remember")
+        promoted_events = [e for e in self.store.read(lc.id) if e.kind == "lifecycle.promoted"]
+        self.assertEqual(len(promoted_events), 1)
+        self.assertEqual(promoted_events[0].data["scope"], "agents-remember")
+
+    def test_events_after_promotion_carry_the_enclosure_and_repo(self) -> None:
+        lc = self.amb.start()
+        self.amb.promote(
+            enclosure="/c/contract.md", repo_id="agents-remember", scope="agents-remember"
+        )
+        self.amb.emit_tool("ping", {"tokens": 1, "ok": True})
+        tool_event = next(e for e in self.store.read(lc.id) if e.kind == "tool.completed")
+        self.assertEqual(tool_event.enclosure, "/c/contract.md")
+        self.assertEqual(tool_event.repoId, "agents-remember")
+
+    def test_promote_requires_an_active_lifecycle(self) -> None:
+        with self.assertRaises(LifecycleError):
+            self.amb.promote(enclosure="/c/contract.md", repo_id="r", scope="r")
+
+
+class AttachTests(_AmbientCase):
+    def test_attach_with_none_active_adopts_and_resumes(self) -> None:
+        adopted = self.amb.attach("LC-EXISTING", enclosure="/c/contract.md", repo_id="r")
+        self.assertEqual(adopted.id, "LC-EXISTING")
+        self.assertEqual((adopted.state, adopted.fleeting), ("running", False))
+        resumed = next(e for e in self.store.read("LC-EXISTING") if e.kind == "lifecycle.resumed")
+        self.assertEqual(resumed.data["cause"], "adopted")
+
+    def test_attach_same_id_is_a_noop(self) -> None:
+        self.amb.attach("LC", enclosure="/c/contract.md", repo_id="r")
+        before = len(self.store.read("LC"))
+        same = self.amb.attach("LC", enclosure="/c/contract.md", repo_id="r")
+        self.assertEqual(same.id, "LC")
+        self.assertEqual(len(self.store.read("LC")), before)
+
+    def test_attach_pauses_a_persistent_current_then_adopts(self) -> None:
+        first = self.amb.start(fleeting=False)
+        self.amb.attach("OTHER", enclosure="/c/other.md", repo_id="r")
+        self.assertIn("lifecycle.paused", self.kinds(first.id))
+        self.assertEqual(self.amb.current and self.amb.current.id, "OTHER")
+
+    def test_attach_over_unsaved_fleeting_needs_a_decision(self) -> None:
+        first = self.amb.start()
+        with self.assertRaises(SaveGateRequired):
+            self.amb.attach("OTHER", enclosure="/c/other.md", repo_id="r")
+        self.assertEqual(self.amb.current and self.amb.current.id, first.id)
+
+    def test_attach_discard_then_adopts(self) -> None:
+        first = self.amb.start()
+        self.amb.attach("OTHER", enclosure="/c/other.md", repo_id="r", on_unsaved="discard")
+        self.assertIn("lifecycle.ended", self.kinds(first.id))
+        self.assertEqual(self.amb.current and self.amb.current.id, "OTHER")
+
+
+class SaveGateUnitTests(unittest.TestCase):
+    def test_compute_scope(self) -> None:
+        self.assertEqual(compute_scope("agents-remember"), "agents-remember")
+        self.assertEqual(compute_scope(None), UNSCOPED_SCOPE)
+        self.assertEqual(compute_scope("r", cross_repo=True), CROSS_REPO_SCOPE)
+
+    def test_coerce_save_decision(self) -> None:
+        self.assertEqual(coerce_save_decision("save"), "save")
+        self.assertEqual(coerce_save_decision("discard"), "discard")
+        with self.assertRaises(LifecycleError):
+            coerce_save_decision("maybe")
 
 
 if __name__ == "__main__":
