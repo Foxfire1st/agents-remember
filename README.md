@@ -2,7 +2,7 @@
   Agents Remember
 </h1>  
 <h3 align="center">
-  Durable, git-verified repo memory for coding agents.
+  Git-verified records for what your coding agents know. A control plane for what they do.
 </h3>
 
 <p align="center">
