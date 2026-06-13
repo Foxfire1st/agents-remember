@@ -44,6 +44,7 @@ from .tools import (
     server_info_payload,
     skills_install_payload,
     switch_lifecycle_payload,
+    task_doc_payload,
     worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
@@ -782,6 +783,40 @@ def create_server(config: McpRuntimeConfig) -> Any:
         """Move the active lifecycle along its phase axis (orthogonal to state): one of
         request | trust-checkpoint | reframe-research | decide | build | close."""
         return lifecycle_phase_payload(phase)
+
+    @server.tool()
+    def task_doc(
+        repo_id: str,
+        operation: str,
+        task_name: str | None = None,
+        contract_path: str | None = None,
+        slug: str | None = None,
+        fields: dict[str, Any] | None = None,
+        step: dict[str, Any] | None = None,
+        decision: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Author the JSON-primary task document (ar-task-document/v1) and re-render its
+        markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
+        parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
+
+        operation: 'create' | 'set_status' | 'set_step' | 'append_decision' | 'set_field' | 'get'.
+        Locate the doc by task_name (also resolves the contract for the lifecycle key) or
+        contract_path; pass slug for a series sub-task ('<slug>.json'), omit for a standalone task
+        ('task.json'). 'create' takes fields (id, slug, title, kind ['light'|'subTask'], repo,
+        type, createdAt, objective, requirements, steps, ...); 'set_step' takes step={id, title,
+        status, parent?, note?}; 'append_decision' takes decision={at, decision, rationale};
+        'set_field' takes fields with scalar/list updates; 'set_status' takes fields.status."""
+        return task_doc_payload(
+            config,
+            repo_id=repo_id,
+            operation=operation,
+            task_name=task_name,
+            contract_path=contract_path,
+            slug=slug,
+            fields=fields,
+            step=step,
+            decision=decision,
+        )
 
     return server
 

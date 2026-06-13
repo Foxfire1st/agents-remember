@@ -1,0 +1,113 @@
+"""Render a :class:`TaskDocument` to its ``task.md`` markdown form.
+
+The JSON document is the source of truth; this module is the **only** writer of
+the rendered markdown. It mirrors ``worktrees.worktree_contract.contract_to_text``:
+small per-section helpers assemble lines from the model, so a re-render fully
+regenerates the document and freeform markdown prose is never round-tripped back.
+The ``w-02-light-task-workflow`` ``template.md`` is the spec these helpers follow.
+
+Output is deterministic: the same document renders byte-for-byte identically.
+Section bodies carry no leading/trailing blank lines and join their own blocks
+with single blanks, so blank lines are exact by construction (no global
+normalization that would corrupt blank lines inside code fences).
+"""
+
+from __future__ import annotations
+
+from .document import CodeExample, Decision, Step, TaskDocument
+
+
+def render_markdown(doc: TaskDocument) -> str:
+    title = f"# Task: {doc.title}"
+    if doc.kind == "subTask":
+        title = f"{title} (Sub-task {doc.id})"
+    parts: list[str] = [title, "", *_header_lines(doc)]
+    parts += _section("Objective", [doc.objective or "_To be defined._"])
+    parts += _section("Requirements", _bullets(doc.requirements))
+    parts += _section("Design", [doc.design or "No design reasoning needed."])
+    parts += _section("Implementation Steps", _step_lines(doc.steps))
+    parts += _section("Proposed Code Examples", _code_example_lines(doc.codeExamples))
+    parts += _section("Decision Log", _decision_lines(doc.decisions))
+    parts += _section("Open Questions", _bullets(doc.openQuestions, empty="- None."))
+    parts += _section("References", _bullets(doc.references))
+    return "\n".join(parts) + "\n"
+
+
+def _header_lines(doc: TaskDocument) -> list[str]:
+    lines = [
+        f"**Status:** {doc.status}",
+        f"**Repo:** {doc.repo}",
+        f"**Type:** {doc.type}",
+        f"**Created:** {doc.createdAt}",
+    ]
+    if doc.master:
+        lines.append(f"**Master:** `{doc.master}`")
+    return lines
+
+
+def _section(heading: str, body: list[str]) -> list[str]:
+    return ["", "---", "", f"## {heading}", "", *body]
+
+
+def _bullets(items: list[str], *, empty: str = "- _None._") -> list[str]:
+    return [f"- {item}" for item in items] if items else [empty]
+
+
+def _checkbox(status: str) -> str:
+    return "x" if status == "done" else " "
+
+
+def _join_blocks(blocks: list[list[str]]) -> list[str]:
+    out: list[str] = []
+    for index, block in enumerate(blocks):
+        if index:
+            out.append("")
+        out.extend(block)
+    return out
+
+
+def _step_lines(steps: list[Step]) -> list[str]:
+    if not steps:
+        return ["_No steps defined yet._"]
+    blocks: list[list[str]] = []
+    for step in steps:
+        block = [f"### {step.id} — {step.title}", "", f"- [{_checkbox(step.status)}] {step.title}"]
+        for sub in step.substeps:
+            suffix = f" — {sub.note}" if sub.note else ""
+            block.append(f"  - [{_checkbox(sub.status)}] {sub.title}{suffix}")
+        blocks.append(block)
+    return _join_blocks(blocks)
+
+
+def _code_example_lines(examples: list[CodeExample]) -> list[str]:
+    if not examples:
+        return ["No code examples are needed for this task."]
+    blocks: list[list[str]] = []
+    for example in examples:
+        block = [
+            f"### {example.id} — {example.title}",
+            "",
+            f"Distinct change covered: {example.distinctChange}",
+            "",
+            f"Why this example is included: {example.why}",
+            "",
+            f"```{example.language}",
+            *example.snippet.split("\n"),
+            "```",
+        ]
+        blocks.append(block)
+    return _join_blocks(blocks)
+
+
+def _decision_lines(decisions: list[Decision]) -> list[str]:
+    if not decisions:
+        return ["_None recorded._"]
+    rows = [
+        f"| {_cell(item.at)} | {_cell(item.decision)} | {_cell(item.rationale)} |"
+        for item in decisions
+    ]
+    return ["| Date-Time | Decision | Rationale |", "| --- | --- | --- |", *rows]
+
+
+def _cell(text: str) -> str:
+    return text.replace("\n", " ").replace("|", "\\|").strip()

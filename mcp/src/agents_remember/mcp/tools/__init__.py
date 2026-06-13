@@ -49,6 +49,7 @@ from .providers import (
     provider_status_payload,
     provider_watchers_payload,
 )
+from .task_doc import task_doc_payload
 from .worktree import (
     worktree_abandon_payload,
     worktree_attach_payload,
@@ -98,6 +99,7 @@ __all__ = [
     "server_info_payload",
     "skills_install_payload",
     "switch_lifecycle_payload",
+    "task_doc_payload",
     "worktree_abandon_payload",
     "worktree_attach_payload",
     "worktree_cleanup_payload",

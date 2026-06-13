@@ -234,6 +234,29 @@ def _lifecycle_payloads(root: Path) -> dict[str, dict]:
         reset_ambient()
 
 
+def _task_doc_payloads(root: Path) -> dict[str, dict]:
+    """Author a representative task document (JSON-primary; markdown rendered)."""
+    config = _base_fixture(root)
+    return {
+        "task_doc": tools.task_doc_payload(
+            config,
+            repo_id=REPO,
+            operation="create",
+            task_name="demo-task",
+            fields={
+                "id": "DEMO",
+                "slug": "task",
+                "title": "Demo",
+                "kind": "light",
+                "repo": REPO,
+                "type": "Code",
+                "createdAt": "2026-01-01T00:00",
+                "objective": "demo",
+            },
+        )
+    }
+
+
 def _allowed_keys(model) -> set[str]:
     """Serialized keys the model is allowed to emit (field names plus aliases)."""
     allowed: set[str] = set()
@@ -253,13 +276,16 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(4)]
-        base, worktree, carryover, lifecycle = (Path(d) for d in cls._temp_dirs)
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(5)]
+        base, worktree, carryover, lifecycle, task_doc_root = (
+            Path(d) for d in cls._temp_dirs
+        )
         cls.payloads = {}
         cls.payloads.update(_simple_payloads(_base_fixture(base)))
         cls.payloads.update(_worktree_payloads(worktree))
         cls.payloads.update(_carryover_payloads(carryover))
         cls.payloads.update(_lifecycle_payloads(lifecycle))
+        cls.payloads.update(_task_doc_payloads(task_doc_root))
 
     @classmethod
     def tearDownClass(cls) -> None:

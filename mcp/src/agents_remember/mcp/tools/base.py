@@ -52,6 +52,7 @@ PUBLIC_TOOLS = (
     "lifecycle_end",
     "switch_lifecycle",
     "lifecycle_phase",
+    "task_doc",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 
