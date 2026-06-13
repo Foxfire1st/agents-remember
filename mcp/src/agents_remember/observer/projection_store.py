@@ -21,9 +21,24 @@ from typing import TYPE_CHECKING, Any
 
 from agents_remember.observer.events import Event
 from agents_remember.observer.paths import observer_root
-from agents_remember.observer.projection import WorkspaceProjection
+from agents_remember.observer.projection import (
+    LedgerNode,
+    RouteCoverageNode,
+    SidecarStaleNode,
+    WorkspaceProjection,
+)
 from agents_remember.observer.reducer import project_workspace
-from agents_remember.observer.snapshots import read_enclosures, read_providers
+from agents_remember.observer.snapshots import (
+    read_drift_snapshots,
+    read_enclosures,
+    read_ledger,
+    read_providers,
+    read_route_coverage,
+    read_setup_progress_nodes,
+    read_setup_summaries,
+    read_sidecar_staleness,
+    read_tool_reports,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
 
@@ -63,17 +78,51 @@ def write_projection(root: Path, projection: WorkspaceProjection) -> None:
 def project_and_write(
     config: McpRuntimeConfig, *, now: datetime | None = None
 ) -> WorkspaceProjection:
-    """Read logs + structural snapshots, reduce the tree, write it atomically."""
+    """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
     moment = now or datetime.now(UTC)
     root = observer_root(config)
+    coordination_root = config.coordination_root
+    sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces(config, moment)
     projection = project_workspace(
         read_lifecycle_logs(root),
-        enclosures=read_enclosures(config.coordination_root),
+        enclosures=read_enclosures(coordination_root),
         providers=read_providers(config, now=moment),
         now=moment,
+        drift_snapshots=read_drift_snapshots(coordination_root, now=moment),
+        sidecar_staleness=sidecar_staleness,
+        setup_summaries=read_setup_summaries(coordination_root, now=moment),
+        setup_progress=read_setup_progress_nodes(coordination_root, now=moment),
+        route_coverage=route_coverage,
+        tool_reports=read_tool_reports(coordination_root, now=moment),
+        ledgers=ledgers,
     )
     write_projection(root, projection)
     return projection
+
+
+def _gather_repo_surfaces(
+    config: McpRuntimeConfig, moment: datetime
+) -> tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]:
+    """Per-repo analytical surfaces (sidecar staleness, route coverage, ledger).
+
+    These walk each managed repo's onboarding/memory roots, so they are gathered
+    per ``RepositoryScope`` rather than once under the coordination root.
+    """
+    sidecar_staleness: list[SidecarStaleNode] = []
+    route_coverage: list[RouteCoverageNode] = []
+    ledgers: list[LedgerNode] = []
+    for scope in config.repositories.values():
+        if scope.memory_root is None:
+            continue
+        onboarding_root = scope.memory_root / "onboarding"
+        sidecar_staleness.extend(
+            read_sidecar_staleness(onboarding_root, repository=scope.repo_id, now=moment)
+        )
+        route_coverage.extend(read_route_coverage(onboarding_root, repository=scope.repo_id))
+        ledger = read_ledger(scope.memory_root)
+        if ledger is not None:
+            ledgers.append(ledger)
+    return sidecar_staleness, route_coverage, ledgers
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

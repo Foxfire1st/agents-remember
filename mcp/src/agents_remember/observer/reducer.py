@@ -31,10 +31,19 @@ from agents_remember.observer.lifecycle_state import (
 )
 from agents_remember.observer.projection import (
     ActionAvailability,
+    Analytics,
+    DriftSnapshotNode,
     EnclosureNode,
+    LedgerNode,
     LifecycleProjection,
     Metrics,
     ProviderNode,
+    RouteCoverageNode,
+    SetupProgressNode,
+    SetupSummaryNode,
+    SidecarStaleNode,
+    TokenSample,
+    ToolReportNode,
     WorkspaceProjection,
 )
 from agents_remember.observer.timeutil import STALE_AFTER_SECONDS, TTL_SECONDS, age_seconds
@@ -62,7 +71,9 @@ def project_lifecycle(events: list[Event], *, now: datetime) -> LifecycleProject
             proj = proj.model_copy(update={"state": corrected})
     proj = proj.model_copy(update={"lastEventTs": events[-1].ts})
     proj = _project_inferred(proj, events, now)
-    return proj.model_copy(update={"actions": _lifecycle_actions(proj)})
+    return proj.model_copy(
+        update={"actions": _lifecycle_actions(proj), "tokenSeries": token_series(events)}
+    )
 
 
 def project_workspace(
@@ -71,19 +82,43 @@ def project_workspace(
     enclosures: list[EnclosureNode],
     providers: list[ProviderNode],
     now: datetime,
+    drift_snapshots: list[DriftSnapshotNode] | None = None,
+    sidecar_staleness: list[SidecarStaleNode] | None = None,
+    setup_summaries: list[SetupSummaryNode] | None = None,
+    setup_progress: list[SetupProgressNode] | None = None,
+    route_coverage: list[RouteCoverageNode] | None = None,
+    tool_reports: list[ToolReportNode] | None = None,
+    ledgers: list[LedgerNode] | None = None,
+    stalest_limit: int = 10,
 ) -> WorkspaceProjection:
-    """Assemble the whole tree from already-read logs + structural snapshots."""
+    """Assemble the whole tree from already-read logs + structural + analytical snapshots.
+
+    The analytical inputs (slice 3b) are keyword-optional: a caller that wants only
+    the structural tree (the 3a contract) omits them and gets an empty ``analytics``.
+    """
     lifecycles = [project_lifecycle(log, now=now) for log in logs if log]
     enriched = [
         enclosure.model_copy(update={"actions": enclosure_actions(enclosure)})
         for enclosure in enclosures
     ]
+    sidecars = sidecar_staleness or []
+    analytics = build_analytics(
+        drift_snapshots=drift_snapshots or [],
+        sidecar_staleness=sidecars,
+        setup_summaries=setup_summaries or [],
+        setup_progress=setup_progress or [],
+        route_coverage=route_coverage or [],
+        tool_reports=tool_reports or [],
+        ledgers=ledgers or [],
+        stalest_limit=stalest_limit,
+    )
     return WorkspaceProjection(
         generatedAt=now.isoformat(),
         lifecycles=lifecycles,
         enclosures=enriched,
         providers=providers,
-        metrics=_metrics(lifecycles),
+        metrics=_metrics(lifecycles, sidecars),
+        analytics=analytics,
     )
 
 
@@ -223,11 +258,93 @@ def _cleanup_action(enclosure: EnclosureNode) -> ActionAvailability:
     return ActionAvailability(action="cleanup", enabled=True)
 
 
-def _metrics(lifecycles: list[LifecycleProjection]) -> Metrics:
+def _metrics(
+    lifecycles: list[LifecycleProjection],
+    sidecars: list[SidecarStaleNode] | None = None,
+) -> Metrics:
     return Metrics(
         lifecycleCount=len(lifecycles),
         runningCount=sum(1 for lc in lifecycles if lc.state == "running"),
         blockedCount=sum(1 for lc in lifecycles if lc.state == "blocked"),
         pausedCount=sum(1 for lc in lifecycles if lc.state == "paused"),
         totalTokens=sum(lc.tokens for lc in lifecycles),
+        stalenessHistogram=staleness_histogram(sidecars) if sidecars else {},
     )
+
+
+# --- analytical rollups (slice 3b) -------------------------------------------
+
+
+def token_series(events: list[Event]) -> list[TokenSample]:
+    """Cumulative token spend over time, from the log's ``tool.completed`` events (§2.4).
+
+    The per-lifecycle fuel gauge: gap #2 ("no token-spend persistence") is closed by
+    the event substrate, so the running total is a pure fold of the log.
+    """
+    total = 0
+    samples: list[TokenSample] = []
+    for event in events:
+        if event.kind != "tool.completed":
+            continue
+        tokens = event.data.get("tokens")
+        if isinstance(tokens, int):
+            total += tokens
+            samples.append(TokenSample(ts=event.ts, cumulative=total))
+    return samples
+
+
+# Upper bound (exclusive, seconds) per verification-age bucket; the final bucket is
+# open-ended and a node with no parseable date falls into "unknown".
+_STALENESS_BUCKETS: tuple[tuple[str, float | None], ...] = (
+    ("<7d", 7 * 86400.0),
+    ("7-30d", 30 * 86400.0),
+    ("30-90d", 90 * 86400.0),
+    (">90d", None),
+)
+
+
+def staleness_histogram(nodes: list[SidecarStaleNode]) -> dict[str, int]:
+    """Bucket sidecars by verification age (surface 11 rollup; unparseable -> unknown)."""
+    buckets = {label: 0 for label, _ in _STALENESS_BUCKETS}
+    buckets["unknown"] = 0
+    for node in nodes:
+        buckets[_staleness_bucket(node.ageSeconds)] += 1
+    return buckets
+
+
+def _staleness_bucket(age: float | None) -> str:
+    if age is None:
+        return "unknown"
+    for label, upper in _STALENESS_BUCKETS:
+        if upper is None or age < upper:
+            return label
+    return ">90d"
+
+
+def build_analytics(
+    *,
+    drift_snapshots: list[DriftSnapshotNode],
+    sidecar_staleness: list[SidecarStaleNode],
+    setup_summaries: list[SetupSummaryNode],
+    setup_progress: list[SetupProgressNode],
+    route_coverage: list[RouteCoverageNode],
+    tool_reports: list[ToolReportNode],
+    ledgers: list[LedgerNode],
+    stalest_limit: int = 10,
+) -> Analytics:
+    """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard."""
+    return Analytics(
+        driftSnapshots=drift_snapshots,
+        stalestSidecars=_stalest(sidecar_staleness, stalest_limit),
+        setupSummaries=setup_summaries,
+        setupProgress=setup_progress,
+        routeCoverage=route_coverage,
+        toolReports=tool_reports,
+        ledgers=ledgers,
+    )
+
+
+def _stalest(nodes: list[SidecarStaleNode], limit: int) -> list[SidecarStaleNode]:
+    """The oldest-verified sidecars first; unparseable dates sort last."""
+    ranked = sorted(nodes, key=lambda node: (node.ageSeconds is None, -(node.ageSeconds or 0.0)))
+    return ranked[:limit]

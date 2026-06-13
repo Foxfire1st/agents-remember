@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +12,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check import drif
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     ACTIONABLE_CLASSIFICATIONS,
 )
+from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot_dir
 
 
 def not_checked() -> dict[str, Any]:
@@ -58,6 +62,7 @@ def run_drift_summary(
         code_repository_root,
         context.onboarding_root,
     )
+    _write_drift_snapshot(code_repository_root, context, rows)
     return summarize_rows(
         [_row_to_dict(row, context.onboarding_root) for row in rows],
         report_path=report_path.as_posix(),
@@ -96,3 +101,37 @@ def _row_to_dict(row: Any, onboarding_root: Path) -> dict[str, Any]:
         "affected_sections": row.affected_sections,
         "note": row.note,
     }
+
+
+def _write_drift_snapshot(code_repository_root: Path, context: Any, rows: list[Any]) -> None:
+    """Persist the drift result as a durable JSON snapshot for the observer (slice 3b, b1).
+
+    Best-effort: the dashboard snapshot must never fail the drift run that produced
+    it, so write errors are swallowed. The reducer reads this snapshot with a
+    staleness age instead of re-classifying drift (which is git-per-sidecar).
+    """
+    branch = drift.current_branch_name(code_repository_root)
+    classification_counts = drift.counts(rows)
+    payload = {
+        "schema": DRIFT_SNAPSHOT_SCHEMA,
+        "repository": code_repository_root.name,
+        "branch": branch,
+        "checkedAt": datetime.now(UTC).isoformat(),
+        "counts": classification_counts,
+        "actionableCount": sum(
+            count
+            for name, count in classification_counts.items()
+            if name in ACTIONABLE_CLASSIFICATIONS
+        ),
+        "rows": [_row_to_dict(row, context.onboarding_root) for row in rows],
+    }
+    repo_token = drift.sanitize_report_token(code_repository_root.name)
+    branch_token = drift.sanitize_report_token(branch)
+    snapshot_path = drift_snapshot_dir(context.coordination_root) / f"{repo_token}__{branch_token}.json"
+    try:
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = snapshot_path.with_name(f"{snapshot_path.name}.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+        os.replace(tmp, snapshot_path)
+    except OSError:
+        pass  # the snapshot is a dashboard convenience; never fail the drift run for it

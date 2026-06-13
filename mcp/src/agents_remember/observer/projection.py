@@ -41,6 +41,21 @@ class ActionAvailability(BaseModel):
     nextSafeAction: str | None = None
 
 
+class TokenSample(BaseModel):
+    """One point on a lifecycle's cumulative-token fuel gauge (slice 3b, §2.4).
+
+    Derived from the event log: every ``tool.completed`` event carries the tokens
+    that call cost, so the running total over event timestamps is the time series
+    note 03 gap #2 ("no token-spend persistence") wanted -- now derivable because
+    the event substrate (slice 02) persists it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ts: str
+    cumulative: int
+
+
 class LifecycleProjection(BaseModel):
     """One lifecycle's resolved state, folded from its event log.
 
@@ -69,6 +84,8 @@ class LifecycleProjection(BaseModel):
     # The latest open block ask (the proto-gate); slice 06 materializes the record.
     ask: dict[str, Any] | None = None
     actions: list[ActionAvailability] = Field(default_factory=list)
+    # The cumulative-token fuel gauge, folded from the log's tool.completed events.
+    tokenSeries: list[TokenSample] = Field(default_factory=list)
 
 
 class EnclosureNode(BaseModel):
@@ -112,7 +129,14 @@ class ProviderNode(BaseModel):
 
 
 class Metrics(BaseModel):
-    """Workspace rollups. 3a keeps point counts; 3b adds the derived time series."""
+    """Workspace rollups: 3a point counts + the 3b derived aggregates.
+
+    ``stalenessHistogram`` buckets every onboarding sidecar by the age of its
+    ``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free
+    verification-age distribution note 03 wanted, computed without classifying
+    drift. Per-lifecycle token *series* live on each ``LifecycleProjection``; these
+    are the workspace-wide rollups.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -121,10 +145,137 @@ class Metrics(BaseModel):
     blockedCount: int = 0
     pausedCount: int = 0
     totalTokens: int = 0
+    stalenessHistogram: dict[str, int] = Field(default_factory=dict)
+
+
+class DriftSnapshotNode(BaseModel):
+    """A repo's onboarding-drift result, read from a persisted JSON snapshot (3b, b1).
+
+    The reducer never classifies drift (that is git-per-sidecar -- far too costly for
+    a poll-cadence write); it reads the snapshot the memory_quality drift run
+    persisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), exactly
+    like a provider tile. The full per-sidecar rows stay in the snapshot file; the
+    projection carries only the classification counts a gauge needs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str
+    branch: str
+    counts: dict[str, int] = Field(default_factory=dict)
+    actionableCount: int = 0
+    snapshotStaleSeconds: float | None = None
+
+
+class SidecarStaleNode(BaseModel):
+    """One onboarding sidecar's verification age (slice 3b, surface 11; git-free).
+
+    Read from the sidecar's table metadata (``lastVerifiedCommitDate``) with no git
+    -- the always-on complement to the drift snapshot. The projection carries only
+    the *stalest* bounded sample (a leaderboard); the full distribution is the
+    ``Metrics.stalenessHistogram`` rollup.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    onboardingFile: str
+    repository: str
+    lastVerifiedDate: str
+    ageSeconds: float | None = None
+
+
+class SetupSummaryNode(BaseModel):
+    """The latest provider-setup outcome for one action (slice 3b, surface 2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str
+    ok: bool | None = None
+    ready: bool | None = None
+    state: str | None = None
+    generatedAt: str | None = None
+    snapshotStaleSeconds: float | None = None
+    resultCounts: dict[str, int] = Field(default_factory=dict)
+
+
+class SetupProgressNode(BaseModel):
+    """A worktree group's live provider-setup progress (slice 3b, surface 3).
+
+    Projected through ``setup_progress.progress_status``, so a ``running`` group
+    whose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    group: str
+    state: str
+    currentPhase: str | None = None
+    heartbeatAgeSeconds: float | None = None
+    completedCount: int = 0
+    failedPhases: list[str] = Field(default_factory=list)
+
+
+class RouteCoverageNode(BaseModel):
+    """One onboarding route's coverage, from its ``overview.index.json`` (3b, surface 10)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str | None = None
+    route: str
+    sourceFilesInScope: int = 0
+    fileSidecars: int = 0
+    childRoutes: int = 0
+
+
+class ToolReportNode(BaseModel):
+    """A recent verbose tool-report file (slice 3b, surface 12; bounded keep-last-5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str
+    path: str
+    label: str
+    ageSeconds: float | None = None
+
+
+class LedgerNode(BaseModel):
+    """A repo's memory ledger currency (slice 3b, surface 8).
+
+    ``closeoutCount`` is the ledger row count (one row per closeout); the rows carry
+    no timestamps, so "closeouts over time" is deliberately not projected -- only the
+    count + the last-verified-code-commit currency.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository: str
+    closeoutCount: int = 0
+    lastVerifiedCodeCommit: str
+    baseCodeCommit: str
+
+
+class Analytics(BaseModel):
+    """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
+
+    Kept apart from the structural tree (lifecycles/enclosures/providers) so the
+    client-agnostic core stays small. Large raw inventories are deliberately *not*
+    here -- drift rows stay in the snapshot file, the full sidecar list collapses to
+    the histogram + a bounded leaderboard -- so the served projection stays lean.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    driftSnapshots: list[DriftSnapshotNode] = Field(default_factory=list)
+    stalestSidecars: list[SidecarStaleNode] = Field(default_factory=list)
+    setupSummaries: list[SetupSummaryNode] = Field(default_factory=list)
+    setupProgress: list[SetupProgressNode] = Field(default_factory=list)
+    routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
+    toolReports: list[ToolReportNode] = Field(default_factory=list)
+    ledgers: list[LedgerNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):
-    """The whole resolved tree: lifecycles + enclosures + providers + metrics."""
+    """The whole resolved tree: lifecycles + enclosures + providers + metrics + analytics."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -134,3 +285,4 @@ class WorkspaceProjection(BaseModel):
     enclosures: list[EnclosureNode] = Field(default_factory=list)
     providers: list[ProviderNode] = Field(default_factory=list)
     metrics: Metrics = Field(default_factory=Metrics)
+    analytics: Analytics = Field(default_factory=Analytics)
