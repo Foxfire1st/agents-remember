@@ -40,6 +40,7 @@ from agents_remember.observer.projection import (
     EnclosureNode,
     ProviderNode,
     SidecarStaleNode,
+    TaskDocNode,
     WorkspaceProjection,
 )
 from agents_remember.observer.projection_store import (
@@ -64,12 +65,14 @@ from agents_remember.observer.snapshots import (
     read_setup_progress_nodes,
     read_setup_summaries,
     read_sidecar_staleness,
+    read_task_documents,
     read_tool_reports,
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import default_contract, write_contract
 
 T0 = "2026-06-13T18:00:00+00:00"
@@ -723,14 +726,73 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
             "| Field | Value |\n| --- | --- |\n| doc_type | `file-level-onboarding` |\n| lastVerifiedCommitDate | 2026-06-13T17:00:00+00:00 |\n",
             encoding="utf-8",
         )
+        write_task_doc(
+            self.coord / "tasks" / "repo-a" / "demo",
+            TaskDocument.model_validate({
+                "id": "D", "slug": "task", "title": "Demo", "kind": "light", "repo": "repo-a",
+                "createdAt": "2026-01-01T00:00", "lifecycleId": "LC1",
+                "steps": [{"id": "S1", "title": "a", "status": "done"}],
+            }),
+        )
         proj = project_and_write(config, now=FRESH)
         self.assertEqual(len(proj.analytics.driftSnapshots), 1)
         self.assertEqual(proj.analytics.driftSnapshots[0].counts["drifted"], 1)
         self.assertEqual(proj.analytics.ledgers[0].closeoutCount, 2)
         self.assertEqual(len(proj.analytics.stalestSidecars), 1)
         self.assertEqual(proj.metrics.stalenessHistogram["<7d"], 1)
+        self.assertEqual(len(proj.analytics.taskDocuments), 1)
+        self.assertEqual(proj.analytics.taskDocuments[0].lifecycleId, "LC1")
         state = json.loads((observer_root(config) / "latest-state.json").read_text(encoding="utf-8"))
         self.assertIn("analytics", state)
+
+
+class TaskDocumentsReaderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.coord = Path(self._dir.name)
+
+    def _doc(self, **over: object) -> TaskDocument:
+        base: dict[str, object] = {
+            "id": "D", "slug": "task", "title": "Demo", "kind": "light",
+            "repo": "repo-a", "createdAt": "2026-01-01T00:00",
+        }
+        base.update(over)
+        return TaskDocument.model_validate(base)
+
+    def test_reads_lifecycle_keyed_progress(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        write_task_doc(root, self._doc(lifecycleId="LC1", steps=[
+            {"id": "S1", "title": "a", "status": "done"},
+            {"id": "S2", "title": "b", "status": "inProgress"},
+        ]))
+        nodes = read_task_documents(self.coord, now=FRESH)
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(
+            (nodes[0].lifecycleId, nodes[0].stepsDone, nodes[0].stepsTotal, nodes[0].currentStep),
+            ("LC1", 1, 2, "S2 — b"),
+        )
+
+    def test_skips_docs_without_lifecycle_and_non_task_json(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # no lifecycleId
+        (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
+        self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
+
+    def test_missing_tasks_dir_is_empty(self) -> None:
+        self.assertEqual(read_task_documents(self.coord / "nope", now=FRESH), [])
+
+    def test_build_analytics_includes_task_documents(self) -> None:
+        node = TaskDocNode(
+            lifecycleId="LC1", repository="repo-a", title="t", status="planning",
+            kind="light", docPath="p",
+        )
+        analytics = build_analytics(
+            drift_snapshots=[], sidecar_staleness=[], setup_summaries=[], setup_progress=[],
+            route_coverage=[], tool_reports=[], ledgers=[], task_documents=[node],
+        )
+        self.assertEqual(len(analytics.taskDocuments), 1)
+        self.assertEqual(analytics.taskDocuments[0].lifecycleId, "LC1")
 
 
 def _action(actions: list, name: str):  # type: ignore[type-arg]

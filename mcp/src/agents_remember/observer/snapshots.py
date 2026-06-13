@@ -36,11 +36,19 @@ from agents_remember.observer.projection import (
     SetupProgressNode,
     SetupSummaryNode,
     SidecarStaleNode,
+    TaskDocNode,
     ToolReportNode,
 )
 from agents_remember.observer.timeutil import age_seconds
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import progress_status, read_setup_progress
+from agents_remember.tasks import (
+    TASK_DOCUMENT_SCHEMA,
+    TaskDocument,
+    current_step,
+    step_done,
+    step_total,
+)
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
@@ -314,6 +322,46 @@ def read_ledger(memory_root: Path) -> LedgerNode | None:
         lastVerifiedCodeCommit=ledger.last_verified_code_commit,
         baseCodeCommit=ledger.base_code_commit,
     )
+
+
+def read_task_documents(coordination_root: Path, *, now: datetime) -> list[TaskDocNode]:
+    """Surface 7 (slice 3c): per-lifecycle task-document progress.
+
+    Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
+    source of truth, never the rendered markdown -- keyed by ``lifecycleId`` so the
+    dashboard can show what a lifecycle is doing. Documents with no lifecycle key
+    (not yet bound to a durable worktree), non-task JSON, and malformed files are
+    skipped.
+    """
+    tasks_root = coordination_root / "tasks"
+    if not tasks_root.is_dir():
+        return []
+    nodes: list[TaskDocNode] = []
+    for path in sorted(tasks_root.glob("*/*/*.json")):
+        payload = _read_json(path)
+        if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
+            continue
+        if not payload.get("lifecycleId"):
+            continue
+        try:
+            doc = TaskDocument.model_validate(payload)
+        except ValueError:
+            continue
+        nodes.append(
+            TaskDocNode(
+                lifecycleId=doc.lifecycleId or "",
+                repository=doc.repo,
+                title=doc.title,
+                status=doc.status,
+                kind=doc.kind,
+                stepsDone=step_done(doc),
+                stepsTotal=step_total(doc),
+                currentStep=current_step(doc),
+                docPath=path.as_posix(),
+                ageSeconds=_file_age_seconds(path, now),
+            )
+        )
+    return nodes
 
 
 # --- shared helpers ----------------------------------------------------------

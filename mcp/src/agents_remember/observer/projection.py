@@ -254,6 +254,30 @@ class LedgerNode(BaseModel):
     baseCodeCommit: str
 
 
+class TaskDocNode(BaseModel):
+    """A task document's progress, keyed by lifecycle (slice 3c, surface 7).
+
+    Read from the JSON-primary ``ar-task-document/v1`` document (the source of
+    truth -- never the rendered markdown), so the dashboard can show what a
+    lifecycle is doing at step granularity. Bounded to the dashboard's needs: the
+    per-step detail stays in the document file, and documents not yet bound to a
+    lifecycle are omitted by the reader.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lifecycleId: str
+    repository: str
+    title: str
+    status: str
+    kind: str
+    stepsDone: int = 0
+    stepsTotal: int = 0
+    currentStep: str | None = None
+    docPath: str
+    ageSeconds: float | None = None
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
@@ -272,6 +296,7 @@ class Analytics(BaseModel):
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
+    taskDocuments: list[TaskDocNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):

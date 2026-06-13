@@ -37,6 +37,7 @@ from agents_remember.observer.snapshots import (
     read_setup_progress_nodes,
     read_setup_summaries,
     read_sidecar_staleness,
+    read_task_documents,
     read_tool_reports,
 )
 from agents_remember.observer.store import EventStore
@@ -95,6 +96,7 @@ def project_and_write(
         route_coverage=route_coverage,
         tool_reports=read_tool_reports(coordination_root, now=moment),
         ledgers=ledgers,
+        task_documents=read_task_documents(coordination_root, now=moment),
     )
     write_projection(root, projection)
     return projection

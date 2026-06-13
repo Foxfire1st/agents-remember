@@ -36,6 +36,14 @@ Create the wrapper folder at the same time the durable task artifact is created,
 
 Light-task artifacts use minute-precision timestamps in `YYYY-MM-DDTHH:MM` format wherever they record task-local dates or times.
 
+## Task Document Format (JSON-Primary)
+
+The task document is **JSON-primary**: an `ar-task-document/v1` JSON file is the source of truth, and the `task.md` (or `<slug>.md` for a sub-task) is a deterministic **render** of it. Author and update it with the `task_doc` MCP tool — `create`, `set_status`, `set_step`, `append_decision`, `set_field` — which writes the JSON and re-renders the markdown on every write. Do not hand-edit a tool-managed `task.md`; edit through the tool and let it re-render. `template.md` and `master-template.md` document the **render spec** (the shape the renderer produces), not a separate hand-authored format.
+
+Because the JSON encodes step/substep status explicitly, a tool-managed document is legible on the dashboard — the observer projects it, keyed to the lifecycle via the contract's `lifecycle_id`, at step granularity. The same schema/tool serves a *lightweight* document for a chat build (a thin doc: title plus a few steps, so even a no-`task.md` session is legible) and a *full* one for a durable task; the difference is content completeness, not a separate format.
+
+Scope and transition: the tool manages **`light` and `subTask`** documents; a series **master** file stays hand-authored markdown for now (a generic re-render would clobber a master's bespoke sections). Existing markdown task files stay markdown until intentionally migrated — new tasks adopt the JSON-primary format going forward.
+
 ## Master-Task Composition (task series)
 
 When a task outgrows a single-page plan, escalate to a **master + light sub-task series**. One wrapper
@@ -91,6 +99,10 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 13. A task that outgrows a single-page plan escalates to a master + light sub-task series
     (`master-template.md`): one wrapper folder (master `task.md` + flat `NN_<name>.md` sub-tasks), one
     shared worktree for the series, a commit per slice, and a single integrate + release at the end.
+14. Tool-managed task documents are JSON-primary: author `light` and `subTask` documents through the
+    `task_doc` MCP tool (which writes the `ar-task-document/v1` JSON and renders the markdown); do not
+    hand-edit a generated `task.md`. `template.md`/`master-template.md` are the render spec; series
+    master files stay hand-authored markdown for now, and existing markdown tasks migrate going forward.
 
 ## Relationship To Other Instructions
 

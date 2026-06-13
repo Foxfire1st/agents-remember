@@ -2,6 +2,8 @@
 
 Use this template for `task.md` inside any task wrapper created by `w-02-light-task-workflow`.
 
+This template is also the **render spec** for the JSON-primary task document: the `task_doc` MCP tool renders an `ar-task-document/v1` JSON into exactly this `task.md` shape. For tool-managed `light` and `subTask` documents, edit the JSON through `task_doc` and let it re-render — do not hand-edit the generated markdown. (Series *master* files are not tool-managed yet; they stay hand-authored.)
+
 Implementation sections use checkbox-based steps and nested checkbox items. Keep every checklist item on its own line, and indent nested checklist items by two spaces beneath their parent checkbox. The checklist is the live execution state during implementation and review.
 
 ````markdown

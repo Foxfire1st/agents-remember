@@ -42,6 +42,7 @@ from agents_remember.observer.projection import (
     SetupProgressNode,
     SetupSummaryNode,
     SidecarStaleNode,
+    TaskDocNode,
     TokenSample,
     ToolReportNode,
     WorkspaceProjection,
@@ -89,6 +90,7 @@ def project_workspace(
     route_coverage: list[RouteCoverageNode] | None = None,
     tool_reports: list[ToolReportNode] | None = None,
     ledgers: list[LedgerNode] | None = None,
+    task_documents: list[TaskDocNode] | None = None,
     stalest_limit: int = 10,
 ) -> WorkspaceProjection:
     """Assemble the whole tree from already-read logs + structural + analytical snapshots.
@@ -110,6 +112,7 @@ def project_workspace(
         route_coverage=route_coverage or [],
         tool_reports=tool_reports or [],
         ledgers=ledgers or [],
+        task_documents=task_documents or [],
         stalest_limit=stalest_limit,
     )
     return WorkspaceProjection(
@@ -330,6 +333,7 @@ def build_analytics(
     route_coverage: list[RouteCoverageNode],
     tool_reports: list[ToolReportNode],
     ledgers: list[LedgerNode],
+    task_documents: list[TaskDocNode] | None = None,
     stalest_limit: int = 10,
 ) -> Analytics:
     """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard."""
@@ -341,6 +345,7 @@ def build_analytics(
         routeCoverage=route_coverage,
         toolReports=tool_reports,
         ledgers=ledgers,
+        taskDocuments=task_documents or [],
     )
 
 
