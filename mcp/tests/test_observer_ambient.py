@@ -1,0 +1,229 @@
+"""Tests for the ambient lifecycle (slice 2b).
+
+Covers the signal state machine, guarded start, switch transitions, the
+choke-point emission (tagging an active lifecycle; dropping a lifecycle-less
+call), the TTL project-and-prune sweep, and the heartbeat ticker.
+"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import time
+import unittest
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(MCP_SRC))
+
+from agents_remember.observer.ambient import AmbientLifecycle, build_ask
+from agents_remember.observer.events import Event
+from agents_remember.observer.lifecycle_state import (
+    GuardedStartError,
+    LifecycleError,
+    coerce_phase,
+)
+from agents_remember.observer.store import EventStore
+from agents_remember.observer.ulid import new_ulid
+
+
+class _AmbientCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.root = Path(self._dir.name)
+        self.store = EventStore(self.root)
+        # A long heartbeat keeps these tests deterministic (no ticker noise).
+        self.amb = AmbientLifecycle(self.store, heartbeat_seconds=3600)
+
+    def tearDown(self) -> None:
+        self.amb.shutdown()
+        self._dir.cleanup()
+
+    def kinds(self, lifecycle_id: str) -> list[str]:
+        return [event.kind for event in self.store.read(lifecycle_id)]
+
+
+class StateMachineTests(_AmbientCase):
+    def test_start_is_running_fleeting_and_guarded(self) -> None:
+        lc = self.amb.start()
+        self.assertEqual((lc.state, lc.phase, lc.fleeting), ("running", "request", True))
+        with self.assertRaises(GuardedStartError):
+            self.amb.start()
+
+    def test_signal_sequence_is_recorded_in_order(self) -> None:
+        lc = self.amb.start()
+        self.amb.phase("build")
+        self.amb.block(kind="question", prompt="?")
+        self.amb.resume()
+        self.amb.end("completed")
+        self.assertEqual(
+            self.kinds(lc.id),
+            [
+                "lifecycle.started",
+                "lifecycle.phase-changed",
+                "lifecycle.blocked",
+                "lifecycle.resumed",
+                "lifecycle.ended",
+            ],
+        )
+
+    def test_block_only_from_running(self) -> None:
+        self.amb.start()
+        self.amb.block()
+        with self.assertRaises(LifecycleError):
+            self.amb.block()
+
+    def test_resume_only_from_blocked(self) -> None:
+        self.amb.start()
+        with self.assertRaises(LifecycleError):
+            self.amb.resume()
+
+    def test_end_clears_current_and_lifts_the_guard(self) -> None:
+        self.amb.start()
+        ended = self.amb.end("abandoned")
+        self.assertEqual(ended.state, "abandoned")
+        self.assertIsNone(self.amb.current)
+        self.assertIsNotNone(self.amb.start())
+
+    def test_end_rejects_a_non_terminal_outcome(self) -> None:
+        self.amb.start()
+        with self.assertRaises(LifecycleError):
+            self.amb.end("paused")
+
+    def test_phase_moves(self) -> None:
+        self.amb.start()
+        self.assertEqual(self.amb.phase("close").phase, "close")
+
+    def test_signal_without_active_lifecycle_raises(self) -> None:
+        with self.assertRaises(LifecycleError):
+            self.amb.phase("build")
+
+
+class SwitchTests(_AmbientCase):
+    def test_switch_from_fleeting_discards_then_starts_fresh(self) -> None:
+        first = self.amb.start()
+        second = self.amb.switch()
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual(self.amb.current and self.amb.current.id, second.id)
+        self.assertIn("lifecycle.ended", self.kinds(first.id))
+        self.assertEqual(second.state, "running")
+
+    def test_switch_from_persistent_pauses_the_old(self) -> None:
+        first = self.amb.start(fleeting=False)
+        self.amb.switch()
+        self.assertIn("lifecycle.paused", self.kinds(first.id))
+
+
+class EmissionTests(_AmbientCase):
+    def test_emit_tool_tags_the_active_lifecycle_once(self) -> None:
+        lc = self.amb.start()
+        self.amb.emit_tool("ping", {"tokens": 5, "ok": True})
+        tool_events = [e for e in self.store.read(lc.id) if e.kind == "tool.completed"]
+        self.assertEqual(len(tool_events), 1)
+        self.assertEqual(tool_events[0].trust, "observed")
+        self.assertEqual(tool_events[0].actor, "model")
+        self.assertEqual(tool_events[0].data["tool"], "ping")
+
+    def test_lifecycle_less_call_is_dropped_not_misattributed(self) -> None:
+        self.amb.emit_tool("ping", {"tokens": 5, "ok": True})
+        self.assertEqual(self.store.read(None), [])
+        self.assertFalse((self.root / "lifecycles").exists())
+
+    def test_end_signal_produces_no_trailing_tool_completed(self) -> None:
+        # _tool_payload calls emit_tool after the tool body; lifecycle_end clears
+        # the ambient first, so its own tool.completed is dropped by construction.
+        lc = self.amb.start()
+        self.amb.end("completed")
+        self.amb.emit_tool("lifecycle_end", {"tokens": 3, "ok": True})
+        self.assertNotIn("tool.completed", self.kinds(lc.id))
+
+
+class TtlSweepTests(_AmbientCase):
+    def _seed(self, lifecycle_id: str, *, fleeting: bool, age: timedelta, promoted: bool = False) -> None:
+        ts = (datetime.now(UTC) - age).isoformat()
+        self.store.append(
+            Event(
+                id=new_ulid(),
+                ts=ts,
+                kind="lifecycle.started",
+                trust="declared",
+                actor="model",
+                lifecycleId=lifecycle_id,
+                data={"fleeting": fleeting},
+            )
+        )
+        if promoted:
+            self.store.append(
+                Event(
+                    id=new_ulid(),
+                    ts=ts,
+                    kind="lifecycle.promoted",
+                    trust="observed",
+                    actor="system",
+                    lifecycleId=lifecycle_id,
+                )
+            )
+
+    def _exists(self, lifecycle_id: str) -> bool:
+        return (self.root / "lifecycles" / lifecycle_id).exists()
+
+    def test_dormant_fleeting_is_pruned(self) -> None:
+        self._seed("OLD", fleeting=True, age=timedelta(hours=2))
+        self.assertEqual(self.amb._reap_stale_fleeting(), ["OLD"])
+        self.assertFalse(self._exists("OLD"))
+
+    def test_persistent_is_never_pruned(self) -> None:
+        self._seed("KEEP", fleeting=False, age=timedelta(hours=2))
+        self.assertEqual(self.amb._reap_stale_fleeting(), [])
+        self.assertTrue(self._exists("KEEP"))
+
+    def test_fresh_fleeting_is_kept(self) -> None:
+        self._seed("FRESH", fleeting=True, age=timedelta(seconds=5))
+        self.amb._reap_stale_fleeting()
+        self.assertTrue(self._exists("FRESH"))
+
+    def test_promoted_fleeting_is_kept(self) -> None:
+        self._seed("PROMO", fleeting=True, age=timedelta(hours=2), promoted=True)
+        self.amb._reap_stale_fleeting()
+        self.assertTrue(self._exists("PROMO"))
+
+    def test_start_keeps_the_fresh_current_while_sweeping(self) -> None:
+        self._seed("OLD", fleeting=True, age=timedelta(hours=2))
+        lc = self.amb.start()  # start triggers the opportunistic sweep
+        self.assertFalse(self._exists("OLD"))
+        self.assertTrue(self._exists(lc.id))
+
+
+class HeartbeatTests(unittest.TestCase):
+    def test_ticker_emits_heartbeats_until_stopped(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        amb = AmbientLifecycle(store, heartbeat_seconds=0.02)
+        self.addCleanup(amb.shutdown)
+        lc = amb.start()
+        time.sleep(0.2)
+        amb.shutdown()
+        time.sleep(0.05)  # let the ticker observe the stop and exit before reading
+        kinds = [event.kind for event in store.read(lc.id)]
+        self.assertIn("lifecycle.heartbeat", kinds)
+
+
+class AskTests(unittest.TestCase):
+    def test_build_ask_prunes_and_returns_none_when_empty(self) -> None:
+        self.assertIsNone(build_ask(None, None, None))
+        self.assertEqual(
+            build_ask("decision", "ok?", ["a", "b"]),
+            {"kind": "decision", "prompt": "ok?", "options": ["a", "b"]},
+        )
+        self.assertEqual(build_ask(None, "just a prompt", None), {"prompt": "just a prompt"})
+
+    def test_coerce_phase_validates_at_the_boundary(self) -> None:
+        self.assertEqual(coerce_phase("build"), "build")
+        with self.assertRaises(LifecycleError):
+            coerce_phase("not-a-phase")
+
+
+if __name__ == "__main__":
+    unittest.main()

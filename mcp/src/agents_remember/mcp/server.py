@@ -6,6 +6,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
+from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient
 
 from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
@@ -22,6 +23,11 @@ from .tools import (
     drift_check_payload,
     grepai_search_payload,
     grepai_trace_payload,
+    lifecycle_block_payload,
+    lifecycle_end_payload,
+    lifecycle_phase_payload,
+    lifecycle_resume_payload,
+    lifecycle_start_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
     memory_carryover_apply_payload,
@@ -37,6 +43,7 @@ from .tools import (
     runtime_install_payload,
     server_info_payload,
     skills_install_payload,
+    switch_lifecycle_payload,
     worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
@@ -51,6 +58,9 @@ from .tools import (
 
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
+    # One ambient lifecycle per server process; the _tool_payload choke point
+    # tags tool calls onto it once a lifecycle is started.
+    install_ambient(AmbientLifecycle(EventStore(config.coordination_root / "logs" / "observer")))
     server = FastMCP("Agents Remember")
 
     @server.tool()
@@ -725,6 +735,49 @@ def create_server(config: McpRuntimeConfig) -> Any:
             provider_timeout=provider_timeout,
             codex_sandbox=codex_sandbox,
         )
+
+    @server.tool()
+    def lifecycle_start() -> dict[str, Any]:
+        """Begin a new session lifecycle and become its running owner. Guarded: rejected
+        (with a reminder naming the active lifecycle) when one is already active in this
+        session -- end or switch it first. Takes no identifier; the server mints and tracks
+        the id. Signal this once governance is confirmed at the trust checkpoint."""
+        return lifecycle_start_payload()
+
+    @server.tool()
+    def lifecycle_block(
+        kind: str | None = None,
+        prompt: str | None = None,
+        options: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Mark the active lifecycle blocked (waiting on a gate or a human answer). Optionally
+        carry a structured ask: kind ('question'|'decision'|'conflict'), a prompt, and
+        enumerable options. Resolve it with lifecycle_resume."""
+        return lifecycle_block_payload(kind=kind, prompt=prompt, options=options)
+
+    @server.tool()
+    def lifecycle_resume() -> dict[str, Any]:
+        """Resume the active lifecycle from blocked back to running once the gate or question
+        that blocked it is resolved."""
+        return lifecycle_resume_payload()
+
+    @server.tool()
+    def lifecycle_end(outcome: str) -> dict[str, Any]:
+        """End the active lifecycle. outcome is 'completed' (the human declared done) or
+        'abandoned' (otherwise). Clears the session's active lifecycle."""
+        return lifecycle_end_payload(outcome)
+
+    @server.tool()
+    def switch_lifecycle() -> dict[str, Any]:
+        """Transition away from the current lifecycle (a persistent one is paused, a fleeting
+        one is discarded) and begin a fresh one. The model never handles ids."""
+        return switch_lifecycle_payload()
+
+    @server.tool()
+    def lifecycle_phase(phase: str) -> dict[str, Any]:
+        """Move the active lifecycle along its phase axis (orthogonal to state): one of
+        request | trust-checkpoint | reframe-research | decide | build | close."""
+        return lifecycle_phase_payload(phase)
 
     return server
 

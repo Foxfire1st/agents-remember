@@ -29,6 +29,14 @@ from agents_remember.models.benchmarks import (
 )
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
+from agents_remember.models.lifecycle import (
+    LifecycleBlockResponse,
+    LifecycleEndResponse,
+    LifecyclePhaseResponse,
+    LifecycleResumeResponse,
+    LifecycleStartResponse,
+    SwitchLifecycleResponse,
+)
 from agents_remember.models.memory import (
     DriftCheckResponse,
     MemoryBaselineAdoptResponse,
@@ -103,4 +111,10 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "memory_carryover_apply": MemoryCarryoverApplyResponse,
     "codex_benchmark_prepare": CodexBenchmarkPrepareResponse,
     "codex_benchmark_run": CodexBenchmarkRunResponse,
+    "lifecycle_start": LifecycleStartResponse,
+    "lifecycle_block": LifecycleBlockResponse,
+    "lifecycle_resume": LifecycleResumeResponse,
+    "lifecycle_end": LifecycleEndResponse,
+    "switch_lifecycle": SwitchLifecycleResponse,
+    "lifecycle_phase": LifecyclePhaseResponse,
 }

@@ -18,6 +18,14 @@ from .core import (
     server_info_payload,
     skills_install_payload,
 )
+from .lifecycle import (
+    lifecycle_block_payload,
+    lifecycle_end_payload,
+    lifecycle_phase_payload,
+    lifecycle_resume_payload,
+    lifecycle_start_payload,
+    switch_lifecycle_payload,
+)
 from .memory import (
     drift_check_payload,
     memory_baseline_adopt_payload,
@@ -69,6 +77,11 @@ __all__ = [
     "drift_check_payload",
     "grepai_search_payload",
     "grepai_trace_payload",
+    "lifecycle_block_payload",
+    "lifecycle_end_payload",
+    "lifecycle_phase_payload",
+    "lifecycle_resume_payload",
+    "lifecycle_start_payload",
     "memory_baseline_adopt_payload",
     "memory_baseline_status_payload",
     "memory_carryover_apply_payload",
@@ -84,6 +97,7 @@ __all__ = [
     "runtime_install_payload",
     "server_info_payload",
     "skills_install_payload",
+    "switch_lifecycle_payload",
     "worktree_abandon_payload",
     "worktree_attach_payload",
     "worktree_cleanup_payload",

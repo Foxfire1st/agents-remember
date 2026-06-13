@@ -6,6 +6,7 @@ from typing import Any
 
 from agents_remember.models.tokens import finalize_payload_tokens
 from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.observer.ambient import ambient
 
 TRANSPORT = "stdio"
 PUBLIC_TOOLS = (
@@ -45,6 +46,12 @@ PUBLIC_TOOLS = (
     "memory_carryover_apply",
     "codex_benchmark_prepare",
     "codex_benchmark_run",
+    "lifecycle_start",
+    "lifecycle_block",
+    "lifecycle_resume",
+    "lifecycle_end",
+    "switch_lifecycle",
+    "lifecycle_phase",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 
@@ -52,4 +59,10 @@ RESERVED_TOOLS: tuple[str, ...] = ()
 def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     model = PUBLIC_TOOL_RESPONSE_MODELS[tool_name]
     dumped = model.model_validate(payload).model_dump(mode="json", exclude_none=True)
-    return finalize_payload_tokens(dumped)
+    finalized = finalize_payload_tokens(dumped)
+    # The choke point: tag every tool call onto the active lifecycle by
+    # construction. A lifecycle-less call is dropped, never misattributed.
+    amb = ambient()
+    if amb is not None:
+        amb.emit_tool(tool_name, finalized)
+    return finalized

@@ -36,6 +36,12 @@ from agents_remember.mcp import tools
 from agents_remember.mcp.config import load_config
 from agents_remember.models.base import FlexibleResponseModel
 from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.observer import (
+    AmbientLifecycle,
+    EventStore,
+    install_ambient,
+    reset_ambient,
+)
 from test_config import settings_payload
 from test_worktree_support import (
     commit_file,
@@ -204,6 +210,30 @@ def _carryover_payloads(root: Path) -> dict[str, dict]:
     }
 
 
+def _lifecycle_payloads(root: Path) -> dict[str, dict]:
+    """Drive the ambient lifecycle through each signal, capturing every payload.
+
+    The signals require an installed ambient; a long heartbeat keeps the capture
+    deterministic, and the ambient is reset afterward so other suites see none.
+    """
+    install_ambient(
+        AmbientLifecycle(EventStore(root / "logs" / "observer"), heartbeat_seconds=3600)
+    )
+    try:
+        return {
+            "lifecycle_start": tools.lifecycle_start_payload(),
+            "lifecycle_phase": tools.lifecycle_phase_payload("build"),
+            "lifecycle_block": tools.lifecycle_block_payload(
+                kind="decision", prompt="ok?", options=["a", "b"]
+            ),
+            "lifecycle_resume": tools.lifecycle_resume_payload(),
+            "lifecycle_end": tools.lifecycle_end_payload("completed"),
+            "switch_lifecycle": tools.switch_lifecycle_payload(),
+        }
+    finally:
+        reset_ambient()
+
+
 def _allowed_keys(model) -> set[str]:
     """Serialized keys the model is allowed to emit (field names plus aliases)."""
     allowed: set[str] = set()
@@ -223,12 +253,13 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(3)]
-        base, worktree, carryover = (Path(d) for d in cls._temp_dirs)
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(4)]
+        base, worktree, carryover, lifecycle = (Path(d) for d in cls._temp_dirs)
         cls.payloads = {}
         cls.payloads.update(_simple_payloads(_base_fixture(base)))
         cls.payloads.update(_worktree_payloads(worktree))
         cls.payloads.update(_carryover_payloads(carryover))
+        cls.payloads.update(_lifecycle_payloads(lifecycle))
 
     @classmethod
     def tearDownClass(cls) -> None:
