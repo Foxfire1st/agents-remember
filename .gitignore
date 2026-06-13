@@ -9,3 +9,4 @@ __pycache__/
 .venv/
 .ruff_cache/
 .coverage
+uv.lock

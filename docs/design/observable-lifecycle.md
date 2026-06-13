@@ -58,10 +58,13 @@ lifecycle there is no "off-task digression" left for a model-driven pause to mea
 | blocked | blocked | switch-away or chat death | — | none (gate record keeps the queue item) |
 | paused | running | re-adoption via switch/attach | system / observed | `lifecycle.resumed` (`adopted`) |
 | paused | running | activity inference (heartbeats return) | system / inferred | `lifecycle.resumed` (`inferred`) |
-| paused (fleeting) | abandoned | TTL reaper: dormant ~1h | system / observed | `lifecycle.ended` (`ttl`) |
+| paused (fleeting) | abandoned | TTL: dormant ~1h (fleeting only) | system / inferred | *(projected; log pruned — §1.5)* |
 
 Dormancy inference applies to `running` only; `blocked` survives a dead chat because the
-gate record is the queue's truth. Switching away from a *fleeting* lifecycle routes
+gate record is the queue's truth. The TTL transition is the one terminal state with **no
+written event**: by definition no live owner remains to write it, so readers *project*
+`abandoned` and the sweep prunes the log (§1.5) — keeping the single-writer invariant
+(§2.3) intact. Every other transition above is written by the live owning session. Switching away from a *fleeting* lifecycle routes
 through the save gate first: save ⇒ promote (then the switch-away pauses it); decline ⇒
 deliberate discard (`lifecycle.ended`, outcome `abandoned`).
 
@@ -101,10 +104,18 @@ in phase `reframe-research` and state `paused` at once; you cannot be `paused` a
   vs deliberate discard. Landing zones for saved work without a single tangible repo:
   **`0_unscoped`** (no managed-repo binding) and **`1_cross-repo`** (multi-repo
   enclosure work). Number prefixes sort both above the repo folders.
-- **TTL is fleeting-only**: fleeting + paused-by-dormancy for ~1h ⇒ auto-end
-  (`abandoned`). It exists because disconnects may be involuntary (a dropped network is
-  not intent). Persistent lifecycles are **never** auto-reaped — the dashboard's hangar
-  panel surfaces rot for the developer instead.
+- **TTL is fleeting-only, and project-and-prune (not a written end).** A fleeting
+  lifecycle dormant for ~1h is *abandoned* — but since no live owner remains to write a
+  terminal event, readers **derive** `abandoned` from its log (started, never promoted,
+  dormant > TTL) and the opportunistic sweep **prunes** (deletes) the log directory. No
+  process ever appends to a lifecycle file it does not own, so the single-writer
+  invariant (§2.3) holds without coordination. The sweep runs on the next live trigger —
+  `lifecycle_start`/`switch_lifecycle`, and the dashboard's projection tick once it
+  exists — never a daemon (a dead stdio process cannot reap itself). TTL exists because
+  disconnects may be involuntary (a dropped network is not intent), and pruning a
+  worktree-less, artifact-less stub loses nothing audit-critical. Persistent lifecycles
+  are **never** auto-reaped — the dashboard's hangar panel surfaces rot for the developer
+  instead.
 
 ### 1.6 Ambient attribution and the heartbeat
 
@@ -168,7 +179,10 @@ subsystems; until then they are derivable from `tool.*`. The fleeting→persiste
 ```
 
 - **Exclusive adoption ⇒ exactly one writer per lifecycle file.** No cross-process
-  locking, ever, even with parallel harness sessions.
+  locking, ever, even with parallel harness sessions. The invariant is total: every event
+  in a lifecycle file is written by that lifecycle's live owner. The only "cleanup" of a
+  dead lifecycle is the TTL *prune* of a dormant fleeting log (§1.5) — a directory
+  deletion, never a non-owner append.
 - **Replayability is a schema requirement:** stable ordering (append order; ULIDs
   tie-break), and each lifecycle file is **self-contained** — `lifecycle.started`
   carries full initial context so one file alone replays one lifecycle's projection. A
@@ -185,6 +199,10 @@ subsystems; until then they are derivable from `tool.*`. The fleeting→persiste
 | Forever | lifecycle skeleton (started/promoted/ended), **all gate records** | never reaped — the approval audit is an invariant |
 | Rolling raw | dense `tool.*`/`span.*`/heartbeats | never pruned while the lifecycle is open; after closure: archived compressed, pruned past a configurable grace window |
 | Derived aggregates | rollups (tokens/day, events/hour, health series) | tiny, kept forever — trend charts survive raw pruning |
+
+A dormant fleeting lifecycle reaped by TTL is the exception to the Forever tier: it has no
+gates and no persistent skeleton, so its whole log is **pruned** (§1.5) rather than
+retained — nothing audit-critical is lost.
 
 ### 2.5 The observer and its projections
 
