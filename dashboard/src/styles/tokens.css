@@ -1,0 +1,167 @@
+/* Podracer palette over oklch mechanics (note 08). Values tuned at 5a; refine from mc2 +
+   the color-expert skill in 5b/5c. State is carried by colour + silhouette, never chrome. */
+:root {
+  color-scheme: dark;
+
+  --bg: oklch(0.16 0.02 250);
+  --bg-panel: oklch(0.2 0.02 250);
+  --ink: oklch(0.92 0.03 90);
+  --grid: oklch(0.3 0.02 250);
+
+  --amber: oklch(0.82 0.16 75); /* nominal wireframe */
+  --cyan: oklch(0.85 0.13 200); /* progress / running */
+  --alarm: oklch(0.63 0.24 25); /* whole-silhouette alarm */
+  --mint: oklch(0.88 0.16 165); /* fresh-online / live */
+  --dormant: oklch(0.45 0.06 25); /* skeletal dark-red dormant */
+
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  --glow-strength: 1;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.cockpit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 1rem 1.25rem;
+  gap: 0.9rem;
+}
+.cockpit__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--grid);
+  padding-bottom: 0.6rem;
+}
+.cockpit__bar h1 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-shadow: 0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5);
+}
+.cockpit__body {
+  display: grid;
+  gap: 1rem;
+  flex: 1;
+}
+.cockpit__foot {
+  color: var(--cyan);
+  border-top: 1px solid var(--grid);
+  padding-top: 0.6rem;
+}
+
+h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.raw-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.raw-list li {
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-panel);
+  border-left: 2px solid var(--amber);
+}
+
+.dot {
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-right: 0.4em;
+  border-radius: 50%;
+  background: var(--amber);
+}
+.dot--running {
+  background: var(--cyan);
+}
+.dot--blocked {
+  background: var(--alarm);
+  animation: pulse 0.6s steps(1) infinite; /* ~2 flashes/s, under WCAG 2.3.1 ≤3 */
+}
+.dot--paused {
+  background: var(--dormant);
+}
+.dot--completed {
+  background: var(--mint);
+}
+.dot--abandoned {
+  background: var(--dormant);
+}
+
+.status {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.status--connecting {
+  color: var(--amber);
+}
+.status--live {
+  color: var(--mint);
+}
+.status--signal-lost {
+  color: var(--alarm);
+  animation: pulse 0.5s steps(1) infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* CRT base overlay — global, pointer-events:none, compositor-only (note 09 strategy). */
+.crt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  background:
+    repeating-linear-gradient(0deg, oklch(0 0 0 / 0.18) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 100% at 50% 0%, transparent 60%, oklch(0 0 0 / 0.45) 100%);
+  animation: flicker 4s infinite;
+}
+@keyframes flicker {
+  0%,
+  97%,
+  100% {
+    opacity: 1;
+  }
+  98% {
+    opacity: 0.85;
+  }
+}
+
+/* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
+   assertions are stable. Set via ?effects=off or the calm-cockpit toggle (see main.tsx). */
+html[data-effects="off"] *,
+html[data-effects="off"] *::before,
+html[data-effects="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+}

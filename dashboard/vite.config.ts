@@ -1,0 +1,18 @@
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+// `base: "./"` keeps the built bundle's asset URLs relative so it works under the FastAPI
+// "/" static mount (serving/static.py). The dev `/api` proxy points at a locally running
+// `agents-remember dashboard` server so `npm run dev` consumes the real (or --sim) stream.
+// Test config lives in vitest.config.ts (separate, to keep pure Vite plugin types here).
+export default defineConfig({
+  base: "./",
+  plugins: [react()],
+  build: { outDir: "dist", emptyOutDir: true },
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": { target: "http://127.0.0.1:8765", changeOrigin: true },
+    },
+  },
+});

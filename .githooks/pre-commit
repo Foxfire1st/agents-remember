@@ -27,3 +27,5 @@ echo "[pre-commit] checking generated skill copies..."
 "$py" scripts/sync-skills.py --check || exit 1
 echo "[pre-commit] checking generated runtime asset copies..."
 "$py" scripts/sync-runtime.py --check || exit 1
+echo "[pre-commit] checking shipped dashboard bundle..."
+"$py" scripts/sync-dashboard.py --check || exit 1

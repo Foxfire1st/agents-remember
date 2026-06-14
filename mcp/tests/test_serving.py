@@ -249,20 +249,24 @@ class AppTests(unittest.TestCase):
         self.assertEqual(body["version"], 1)
         self.assertEqual(body["lifecycles"], [])
 
-    def test_root_serves_placeholder(self) -> None:
+    def test_root_serves_dashboard_bundle(self) -> None:
         app = create_app(_config(self.tmp), interval=100)
         with TestClient(app) as client:
             response = client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("MISSION CONTROL", response.text)
+        # Slice 05 ships the built React bundle (the slice-04 placeholder is gone). The SPA
+        # mount point and the app title are stable across rebuilds; hashed asset names are not.
+        self.assertIn('<div id="root">', response.text)
+        self.assertIn("Agents Remember", response.text)
 
 
 class StaticTests(unittest.TestCase):
-    def test_static_dir_resolves_to_shipped_placeholder(self) -> None:
+    def test_static_dir_resolves_to_shipped_bundle(self) -> None:
         static_dir = dashboard_static_dir()
         self.assertIsNotNone(static_dir)
         assert static_dir is not None
         self.assertTrue((static_dir / "index.html").is_file())
+        self.assertTrue((static_dir / "assets").is_dir())
 
 
 class CliTests(unittest.TestCase):

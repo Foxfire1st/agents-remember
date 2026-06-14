@@ -40,6 +40,8 @@ echo "[pre-push] checking generated skill copies..."
 "$py" scripts/sync-skills.py --check || exit 1
 echo "[pre-push] checking generated runtime asset copies..."
 "$py" scripts/sync-runtime.py --check || exit 1
+echo "[pre-push] checking shipped dashboard bundle..."
+"$py" scripts/sync-dashboard.py --check || exit 1
 echo "[pre-push] running quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)..."
 checkout_pythonpath="$root/mcp/src"
 if [ -n "${PYTHONPATH:-}" ]; then
