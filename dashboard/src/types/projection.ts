@@ -145,6 +145,20 @@ export interface TaskDocNode {
   ageSeconds?: number;
 }
 
+export interface AttentionItem {
+  id: string;
+  kind: string; // blocked-gate | provider-down | actionable-drift | failed-setup | stale-session | dormant-fleeting | …
+  severity: "alarm" | "warn" | "info";
+  lane: "repo" | "worktree" | "lifecycle";
+  title: string;
+  detail?: string;
+  waitSeconds?: number; // server-computed age (never render time)
+  lifecycleId?: string; // cross-refs into the structural tree → queue↔tree coupling
+  enclosure?: string;
+  repoId?: string;
+  providerId?: string;
+}
+
 export interface Analytics {
   driftSnapshots: DriftSnapshotNode[];
   stalestSidecars: SidecarStaleNode[];
@@ -154,6 +168,7 @@ export interface Analytics {
   toolReports: ToolReportNode[];
   ledgers: LedgerNode[];
   taskDocuments: TaskDocNode[];
+  attentionQueue: AttentionItem[]; // the one derived surface — composed by the reducer (slice 05)
 }
 
 export interface WorkspaceProjection {

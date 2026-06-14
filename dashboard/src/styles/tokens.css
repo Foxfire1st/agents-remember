@@ -165,3 +165,334 @@ html[data-effects="off"] *::after {
   animation: none !important;
   transition: none !important;
 }
+
+/* ── slice 5b: console layout, panels, grammar ─────────────────────────────── */
+
+.console {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.8fr) minmax(280px, 1.2fr);
+  gap: 0.9rem;
+  flex: 1;
+  min-height: 0;
+}
+.console__col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  padding: 0.7rem 0.8rem;
+}
+.panel--placeholder {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.muted {
+  color: oklch(0.7 0.02 250);
+  font-size: 0.8rem;
+  margin: 0.2rem 0;
+}
+
+/* severity dots (attention grammar) on top of the 5a state dots */
+.dot--alarm {
+  background: var(--alarm);
+  animation: pulse 0.6s steps(1) infinite; /* ≤3/s, WCAG 2.3.1 */
+}
+.dot--warn {
+  background: var(--amber);
+}
+.dot--info {
+  background: var(--cyan);
+}
+
+/* attention queue */
+.attn__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.attn__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg);
+  border-left: 3px solid var(--grid);
+}
+.attn__item--alarm {
+  border-left-color: var(--alarm);
+}
+.attn__item--warn {
+  border-left-color: var(--amber);
+}
+.attn__item--info {
+  border-left-color: var(--cyan);
+}
+.attn__body {
+  flex: 1;
+  min-width: 0;
+}
+.attn__title {
+  font-weight: 600;
+}
+.attn__detail {
+  color: var(--ink);
+  opacity: 0.85;
+  font-size: 0.82rem;
+}
+.attn__meta {
+  color: oklch(0.7 0.02 250);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+
+/* session strip */
+.strip__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.strip__item,
+.tree__leaves button,
+.ghost {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.strip__item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border-left: 2px solid var(--cyan);
+  background: var(--bg);
+}
+.strip__item--fleeting {
+  border-left-style: dashed;
+  opacity: 0.8;
+}
+.strip__item.is-selected,
+.tree__leaves button.is-selected {
+  outline: 1px solid var(--amber);
+}
+.strip__id {
+  font-weight: 600;
+}
+.strip__phase {
+  color: var(--cyan);
+  font-size: 0.78rem;
+}
+.strip__meta {
+  margin-left: auto;
+  color: oklch(0.7 0.02 250);
+  font-size: 0.75rem;
+}
+
+/* operation tree */
+.tree__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.tree__pivot {
+  display: flex;
+  gap: 0.25rem;
+}
+.tree__pivot button,
+.bench__nav a {
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.45rem;
+  background: var(--bg);
+  color: oklch(0.7 0.02 250);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.tree__pivot button.is-active,
+.bench__nav a.is-active {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.tree__groups,
+.tree__leaves {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tree__groups {
+  margin-top: 0.5rem;
+  display: grid;
+  gap: 0.4rem;
+}
+.tree__group {
+  color: var(--amber);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tree__leaves {
+  margin: 0.2rem 0 0 0.6rem;
+  display: grid;
+  gap: 0.15rem;
+}
+.tree__leaves button {
+  width: 100%;
+  padding: 0.2rem 0.35rem;
+}
+
+/* detail panel: phase stepper + gate + task + tokens */
+.stepper {
+  list-style: none;
+  margin: 0.4rem 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.stepper__step {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  color: oklch(0.6 0.02 250);
+}
+.stepper__step.is-done {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.stepper__step.is-current {
+  color: var(--amber);
+  border-color: var(--amber);
+  text-shadow: 0 0 calc(5px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5);
+}
+.gate {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--amber);
+  border-radius: 3px;
+  background: oklch(0.82 0.16 75 / 0.08);
+}
+.gate__actions {
+  display: flex;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0.2rem;
+}
+.chip {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--cyan);
+  border-radius: 10px;
+  color: var(--cyan);
+}
+.chip--disabled {
+  border-color: var(--grid);
+  color: oklch(0.6 0.02 250);
+}
+.gate__note {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  color: oklch(0.65 0.02 250);
+  font-style: italic;
+}
+.detail__task {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+}
+.detail__task-head {
+  font-size: 0.82rem;
+}
+.detail__tokens {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.detail__label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.7 0.02 250);
+}
+
+/* grammar: progress fill (bottom-up) + token gauge */
+.fill {
+  position: relative;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid var(--cyan);
+  border-radius: 2px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+.fill__level {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: oklch(0.85 0.13 200 / 0.35);
+  transition: height 0.4s ease;
+}
+.fill__pct {
+  position: relative;
+  font-size: 0.66rem;
+  color: var(--cyan);
+}
+.gauge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.gauge__line {
+  stroke: var(--cyan);
+  stroke-width: 1.5;
+}
+.gauge__total {
+  font-size: 0.78rem;
+  color: var(--cyan);
+}
+.gauge--flat {
+  font-size: 0.78rem;
+  color: var(--cyan);
+}
+
+/* dev harness */
+.bench__nav {
+  display: flex;
+  gap: 0.3rem;
+}
+.reference {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.reference__bar {
+  padding: 0.5rem 0.8rem;
+  color: var(--amber);
+  border-bottom: 1px solid var(--grid);
+}
+.reference__frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+}

@@ -39,6 +39,7 @@ from agents_remember.observer.projection import (
     DriftSnapshotNode,
     EnclosureNode,
     ProviderNode,
+    SetupProgressNode,
     SidecarStaleNode,
     TaskDocNode,
     WorkspaceProjection,
@@ -468,6 +469,61 @@ class AnalyticsAssemblyTests(unittest.TestCase):
         proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
         self.assertEqual(proj.analytics.driftSnapshots, [])
         self.assertEqual(proj.metrics.stalenessHistogram, {})
+
+
+class AttentionQueueTests(unittest.TestCase):
+    def test_blocked_and_provider_down_rank_alarm_first(self) -> None:
+        proj = project_workspace(
+            [
+                [_started(lifecycle_id="LC1")],
+                [
+                    _started(lifecycle_id="LC2"),
+                    _event(
+                        "lifecycle.blocked",
+                        lifecycle_id="LC2",
+                        ts="2026-06-13T18:00:05+00:00",
+                        ask={"kind": "gate", "question": "Approve the plan?"},
+                    ),
+                ],
+            ],
+            enclosures=[],
+            providers=[ProviderNode(id="cgc", state="stopped", ok=False)],
+            now=FRESH,
+        )
+        queue = proj.analytics.attentionQueue
+        self.assertEqual(queue[0].kind, "provider-down")  # alarm sorts above warn
+        blocked = next(item for item in queue if item.kind == "blocked-gate")
+        self.assertEqual((blocked.lifecycleId, blocked.detail), ("LC2", "Approve the plan?"))
+
+    def test_stale_session_is_info(self) -> None:
+        proj = project_workspace([[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=STALE)
+        item = proj.analytics.attentionQueue[0]
+        self.assertEqual((item.kind, item.severity, item.lifecycleId), ("stale-session", "info", "LC1"))
+
+    def test_dormant_fleeting_is_info(self) -> None:
+        proj = project_workspace(
+            [[_started(fleeting=True, lifecycle_id="LC1")]], enclosures=[], providers=[], now=DORMANT
+        )
+        self.assertEqual(proj.analytics.attentionQueue[0].kind, "dormant-fleeting")
+
+    def test_drift_and_failed_setup_surface(self) -> None:
+        proj = project_workspace(
+            [[_started()]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+            drift_snapshots=[
+                DriftSnapshotNode(repository="repo-a", branch="main", counts={"drifted": 2}, actionableCount=2)
+            ],
+            setup_progress=[SetupProgressNode(group="g1", state="ok", failedPhases=["cgc setup"])],
+        )
+        self.assertEqual(
+            {item.kind for item in proj.analytics.attentionQueue}, {"actionable-drift", "failed-setup"}
+        )
+
+    def test_calm_tree_has_empty_queue(self) -> None:
+        proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
+        self.assertEqual(proj.analytics.attentionQueue, [])
 
 
 class DriftSnapshotReaderTests(unittest.TestCase):

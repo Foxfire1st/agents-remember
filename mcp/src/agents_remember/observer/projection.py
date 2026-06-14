@@ -278,6 +278,31 @@ class TaskDocNode(BaseModel):
     ageSeconds: float | None = None
 
 
+class AttentionItem(BaseModel):
+    """One thing that needs the human, decided by the reducer (note 06, slice 05).
+
+    A ranked cross-section of the structural tree + analytics signals -- the
+    home-screen attention queue. Computed server-side so every client (dashboard,
+    TUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never
+    a client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the
+    structural tree so the UI can couple a queue item to its operation-tree node.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: str
+    severity: str
+    lane: str
+    title: str
+    detail: str | None = None
+    waitSeconds: float | None = None
+    lifecycleId: str | None = None
+    enclosure: str | None = None
+    repoId: str | None = None
+    providerId: str | None = None
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
@@ -285,6 +310,10 @@ class Analytics(BaseModel):
     client-agnostic core stays small. Large raw inventories are deliberately *not*
     here -- drift rows stay in the snapshot file, the full sidecar list collapses to
     the histogram + a bounded leaderboard -- so the served projection stays lean.
+
+    ``attentionQueue`` (slice 05) is the one *derived* surface here: the reducer
+    composes it from the structural tree + these signals (not from an input file), so
+    a structural-only caller can still see a non-empty queue.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -297,6 +326,7 @@ class Analytics(BaseModel):
     toolReports: list[ToolReportNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
     taskDocuments: list[TaskDocNode] = Field(default_factory=list)
+    attentionQueue: list[AttentionItem] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):

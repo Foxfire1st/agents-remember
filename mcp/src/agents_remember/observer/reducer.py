@@ -32,6 +32,7 @@ from agents_remember.observer.lifecycle_state import (
 from agents_remember.observer.projection import (
     ActionAvailability,
     Analytics,
+    AttentionItem,
     DriftSnapshotNode,
     EnclosureNode,
     LedgerNode,
@@ -113,6 +114,9 @@ def project_workspace(
         tool_reports=tool_reports or [],
         ledgers=ledgers or [],
         task_documents=task_documents or [],
+        attention_queue=build_attention_queue(
+            lifecycles, providers, drift_snapshots or [], setup_progress or []
+        ),
         stalest_limit=stalest_limit,
     )
     return WorkspaceProjection(
@@ -334,6 +338,7 @@ def build_analytics(
     tool_reports: list[ToolReportNode],
     ledgers: list[LedgerNode],
     task_documents: list[TaskDocNode] | None = None,
+    attention_queue: list[AttentionItem] | None = None,
     stalest_limit: int = 10,
 ) -> Analytics:
     """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard."""
@@ -346,6 +351,7 @@ def build_analytics(
         toolReports=tool_reports,
         ledgers=ledgers,
         taskDocuments=task_documents or [],
+        attentionQueue=attention_queue or [],
     )
 
 
@@ -353,3 +359,146 @@ def _stalest(nodes: list[SidecarStaleNode], limit: int) -> list[SidecarStaleNode
     """The oldest-verified sidecars first; unparseable dates sort last."""
     ranked = sorted(nodes, key=lambda node: (node.ageSeconds is None, -(node.ageSeconds or 0.0)))
     return ranked[:limit]
+
+
+# --- attention queue (slice 05) ----------------------------------------------
+
+_SEVERITY_RANK: dict[str, int] = {"alarm": 0, "warn": 1, "info": 2}
+_PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
+
+
+def _ask_text(ask: dict[str, Any] | None) -> str | None:
+    """The human-facing question from an open block ask, when present."""
+    if not ask:
+        return None
+    question = ask.get("question")
+    return str(question) if question is not None else None
+
+
+def build_attention_queue(
+    lifecycles: list[LifecycleProjection],
+    providers: list[ProviderNode],
+    drift_snapshots: list[DriftSnapshotNode],
+    setup_progress: list[SetupProgressNode],
+) -> list[AttentionItem]:
+    """The home-screen attention queue: a ranked cross-section of what needs the human.
+
+    Pure and deterministic -- a total sort by (severity, wait, id) -- so the served
+    projection and sim replay stay byte-identical. Every ``waitSeconds`` is an age the
+    reducer/readers already computed server-side (``staleSeconds`` /
+    ``snapshotStaleSeconds`` / ``heartbeatAgeSeconds``), never a client's render time.
+    The taxonomy is extensible (North-Star Constraint 7): each source contributes one
+    small builder. Enclosure-derived items (pending review / worktree debt) are the
+    hangar's job (5c).
+    """
+    items = [
+        *_lifecycle_attention(lifecycles),
+        *_provider_attention(providers),
+        *_drift_attention(drift_snapshots),
+        *_setup_attention(setup_progress),
+    ]
+    items.sort(
+        key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), -(item.waitSeconds or 0.0), item.id)
+    )
+    return items
+
+
+def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[AttentionItem]:
+    """Blocked gates, then inferred stale/dormant sessions (one item per lifecycle)."""
+    items: list[AttentionItem] = []
+    for lifecycle in lifecycles:
+        if lifecycle.state == "blocked":
+            items.append(
+                AttentionItem(
+                    id=f"blocked-gate:{lifecycle.id}",
+                    kind="blocked-gate",
+                    severity="warn",
+                    lane="lifecycle",
+                    title="Gate — input needed",
+                    detail=_ask_text(lifecycle.ask),
+                    waitSeconds=lifecycle.staleSeconds,
+                    lifecycleId=lifecycle.id,
+                    enclosure=lifecycle.enclosure,
+                    repoId=lifecycle.repoId,
+                )
+            )
+        elif lifecycle.inferred and lifecycle.state == "paused":
+            items.append(
+                AttentionItem(
+                    id=f"stale-session:{lifecycle.id}",
+                    kind="stale-session",
+                    severity="info",
+                    lane="lifecycle",
+                    title="Session gone quiet",
+                    waitSeconds=lifecycle.staleSeconds,
+                    lifecycleId=lifecycle.id,
+                    repoId=lifecycle.repoId,
+                )
+            )
+        elif lifecycle.inferred and lifecycle.state == "abandoned":
+            items.append(
+                AttentionItem(
+                    id=f"dormant-fleeting:{lifecycle.id}",
+                    kind="dormant-fleeting",
+                    severity="info",
+                    lane="lifecycle",
+                    title="Fleeting session dormant",
+                    waitSeconds=lifecycle.staleSeconds,
+                    lifecycleId=lifecycle.id,
+                    repoId=lifecycle.repoId,
+                )
+            )
+    return items
+
+
+def _provider_attention(providers: list[ProviderNode]) -> list[AttentionItem]:
+    """A down/crashed provider -- the 2026-06-09 invisible fire, made an alarm."""
+    return [
+        AttentionItem(
+            id=f"provider-down:{provider.id}",
+            kind="provider-down",
+            severity="alarm",
+            lane="repo",
+            title=f"Provider {provider.id} down",
+            detail=provider.state,
+            waitSeconds=provider.snapshotStaleSeconds,
+            providerId=provider.id,
+        )
+        for provider in providers
+        if provider.ok is False or provider.state in _PROVIDER_DOWN
+    ]
+
+
+def _drift_attention(drift_snapshots: list[DriftSnapshotNode]) -> list[AttentionItem]:
+    """Onboarding that needs a refresh decision (actionable drift)."""
+    return [
+        AttentionItem(
+            id=f"actionable-drift:{drift.repository}",
+            kind="actionable-drift",
+            severity="warn",
+            lane="repo",
+            title=f"{drift.actionableCount} actionable drift",
+            waitSeconds=drift.snapshotStaleSeconds,
+            repoId=drift.repository,
+        )
+        for drift in drift_snapshots
+        if drift.actionableCount > 0
+    ]
+
+
+def _setup_attention(setup_progress: list[SetupProgressNode]) -> list[AttentionItem]:
+    """A provider-setup boot that failed or went stale mid-flight."""
+    return [
+        AttentionItem(
+            id=f"failed-setup:{setup.group}",
+            kind="failed-setup",
+            severity="alarm" if setup.failedPhases else "warn",
+            lane="worktree",
+            title="Provider setup needs attention",
+            detail=setup.currentPhase,
+            waitSeconds=setup.heartbeatAgeSeconds,
+            enclosure=setup.group,
+        )
+        for setup in setup_progress
+        if setup.failedPhases or setup.state in {"failed", "stale"}
+    ]

@@ -91,6 +91,20 @@
         "baseCodeCommit": "6f1a7e9"
       }
     ],
-    "taskDocuments": []
+    "taskDocuments": [],
+    "attentionQueue": [
+      {
+        "id": "blocked-gate:sim-replay-lifecycle",
+        "kind": "blocked-gate",
+        "severity": "warn",
+        "lane": "lifecycle",
+        "title": "Gate — input needed",
+        "detail": "approve the gate?",
+        "waitSeconds": 20,
+        "lifecycleId": "sim-replay-lifecycle",
+        "enclosure": "sim-enclosure",
+        "repoId": "agents-remember"
+      }
+    ]
   }
 }
