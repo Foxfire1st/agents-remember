@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agents Remember — Mission Control</title>
+<style>
+  body { background:#0a0e0a; color:#ffb000; font:14px/1.5 ui-monospace,SFMono-Regular,monospace; margin:0; padding:2rem; }
+  h1 { font-weight:600; letter-spacing:.08em; font-size:1.1rem; }
+  .dim { opacity:.5; }
+  #log { white-space:pre-wrap; margin-top:1rem; opacity:.85; max-height:70vh; overflow:auto; }
+</style>
+</head>
+<body>
+  <h1>AGENTS REMEMBER · MISSION CONTROL</h1>
+  <p class="dim">Serving-layer placeholder (slice 04). The cockpit UI ships in slice 05.</p>
+  <p>Projection stream: <span id="status">connecting…</span></p>
+  <div id="log"></div>
+  <script>
+    const out = document.getElementById("log");
+    const status = document.getElementById("status");
+    const log = (m) => { out.textContent += m + "\n"; out.scrollTop = out.scrollHeight; };
+    const es = new EventSource("/api/stream");
+    es.addEventListener("open", () => (status.textContent = "connected"));
+    es.addEventListener("error", () => (status.textContent = "SIGNAL LOST — reconnecting"));
+    es.addEventListener("snapshot", (e) => log("snapshot: " + e.data));
+    for (const t of ["lifecycle", "enclosure", "provider", "metrics", "analytics"]) {
+      es.addEventListener(t, (e) => log(t + ": " + e.data));
+      es.addEventListener(t + ".removed", (e) => log(t + ".removed: " + e.data));
+    }
+  </script>
+</body>
+</html>
