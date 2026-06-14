@@ -7,16 +7,18 @@ peer of ``observer.projection`` -- a persisted/served Pydantic contract, **not**
 an MCP response model.
 
 Scope (slice 3c): ``light`` standalone tasks and ``subTask`` slices of a series
--- the lifecycle-keyed work-content documents. Series *master* files stay
-hand-authored markdown for now (they carry bespoke sections a generic render
-would drop), so ``master`` is deliberately absent from ``DocKind``.
+(the lifecycle-keyed work-content documents), plus the series ``master`` itself
+(commit 3). A master is the series-aggregation entity: a structured ``subTasks``
+index (each slice a checkable entry) + an ordered ``sections`` render plan that
+preserves bespoke prose sections verbatim. Masters carry no ``lifecycleId``, so
+the observer never projects them as a lifecycle node.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
@@ -26,7 +28,7 @@ StepStatus = Literal["pending", "inProgress", "blocked", "done"]
 # Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
 # the rendered ``**Status:**`` line is always a valid template value.
 DocStatus = Literal["planning", "inProgress", "Completed"]
-DocKind = Literal["light", "subTask"]
+DocKind = Literal["light", "subTask", "master"]
 
 
 class _Doc(BaseModel):
@@ -64,6 +66,29 @@ class CodeExample(_Doc):
     snippet: str = ""
 
 
+class SubTaskRef(_Doc):
+    """One slice in a master's series index; ``status`` drives the ✅/🔨/⬜ marker."""
+
+    number: str
+    name: str
+    file: str = ""
+    status: DocStatus = "planning"
+    scope: str = ""
+
+
+class Section(_Doc):
+    """One ordered section of a master render: freeform prose or a structured block.
+
+    ``freeform`` renders the heading + ``body`` verbatim; ``subTasks`` and
+    ``sharedDecisions`` render the generated block (the series list / the decisions
+    table) with ``body`` as optional intro prose, at this position in the order.
+    """
+
+    kind: Literal["freeform", "subTasks", "sharedDecisions"] = "freeform"
+    heading: str
+    body: str = ""
+
+
 class TaskDocument(_Doc):
     schema_: Literal["ar-task-document/v1"] = Field(
         default=TASK_DOCUMENT_SCHEMA, alias="schema"
@@ -87,6 +112,22 @@ class TaskDocument(_Doc):
     decisions: list[Decision] = Field(default_factory=list)
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
+    # Master-only (kind == "master"): the series index + the ordered render plan.
+    subTasks: list[SubTaskRef] = Field(default_factory=list)
+    sections: list[Section] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_kind_fields(self) -> Self:
+        if self.kind == "master":
+            if self.steps or self.codeExamples or self.lifecycleId is not None:
+                raise ValueError(
+                    "a master document has no steps, codeExamples, or lifecycleId"
+                )
+        elif self.subTasks or self.sections:
+            raise ValueError(
+                f"a {self.kind} document has no subTasks or sections (master-only)"
+            )
+        return self
 
 
 def _leaf_statuses(doc: TaskDocument) -> list[StepStatus]:

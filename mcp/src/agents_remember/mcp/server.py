@@ -794,18 +794,23 @@ def create_server(config: McpRuntimeConfig) -> Any:
         fields: dict[str, Any] | None = None,
         step: dict[str, Any] | None = None,
         decision: dict[str, Any] | None = None,
+        subtask: dict[str, Any] | None = None,
+        section: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Author the JSON-primary task document (ar-task-document/v1) and re-render its
         markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
-        operation: 'create' | 'set_status' | 'set_step' | 'append_decision' | 'set_field' | 'get'.
-        Locate the doc by task_name (also resolves the contract for the lifecycle key) or
-        contract_path; pass slug for a series sub-task ('<slug>.json'), omit for a standalone task
-        ('task.json'). 'create' takes fields (id, slug, title, kind ['light'|'subTask'], repo,
-        type, createdAt, objective, requirements, steps, ...); 'set_step' takes step={id, title,
-        status, parent?, note?}; 'append_decision' takes decision={at, decision, rationale};
-        'set_field' takes fields with scalar/list updates; 'set_status' takes fields.status."""
+        operation: 'create' | 'set_status' | 'set_step' | 'set_subtask' | 'set_section' |
+        'append_decision' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        contract for the lifecycle key) or contract_path; pass slug for a series sub-task
+        ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
+        title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
+        steps, ... — a master takes subTasks + ordered sections instead of steps); 'set_step' takes
+        step={id, title, status, parent?, note?}; 'set_subtask' (master) takes subtask={number, name,
+        file?, status?, scope?}; 'set_section' (master) takes section={heading, kind?, body?};
+        'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
+        scalar/list updates; 'set_status' takes fields.status."""
         return task_doc_payload(
             config,
             repo_id=repo_id,
@@ -816,6 +821,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             fields=fields,
             step=step,
             decision=decision,
+            subtask=subtask,
+            section=section,
         )
 
     return server

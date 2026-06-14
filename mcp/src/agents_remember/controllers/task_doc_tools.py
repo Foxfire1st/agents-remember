@@ -32,7 +32,16 @@ from agents_remember.worktrees.worktree_contract import (
     task_root_candidates,
 )
 
-VALID_OPERATIONS = ("create", "set_status", "set_step", "append_decision", "set_field", "get")
+VALID_OPERATIONS = (
+    "create",
+    "set_status",
+    "set_step",
+    "set_subtask",
+    "set_section",
+    "append_decision",
+    "set_field",
+    "get",
+)
 
 # set_field may only touch these (scalars + flat string lists); structural edits
 # go through create / set_step / append_decision.
@@ -68,6 +77,8 @@ def task_doc_tool(
     fields: dict[str, Any] | None = None,
     step: dict[str, Any] | None = None,
     decision: dict[str, Any] | None = None,
+    subtask: dict[str, Any] | None = None,
+    section: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if operation not in VALID_OPERATIONS:
         raise TaskDocError(
@@ -90,6 +101,8 @@ def task_doc_tool(
             fields=payload_fields,
             step=step,
             decision=decision,
+            subtask=subtask,
+            section=section,
         )
 
     json_path, markdown_path = write_task_doc(task_root, doc)
@@ -139,7 +152,8 @@ def _create(
     data = dict(fields)
     data.setdefault("kind", "light")
     if contract is not None:
-        if contract.lifecycle_id:
+        # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
+        if contract.lifecycle_id and data.get("kind") != "master":
             data.setdefault("lifecycleId", contract.lifecycle_id)
         data.setdefault("contractPath", (task_root / "contract.md").as_posix())
     doc = _validate(data)
@@ -156,6 +170,8 @@ def _apply(
     fields: dict[str, Any],
     step: dict[str, Any] | None,
     decision: dict[str, Any] | None,
+    subtask: dict[str, Any] | None,
+    section: dict[str, Any] | None,
 ) -> TaskDocument:
     data = doc.model_dump(by_alias=True)
     if operation == "set_status":
@@ -171,9 +187,23 @@ def _apply(
             )
         data.update(updates)
     elif operation == "set_step":
+        if doc.kind == "master":
+            raise TaskDocError("set_step is not valid for a master; use set_subtask")
         if not step:
             raise TaskDocError("set_step requires a step object")
         _upsert_step(data, step)
+    elif operation == "set_subtask":
+        if doc.kind != "master":
+            raise TaskDocError("set_subtask is only valid for a master document")
+        if not subtask:
+            raise TaskDocError("set_subtask requires a subtask object")
+        _upsert_subtask(data, subtask)
+    elif operation == "set_section":
+        if doc.kind != "master":
+            raise TaskDocError("set_section is only valid for a master document")
+        if not section:
+            raise TaskDocError("set_section requires a section object")
+        _upsert_section(data, section)
     elif operation == "append_decision":
         if not decision:
             raise TaskDocError("append_decision requires a decision object")
@@ -219,6 +249,36 @@ def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
         if item.get("id") == item_id:
             return item
     return None
+
+
+def _upsert_subtask(data: dict[str, Any], subtask: dict[str, Any]) -> None:
+    number = subtask.get("number")
+    if not number:
+        raise TaskDocError("set_subtask requires subtask.number")
+    refs: list[dict[str, Any]] = data.setdefault("subTasks", [])
+    updates = {key: subtask[key] for key in ("name", "file", "status", "scope") if key in subtask}
+    existing = next((ref for ref in refs if ref.get("number") == number), None)
+    if existing is None:
+        new_ref: dict[str, Any] = {"number": str(number), "name": subtask.get("name", str(number))}
+        new_ref.update(updates)
+        refs.append(new_ref)
+    else:
+        existing.update(updates)
+
+
+def _upsert_section(data: dict[str, Any], section: dict[str, Any]) -> None:
+    heading = section.get("heading")
+    if not heading:
+        raise TaskDocError("set_section requires section.heading")
+    sections: list[dict[str, Any]] = data.setdefault("sections", [])
+    updates = {key: section[key] for key in ("kind", "body") if key in section}
+    existing = next((sec for sec in sections if sec.get("heading") == heading), None)
+    if existing is None:
+        new_section: dict[str, Any] = {"heading": heading}
+        new_section.update(updates)
+        sections.append(new_section)
+    else:
+        existing.update(updates)
 
 
 def _validate(data: dict[str, Any]) -> TaskDocument:

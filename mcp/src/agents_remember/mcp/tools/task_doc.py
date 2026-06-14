@@ -21,6 +21,8 @@ def task_doc_payload(
     fields: dict[str, Any] | None = None,
     step: dict[str, Any] | None = None,
     decision: dict[str, Any] | None = None,
+    subtask: dict[str, Any] | None = None,
+    section: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "task_doc",
@@ -34,5 +36,7 @@ def task_doc_payload(
             fields=fields,
             step=step,
             decision=decision,
+            subtask=subtask,
+            section=section,
         ),
     )

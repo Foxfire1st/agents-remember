@@ -14,10 +14,12 @@ normalization that would corrupt blank lines inside code fences).
 
 from __future__ import annotations
 
-from .document import CodeExample, Decision, Step, TaskDocument
+from .document import CodeExample, Decision, Section, Step, SubTaskRef, TaskDocument
 
 
 def render_markdown(doc: TaskDocument) -> str:
+    if doc.kind == "master":
+        return _render_master(doc)
     title = f"# Task: {doc.title}"
     if doc.kind == "subTask":
         title = f"{title} (Sub-task {doc.id})"
@@ -31,6 +33,46 @@ def render_markdown(doc: TaskDocument) -> str:
     parts += _section("Open Questions", _bullets(doc.openQuestions, empty="- None."))
     parts += _section("References", _bullets(doc.references))
     return "\n".join(parts) + "\n"
+
+
+_MARKER: dict[str, str] = {"Completed": "✅", "inProgress": "🔨", "planning": "⬜"}
+
+
+def _render_master(doc: TaskDocument) -> str:
+    """Render a series ``master``: header + the ordered ``sections`` plan.
+
+    Each section is freeform prose (a verbatim ``body``) or a structured block --
+    the ``subTasks`` series index or the ``sharedDecisions`` table -- with the
+    section ``body`` rendered first as optional intro prose.
+    """
+    parts: list[str] = [f"# Task: {doc.title}", "", *_header_lines(doc)]
+    for section in doc.sections:
+        parts += _section(section.heading, _master_body(doc, section))
+    return "\n".join(parts) + "\n"
+
+
+def _master_body(doc: TaskDocument, section: Section) -> list[str]:
+    if section.kind == "subTasks":
+        return _intro(section.body) + _subtask_lines(doc.subTasks)
+    if section.kind == "sharedDecisions":
+        return _intro(section.body) + _decision_lines(doc.decisions)
+    return section.body.split("\n")
+
+
+def _intro(body: str) -> list[str]:
+    return [*body.split("\n"), ""] if body else []
+
+
+def _subtask_lines(subtasks: list[SubTaskRef]) -> list[str]:
+    if not subtasks:
+        return ["_No sub-tasks defined yet._"]
+    lines: list[str] = []
+    for ref in subtasks:
+        file_suffix = f" · `{ref.file}`" if ref.file else ""
+        scope_suffix = f" — {ref.scope}" if ref.scope else ""
+        marker = _MARKER[ref.status]
+        lines.append(f"{ref.number}. {marker} **{ref.name}**{file_suffix}{scope_suffix}")
+    return lines
 
 
 def _header_lines(doc: TaskDocument) -> list[str]:

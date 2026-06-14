@@ -42,7 +42,7 @@ The task document is **JSON-primary**: an `ar-task-document/v1` JSON file is the
 
 Because the JSON encodes step/substep status explicitly, a tool-managed document is legible on the dashboard — the observer projects it, keyed to the lifecycle via the contract's `lifecycle_id`, at step granularity. The same schema/tool serves a *lightweight* document for a chat build (a thin doc: title plus a few steps, so even a no-`task.md` session is legible) and a *full* one for a durable task; the difference is content completeness, not a separate format.
 
-Scope and transition: the tool manages **`light` and `subTask`** documents; a series **master** file stays hand-authored markdown for now (a generic re-render would clobber a master's bespoke sections). Existing markdown task files stay markdown until intentionally migrated — new tasks adopt the JSON-primary format going forward.
+Scope and transition: the tool manages **`light` and `subTask`** documents, and the format also covers a series **master** (`kind:"master"`: a structured `subTasks` index + ordered `sections` that preserve a master's bespoke prose, so a re-render is lossless). Masters and existing markdown task files stay hand-authored markdown until the runtime ships `task_doc` and they are intentionally migrated — new tasks adopt the JSON-primary format going forward.
 
 ## Master-Task Composition (task series)
 

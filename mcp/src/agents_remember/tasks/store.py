@@ -16,8 +16,8 @@ from .render import render_markdown
 
 
 def doc_stem(doc: TaskDocument) -> str:
-    """A standalone ``light`` task is ``task.{json,md}``; a ``subTask`` keeps its slug."""
-    return "task" if doc.kind == "light" else doc.slug
+    """``light`` and ``master`` docs are ``task.{json,md}``; a ``subTask`` keeps its slug."""
+    return doc.slug if doc.kind == "subTask" else "task"
 
 
 def json_path_for(task_root: Path, doc: TaskDocument) -> Path:

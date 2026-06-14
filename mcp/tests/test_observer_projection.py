@@ -779,6 +779,19 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
         self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
 
+    def test_master_is_not_projected_as_a_lifecycle(self) -> None:
+        # A master spans the series, carries no lifecycleId (schema-enforced), and must
+        # never surface as a lifecycle node in the observer projection.
+        root = self.coord / "tasks" / "repo-a" / "series"
+        master = TaskDocument.model_validate({
+            "id": "series", "slug": "series", "title": "Series", "kind": "master",
+            "repo": "repo-a", "createdAt": "2026-01-01T00:00",
+            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+        })
+        write_task_doc(root, master)
+        self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
+
     def test_missing_tasks_dir_is_empty(self) -> None:
         self.assertEqual(read_task_documents(self.coord / "nope", now=FRESH), [])
 

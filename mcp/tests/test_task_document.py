@@ -58,6 +58,20 @@ def _doc(**over: Any) -> TaskDocument:
     return TaskDocument.model_validate(base)
 
 
+def _master(**over: Any) -> TaskDocument:
+    base: dict[str, Any] = {
+        "id": "series",
+        "slug": "series",
+        "title": "Series",
+        "kind": "master",
+        "repo": "agents-remember",
+        "type": "Master (Code)",
+        "createdAt": "2026-01-01T00:00",
+    }
+    base.update(over)
+    return TaskDocument.model_validate(base)
+
+
 def _config(coord: Path) -> McpRuntimeConfig:
     """A lightweight stand-in: the task-doc controller only reads coordination_root."""
     return cast(McpRuntimeConfig, SimpleNamespace(coordination_root=coord))
@@ -113,6 +127,29 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(current_step(pending), "S2 — Two")
         finished = _doc(steps=[{"id": "S1", "title": "One", "status": "done"}])
         self.assertIsNone(current_step(finished))
+
+    def test_master_roundtrips_with_subtasks_and_sections(self) -> None:
+        doc = _master(
+            subTasks=[
+                {"number": "3c", "name": "Persist", "file": "03c.md",
+                 "status": "inProgress", "scope": "x"}
+            ],
+            sections=[{"kind": "freeform", "heading": "H", "body": "b"}],
+        )
+        again = TaskDocument.model_validate(doc.model_dump(by_alias=True))
+        self.assertEqual(again, doc)
+
+    def test_master_forbids_steps_and_lifecycle_id(self) -> None:
+        with self.assertRaises(ValidationError):
+            _master(steps=[{"id": "S1", "title": "x"}])
+        with self.assertRaises(ValidationError):
+            _master(lifecycleId="LC")
+
+    def test_non_master_forbids_subtasks_and_sections(self) -> None:
+        with self.assertRaises(ValidationError):
+            _doc(sections=[{"heading": "H"}])
+        with self.assertRaises(ValidationError):
+            _doc(subTasks=[{"number": "1", "name": "x"}])
 
 
 class RenderTests(unittest.TestCase):
@@ -246,6 +283,114 @@ class RenderTests(unittest.TestCase):
         self.assertIn("```python\na = 1\n\nb = 2\n```", md)
 
 
+class MasterRenderTests(unittest.TestCase):
+    def test_golden_master(self) -> None:
+        doc = _master(
+            title="Series X",
+            type="Master (Code / Docs)",
+            status="inProgress",
+            createdAt="2026-06-12T15:58",
+            subTasks=[
+                {"number": "1", "name": "Design", "file": "01_d.md",
+                 "status": "Completed", "scope": "keystone"},
+                {"number": "3c", "name": "Persist", "file": "03c_p.md",
+                 "status": "inProgress"},
+                {"number": "4", "name": "Serve", "status": "planning"},
+            ],
+            decisions=[{"at": "2026-06-12T15:58", "decision": "8 slices", "rationale": "fits"}],
+            sections=[
+                {"kind": "freeform", "heading": "Objective", "body": "Ship 3.0.0."},
+                {"kind": "subTasks", "heading": "Sub-tasks (execution order)", "body": "> note"},
+                {"kind": "sharedDecisions", "heading": "Shared Decisions"},
+                {"kind": "freeform", "heading": "Invariants", "body": "- never weaker"},
+            ],
+        )
+        expected = (
+            "\n".join(
+                [
+                    "# Task: Series X",
+                    "",
+                    "**Status:** inProgress",
+                    "**Repo:** agents-remember",
+                    "**Type:** Master (Code / Docs)",
+                    "**Created:** 2026-06-12T15:58",
+                    "",
+                    "---",
+                    "",
+                    "## Objective",
+                    "",
+                    "Ship 3.0.0.",
+                    "",
+                    "---",
+                    "",
+                    "## Sub-tasks (execution order)",
+                    "",
+                    "> note",
+                    "",
+                    "1. ✅ **Design** · `01_d.md` — keystone",
+                    "3c. 🔨 **Persist** · `03c_p.md`",
+                    "4. ⬜ **Serve**",
+                    "",
+                    "---",
+                    "",
+                    "## Shared Decisions",
+                    "",
+                    "| Date-Time | Decision | Rationale |",
+                    "| --- | --- | --- |",
+                    "| 2026-06-12T15:58 | 8 slices | fits |",
+                    "",
+                    "---",
+                    "",
+                    "## Invariants",
+                    "",
+                    "- never weaker",
+                ]
+            )
+            + "\n"
+        )
+        self.assertEqual(render_markdown(doc), expected)
+
+    def test_master_render_is_deterministic(self) -> None:
+        doc = _master(
+            subTasks=[{"number": "1", "name": "a", "status": "planning"}],
+            sections=[{"kind": "subTasks", "heading": "Sub-tasks"}],
+        )
+        self.assertEqual(render_markdown(doc), render_markdown(doc))
+
+    def test_master_markers_map_status(self) -> None:
+        doc = _master(
+            subTasks=[
+                {"number": "1", "name": "a", "status": "Completed"},
+                {"number": "2", "name": "b", "status": "inProgress"},
+                {"number": "3", "name": "c", "status": "planning"},
+            ],
+            sections=[{"kind": "subTasks", "heading": "S"}],
+        )
+        md = render_markdown(doc)
+        self.assertIn("1. ✅ **a**", md)
+        self.assertIn("2. 🔨 **b**", md)
+        self.assertIn("3. ⬜ **c**", md)
+
+    def test_master_empty_subtasks_placeholder(self) -> None:
+        doc = _master(sections=[{"kind": "subTasks", "heading": "Sub-tasks"}])
+        self.assertIn("_No sub-tasks defined yet._", render_markdown(doc))
+
+    def test_master_preserves_bespoke_prose_verbatim(self) -> None:
+        # Bespoke prose sections (Resume / North-Star / Mandated ...) survive byte-for-byte,
+        # including internal blank lines and nested bullets -- the S4 acceptance.
+        resume = "**Where we are:** slices 01-03 done.\n\n- code @ abc\n  - nested\n- memory @ def"
+        north_star = "1. Design test.\n2. Client-agnostic API."
+        doc = _master(
+            sections=[
+                {"kind": "freeform", "heading": "Resume / Current State", "body": resume},
+                {"kind": "freeform", "heading": "North-Star Constraints", "body": north_star},
+            ],
+        )
+        md = render_markdown(doc)
+        self.assertIn(f"## Resume / Current State\n\n{resume}\n", md)
+        self.assertIn(f"## North-Star Constraints\n\n{north_star}\n", md)
+
+
 class StoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp())
@@ -253,6 +398,9 @@ class StoreTests(unittest.TestCase):
     def test_doc_stem_light_vs_subtask(self) -> None:
         self.assertEqual(doc_stem(_doc(kind="light")), "task")
         self.assertEqual(doc_stem(_doc(kind="subTask", slug="03c_x")), "03c_x")
+
+    def test_doc_stem_master_is_task(self) -> None:
+        self.assertEqual(doc_stem(_master(slug="series")), "task")
 
     def test_write_then_read_roundtrips_and_leaves_no_tmp(self) -> None:
         doc = _doc(objective="o", steps=[{"id": "S1", "title": "a", "status": "done"}])
@@ -402,6 +550,120 @@ class ControllerTests(unittest.TestCase):
             self._call("set_step", step={"title": "no id"})
         with self.assertRaises(TaskDocError):
             self._call("set_step", step={"id": "S9.a", "title": "x", "parent": "ghost"})
+
+
+class MasterControllerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.coord = Path(tempfile.mkdtemp())
+        self.cfg = _config(self.coord)
+
+    def _create(self, **fields: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": "series",
+            "slug": "series",
+            "title": "Series",
+            "kind": "master",
+            "repo": "agents-remember",
+            "type": "Master (Code)",
+            "createdAt": "2026-01-01T00:00",
+            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+        }
+        payload.update(fields)
+        return task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="series",
+            fields=payload,
+        )
+
+    def _op(self, operation: str, **kw: Any) -> dict[str, Any]:
+        return task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation=operation,
+            task_name="series",
+            **kw,
+        )
+
+    def test_create_master_writes_task_json_without_lifecycle(self) -> None:
+        result = self._create()
+        self.assertEqual(result["kind"], "master")
+        self.assertTrue(str(result["docPath"]).endswith("task.json"))
+        self.assertIsNone(result["lifecycleId"])
+
+    def test_set_subtask_inserts_then_updates_by_number(self) -> None:
+        self._create(subTasks=[{"number": "1", "name": "A", "status": "planning"}])
+        self._op("set_subtask", subtask={"number": "3c", "name": "B", "status": "inProgress"})
+        result = self._op(
+            "set_subtask", subtask={"number": "1", "status": "Completed", "scope": "done"}
+        )
+        doc = read_task_doc(Path(str(result["docPath"])))
+        self.assertEqual(
+            [(s.number, s.status) for s in doc.subTasks],
+            [("1", "Completed"), ("3c", "inProgress")],
+        )
+        self.assertEqual(doc.subTasks[0].scope, "done")
+
+    def test_set_section_upserts_by_heading(self) -> None:
+        self._create()
+        self._op("set_section", section={"heading": "Invariants", "body": "- x"})
+        result = self._op("set_section", section={"heading": "Invariants", "body": "- y"})
+        doc = read_task_doc(Path(str(result["docPath"])))
+        invariants = [s for s in doc.sections if s.heading == "Invariants"]
+        self.assertEqual(len(invariants), 1)
+        self.assertEqual(invariants[0].body, "- y")
+
+    def test_master_create_ignores_contract_lifecycle_id(self) -> None:
+        contract = default_contract(
+            task_name="series",
+            repo_name="agents-remember",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=self.coord,
+            code_source_branch="main",
+            code_work_branch="wb",
+            code_base_commit="abc123",
+            worktree_name="series",
+            lifecycle_id="LC-X",
+        )
+        write_contract(contract.contract_path, contract)
+        self.assertIsNone(self._create()["lifecycleId"])
+
+    def test_master_rejects_step_op(self) -> None:
+        self._create()
+        with self.assertRaises(TaskDocError):
+            self._op("set_step", step={"id": "S1", "title": "x"})
+
+    def test_subtask_section_ops_reject_non_master(self) -> None:
+        task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="lite",
+            fields={
+                "id": "L", "slug": "task", "title": "L", "kind": "light",
+                "repo": "r", "createdAt": "2026-01-01T00:00",
+            },
+        )
+        with self.assertRaises(TaskDocError):
+            task_doc_tool(
+                self.cfg, repo_id="agents-remember", operation="set_subtask",
+                task_name="lite", subtask={"number": "1", "name": "x"},
+            )
+        with self.assertRaises(TaskDocError):
+            task_doc_tool(
+                self.cfg, repo_id="agents-remember", operation="set_section",
+                task_name="lite", section={"heading": "H"},
+            )
+
+    def test_master_op_argument_errors(self) -> None:
+        self._create()
+        with self.assertRaises(TaskDocError):
+            self._op("set_subtask", subtask={"name": "no number"})
+        with self.assertRaises(TaskDocError):
+            self._op("set_section", section={"body": "no heading"})
 
 
 class RegistrationTests(unittest.TestCase):
