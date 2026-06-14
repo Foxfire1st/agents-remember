@@ -1,36 +1,51 @@
-"""The dashboard FastAPI app: one-shot state + the multiplexed SSE stream (slice 04).
+"""The dashboard FastAPI app: one-shot state, the multiplexed SSE stream, raw events, actions.
 
 Endpoints:
 
-* ``GET /api/state``  -- the current projection once (curl-friendly, no streaming).
-* ``GET /api/stream`` -- one EventSource: an ``event: snapshot`` with the full projection
-  on connect, then per-entity ``state`` deltas (``lifecycle`` / ``enclosure`` /
-  ``provider`` / ``metrics`` / ``analytics`` and their ``*.removed`` markers) fanned out
-  from the shared :class:`Projector`. The raw ``event`` channel and the POST action
-  skeleton land in slice 4b.
+* ``GET  /api/state``           -- the current projection once (curl-friendly, no streaming).
+* ``GET  /api/stream``          -- one EventSource: an ``event: snapshot`` with the full
+  projection on connect, then per-entity ``state`` deltas (``lifecycle`` / ``enclosure`` /
+  ``provider`` / ``metrics`` / ``analytics`` and their ``*.removed`` markers) fanned out from
+  the shared :class:`Projector`.
+* ``GET  /api/events``          -- the raw ``ar-observer-event/v1`` log, tailed with exact
+  byte-offset ``Last-Event-ID`` resume (slice 4b). A *separate* stream from ``/api/stream``:
+  it resumes by byte offset, the state channel re-snapshots, so mixing them on one stream
+  would be incoherent. The cockpit opens both (still well under the ~6 connections/origin cap).
+* ``POST /api/actions/{action}``-- the gate return-channel skeleton (slice 4b): validate the
+  action against the reducer's ``ActionAvailability``, capture attribution, and acknowledge.
+  It performs no mutation -- slice 06 enforces gate state in the MCP tools.
 
-Local-first posture: bind ``127.0.0.1`` only (the CLI default) with no auth in v1. This is
-a cockpit for the developer's own machine; exposing it (an SSH tunnel, a reverse proxy)
-hands an unauthenticated reader the whole projection and, later, the action surface, so any
-multi-user or remote story is a deliberate later design with its own auth gate.
+Local-first posture: bind ``127.0.0.1`` only (the CLI default) with no auth in v1. This is a
+cockpit for the developer's own machine; exposing it (an SSH tunnel, a reverse proxy) hands an
+unauthenticated reader the whole projection -- and the POST action surface -- so any multi-user
+or remote story is a deliberate later design with its own auth gate.
+
+The ``now`` / ``before_tick`` parameters are the sim seams (slice 4b): live serving leaves them
+at their defaults; ``cli.dashboard`` passes a replay clock + fixture feeder under ``--sim``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel
 
+from agents_remember.observer.events import now_iso
+from agents_remember.serving.actions import ActionRequest, evaluate_action
+from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from agents_remember.mcp.config import McpRuntimeConfig
 
 
@@ -57,9 +72,18 @@ async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]
         )
 
 
-def create_app(config: McpRuntimeConfig, *, interval: float = 1.0) -> FastAPI:
-    """Build the dashboard app bound to one shared projector for ``config``."""
-    projector = Projector(config, interval=interval)
+def create_app(
+    config: McpRuntimeConfig,
+    *,
+    interval: float = 1.0,
+    now: Callable[[], datetime] | None = None,
+    before_tick: Callable[[datetime], object] | None = None,
+) -> FastAPI:
+    """Build the dashboard app bound to one shared projector for ``config``.
+
+    ``now`` / ``before_tick`` default to live behaviour; sim wires a replay clock + feeder.
+    """
+    projector = Projector(config, interval=interval, now=now, before_tick=before_tick)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -85,6 +109,25 @@ def create_app(config: McpRuntimeConfig, *, interval: float = 1.0) -> FastAPI:
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
         async for event in stream_events(projector):
             yield event
+
+    @app.get("/api/events", response_class=EventSourceResponse)
+    async def api_events(
+        last_event_id: Annotated[str | None, Header()] = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        async for event in stream_raw_events(
+            config, last_event_id=last_event_id, interval=interval
+        ):
+            yield event
+
+    @app.post("/api/actions/{action}")
+    def api_action(action: str, request: ActionRequest) -> Response:
+        _, snapshot = projector.current()
+        if snapshot is None:
+            raise HTTPException(status_code=503, detail="projection not ready")
+        outcome = evaluate_action(
+            snapshot, action, request.target, actor=request.actor, now=now_iso()
+        )
+        return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
     mount_static(app)
     return app
