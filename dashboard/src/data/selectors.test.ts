@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { DashboardState } from "./store";
-import type { AttentionItem, LifecycleProjection } from "../types/projection";
+import type { AttentionItem, LifecycleProjection, Phase } from "../types/projection";
 import { buildTree, fmtWait, selectQueue } from "./selectors";
 
-const lifecycle = (id: string, repoId?: string): LifecycleProjection => {
+const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): LifecycleProjection => {
   const base: LifecycleProjection = {
     id,
     state: "running",
-    phase: "build",
+    phase,
     fleeting: false,
     tokens: 0,
     startedAt: "t",
@@ -21,10 +21,17 @@ const lifecycle = (id: string, repoId?: string): LifecycleProjection => {
 };
 
 describe("buildTree", () => {
-  it("BY LIFECYCLE yields one id-sorted group per lifecycle", () => {
-    const tree = buildTree([lifecycle("LC2"), lifecycle("LC1")], "lifecycle");
-    expect(tree.map((g) => g.key)).toEqual(["LC1", "LC2"]);
-    expect(tree.every((g) => g.lifecycles.length === 1)).toBe(true);
+  it("BY PHASE groups by l-01 phase in pipeline order, members id-sorted", () => {
+    const tree = buildTree(
+      [
+        lifecycle("LC2", undefined, "build"),
+        lifecycle("LC1", undefined, "build"),
+        lifecycle("LC3", undefined, "request"),
+      ],
+      "phase",
+    );
+    expect(tree.map((g) => g.key)).toEqual(["request", "build"]); // pipeline order, not alpha
+    expect(tree.find((g) => g.key === "build")?.lifecycles.map((l) => l.id)).toEqual(["LC1", "LC2"]);
   });
 
   it("BY REPO groups by repoId, sorted, with members id-sorted", () => {

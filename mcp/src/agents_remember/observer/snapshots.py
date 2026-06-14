@@ -36,7 +36,11 @@ from agents_remember.observer.projection import (
     SetupProgressNode,
     SetupSummaryNode,
     SidecarStaleNode,
+    TaskCodeExampleNode,
+    TaskDecisionNode,
     TaskDocNode,
+    TaskStepNode,
+    TaskSubStepNode,
     ToolReportNode,
 )
 from agents_remember.observer.timeutil import age_seconds
@@ -51,13 +55,29 @@ from agents_remember.tasks import (
 )
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
+WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
+
+
+def _provider_role(provider_id: str) -> str:
+    """Map a provider id to its repo role: GrepAI serves the memory repo, CGC the code repo."""
+    return "memory" if "memory" in provider_id or "grepai" in provider_id else "code"
+
 
 def read_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderNode]:
-    """Surface 1: the persisted provider current-state snapshot.
+    """Surfaces 1 + 4: the workspace provider snapshot **plus** each worktree's isolated stack.
 
-    Provider state is call-triggered and stale between calls, so the snapshot's
-    age (``snapshotStaleSeconds``) is surfaced rather than pretending it is live.
+    Surface 1 is the workspace ``current.json`` (one call-triggered snapshot; its age is surfaced
+    via ``snapshotStaleSeconds`` rather than faked live). Surface 4 is every worktree group's
+    ``provider-runtime/provider-state.json`` -- the isolated CGC (code repo) + GrepAI (memory repo)
+    stack a worktree spawns at start -- bound to its worktree group + repo + role, so the engine
+    room shows each worktree's own engines instead of only main's (the gap note 03 flagged).
     """
+    return _workspace_providers(config, now=now) + _worktree_providers(
+        config.coordination_root, now=now
+    )
+
+
+def _workspace_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderNode]:
     payload = _read_json(current_state_path(config))
     if payload is None:
         return []
@@ -71,16 +91,54 @@ def read_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderN
         if not isinstance(value, dict):
             continue
         ok = value.get("ok")
+        provider_id = str(value.get("id", key))
         nodes.append(
             ProviderNode(
-                id=str(value.get("id", key)),
+                id=provider_id,
                 state=str(value.get("state", "unknown")),
                 ok=ok if isinstance(ok, bool) else None,
                 watcherUp=bool(value.get("watcherUp", False)),
                 indexingState=str(value.get("indexingState", "unknown")),
                 snapshotStaleSeconds=stale,
+                scope="workspace",
+                role=_provider_role(provider_id),
             )
         )
+    return nodes
+
+
+def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[ProviderNode]:
+    """Surface 4: each worktree group's isolated provider stack, bound to its worktree + repo."""
+    worktrees_root = coordination_root / "worktrees"
+    if not worktrees_root.is_dir():
+        return []
+    nodes: list[ProviderNode] = []
+    for path in sorted(worktrees_root.glob("*/*/provider-runtime/provider-state.json")):
+        payload = _read_json(path)
+        if payload is None or payload.get("schema") != WORKTREE_PROVIDER_STATE_SCHEMA:
+            continue
+        group = path.parent.parent.name
+        repo = _text_or_none(payload.get("repoName"))
+        settings = payload.get("isolatedProviderSettings")
+        providers = settings.get("providers") if isinstance(settings, dict) else None
+        if not isinstance(providers, list):
+            continue
+        stale = _file_age_seconds(path, now)
+        for provider in providers:
+            provider_id = str(provider)
+            nodes.append(
+                ProviderNode(
+                    id=f"{provider_id}@{group}",
+                    state="configured",  # the group state file exists => the stack was set up
+                    ok=True,
+                    indexingState="unknown",
+                    snapshotStaleSeconds=stale,
+                    scope="worktree",
+                    role=_provider_role(provider_id),
+                    repoId=repo,
+                    worktreeGroup=group,
+                )
+            )
     return nodes
 
 
@@ -359,6 +417,38 @@ def read_task_documents(coordination_root: Path, *, now: datetime) -> list[TaskD
                 currentStep=current_step(doc),
                 docPath=path.as_posix(),
                 ageSeconds=_file_age_seconds(path, now),
+                steps=[
+                    TaskStepNode(
+                        id=step.id,
+                        title=step.title,
+                        status=step.status,
+                        substeps=[
+                            TaskSubStepNode(id=sub.id, title=sub.title, status=sub.status)
+                            for sub in step.substeps
+                        ],
+                    )
+                    for step in doc.steps
+                ],
+                objective=doc.objective,
+                requirements=list(doc.requirements),
+                design=doc.design,
+                codeExamples=[
+                    TaskCodeExampleNode(
+                        id=example.id,
+                        title=example.title,
+                        distinctChange=example.distinctChange,
+                        why=example.why,
+                        language=example.language,
+                        snippet=example.snippet,
+                    )
+                    for example in doc.codeExamples
+                ],
+                decisions=[
+                    TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
+                    for item in doc.decisions
+                ],
+                openQuestions=list(doc.openQuestions),
+                references=list(doc.references),
             )
         )
     return nodes

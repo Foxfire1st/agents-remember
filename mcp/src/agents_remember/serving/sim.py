@@ -19,6 +19,7 @@ same moment yields the same log, hence the same projection and the same delta se
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -119,13 +120,29 @@ class SimSetup:
     temp_dir: tempfile.TemporaryDirectory[str]
 
 
+def _materialize_surfaces(fixture_dir: Path, root: Path) -> None:
+    """Copy the fixture's structural surfaces into the fresh sim root so the projector reads them
+    like a live coordination root: worktree contracts (-> enclosures + synthesized paused
+    lifecycles), JSON task documents (the task content), provider current-state, memory ledgers,
+    and persisted drift snapshots. The observer *event logs*
+    (``logs/observer/{lifecycles,workspace}``) are excluded -- the feeder is their sole writer,
+    replaying them over sim time, so copying them too would double-apply and defeat the replay.
+    """
+    shutil.copytree(fixture_dir, root, dirs_exist_ok=True)
+    observer = observer_logs_root(root)
+    for source in ("lifecycles", "workspace"):
+        shutil.rmtree(observer / source, ignore_errors=True)
+
+
 def build_sim(config: McpRuntimeConfig, fixture_dir: Path, *, speed: float) -> SimSetup:
     """Load a fixture and wire a sim over a fresh temp coordination root (no fixture mutation)."""
     events = load_fixture(fixture_dir)
     if not events:
         raise SimError(f"no observer events found in sim fixture: {fixture_dir}")
     temp_dir = tempfile.TemporaryDirectory(prefix="ar-dashboard-sim-")
-    sim_config = replace(config, coordination_root=Path(temp_dir.name))
+    root = Path(temp_dir.name)
+    _materialize_surfaces(fixture_dir, root)
+    sim_config = replace(config, coordination_root=root)
     feeder = ReplayFeeder(EventStore(observer_root(sim_config)), events)
     clock = ReplayClock(_event_ts(events[0]), speed=speed)
     return SimSetup(config=sim_config, clock=clock, feeder=feeder, temp_dir=temp_dir)

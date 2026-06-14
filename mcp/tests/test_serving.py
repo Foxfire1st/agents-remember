@@ -393,7 +393,9 @@ class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
         gen = stream_raw_events(_config(self.tmp), interval=0.01)
         first = await asyncio.wait_for(gen.__anext__(), timeout=1)
         self.assertEqual(first.event, "event")
-        self.assertEqual(first.data, '{"a":1}')
+        # The line is parsed to an object so ServerSentEvent single-encodes it (matching the
+        # state channel); emitting the raw JSON string would double-encode the SSE wire.
+        self.assertEqual(first.data, {"a": 1})
         await gen.aclose()
 
 

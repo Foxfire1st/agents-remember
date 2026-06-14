@@ -126,6 +126,14 @@ class ProviderNode(BaseModel):
     watcherUp: bool = False
     indexingState: str = "unknown"
     snapshotStaleSeconds: float | None = None
+    # Binding (slice 5c): a provider is either workspace-scoped or part of a worktree's *isolated*
+    # stack. The engine room shows each worktree's CGC (its code repo) + GrepAI (its memory repo),
+    # so a worktree-scoped node carries its worktree group + repo + role rather than being lumped
+    # in with main's. ``worktreeGroup`` is the join key back to the enclosure (group name).
+    scope: str = "workspace"  # "workspace" | "worktree"
+    role: str | None = None  # "code" (CGC) | "memory" (GrepAI)
+    repoId: str | None = None
+    worktreeGroup: str | None = None
 
 
 class Metrics(BaseModel):
@@ -254,6 +262,54 @@ class LedgerNode(BaseModel):
     baseCodeCommit: str
 
 
+class TaskSubStepNode(BaseModel):
+    """One substep of a task step (the JSON's finer-grained progress unit)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    status: str
+
+
+class TaskStepNode(BaseModel):
+    """One step of a task document, with its substeps -- the actual task *content* (slice 5c).
+
+    The 3c projection carried only step counts; the cockpit detail needs the step list itself to
+    show what a lifecycle is actually doing, so the served node carries the titles + statuses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    status: str
+    substeps: list[TaskSubStepNode] = Field(default_factory=list)
+
+
+class TaskDecisionNode(BaseModel):
+    """One decision-log row of a task document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    at: str
+    decision: str
+    rationale: str
+
+
+class TaskCodeExampleNode(BaseModel):
+    """One proposed-code-example block of a task document (the plan's distinct change shapes)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    distinctChange: str
+    why: str
+    language: str = ""
+    snippet: str = ""
+
+
 class TaskDocNode(BaseModel):
     """A task document's progress, keyed by lifecycle (slice 3c, surface 7).
 
@@ -276,6 +332,16 @@ class TaskDocNode(BaseModel):
     currentStep: str | None = None
     docPath: str
     ageSeconds: float | None = None
+    steps: list[TaskStepNode] = Field(default_factory=list)
+    # The readable task content (slice 5c): so the dashboard *is* the task reader -- you never
+    # have to open the JSON on disk. The doc is the JSON-primary source (slice 3c).
+    objective: str = ""
+    requirements: list[str] = Field(default_factory=list)
+    design: str | None = None
+    codeExamples: list[TaskCodeExampleNode] = Field(default_factory=list)
+    decisions: list[TaskDecisionNode] = Field(default_factory=list)
+    openQuestions: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
 
 
 class AttentionItem(BaseModel):

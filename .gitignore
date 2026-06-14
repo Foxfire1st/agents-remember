@@ -10,3 +10,4 @@ __pycache__/
 .ruff_cache/
 .coverage
 uv.lock
+mcp/tests/fixtures/sim-rich/

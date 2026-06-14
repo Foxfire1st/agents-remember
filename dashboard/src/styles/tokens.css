@@ -496,3 +496,739 @@ html[data-effects="off"] *::after {
   width: 100%;
   border: 0;
 }
+
+/* ── slice 5c: model-C cockpit shell (persistent chrome + switchable viewport) ─── */
+
+.cockpit--shell {
+  /* Pin the shell to the viewport so the top bar + mode bar stay fixed and the rails / viewport
+     scroll INTERNALLY — without this the content (many lifecycles) grows the page and pushes the
+     mode bar off-screen. */
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.6rem 0.8rem;
+  gap: 0.6rem;
+}
+
+.topbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--grid);
+  padding-bottom: 0.5rem;
+}
+.topbar h1 {
+  margin: 0;
+  font-size: 0.9rem;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-shadow: 0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5);
+}
+.topbar__status {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  font-size: 0.78rem;
+}
+.topbar__metrics,
+.topbar__clock {
+  color: oklch(0.7 0.02 250);
+}
+.caution {
+  letter-spacing: 0.06em;
+  color: oklch(0.7 0.02 250);
+}
+.caution--clear {
+  color: var(--mint);
+}
+.caution--info {
+  color: var(--cyan);
+}
+.caution--warn {
+  color: var(--amber);
+}
+.caution--alarm {
+  color: var(--alarm);
+  animation: pulse 0.6s steps(1) infinite;
+}
+
+.shell__body {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(420px, 2.2fr) minmax(260px, 0.95fr);
+  /* Bound the single row to the body height so the rails/viewport scroll INTERNALLY; an
+     auto row sizes to content and the tall left rail then overflows + gets clipped. */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0.7rem;
+  flex: 1;
+  min-height: 0;
+}
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden; /* the rail itself does not scroll — each panel scrolls on its own */
+}
+.rail > .panel {
+  min-height: 0;
+  overflow: auto;
+}
+.rail > .panel > h2 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -0.7rem -0.8rem 0.4rem; /* span the panel padding so the sticky header has a full bg */
+  padding: 0.7rem 0.8rem 0.3rem;
+  background: var(--bg-panel);
+}
+.rail--left > .attn {
+  flex: 0 1 auto;
+  max-height: 42%;
+}
+.rail--left > .lclist {
+  flex: 1 1 0;
+}
+.rail--right > .river {
+  flex: 1 1 0;
+}
+.viewport {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.viewport > .panel,
+.viewport > .ops {
+  flex: 1;
+}
+
+.modebar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.3rem;
+  border-top: 1px solid var(--grid);
+  padding-top: 0.5rem;
+}
+.modebar button {
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.75rem;
+  background: var(--bg);
+  color: oklch(0.7 0.02 250);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.modebar button.is-active {
+  color: var(--amber);
+  border-color: var(--amber);
+  text-shadow: 0 0 calc(5px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.4);
+}
+
+/* operations view: tree | detail */
+.ops {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.1fr) minmax(320px, 1.5fr);
+  gap: 0.7rem;
+  min-height: 0;
+}
+.ops__tree,
+.ops__detail {
+  min-width: 0;
+  overflow: auto;
+}
+
+/* engine room (podracer twin-engine grammar) */
+.engine__stacks {
+  display: grid;
+  gap: 0.8rem;
+}
+.engine__stack {
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  padding: 0.5rem 0.6rem;
+}
+.engine__stack--workspace {
+  border-left: 3px solid var(--amber);
+}
+.engine__stack--worktree {
+  border-left: 3px solid var(--cyan);
+}
+.engine__stack-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.engine__stack-name {
+  color: var(--ink);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+}
+.engine__stack-repo {
+  color: oklch(0.7 0.02 250);
+  font-size: 0.72rem;
+}
+.engine__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.7rem;
+}
+.engine__unit {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+}
+.engine__name {
+  color: var(--amber);
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+}
+.engine__silhouette {
+  height: 64px;
+  border: 1px solid var(--amber);
+  border-radius: 4px;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 6px,
+    oklch(0.82 0.16 75 / 0.1) 6px 7px
+  );
+}
+.engine__unit--indexing .engine__silhouette {
+  border-color: var(--cyan);
+  background: linear-gradient(0deg, oklch(0.85 0.13 200 / 0.4) 0%, transparent 70%);
+}
+.engine__unit--down .engine__name {
+  color: var(--alarm);
+}
+.engine__unit--down .engine__silhouette {
+  border-color: var(--alarm);
+  background: oklch(0.63 0.24 25 / 0.18);
+  animation: pulse 0.6s steps(1) infinite; /* ≤3/s, WCAG 2.3.1 */
+}
+.engine__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  color: oklch(0.7 0.02 250);
+}
+
+/* memory mirror: segmented coverage/drift bar + ledger + stalest */
+.mirror__repo {
+  margin-bottom: 0.7rem;
+}
+.mirror__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+.mirror__actionable {
+  color: var(--amber);
+}
+.mirror__file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mirror__sub {
+  margin: 0.7rem 0 0.3rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.7 0.02 250);
+}
+.mirror__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+.segbar {
+  display: flex;
+  height: 0.75rem;
+  margin-top: 0.25rem;
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.segbar__seg {
+  height: 100%;
+}
+.seg--current,
+.seg--ok {
+  background: var(--mint);
+}
+.seg--drifted {
+  background: var(--amber);
+}
+.seg--missingVerification {
+  background: var(--cyan);
+}
+.seg--missing,
+.seg--orphaned,
+.seg--unsupported {
+  background: var(--alarm);
+}
+
+/* event river (right-rail ticker) */
+.river__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.river__item {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.25rem 0.4rem;
+  background: var(--bg);
+  border-left: 2px solid var(--grid);
+}
+.river__item--observed {
+  border-left-color: var(--mint);
+}
+.river__item--declared {
+  border-left-color: var(--amber);
+}
+.river__item--inferred {
+  border-left-color: var(--cyan);
+}
+.river__item--approved {
+  border-left-color: var(--mint);
+}
+.river__kind {
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.river__meta {
+  font-size: 0.68rem;
+  color: oklch(0.7 0.02 250);
+  letter-spacing: 0.02em;
+}
+
+/* hangar: stale/uncleaned worktrees */
+.hangar__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.hangar__row {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--grid);
+  border-left: 3px solid var(--dormant);
+  border-radius: 3px;
+}
+.hangar__row--stale {
+  border-left-color: var(--amber);
+}
+.hangar__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.hangar__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.badge {
+  font-size: 0.68rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  color: oklch(0.7 0.02 250);
+}
+.hangar__actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+/* display-only action affordance */
+.afford {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 2px;
+  background: transparent;
+  cursor: default;
+}
+.afford--ready {
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+}
+.afford--off {
+  border: 1px solid var(--grid);
+  color: oklch(0.55 0.02 250);
+}
+
+/* topology — the constellation canvas (mc2 port) */
+.topology-shell {
+  display: flex;
+  flex-direction: column;
+}
+.constel-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 340px;
+  margin-top: 0.4rem;
+  overflow: hidden;
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  background: radial-gradient(120% 100% at 50% 40%, oklch(0.2 0.02 250) 0%, var(--bg) 80%);
+}
+.constel-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.constel-tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 10px));
+  padding: 0.2rem 0.45rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  z-index: 2;
+}
+.constel-legend {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.7rem;
+  color: oklch(0.7 0.02 250);
+  pointer-events: none;
+}
+.legdot {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  margin-right: 0.3em;
+  vertical-align: middle;
+}
+.legdot--ok {
+  background: var(--cyan);
+}
+.legdot--warn {
+  background: var(--amber);
+}
+.legdot--crit {
+  background: var(--alarm);
+}
+.legdot--idle {
+  background: var(--dormant);
+}
+
+/* dev gallery: floating state switcher over the model-C shell */
+.bench-overlay {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 0.25rem 0.4rem;
+  background: oklch(0.16 0.02 250 / 0.9);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+}
+
+/* lifecycle list — the merged unit list (left rail): pivot + grouped rows */
+.lclist__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.lclist__groups,
+.lclist__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lclist__groups {
+  margin-top: 0.4rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.lclist__group {
+  color: var(--amber);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.lclist__rows {
+  margin-top: 0.15rem;
+  display: grid;
+  gap: 0.12rem;
+}
+.lclist__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 0;
+  border-left: 2px solid var(--cyan);
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+  text-align: left;
+}
+.lclist__row--fleeting {
+  border-left-style: dashed;
+  opacity: 0.85;
+}
+.lclist__row.is-selected {
+  outline: 1px solid var(--amber);
+}
+.lclist__id {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lclist__sec {
+  color: var(--cyan);
+  font-size: 0.76rem;
+}
+.lclist__meta {
+  margin-left: auto;
+  color: oklch(0.7 0.02 250);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+/* detail: where the lifecycle lives + the multi-task series slices */
+.detail__where {
+  font-size: 0.76rem;
+  color: oklch(0.7 0.02 250);
+  margin-bottom: 0.4rem;
+}
+.detail__series {
+  margin: 0.5rem 0;
+}
+.detail__slices {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+.detail__slice {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.4rem;
+  background: var(--bg);
+  border-left: 2px solid var(--grid);
+}
+.detail__slice-meta {
+  color: oklch(0.7 0.02 250);
+  font-size: 0.72rem;
+}
+
+/* detail: the lifecycle → worktree → provider spine */
+.detail__spine {
+  margin: 0.6rem 0;
+}
+.detail__spine-head {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: oklch(0.7 0.02 250);
+  margin-bottom: 0.3rem;
+}
+.detail__lanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.detail__lane {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  padding: 0.4rem 0.5rem;
+}
+.detail__lane--code {
+  border-left: 2px solid var(--amber);
+}
+.detail__lane--memory {
+  border-left: 2px solid var(--cyan);
+}
+.detail__lane-title {
+  font-size: 0.76rem;
+  color: var(--ink);
+}
+.detail__lane-repo {
+  font-size: 0.74rem;
+  color: oklch(0.7 0.02 250);
+}
+
+/* detail: the task step checklist (the actual task content) */
+.detail__steps {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+.detail__step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+}
+.detail__step-mark {
+  width: 0.62em;
+  height: 0.62em;
+  align-self: center;
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+}
+.detail__step.is-done .detail__step-mark {
+  background: var(--mint);
+  border-color: var(--mint);
+}
+.detail__step.is-inProgress .detail__step-mark {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.detail__step.is-blocked .detail__step-mark {
+  background: var(--alarm);
+  border-color: var(--alarm);
+}
+.detail__step.is-done .detail__step-title {
+  color: oklch(0.6 0.02 250);
+}
+.detail__substeps {
+  grid-column: 2;
+  list-style: none;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.76rem;
+  color: oklch(0.7 0.02 250);
+}
+.detail__substep.is-inProgress {
+  color: var(--amber);
+}
+
+/* the task reader: the JSON task document rendered for reading inside the dashboard */
+.taskdoc {
+  display: grid;
+  gap: 0.75rem;
+}
+.taskdoc__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.taskdoc__title {
+  font-weight: 600;
+}
+.taskdoc__status {
+  color: var(--cyan);
+  font-size: 0.8rem;
+}
+.taskdoc__section {
+  display: grid;
+  gap: 0.3rem;
+}
+.taskdoc__h {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.taskdoc__p {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+.taskdoc__bullets {
+  margin: 0;
+  padding-left: 1.1rem;
+  max-width: 78ch;
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+.taskdoc__code {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  padding: 0.45rem 0.55rem;
+}
+.taskdoc__code-head {
+  color: var(--amber);
+  font-size: 0.82rem;
+}
+.taskdoc__code-meta {
+  font-size: 0.78rem;
+  color: oklch(0.7 0.02 250);
+}
+.taskdoc__snippet {
+  margin: 0.2rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg);
+  border-radius: 2px;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.taskdoc__decisions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-width: 78ch;
+}
+.taskdoc__decision {
+  font-size: 0.84rem;
+}
+.taskdoc__decision-meta {
+  font-size: 0.76rem;
+  color: oklch(0.7 0.02 250);
+}

@@ -104,6 +104,11 @@ def project_workspace(
         enclosure.model_copy(update={"actions": enclosure_actions(enclosure)})
         for enclosure in enclosures
     ]
+    # A persistent lifecycle exists as long as its worktree (note 01): every worktree-backed
+    # enclosure with no event-backed lifecycle projects as PAUSED, so dormant worktrees appear as
+    # the lifecycles they are -- not as nothing. (A runtime that emits no events leaves this as the
+    # whole tree.) Fleeting + active lifecycles still come from the logs above.
+    lifecycles = lifecycles + _persistent_lifecycles(enriched, lifecycles)
     sidecars = sidecar_staleness or []
     analytics = build_analytics(
         drift_snapshots=drift_snapshots or [],
@@ -127,6 +132,54 @@ def project_workspace(
         metrics=_metrics(lifecycles, sidecars),
         analytics=analytics,
     )
+
+
+# --- persistent lifecycles from worktree enclosures (note 01) ----------------
+
+
+def _persistent_lifecycles(
+    enclosures: list[EnclosureNode], event_backed: list[LifecycleProjection]
+) -> list[LifecycleProjection]:
+    """A paused persistent lifecycle for every worktree-backed enclosure with no event log.
+
+    Note 01: a persistent (worktree-backed) lifecycle exists as long as its worktree, ``paused``
+    when no session drives it, and is never reaped. The reducer otherwise only materializes
+    event-backed lifecycles, so a worktree with no events (e.g. created by a runtime that does not
+    emit; ``lifecycleId == ""``) would vanish from the tree. Synthesized lifecycles carry no events
+    (``lastEventTs == ""``), which is how the attention queue tells them from a live session gone
+    quiet (a dormant *persistent* worktree belongs in the hangar, not the queue -- note 06).
+    """
+    known_ids = {lc.id for lc in event_backed}
+    known_enclosures = {lc.enclosure for lc in event_backed if lc.enclosure}
+    synthesized: list[LifecycleProjection] = []
+    for enclosure in enclosures:
+        if enclosure.lifecycleId and enclosure.lifecycleId in known_ids:
+            continue
+        if enclosure.enclosure in known_enclosures:
+            continue
+        synthesized.append(_persistent_from_enclosure(enclosure))
+    return synthesized
+
+
+def _persistent_from_enclosure(enclosure: EnclosureNode) -> LifecycleProjection:
+    """Seed a paused persistent lifecycle from a worktree contract (no event log).
+
+    The l-01 phase is unknown without events, so it is inferred from the contract's git progress:
+    a completed closeout/integration reads ``close``, otherwise ``build`` (worktrees live in build).
+    """
+    closed = "completed" in {enclosure.closeoutStatus, enclosure.integrationStatus}
+    proj = LifecycleProjection(
+        id=enclosure.lifecycleId or f"{enclosure.repoName}/{enclosure.taskName}",
+        state="paused",
+        phase="close" if closed else "build",
+        fleeting=False,
+        enclosure=enclosure.enclosure,
+        repoId=enclosure.repoName,
+        startedAt="",
+        lastEventTs="",
+        inferred=True,
+    )
+    return proj.model_copy(update={"actions": _lifecycle_actions(proj)})
 
 
 # --- the fold ----------------------------------------------------------------
@@ -422,7 +475,9 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                     repoId=lifecycle.repoId,
                 )
             )
-        elif lifecycle.inferred and lifecycle.state == "paused":
+        elif lifecycle.inferred and lifecycle.state == "paused" and lifecycle.lastEventTs:
+            # Only an event-backed session that went quiet is queue-worthy; a synthesized dormant
+            # persistent worktree (lastEventTs == "") is the hangar's job (note 06), not the queue.
             items.append(
                 AttentionItem(
                     id=f"stale-session:{lifecycle.id}",
@@ -435,7 +490,7 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                     repoId=lifecycle.repoId,
                 )
             )
-        elif lifecycle.inferred and lifecycle.state == "abandoned":
+        elif lifecycle.inferred and lifecycle.state == "abandoned" and lifecycle.lastEventTs:
             items.append(
                 AttentionItem(
                     id=f"dormant-fleeting:{lifecycle.id}",

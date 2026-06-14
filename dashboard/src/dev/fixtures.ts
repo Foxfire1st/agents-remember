@@ -4,7 +4,9 @@
 // build_attention_queue would compute for the same tree — kept in sync by eye (sidecar-free,
 // dashboard/** is out of memory scope).
 
+import type { ObserverEvent } from "../types/event";
 import type {
+  EnclosureNode,
   LifecycleProjection,
   ProviderNode,
   WorkspaceProjection,
@@ -66,6 +68,8 @@ const ok = (id: string): ProviderNode => ({
   ok: true,
   watcherUp: true,
   indexingState: "indexed",
+  scope: "workspace",
+  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
 });
 const down = (id: string): ProviderNode => ({
   id,
@@ -73,11 +77,56 @@ const down = (id: string): ProviderNode => ({
   ok: false,
   watcherUp: false,
   indexingState: "unknown",
+  scope: "workspace",
+  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
+});
+const indexing = (id: string): ProviderNode => ({
+  id,
+  state: "ready",
+  ok: true,
+  watcherUp: true,
+  indexingState: "indexing",
+  snapshotStaleSeconds: 3,
+  scope: "workspace",
+  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
+});
+
+function enclosure(
+  over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure" | "repoName" | "taskName">,
+): EnclosureNode {
+  return {
+    taskId: over.enclosure,
+    lifecycleId: "",
+    worktreeGroup: over.enclosure,
+    humanReviewStatus: "pending",
+    closeoutStatus: "pending",
+    integrationStatus: "not-started",
+    cleanup: "pending",
+    actions: [],
+    ...over,
+  };
+}
+
+const evt = (
+  id: string,
+  kind: string,
+  trust: ObserverEvent["trust"],
+  actor: ObserverEvent["actor"],
+  over: Partial<ObserverEvent> = {},
+): ObserverEvent => ({
+  schema: "ar-observer-event/v1",
+  id,
+  ts: "2026-06-14T09:00:30+00:00",
+  kind,
+  trust,
+  actor,
+  ...over,
 });
 
 export interface GalleryEntry {
   name: string;
   projection: WorkspaceProjection;
+  events?: ObserverEvent[];
 }
 
 export const GALLERY: GalleryEntry[] = [
@@ -193,6 +242,177 @@ export const GALLERY: GalleryEntry[] = [
             lane: "lifecycle",
             title: "Session gone quiet",
             waitSeconds: 5400,
+            lifecycleId: "old-003",
+            repoId: "repo-b",
+          },
+        ],
+      },
+    }),
+  },
+  {
+    name: "full",
+    events: [
+      evt("e1", "lifecycle.started", "observed", "system", { lifecycleId: "build-001" }),
+      evt("e2", "lifecycle.promoted", "approved", "developer", {
+        lifecycleId: "build-001",
+        enclosure: "wt-a",
+        repoId: "agents-remember",
+      }),
+      evt("e3", "tool.completed", "observed", "model", { lifecycleId: "build-001" }),
+      evt("e4", "lifecycle.blocked", "observed", "model", { lifecycleId: "plan-002" }),
+      evt("e5", "correction.recorded", "inferred", "system", { lifecycleId: "old-003" }),
+    ],
+    projection: project({
+      lifecycles: [
+        lifecycle({
+          id: "build-001",
+          state: "running",
+          phase: "build",
+          repoId: "agents-remember",
+          enclosure: "wt-a",
+          tokens: 4200,
+          staleSeconds: 12,
+          tokenSeries: [
+            { ts: "2026-06-14T09:00:10+00:00", cumulative: 1200 },
+            { ts: "2026-06-14T09:00:25+00:00", cumulative: 2600 },
+            { ts: "2026-06-14T09:00:40+00:00", cumulative: 4200 },
+          ],
+        }),
+        lifecycle({
+          id: "plan-002",
+          state: "blocked",
+          phase: "reframe-research",
+          repoId: "agents-remember",
+          enclosure: "wt-a2",
+          staleSeconds: 140,
+          tokens: 800,
+          ask: { question: "Approve the plan?" },
+          actions: [{ action: "resume", enabled: true }],
+        }),
+        lifecycle({
+          id: "old-003",
+          state: "paused",
+          inferred: true,
+          repoId: "repo-b",
+          enclosure: "wt-b",
+          staleSeconds: 6200,
+        }),
+        lifecycle({ id: "fleeting-9", fleeting: true, phase: "trust-checkpoint", staleSeconds: 8 }),
+        lifecycle({
+          id: "done-004",
+          state: "completed",
+          phase: "close",
+          repoId: "repo-b",
+          enclosure: "wt-b",
+          tokens: 9000,
+        }),
+      ],
+      enclosures: [
+        enclosure({
+          enclosure: "wt-a",
+          repoName: "agents-remember",
+          taskName: "browser-dashboard",
+          lifecycleId: "build-001",
+          closeoutStatus: "completed",
+          cleanup: "pending",
+          actions: [
+            { action: "integrate", enabled: true },
+            { action: "cleanup", enabled: false, disabledReason: "integration not complete" },
+          ],
+        }),
+        enclosure({
+          enclosure: "wt-a2",
+          repoName: "agents-remember",
+          taskName: "gate-control",
+          lifecycleId: "plan-002",
+        }),
+        enclosure({
+          enclosure: "wt-b",
+          repoName: "repo-b",
+          taskName: "fission-spike",
+          lifecycleId: "old-003",
+          integrationStatus: "completed",
+          closeoutStatus: "completed",
+          cleanup: "pending",
+          actions: [{ action: "cleanup", enabled: true }],
+        }),
+      ],
+      providers: [indexing("codegraphcontext-code"), ok("grepai-memory")],
+      analytics: {
+        ...EMPTY_ANALYTICS,
+        driftSnapshots: [
+          {
+            repository: "agents-remember",
+            branch: "main",
+            counts: { current: 372, drifted: 4, missingVerification: 2 },
+            actionableCount: 6,
+            snapshotStaleSeconds: 900,
+          },
+          {
+            repository: "repo-b",
+            branch: "main",
+            counts: { current: 88 },
+            actionableCount: 0,
+            snapshotStaleSeconds: 120,
+          },
+        ],
+        ledgers: [
+          {
+            repository: "agents-remember",
+            closeoutCount: 95,
+            lastVerifiedCodeCommit: "c041ff5fade1",
+            baseCodeCommit: "85af25823437",
+          },
+          {
+            repository: "repo-b",
+            closeoutCount: 12,
+            lastVerifiedCodeCommit: "abc1234def56",
+            baseCodeCommit: "abc1234def56",
+          },
+        ],
+        stalestSidecars: [
+          {
+            onboardingFile: "observer/reducer.py.md",
+            repository: "agents-remember",
+            lastVerifiedDate: "2026-05-20",
+            ageSeconds: 2_160_000,
+          },
+          {
+            onboardingFile: "serving/events.py.md",
+            repository: "agents-remember",
+            lastVerifiedDate: "2026-06-01",
+            ageSeconds: 1_120_000,
+          },
+        ],
+        attentionQueue: [
+          {
+            id: "blocked-gate:plan-002",
+            kind: "blocked-gate",
+            severity: "warn",
+            lane: "lifecycle",
+            title: "Gate — input needed",
+            detail: "Approve the plan?",
+            waitSeconds: 140,
+            lifecycleId: "plan-002",
+            enclosure: "wt-a2",
+            repoId: "agents-remember",
+          },
+          {
+            id: "actionable-drift:agents-remember",
+            kind: "actionable-drift",
+            severity: "warn",
+            lane: "repo",
+            title: "6 actionable drift",
+            waitSeconds: 900,
+            repoId: "agents-remember",
+          },
+          {
+            id: "stale-session:old-003",
+            kind: "stale-session",
+            severity: "info",
+            lane: "lifecycle",
+            title: "Session gone quiet",
+            waitSeconds: 6200,
             lifecycleId: "old-003",
             repoId: "repo-b",
           },

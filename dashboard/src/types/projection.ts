@@ -65,6 +65,10 @@ export interface ProviderNode {
   watcherUp: boolean;
   indexingState: string;
   snapshotStaleSeconds?: number;
+  scope: string; // "workspace" | "worktree"
+  role?: string; // "code" (CGC) | "memory" (GrepAI)
+  repoId?: string;
+  worktreeGroup?: string; // join key to the enclosure (group name); absent for workspace
 }
 
 export interface Metrics {
@@ -132,6 +136,34 @@ export interface LedgerNode {
   baseCodeCommit: string;
 }
 
+export interface TaskSubStepNode {
+  id: string;
+  title: string;
+  status: string;
+}
+
+export interface TaskStepNode {
+  id: string;
+  title: string;
+  status: string;
+  substeps: TaskSubStepNode[];
+}
+
+export interface TaskDecisionNode {
+  at: string;
+  decision: string;
+  rationale: string;
+}
+
+export interface TaskCodeExampleNode {
+  id: string;
+  title: string;
+  distinctChange: string;
+  why: string;
+  language: string;
+  snippet: string;
+}
+
 export interface TaskDocNode {
   lifecycleId: string;
   repository: string;
@@ -143,6 +175,14 @@ export interface TaskDocNode {
   currentStep?: string;
   docPath: string;
   ageSeconds?: number;
+  steps: TaskStepNode[];
+  objective: string;
+  requirements: string[];
+  design?: string;
+  codeExamples: TaskCodeExampleNode[];
+  decisions: TaskDecisionNode[];
+  openQuestions: string[];
+  references: string[];
 }
 
 export interface AttentionItem {

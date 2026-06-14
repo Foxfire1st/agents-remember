@@ -286,12 +286,35 @@ class WorkspaceTests(unittest.TestCase):
             providers=[ProviderNode(id="cgc", state="ready", ok=True, watcherUp=True, indexingState="indexed")],
             now=FRESH,
         )
-        self.assertEqual(len(proj.lifecycles), 2)
-        self.assertEqual(proj.metrics.lifecycleCount, 2)
+        # 2 event-backed (running, blocked) + 1 synthesized persistent paused from the enclosure
+        self.assertEqual(len(proj.lifecycles), 3)
+        self.assertEqual(proj.metrics.lifecycleCount, 3)
         self.assertEqual(proj.metrics.runningCount, 1)
         self.assertEqual(proj.metrics.blockedCount, 1)
+        self.assertEqual(proj.metrics.pausedCount, 1)
         self.assertEqual(proj.generatedAt, FRESH.isoformat())
         self.assertTrue(_action(proj.enclosures[0].actions, "integrate").enabled)
+        synthesized = next(lc for lc in proj.lifecycles if lc.state == "paused")
+        self.assertEqual(
+            (synthesized.id, synthesized.fleeting, synthesized.inferred, synthesized.phase, synthesized.lastEventTs),
+            ("r/t", False, True, "close", ""),
+        )
+
+    def test_persistent_synthesis_skips_enclosure_with_event_lifecycle(self) -> None:
+        # An enclosure already represented by an event-backed lifecycle is not duplicated.
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1", ts=T0)]],
+            enclosures=[_enclosure(lifecycleId="LC1")],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
+
+    def test_dormant_persistent_worktree_stays_out_of_the_attention_queue(self) -> None:
+        # A synthesized paused persistent worktree (no events) is the hangar's job, not the queue.
+        proj = project_workspace([], enclosures=[_enclosure()], providers=[], now=FRESH)
+        self.assertEqual([lc.state for lc in proj.lifecycles], ["paused"])
+        self.assertEqual(proj.analytics.attentionQueue, [])
 
 
 class StoreIOTests(unittest.TestCase):
@@ -368,6 +391,55 @@ class SnapshotReaderTests(unittest.TestCase):
 
     def test_read_providers_absent_is_empty(self) -> None:
         self.assertEqual(read_providers(self._config(), now=FRESH), [])
+
+    def test_read_providers_includes_per_worktree_stacks(self) -> None:
+        # Surfaces 1 + 4: the workspace snapshot plus each worktree's isolated CGC+GrepAI stack,
+        # bound to its worktree group + repo + role.
+        config = self._config()
+        coord = config.coordination_root
+        workspace = current_state_path(config)
+        workspace.parent.mkdir(parents=True, exist_ok=True)
+        workspace.write_text(
+            json.dumps(
+                {
+                    "checkedAt": T0,
+                    "providers": {
+                        "codegraphcontext-code": {"id": "codegraphcontext-code", "state": "ready", "ok": True},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        runtime = coord / "worktrees" / "device-management" / "260612-x-ar" / "provider-runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / "provider-state.json").write_text(
+            json.dumps(
+                {
+                    "schema": "ar-worktree-provider-state/v1",
+                    "repoName": "device-management",
+                    "worktreeGroup": str(runtime.parent),
+                    "isolatedProviderSettings": {"providers": ["codegraphcontext-code", "grepai-memory"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        # a malformed stack is skipped, never fatal
+        other = coord / "worktrees" / "device-management" / "broken-ar" / "provider-runtime"
+        other.mkdir(parents=True, exist_ok=True)
+        (other / "provider-state.json").write_text(json.dumps({"schema": "nope"}), encoding="utf-8")
+
+        nodes = {node.id: node for node in read_providers(config, now=FRESH)}
+        self.assertEqual(
+            set(nodes),
+            {"codegraphcontext-code", "codegraphcontext-code@260612-x-ar", "grepai-memory@260612-x-ar"},
+        )
+        self.assertEqual(nodes["codegraphcontext-code"].scope, "workspace")
+        code = nodes["codegraphcontext-code@260612-x-ar"]
+        self.assertEqual(
+            (code.scope, code.role, code.repoId, code.worktreeGroup),
+            ("worktree", "code", "device-management", "260612-x-ar"),
+        )
+        self.assertEqual(nodes["grepai-memory@260612-x-ar"].role, "memory")
 
     def test_read_enclosures_from_contract(self) -> None:
         coord = (self.tmp / "coord").resolve()

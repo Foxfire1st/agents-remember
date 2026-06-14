@@ -45,9 +45,11 @@ _WORKSPACE = "workspace"
 class RawEvent:
     """One raw event line plus the resume cursor a client would send to continue after it.
 
-    ``data`` is the verbatim JSONL line (already the camelCase wire form on disk -- emitted
-    as-is, never re-serialized). ``cursor`` is the encoded per-source offset map *after* this
-    event, i.e. the ``Last-Event-ID`` to resume the whole stream from this point.
+    ``data`` is the verbatim JSONL line (already the camelCase wire form on disk). It is parsed
+    to an object at the SSE boundary (``stream_raw_events``) so ServerSentEvent single-encodes it
+    like the state channel, rather than double-encoding the already-serialized string. ``cursor``
+    is the encoded per-source offset map *after* this event, i.e. the ``Last-Event-ID`` to resume
+    the whole stream from this point.
     """
 
     source: str
@@ -150,5 +152,11 @@ async def stream_raw_events(
     while True:
         events, offsets = await asyncio.to_thread(read_new_events, root, offsets)
         for event in events:
-            yield ServerSentEvent(data=event.data, event="event", id=event.cursor, retry=2000)
+            # ServerSentEvent JSON-encodes whatever it is given (the state channel passes dicts),
+            # so emit the *parsed* object -- passing the pre-serialized JSONL string would
+            # double-encode the wire (`data: "{...}"`) and force every client (dashboard, TUI,
+            # agent) to JSON.parse twice. Single-encoded here matches `/api/stream`.
+            yield ServerSentEvent(
+                data=json.loads(event.data), event="event", id=event.cursor, retry=2000
+            )
         await asyncio.sleep(interval)

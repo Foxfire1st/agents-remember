@@ -1,6 +1,7 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
+import type { ObserverEvent } from "../types/event";
 import type {
   Analytics,
   EnclosureNode,
@@ -20,9 +21,11 @@ export interface DashboardState {
   providers: Record<string, ProviderNode>; // keyed by id
   metrics: Metrics | null;
   analytics: Analytics | null;
+  events: ObserverEvent[]; // bounded tail of the raw observer feed (Event River)
   setConn: (conn: ConnState) => void;
   applySnapshot: (projection: WorkspaceProjection) => void;
   applyDelta: (event: string, data: unknown) => void;
+  pushEvent: (line: string) => void;
 }
 
 const byKey = <T>(items: T[], key: (item: T) => string): Record<string, T> =>
@@ -40,6 +43,9 @@ const remove = <T>(collection: Record<string, T>, id: string): Record<string, T>
   delete next[id];
   return next;
 };
+
+// The Event River keeps a bounded tail of the raw observer feed (newest last).
+const EVENT_CAP = 200;
 
 // The state channel's named deltas, merged into the flat id-keyed maps. The server diffs
 // consecutive projections (serving/delta.py) and emits upserts / `*.removed` markers;
@@ -79,6 +85,7 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
   providers: {},
   metrics: null,
   analytics: null,
+  events: [],
   setConn: (conn) => set({ conn }),
   applySnapshot: (projection) =>
     set({
@@ -91,6 +98,15 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
       analytics: projection.analytics,
     }),
   applyDelta: (event, data) => set((state) => reduceDelta(state, event, data)),
+  pushEvent: (line) =>
+    set((state) => {
+      try {
+        const event = JSON.parse(line) as ObserverEvent;
+        return { events: [...state.events.slice(-(EVENT_CAP - 1)), event] };
+      } catch {
+        return {}; // ignore malformed lines; never break the feed
+      }
+    }),
 }));
 
 export const useDashboard = <T>(selector: (state: DashboardState) => T): T =>
