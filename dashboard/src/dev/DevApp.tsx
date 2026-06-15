@@ -1,6 +1,8 @@
 import { Bench } from "./Bench";
 import { Reference } from "./Reference";
 
+import "./dev.css";
+
 // The dev harness router (DEV-only, lazy-loaded from App so it is dead-code-eliminated in the
 // production bundle). `/dev/bench` = the component gallery; `/dev/reference` = the mc2 mount.
 export default function DevApp() {

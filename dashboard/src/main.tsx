@@ -1,7 +1,9 @@
+import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
+import "./index.css";
 import "./styles/tokens.css";
 
 // Determinism flag (D5, note 15): `?effects=off` or the calm-cockpit toggle freezes CRT
@@ -16,6 +18,8 @@ if (!root) throw new Error("missing #root element");
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <MotionConfig reducedMotion="user">
+      <App />
+    </MotionConfig>
   </StrictMode>,
 );

@@ -6,3 +6,7 @@ dist/
 playwright-report/
 test-results/
 coverage/
+
+## Panda
+styled-system
+styled-system-studio

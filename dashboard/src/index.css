@@ -1,0 +1,96 @@
+/* Panda entry + the global layers (layered blueprint). Declares the cascade-layer order; Panda's
+   postcss plugin injects the generated `tokens` / `recipes` / `utilities` layers, while `reset` /
+   `base` / `effects` are ours. Effects stay global + isolated (note 09), never per-component.
+   Imported first in main.tsx. Token *values* still live in styles/tokens.css `:root` during the
+   migration (referenced here as var(--…)); they move into Panda tokens as panels are ported. */
+@layer reset, base, effects, tokens, recipes, utilities;
+
+@layer reset {
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+}
+
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h2 {
+    margin: 0 0 0.4rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+  .muted {
+    color: oklch(0.7 0.02 250);
+    font-size: 0.8rem;
+    margin: 0.2rem 0;
+  }
+  .raw-list {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .raw-list li {
+    padding: 0.3rem 0.5rem;
+    background: var(--bg-panel);
+    border-left: 2px solid var(--amber);
+  }
+}
+
+@layer effects {
+  /* CRT base overlay — global, pointer-events:none, compositor-only (note 09). */
+  .crt-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    mix-blend-mode: multiply;
+    background:
+      repeating-linear-gradient(0deg, oklch(0 0 0 / 0.18) 0 1px, transparent 1px 3px),
+      radial-gradient(120% 120% at 50% 50%, transparent 70%, oklch(0 0 0 / 0.22) 100%);
+    animation: flicker 4s infinite;
+  }
+}
+
+@keyframes flicker {
+  0%,
+  97%,
+  100% {
+    opacity: 1;
+  }
+  98% {
+    opacity: 0.85;
+  }
+}
+
+/* shared alarm pulse (≤3 flashes/s, under WCAG 2.3.1) — used by blocked/alarm dots, signal-lost,
+   caution--alarm, and the down engine silhouette. Global keyframe; frozen by effects=off below. */
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
+   assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
+   !important so it always wins over the effects layer. */
+html[data-effects="off"] *,
+html[data-effects="off"] *::before,
+html[data-effects="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+}

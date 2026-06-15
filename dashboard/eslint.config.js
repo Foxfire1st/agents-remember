@@ -3,7 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  { ignores: ["dist", "node_modules", "styled-system", "styled-system-studio"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -11,7 +11,7 @@ export default tseslint.config(
     languageOptions: { ecmaVersion: 2022, globals: globals.browser },
   },
   {
-    files: ["*.config.ts", "e2e/**/*.ts"],
+    files: ["*.config.ts", "*.config.cjs", "e2e/**/*.ts"],
     languageOptions: { ecmaVersion: 2022, globals: globals.node },
   },
 );

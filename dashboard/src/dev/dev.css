@@ -1,0 +1,71 @@
+/* Dev gallery styling (the /dev/* harness — Bench + Reference). App.tsx routes /dev/* only under
+   import.meta.env.DEV, so this is a production-dead branch; co-located with the dev code and
+   imported by DevApp. Uses the global :root tokens (styles/tokens.css). */
+.cockpit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 1rem 1.25rem;
+  gap: 0.9rem;
+}
+.cockpit__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--grid);
+  padding-bottom: 0.6rem;
+}
+.cockpit__bar h1 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-shadow: 0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5);
+}
+.bench-overlay {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 0.25rem 0.4rem;
+  background: oklch(0.16 0.02 250 / 0.9);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+}
+.bench__nav {
+  display: flex;
+  gap: 0.3rem;
+}
+.bench__nav a {
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.45rem;
+  background: var(--bg);
+  color: oklch(0.7 0.02 250);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.bench__nav a.is-active {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.reference {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.reference__bar {
+  padding: 0.5rem 0.8rem;
+  color: var(--amber);
+  border-bottom: 1px solid var(--grid);
+}
+.reference__frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+}

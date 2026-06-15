@@ -1,14 +1,79 @@
 import { useEffect, useMemo, useRef } from "react";
 
+import { css, cva } from "../../styled-system/css";
 import { useDashboard } from "../data/store";
+import { Panel } from "../grammar/Panel";
 import { mountConstel, type ConstelHandle } from "../topology/constel";
 import { buildTopology } from "../topology/model";
 
 // Topology — the radial constellation hero (mc2 harvest #4), ported to a React-wrapped <canvas>.
 // React owns the projection→model adapter (a pure, memoised build over the store maps) + mount;
-// the renderer (constel.ts) stays imperative. Clicking a lifecycle node couples back into
-// Operations (the queue↔tree↔topology selection coupling). Halts to a static frame under
-// `?effects=off` (the determinism flag).
+// the renderer (constel.ts) stays imperative, driving the canvas + tip via refs. Clicking a
+// lifecycle node couples back into Operations. Halts to a static frame under `?effects=off`.
+const sizing = css({ display: "flex", flexDirection: "column", flex: "1" });
+const wrap = css({
+  position: "relative",
+  flex: "1",
+  minHeight: "340px",
+  marginTop: "0.4rem",
+  overflow: "hidden",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  background: "radial-gradient(120% 100% at 50% 40%, oklch(0.2 0.02 250) 0%, var(--bg) 80%)",
+});
+const canvasBox = css({ display: "block", width: "100%", height: "100%" });
+const tip = css({
+  position: "absolute",
+  transform: "translate(-50%, calc(-100% - 10px))",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.2rem",
+  background: "bgPanel",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  fontSize: "0.7rem",
+  color: "ink",
+  whiteSpace: "nowrap",
+  pointerEvents: "none",
+  opacity: "0",
+  transition: "opacity 0.1s ease",
+  zIndex: "2",
+});
+const legend = css({
+  position: "absolute",
+  left: "0",
+  bottom: "0",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "0.8rem",
+  paddingInline: "0.6rem",
+  paddingBlock: "0.4rem",
+  fontSize: "0.7rem",
+  color: "muted",
+  pointerEvents: "none",
+});
+const legdot = cva({
+  base: {
+    display: "inline-block",
+    width: "0.5em",
+    height: "0.5em",
+    borderRadius: "full",
+    marginRight: "0.3em",
+    verticalAlign: "middle",
+  },
+  variants: {
+    tone: {
+      ok: { background: "cyan" },
+      warn: { background: "amber" },
+      crit: { background: "alarm" },
+      idle: { background: "dormant" },
+    },
+  },
+});
+
 export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
@@ -19,7 +84,12 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   const tipRef = useRef<HTMLDivElement>(null);
 
   const model = useMemo(
-    () => buildTopology(Object.values(lifecycles), Object.values(enclosures), Object.values(providers)),
+    () =>
+      buildTopology(
+        Object.values(lifecycles),
+        Object.values(enclosures),
+        Object.values(providers),
+      ),
     [lifecycles, enclosures, providers],
   );
 
@@ -34,10 +104,10 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   // of remounting on every projection tick (which reset the animation: T, comets, provider spin).
   useEffect(() => {
     const canvas = canvasRef.current;
-    const wrap = wrapRef.current;
-    const tip = tipRef.current;
-    if (!canvas || !wrap || !tip) return;
-    const handle = mountConstel({ canvas, wrap, tip }, modelRef.current, {
+    const wrapEl = wrapRef.current;
+    const tipEl = tipRef.current;
+    if (!canvas || !wrapEl || !tipEl) return;
+    const handle = mountConstel({ canvas, wrap: wrapEl, tip: tipEl }, modelRef.current, {
       onSelect: (id) => onSelectRef.current(id),
     });
     handleRef.current = handle;
@@ -53,26 +123,25 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   }, [model]);
 
   return (
-    <section className="panel topology-shell" data-testid="topology">
-      <h2>Topology · workspace constellation</h2>
-      <div className="constel-wrap" ref={wrapRef}>
-        <canvas ref={canvasRef} className="constel" data-testid="topology-canvas" />
-        <div className="constel-tip" ref={tipRef} aria-hidden="true" />
-        <div className="constel-legend">
+    <Panel testid="topology" title="Topology · workspace constellation" className={sizing}>
+      <div className={wrap} ref={wrapRef}>
+        <canvas ref={canvasRef} className={canvasBox} data-testid="topology-canvas" />
+        <div className={tip} ref={tipRef} aria-hidden="true" />
+        <div className={legend}>
           <span>
-            <i className="legdot legdot--ok" /> ok
+            <i className={legdot({ tone: "ok" })} /> ok
           </span>
           <span>
-            <i className="legdot legdot--warn" /> waiting
+            <i className={legdot({ tone: "warn" })} /> waiting
           </span>
           <span>
-            <i className="legdot legdot--crit" /> blocked
+            <i className={legdot({ tone: "crit" })} /> blocked
           </span>
           <span>
-            <i className="legdot legdot--idle" /> indexing / dormant
+            <i className={legdot({ tone: "idle" })} /> indexing / dormant
           </span>
         </div>
       </div>
-    </section>
+    </Panel>
   );
 }

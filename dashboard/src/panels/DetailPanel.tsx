@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
+import { css, cva, cx } from "../../styled-system/css";
 import { useDashboard } from "../data/store";
+import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
 import { TokenGauge } from "../grammar/TokenGauge";
 import type {
@@ -12,8 +14,8 @@ import type {
   TaskStepNode,
 } from "../types/projection";
 
-// The l-01 phase vocabulary, in order (mcp/.../lifecycle_state.py). The stepper marks phases
-// before the current as done — mc2's Request→Close mini-map.
+// The l-01 phase vocabulary, in order (mcp/.../lifecycle_state.py). The stepper marks phases before
+// the current as done — mc2's Request→Close mini-map.
 const PHASES: Phase[] = [
   "request",
   "trust-checkpoint",
@@ -23,25 +25,246 @@ const PHASES: Phase[] = [
   "close",
 ];
 
+const sizing = css({ flex: "1" });
+const where = css({ fontSize: "0.76rem", color: "muted", marginBottom: "0.4rem" });
+
+const stepper = css({
+  listStyle: "none",
+  margin: "0.4rem 0",
+  padding: "0",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "0.3rem",
+});
+const step = cva({
+  base: {
+    fontSize: "0.72rem",
+    letterSpacing: "0.04em",
+    paddingInline: "0.4rem",
+    paddingBlock: "0.15rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "grid",
+    borderRadius: "2px",
+    color: "oklch(0.6 0.02 250)",
+  },
+  variants: {
+    state: {
+      todo: {},
+      done: { color: "cyan", borderColor: "cyan" },
+      current: {
+        color: "amber",
+        borderColor: "amber",
+        textShadow: "0 0 calc(5px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5)",
+      },
+    },
+  },
+});
+
+const gate = css({
+  margin: "0.5rem 0",
+  padding: "0.5rem 0.6rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "amber",
+  borderRadius: "3px",
+  background: "oklch(0.82 0.16 75 / 0.08)",
+});
+const gateActions = css({ display: "flex", gap: "0.3rem", margin: "0.4rem 0 0.2rem" });
+const chip = cva({
+  base: {
+    fontSize: "0.72rem",
+    paddingInline: "0.4rem",
+    paddingBlock: "0.1rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "cyan",
+    borderRadius: "10px",
+    color: "cyan",
+  },
+  variants: { disabled: { true: { borderColor: "grid", color: "oklch(0.6 0.02 250)" } } },
+});
+const gateNote = css({
+  margin: "0.2rem 0 0",
+  fontSize: "0.72rem",
+  color: "oklch(0.65 0.02 250)",
+  fontStyle: "italic",
+});
+
+const badge = css({
+  fontSize: "0.68rem",
+  paddingInline: "0.35rem",
+  paddingBlock: "0.05rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  color: "muted",
+});
+
+const series = css({ margin: "0.5rem 0" });
+const taskHead = css({ fontSize: "0.82rem" });
+const slices = css({ listStyle: "none", margin: "0.3rem 0 0", padding: "0", display: "grid", gap: "0.15rem" });
+const slice = css({
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  fontSize: "0.78rem",
+  paddingInline: "0.4rem",
+  paddingBlock: "0.2rem",
+  background: "bg",
+  borderLeftWidth: "2px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "grid",
+});
+const sliceMeta = css({ color: "muted", fontSize: "0.72rem" });
+
+const spine = css({ margin: "0.6rem 0" });
+const spineHead = css({
+  fontSize: "0.72rem",
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "muted",
+  marginBottom: "0.3rem",
+});
+const lanes = css({ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" });
+const lane = cva({
+  base: {
+    display: "grid",
+    gap: "0.25rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "grid",
+    borderRadius: "3px",
+    padding: "0.4rem 0.5rem",
+    borderLeftWidth: "2px",
+  },
+  variants: { kind: { code: { borderLeftColor: "amber" }, memory: { borderLeftColor: "cyan" } } },
+});
+const laneTitle = css({ fontSize: "0.76rem", color: "ink" });
+const laneRepo = css({ fontSize: "0.74rem", color: "muted" });
+const laneMeta = css({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "0.5rem",
+  fontSize: "0.72rem",
+  color: "muted",
+});
+
+const tokensRow = css({ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" });
+const label = css({
+  fontSize: "0.72rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "muted",
+});
+
+const stepsList = css({ listStyle: "none", margin: "0.45rem 0 0", padding: "0", display: "grid", gap: "0.25rem" });
+const stepRow = css({
+  display: "grid",
+  gridTemplateColumns: "auto 1fr",
+  alignItems: "baseline",
+  gap: "0.45rem",
+  fontSize: "0.82rem",
+});
+const stepMarkBase = css({
+  width: "0.62em",
+  height: "0.62em",
+  alignSelf: "center",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+});
+// step status is data-driven; map by record so an unknown status renders as a neutral mark.
+const STEP_MARK: Record<string, string> = {
+  done: css({ background: "mint", borderColor: "mint" }),
+  inProgress: css({ background: "amber", borderColor: "amber" }),
+  blocked: css({ background: "alarm", borderColor: "alarm" }),
+};
+const STEP_TITLE: Record<string, string> = { done: css({ color: "oklch(0.6 0.02 250)" }) };
+const substeps = css({
+  gridColumn: "2",
+  listStyle: "none",
+  margin: "0.15rem 0 0",
+  padding: "0",
+  display: "grid",
+  gap: "0.1rem",
+  fontSize: "0.76rem",
+  color: "muted",
+});
+const SUBSTEP: Record<string, string> = { inProgress: css({ color: "amber" }) };
+
+const taskdoc = css({ display: "grid", gap: "0.75rem" });
+const taskdocHead = css({ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" });
+const taskdocTitle = css({ fontWeight: "600" });
+const taskdocStatus = css({ color: "cyan", fontSize: "0.8rem" });
+const taskdocSection = css({ display: "grid", gap: "0.3rem" });
+const taskdocH = css({
+  margin: "0",
+  fontSize: "0.72rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "amber",
+});
+const taskdocP = css({ margin: "0", maxWidth: "78ch", fontSize: "0.86rem", lineHeight: "1.55" });
+const taskdocBullets = css({
+  margin: "0",
+  paddingLeft: "1.1rem",
+  maxWidth: "78ch",
+  display: "grid",
+  gap: "0.2rem",
+  fontSize: "0.84rem",
+  lineHeight: "1.45",
+});
+const taskdocCode = css({
+  display: "grid",
+  gap: "0.2rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  padding: "0.45rem 0.55rem",
+});
+const taskdocCodeHead = css({ color: "amber", fontSize: "0.82rem" });
+const taskdocCodeMeta = css({ fontSize: "0.78rem", color: "muted" });
+const taskdocSnippet = css({
+  margin: "0.2rem 0 0",
+  padding: "0.5rem 0.6rem",
+  background: "bg",
+  borderRadius: "2px",
+  overflow: "auto",
+  fontSize: "0.78rem",
+  lineHeight: "1.45",
+});
+const taskdocDecisions = css({
+  listStyle: "none",
+  margin: "0",
+  padding: "0",
+  display: "grid",
+  gap: "0.4rem",
+  maxWidth: "78ch",
+});
+const taskdocDecision = css({ fontSize: "0.84rem" });
+const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
+
 // The selected lifecycle: phase stepper, the open-gate banner (display-only — the gate control
-// plane is slice 06), the task-document checklist (analytics.taskDocuments), and the token gauge.
+// plane is slice 06), the task-document content (analytics.taskDocuments), the lifecycle → worktree
+// → provider spine, and the token gauge.
 export function DetailPanel({ selectedId }: { selectedId: string | null }) {
   const lifecycle = useDashboard((s) => (selectedId ? s.lifecycles[selectedId] : undefined));
   const analytics = useDashboard((s) => s.analytics);
   const enclosures = useDashboard((s) => s.enclosures);
   const providers = useDashboard((s) => s.providers);
-  // All task docs bound to this lifecycle: one => single task; several => a multi-task series
-  // (the subtask slices). Filtered in render (not a store selector) so it stays a stable read.
   const docs = selectedId
     ? (analytics?.taskDocuments ?? []).filter((doc) => doc.lifecycleId === selectedId)
     : [];
 
   if (!lifecycle) {
     return (
-      <section className="panel detail" data-testid="detail-panel">
-        <h2>Detail</h2>
+      <Panel testid="detail-panel" title="Detail" className={sizing}>
         <p className="muted">Select a session to inspect its phase, gate, and tokens.</p>
-      </section>
+      </Panel>
     );
   }
 
@@ -50,8 +273,6 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
     ? String((lifecycle.ask as { question?: unknown }).question ?? "awaiting input")
     : null;
 
-  // The lifecycle → worktree → provider spine: its enclosure (worktree wrapper) and the isolated
-  // engines that worktree spawned (joined by group name; CGC serves the code repo, GrepAI memory).
   const enclosure = lifecycle.enclosure ? enclosures[lifecycle.enclosure] : undefined;
   const groupName = enclosure ? (enclosure.worktreeGroup.split("/").filter(Boolean).pop() ?? "") : "";
   const engines = groupName
@@ -59,26 +280,19 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
     : [];
 
   return (
-    <section className="panel detail" data-testid="detail-panel">
-      <h2>{lifecycle.id}</h2>
-      <div className="detail__where">
+    <Panel testid="detail-panel" title={lifecycle.id} className={sizing}>
+      <div className={where}>
         {lifecycle.fleeting
           ? "fleeting · no worktree"
           : `persistent worktree · ${lifecycle.repoId ?? "—"}`}
         {lifecycle.inferred ? " · inferred" : ""}
       </div>
 
-      <ol className="stepper" aria-label="phase">
+      <ol className={stepper} aria-label="phase">
         {PHASES.map((phase, i) => (
           <li
             key={phase}
-            className={[
-              "stepper__step",
-              i < currentIdx ? "is-done" : "",
-              i === currentIdx ? "is-current" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
+            className={step({ state: i < currentIdx ? "done" : i === currentIdx ? "current" : "todo" })}
           >
             {phase}
           </li>
@@ -86,31 +300,31 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
       </ol>
 
       {askQuestion ? (
-        <div className="gate" data-testid="gate-banner">
-          <div className="gate__head">
+        <div className={gate} data-testid="gate-banner">
+          <div>
             <strong>Gate</strong> · {askQuestion}
           </div>
-          <div className="gate__actions">
+          <div className={gateActions}>
             {lifecycle.actions.map((action) => (
               <span
                 key={action.action}
-                className={`chip${action.enabled ? "" : " chip--disabled"}`}
+                className={chip({ disabled: !action.enabled })}
                 title={action.disabledReason ?? undefined}
               >
                 {action.action}
               </span>
             ))}
           </div>
-          <p className="gate__note">display-only — gate control plane is slice 06</p>
+          <p className={gateNote}>display-only — gate control plane is slice 06</p>
         </div>
       ) : null}
 
       <TaskContent docs={docs} />
 
       {enclosure ? (
-        <div className="detail__spine">
-          <div className="detail__spine-head">worktree · {groupName || enclosure.repoName}</div>
-          <div className="detail__lanes">
+        <div className={spine}>
+          <div className={spineHead}>worktree · {groupName || enclosure.repoName}</div>
+          <div className={lanes}>
             <SpineLane
               kind="code"
               title="code → CGC"
@@ -127,17 +341,14 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
         </div>
       ) : null}
 
-      <div className="detail__tokens">
-        <span className="detail__label">tokens</span>
+      <div className={tokensRow}>
+        <span className={label}>tokens</span>
         <TokenGauge series={lifecycle.tokenSeries} />
       </div>
-    </section>
+    </Panel>
   );
 }
 
-// The task content (note: "the task contents we capture via JSON didn't show up at all"). One doc
-// is a single task (its step progress); several docs bound to the same lifecycle are a multi-task
-// series (the subtask slices). Step granularity beyond the counts awaits a TaskDocNode enrichment.
 function TaskContent({ docs }: { docs: TaskDocNode[] }) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this lifecycle.</p>;
@@ -146,17 +357,17 @@ function TaskContent({ docs }: { docs: TaskDocNode[] }) {
     return <TaskReader doc={docs[0]} />;
   }
   return (
-    <div className="detail__series">
-      <div className="detail__task-head">
-        <span className="badge">series</span> {docs.length} task slices
+    <div className={series}>
+      <div className={taskHead}>
+        <span className={badge}>series</span> {docs.length} task slices
       </div>
-      <ul className="detail__slices">
+      <ul className={slices}>
         {[...docs]
           .sort((a, b) => a.title.localeCompare(b.title))
           .map((doc) => (
-            <li key={doc.docPath} className="detail__slice">
-              <span className="detail__slice-title">{doc.title}</span>
-              <span className="detail__slice-meta">
+            <li key={doc.docPath} className={slice}>
+              <span>{doc.title}</span>
+              <span className={sliceMeta}>
                 {doc.stepsDone}/{doc.stepsTotal} · {doc.status}
               </span>
             </li>
@@ -178,11 +389,11 @@ function SpineLane({
   engines: ProviderNode[];
 }) {
   return (
-    <div className={`detail__lane detail__lane--${kind}`}>
-      <div className="detail__lane-title">{title}</div>
-      <div className="detail__lane-repo">{repo}</div>
+    <div className={lane({ kind })}>
+      <div className={laneTitle}>{title}</div>
+      <div className={laneRepo}>{repo}</div>
       {engines.length > 0 ? (
-        <div className="engine__meta">
+        <div className={laneMeta}>
           {engines.map((engine) => (
             <span key={engine.id}>{engine.state}</span>
           ))}
@@ -194,21 +405,18 @@ function SpineLane({
   );
 }
 
-// The task reader: the JSON task document rendered in the dashboard so you read the content here,
-// not in the filesystem — objective, requirements, design, steps, proposed code, decisions,
-// open questions, references. Only sections with content render.
 function TaskReader({ doc }: { doc: TaskDocNode }) {
   return (
-    <div className="taskdoc">
-      <div className="taskdoc__head">
-        <span className="badge">{doc.kind}</span>
-        <span className="taskdoc__title">{doc.title}</span>
-        <span className="taskdoc__status">{doc.status}</span>
+    <div className={taskdoc}>
+      <div className={taskdocHead}>
+        <span className={badge}>{doc.kind}</span>
+        <span className={taskdocTitle}>{doc.title}</span>
+        <span className={taskdocStatus}>{doc.status}</span>
         <ProgressFill completed={doc.stepsDone} total={doc.stepsTotal} label="steps done" />
       </div>
       {doc.objective ? (
         <Section title="Objective">
-          <p className="taskdoc__p">{doc.objective}</p>
+          <p className={taskdocP}>{doc.objective}</p>
         </Section>
       ) : null}
       {doc.requirements.length > 0 ? (
@@ -218,7 +426,7 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
       ) : null}
       {doc.design ? (
         <Section title="Design">
-          <p className="taskdoc__p">{doc.design}</p>
+          <p className={taskdocP}>{doc.design}</p>
         </Section>
       ) : null}
       {doc.steps.length > 0 ? (
@@ -254,8 +462,8 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="taskdoc__section">
-      <h3 className="taskdoc__h">{title}</h3>
+    <section className={taskdocSection}>
+      <h3 className={taskdocH}>{title}</h3>
       {children}
     </section>
   );
@@ -263,7 +471,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 function Bullets({ items }: { items: string[] }) {
   return (
-    <ul className="taskdoc__bullets">
+    <ul className={taskdocBullets}>
       {items.map((item) => (
         <li key={item}>{item}</li>
       ))}
@@ -273,15 +481,15 @@ function Bullets({ items }: { items: string[] }) {
 
 function StepList({ steps }: { steps: TaskStepNode[] }) {
   return (
-    <ol className="detail__steps">
-      {steps.map((step) => (
-        <li key={step.id} className={`detail__step is-${step.status}`}>
-          <span className="detail__step-mark" aria-hidden="true" />
-          <span className="detail__step-title">{step.title}</span>
-          {step.substeps.length > 0 ? (
-            <ul className="detail__substeps">
-              {step.substeps.map((sub) => (
-                <li key={sub.id} className={`detail__substep is-${sub.status}`}>
+    <ol className={stepsList}>
+      {steps.map((s) => (
+        <li key={s.id} className={stepRow}>
+          <span className={cx(stepMarkBase, STEP_MARK[s.status] ?? "")} aria-hidden="true" />
+          <span className={STEP_TITLE[s.status] ?? ""}>{s.title}</span>
+          {s.substeps.length > 0 ? (
+            <ul className={substeps}>
+              {s.substeps.map((sub) => (
+                <li key={sub.id} className={SUBSTEP[sub.status] ?? ""}>
                   {sub.title}
                 </li>
               ))}
@@ -295,22 +503,22 @@ function StepList({ steps }: { steps: TaskStepNode[] }) {
 
 function CodeExample({ example }: { example: TaskCodeExampleNode }) {
   return (
-    <div className="taskdoc__code">
-      <div className="taskdoc__code-head">{example.title}</div>
-      <div className="taskdoc__code-meta">covers: {example.distinctChange}</div>
-      <div className="taskdoc__code-meta">why: {example.why}</div>
-      {example.snippet ? <pre className="taskdoc__snippet">{example.snippet}</pre> : null}
+    <div className={taskdocCode}>
+      <div className={taskdocCodeHead}>{example.title}</div>
+      <div className={taskdocCodeMeta}>covers: {example.distinctChange}</div>
+      <div className={taskdocCodeMeta}>why: {example.why}</div>
+      {example.snippet ? <pre className={taskdocSnippet}>{example.snippet}</pre> : null}
     </div>
   );
 }
 
 function DecisionList({ items }: { items: TaskDecisionNode[] }) {
   return (
-    <ul className="taskdoc__decisions">
+    <ul className={taskdocDecisions}>
       {items.map((item) => (
         <li key={`${item.at}:${item.decision}`}>
-          <div className="taskdoc__decision">{item.decision}</div>
-          <div className="taskdoc__decision-meta">
+          <div className={taskdocDecision}>{item.decision}</div>
+          <div className={taskdocDecisionMeta}>
             {item.at} — {item.rationale}
           </div>
         </li>
