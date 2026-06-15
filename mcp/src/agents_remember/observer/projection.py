@@ -18,6 +18,7 @@ enclosures (North-Star #4) from being keyed to a single repo.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -369,6 +370,143 @@ class AttentionItem(BaseModel):
     providerId: str | None = None
 
 
+class CommitRefNode(BaseModel):
+    """One side of the official-line/worktree pair: a branch @ commit at a path (slice 5e).
+
+    ``factState`` is the honesty axis: ``observed`` means the worktree checkout exists on
+    disk; ``derived`` means the value is a recorded contract field whose checkout is not
+    present; ``planned`` is an expected-but-not-yet step; ``missing`` is unobservable; and
+    ``not-applicable`` is a lane that does not exist (e.g. memory on a ``disabled`` contract).
+    The cockpit colours/animates from this so it never renders a planned path as a live one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    branch: str | None = None
+    commit: str | None = None
+    path: str | None = None
+    exists: bool | None = None
+    dirty: bool | None = None
+    # How far the recorded base is behind the *local* source-branch tip (fetch-free; a
+    # parallel cycle that landed). 0/None when current or unknown.
+    behindSource: int | None = None
+    factState: str = "missing"  # observed | derived | planned | missing | not-applicable
+
+
+class ProviderBootNode(BaseModel):
+    """One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).
+
+    The boot *sequence* (seed/clone/watcher phases) lives on the owning
+    :class:`EngineProcessNode` because provider setup is one progress file per worktree
+    group; this node is the engine's identity + its current runtime health.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    role: str  # "code" (CGC) | "memory" (GrepAI)
+    runtimeState: str  # nominal | indexing | down | configured | unknown
+    factState: str = "observed"
+
+
+class EngineProcessEdge(BaseModel):
+    """One conduit in the process map, with a state-backed visual treatment (slice 5e).
+
+    Edges are derived from facts, never decoration: a ``cgc-seed`` edge reads ``running``
+    only while the seed phase is live, ``failed`` on a failed phase, ``planned`` before it
+    starts -- so an animated conduit always means an observed transition.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    fromNode: str
+    toNode: str
+    # git-base|worktree-add|ledger-map|contract-anchor|cgc-seed|grepai-clone|
+    # watcher-start|sync|closeout|integration|cleanup
+    kind: str
+    # nominal|running|blocked|failed|stale|skipped|complete|planned|unknown
+    state: str
+    label: str
+    detail: str | None = None
+
+
+class EngineProcessNode(BaseModel):
+    """One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).
+
+    Composed (like ``attentionQueue``) from the contract + status guidance + provider boot +
+    lifecycle, **not** read from a new file. The center of the Engine Room is this enclosure,
+    not a provider card: the official source line, the code/memory worktrees, the contract
+    coupling them, and the two isolated engines bound to that worktree group. ``health`` and
+    the per-side ``factState``s carry the observed/derived/planned/missing honesty 5e demands.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str  # the contract path -- the stable enclosure id (== EnclosureNode.enclosure)
+    enclosure: str
+    worktreeGroup: str
+    taskId: str
+    taskName: str
+    repoName: str
+    lifecycleId: str | None = None
+    # preflight|code-worktree|memory-compatibility|contract-written|worktree-started|
+    # provider-setup|sync-needed|commit-approval-pending|closeout-pending|integration-pending|
+    # integration-blocked|cleanup-pending|completed|abandoned|unknown
+    phase: str
+    health: str  # nominal|running|blocked|failed|stale|skipped|unknown|complete
+
+    codeSource: CommitRefNode
+    codeWorktree: CommitRefNode
+    memoryMode: str  # "external" | "internal" | "disabled"
+    memorySource: CommitRefNode | None = None
+    memoryWorktree: CommitRefNode | None = None
+    ledgerPath: str | None = None
+
+    humanReviewStatus: str
+    closeoutStatus: str
+    integrationStatus: str
+    cleanup: str
+
+    # Provider boot: one setup-progress sequence per worktree group (slice 3b reused).
+    setupState: str | None = None  # running|stale|failed|failed-unchecked|ok|complete|prepared
+    currentPhase: str | None = None
+    completedPhases: list[str] = Field(default_factory=list)
+    failedPhases: list[str] = Field(default_factory=list)
+    heartbeatAgeSeconds: float | None = None
+    seedFallback: bool = False
+    retryArgs: dict[str, Any] | None = None
+
+    providers: list[ProviderBootNode] = Field(default_factory=list)
+    edges: list[EngineProcessEdge] = Field(default_factory=list)
+    actions: list[ActionAvailability] = Field(default_factory=list)
+    # The lifecycle-guidance next operation + human one-liner (display/copy only until slice 06).
+    nextAction: str | None = None
+    summary: str = ""
+
+    missingFacts: list[str] = Field(default_factory=list)
+    sourceFiles: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EngineProcessFacts:
+    """Raw per-enclosure facts the reader gathers for the process map (slice 5e).
+
+    An *input* carrier, not a served node: ``contract`` is the pure ``contract_payload``
+    dump (branches, commits, paths, gate states); ``guidance`` is the pure
+    ``lifecycle_guidance`` (phase + next operation); ``status`` is the best-effort
+    ``status_payload`` (worktree existence, dirty flags, base freshness, provider boot) or
+    ``None`` when its git probes could not run. Defined here -- the module both the I/O reader
+    (:mod:`agents_remember.observer.snapshots`) and the pure
+    :func:`agents_remember.observer.reducer.build_engine_processes` already import -- so the
+    reducer stays free of any I/O-layer dependency.
+    """
+
+    contract: dict[str, Any]
+    guidance: dict[str, Any]
+    status: dict[str, Any] | None
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
@@ -377,9 +515,9 @@ class Analytics(BaseModel):
     here -- drift rows stay in the snapshot file, the full sidecar list collapses to
     the histogram + a bounded leaderboard -- so the served projection stays lean.
 
-    ``attentionQueue`` (slice 05) is the one *derived* surface here: the reducer
-    composes it from the structural tree + these signals (not from an input file), so
-    a structural-only caller can still see a non-empty queue.
+    ``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*
+    surfaces here: the reducer composes them from the structural tree + these signals (not
+    from an input file), so a structural-only caller can still see them populated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -393,6 +531,9 @@ class Analytics(BaseModel):
     ledgers: list[LedgerNode] = Field(default_factory=list)
     taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)
+    # The enclosure-centered Engine Room process map (slice 5e): one node per worktree
+    # enclosure, derived from contract + status guidance + provider boot + lifecycle.
+    engineProcesses: list[EngineProcessNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):
@@ -400,7 +541,7 @@ class WorkspaceProjection(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int = 1
+    version: int = 2
     generatedAt: str
     lifecycles: list[LifecycleProjection] = Field(default_factory=list)
     enclosures: list[EnclosureNode] = Field(default_factory=list)

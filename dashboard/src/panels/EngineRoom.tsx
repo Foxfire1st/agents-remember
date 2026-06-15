@@ -1,131 +1,136 @@
-import { css, cva } from "../../styled-system/css";
-import { engineState, fmtWait, groupEngines } from "../data/selectors";
+import { type ReactNode, useState } from "react";
+
+import { css } from "../../styled-system/css";
+import { type EngineStack, engineState as engineRuntime } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 import type { ProviderNode } from "../types/projection";
-
-// note 08 semantic map: a worktree's provider stack is the podracer's twin engines — CGC (its code
-// repo) + GrepAI (its memory repo). The engine room shows the workspace stack AND every worktree's
-// *own* isolated stack (note 03 surfaces 1 + 4), so the lifecycle → worktree → provider connection
-// is visible. State is carried by colour + silhouette: nominal amber / indexing cyan / down alarm.
-const ROLE_LABEL: Record<string, string> = { code: "CGC · code", memory: "GrepAI · memory" };
+import { BootTimeline } from "./engine-room/BootTimeline";
+import { buildEngineRoomModel } from "./engine-room/buildEngineRoomModel";
+import { DiagnosticsPanel } from "./engine-room/DiagnosticsPanel";
+import { EnclosureProcessMap } from "./engine-room/EnclosureProcessMap";
+import { EnclosureStackList } from "./engine-room/EnclosureStackList";
+import {
+  detailColumn,
+  emptyState,
+  engineSilhouette,
+  officialStrip,
+  roomLayout,
+  sectionLabel,
+} from "./engine-room/engineRoomStyles";
 
 const sizing = css({ flex: "1" });
-const stackList = css({ display: "grid", gap: "0.8rem" });
-const stack = cva({
-  base: {
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "grid",
-    borderRadius: "3px",
-    padding: "0.5rem 0.6rem",
-    borderLeftWidth: "3px",
-  },
-  variants: {
-    scope: {
-      workspace: { borderLeftColor: "amber" },
-      worktree: { borderLeftColor: "cyan" },
-    },
-  },
-});
-const stackHead = css({
-  display: "flex",
-  alignItems: "baseline",
-  gap: "0.5rem",
-  marginBottom: "0.45rem",
-});
-const stackName = css({ color: "ink", fontSize: "0.82rem", letterSpacing: "0.04em" });
-const stackRepo = css({ color: "muted", fontSize: "0.72rem" });
-const grid = css({
+const engineChip = css({ display: "flex", alignItems: "center", gap: "0.35rem" });
+const engineChipLabel = css({ color: "muted", fontSize: "0.7rem" });
+const fallbackWrap = css({ display: "grid", gap: "0.6rem" });
+const fallbackStackBox = css({
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-  gap: "0.7rem",
-});
-const unit = css({
-  display: "grid",
-  gap: "0.5rem",
-  padding: "0.7rem",
-  background: "bg",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
+  gap: "0.4rem",
+  padding: "0.5rem 0.6rem",
+  border: "1px solid token(colors.grid)",
   borderRadius: "3px",
+  borderLeftWidth: "3px",
+  borderLeftColor: "cyan",
 });
-const engineName = cva({
-  base: { color: "amber", fontSize: "0.82rem", letterSpacing: "0.05em" },
-  variants: { state: { nominal: {}, indexing: {}, down: { color: "alarm" } } },
-});
-const silhouette = cva({
-  base: {
-    height: "64px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "amber",
-    borderRadius: "4px",
-    background: "repeating-linear-gradient(0deg, transparent 0 6px, oklch(0.82 0.16 75 / 0.1) 6px 7px)",
-  },
-  variants: {
-    state: {
-      nominal: {},
-      indexing: {
-        borderColor: "cyan",
-        background: "linear-gradient(0deg, oklch(0.85 0.13 200 / 0.4) 0%, transparent 70%)",
-      },
-      down: {
-        borderColor: "alarm",
-        background: "oklch(0.63 0.24 25 / 0.18)",
-        animation: "pulse 0.6s steps(1) infinite",
-      },
-    },
-  },
-});
-const meta = css({
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "0.5rem",
-  fontSize: "0.72rem",
-  color: "muted",
-});
+const fallbackEngines = css({ display: "flex", gap: "0.7rem", flexWrap: "wrap" });
 
-export function EngineRoom() {
-  const providers = useDashboard((s) => s.providers);
-  const stacks = groupEngines(Object.values(providers));
+function engineLabel(provider: ProviderNode): string {
+  return provider.role === "memory" ? "GrepAI" : "CGC";
+}
+
+function OfficialStrip({ engines }: { engines: ProviderNode[] }) {
   return (
-    <Panel testid="engine-room" title={`Engine room · ${stacks.length} stacks`} className={sizing}>
-      {stacks.length === 0 ? (
-        <p className="muted">No providers reporting.</p>
-      ) : (
-        <div className={stackList}>
-          {stacks.map((s) => (
-            <div key={s.key} className={stack({ scope: s.scope })} data-testid="engine-stack">
-              <div className={stackHead}>
-                <span className={stackName}>{s.scope === "workspace" ? "Workspace" : s.key}</span>
-                {s.repoId ? <span className={stackRepo}>{s.repoId}</span> : null}
-              </div>
-              <div className={grid}>
-                {s.engines.map((provider) => (
-                  <Engine key={provider.id} provider={provider} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Panel>
+    <div className={officialStrip} data-testid="official-strip">
+      <span className={sectionLabel}>Official line · workspace</span>
+      {engines.map((engine) => (
+        <span key={engine.id} className={engineChip}>
+          <span
+            className={engineSilhouette({ runtimeState: engineRuntime(engine) })}
+            role="img"
+            aria-label={`${engineLabel(engine)} engine ${engineRuntime(engine)}`}
+          />
+          <span className={engineChipLabel}>
+            {engineLabel(engine)} · {engineRuntime(engine)}
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }
 
-function Engine({ provider }: { provider: ProviderNode }) {
-  const state = engineState(provider);
+function FallbackStacks({ stacks }: { stacks: EngineStack[] }) {
   return (
-    <div className={unit} data-testid="engine-unit" data-state={state}>
-      <div className={engineName({ state })}>{ROLE_LABEL[provider.role ?? ""] ?? provider.id}</div>
-      <div className={silhouette({ state })} role="img" aria-label={`engine ${state}`} />
-      <div className={meta}>
-        <span>{provider.state}</span>
-        <span>{provider.indexingState}</span>
-        <span>snapshot {fmtWait(provider.snapshotStaleSeconds)}</span>
-      </div>
+    <div className={fallbackWrap} data-testid="engine-room-fallback">
+      <span className={sectionLabel}>Provider stacks (no enclosure process surface)</span>
+      {stacks.map((stack) => (
+        <div key={stack.key} className={fallbackStackBox} data-testid="engine-stack">
+          <span className={css({ color: "ink", fontSize: "0.78rem" })}>{stack.key}</span>
+          <div className={fallbackEngines}>
+            {stack.engines.map((engine) => (
+              <span key={engine.id} className={engineChip} data-testid="engine-unit">
+                <span
+                  className={engineSilhouette({ runtimeState: engineRuntime(engine) })}
+                  role="img"
+                  aria-label={`${engineLabel(engine)} engine ${engineRuntime(engine)}`}
+                />
+                <span className={engineChipLabel}>{engineLabel(engine)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
+  );
+}
+
+export function EngineRoom() {
+  const analytics = useDashboard((state) => state.analytics);
+  const providers = useDashboard((state) => state.providers);
+  const lifecycles = useDashboard((state) => state.lifecycles);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const model = buildEngineRoomModel(
+    analytics?.engineProcesses ?? [],
+    Object.values(providers),
+    Object.values(lifecycles),
+  );
+  const selected =
+    model.processes.find((view) => view.node.id === selectedId) ?? model.processes[0];
+
+  let body: ReactNode;
+  if (model.usesFallback) {
+    body = <FallbackStacks stacks={model.fallbackStacks} />;
+  } else if (!selected) {
+    body = (
+      <p className={emptyState} data-testid="engine-room-empty">
+        No worktree enclosures are active.
+      </p>
+    );
+  } else {
+    body = (
+      <div className={roomLayout}>
+        <EnclosureStackList
+          views={model.processes}
+          selectedId={selected.node.id}
+          onSelect={setSelectedId}
+        />
+        <div className={detailColumn}>
+          <EnclosureProcessMap node={selected.node} />
+          <BootTimeline node={selected.node} />
+          <DiagnosticsPanel node={selected.node} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Panel
+      testid="engine-room"
+      title={`Engine room · ${model.processes.length} ${model.processes.length === 1 ? "enclosure" : "enclosures"}`}
+      className={sizing}
+    >
+      {model.workspaceEngines.length > 0 ? <OfficialStrip engines={model.workspaceEngines} /> : null}
+      {body}
+    </Panel>
   );
 }

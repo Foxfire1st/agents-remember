@@ -199,6 +199,91 @@ export interface AttentionItem {
   providerId?: string;
 }
 
+// --- engine room process map (slice 5e) --------------------------------------
+
+// The honesty axis: observed = checkout exists on disk; derived = recorded contract
+// field whose checkout is absent; planned = expected-but-not-yet; missing = unobservable;
+// not-applicable = a lane that does not exist (memory on a disabled contract).
+export type ProcessFactState =
+  | "observed"
+  | "derived"
+  | "planned"
+  | "missing"
+  | "not-applicable";
+
+export type ProcessHealth =
+  | "nominal"
+  | "running"
+  | "blocked"
+  | "failed"
+  | "stale"
+  | "skipped"
+  | "unknown"
+  | "complete";
+
+export interface CommitRefNode {
+  branch?: string;
+  commit?: string;
+  path?: string;
+  exists?: boolean;
+  dirty?: boolean;
+  behindSource?: number; // commits behind the local source tip (fetch-free); 0/absent when current
+  factState: ProcessFactState;
+}
+
+export interface ProviderBootNode {
+  id: string;
+  role: string; // "code" (CGC) | "memory" (GrepAI)
+  runtimeState: string; // nominal | indexing | down | configured | unknown
+  factState: ProcessFactState;
+}
+
+export interface EngineProcessEdge {
+  id: string;
+  fromNode: string;
+  toNode: string;
+  kind: string; // worktree-add | ledger-map | cgc-seed | grepai-clone | sync | …
+  state: string; // nominal | running | blocked | failed | stale | skipped | complete | planned | unknown
+  label: string;
+  detail?: string;
+}
+
+export interface EngineProcessNode {
+  id: string; // the contract path — the stable enclosure id (== EnclosureNode.enclosure)
+  enclosure: string;
+  worktreeGroup: string;
+  taskId: string;
+  taskName: string;
+  repoName: string;
+  lifecycleId?: string;
+  phase: string; // worktree-started | provider-setup | sync-needed | commit-approval-pending | … | completed | unknown
+  health: ProcessHealth;
+  codeSource: CommitRefNode;
+  codeWorktree: CommitRefNode;
+  memoryMode: string; // "external" | "internal" | "disabled"
+  memorySource?: CommitRefNode;
+  memoryWorktree?: CommitRefNode;
+  ledgerPath?: string;
+  humanReviewStatus: string;
+  closeoutStatus: string;
+  integrationStatus: string;
+  cleanup: string;
+  setupState?: string; // running | stale | failed | failed-unchecked | ok | complete | prepared
+  currentPhase?: string;
+  completedPhases: string[];
+  failedPhases: string[];
+  heartbeatAgeSeconds?: number;
+  seedFallback: boolean;
+  retryArgs?: Record<string, unknown>;
+  providers: ProviderBootNode[];
+  edges: EngineProcessEdge[];
+  actions: ActionAvailability[];
+  nextAction?: string; // the lifecycle-guidance next operation (display/copy only until slice 06)
+  summary: string;
+  missingFacts: string[];
+  sourceFiles: string[];
+}
+
 export interface Analytics {
   driftSnapshots: DriftSnapshotNode[];
   stalestSidecars: SidecarStaleNode[];
@@ -208,7 +293,8 @@ export interface Analytics {
   toolReports: ToolReportNode[];
   ledgers: LedgerNode[];
   taskDocuments: TaskDocNode[];
-  attentionQueue: AttentionItem[]; // the one derived surface — composed by the reducer (slice 05)
+  attentionQueue: AttentionItem[]; // derived surface — composed by the reducer (slice 05)
+  engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map (slice 5e)
 }
 
 export interface WorkspaceProjection {

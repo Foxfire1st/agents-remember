@@ -38,6 +38,7 @@ from agents_remember.observer.paths import (
 from agents_remember.observer.projection import (
     DriftSnapshotNode,
     EnclosureNode,
+    EngineProcessFacts,
     ProviderNode,
     SetupProgressNode,
     SidecarStaleNode,
@@ -51,6 +52,7 @@ from agents_remember.observer.projection_store import (
 )
 from agents_remember.observer.reducer import (
     build_analytics,
+    build_engine_processes,
     enclosure_actions,
     project_lifecycle,
     project_workspace,
@@ -60,12 +62,14 @@ from agents_remember.observer.reducer import (
 from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
+    read_engine_process_facts,
     read_ledger,
     read_providers,
     read_route_coverage,
     read_setup_progress_nodes,
     read_setup_summaries,
     read_sidecar_staleness,
+    read_start_progress_entries,
     read_task_documents,
     read_tool_reports,
 )
@@ -74,6 +78,12 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees.start_progress import (
+    clear_start_progress,
+    read_start_progress,
+    start_progress_path,
+    write_start_progress,
+)
 from agents_remember.worktrees.worktree_contract import default_contract, write_contract
 
 T0 = "2026-06-13T18:00:00+00:00"
@@ -938,6 +948,252 @@ class TaskDocumentsReaderTests(unittest.TestCase):
 
 def _action(actions: list, name: str):  # type: ignore[type-arg]
     return next(action for action in actions if action.action == name)
+
+
+def _facts(
+    *,
+    contract: dict | None = None,  # type: ignore[type-arg]
+    status: dict | None = None,  # type: ignore[type-arg]
+    guidance: dict | None = None,  # type: ignore[type-arg]
+) -> EngineProcessFacts:
+    base_contract: dict[str, object] = {
+        "contract_path": "/c.md",
+        "task_id": "T",
+        "task_name": "demo",
+        "repo_name": "r",
+        "worktree_group": "/w/r/grp",
+        "memory_mode": "external",
+        "code_source_branch": "main",
+        "code_base_commit": "abc1234",
+        "code_repo_path": "/repo",
+        "code_work_branch": "ar/x",
+        "code_worktree": "/w/r/grp/wt",
+        "code_commit": "",
+        "memory_source_branch": "main",
+        "memory_base_commit": "def5678",
+        "memory_repo_path": "/mrepo",
+        "memory_work_branch": "ar/x",
+        "memory_content_commit": "",
+        "memory_worktree": "/w/r/grp/mem",
+        "ledger_path": "/w/r/grp/mem/memory.md",
+        "human_review_status": "pending-review",
+        "closeout_status": "not-started",
+        "integration_status": "not-started",
+        "cleanup": "pending",
+        "lifecycle_id": "LC1",
+    }
+    base_contract.update(contract or {})
+    base_guidance: dict[str, object] = {
+        "phase": "worktree-started",
+        "summary": "continue",
+        "nextOperation": "continue_work",
+    }
+    base_guidance.update(guidance or {})
+    return EngineProcessFacts(contract=base_contract, guidance=base_guidance, status=status)
+
+
+class EngineProcessTests(unittest.TestCase):
+    """The slice-5e enclosure-centered process map (``build_engine_processes``)."""
+
+    def test_successful_bootstrap_is_observed_and_complete(self) -> None:
+        facts = _facts(
+            status={
+                "code_worktree_exists": True,
+                "code_worktree_dirty": False,
+                "memory_worktree_exists": True,
+                "memory_worktree_dirty": False,
+                "freshness": {"state": "current", "code": {"baseBehindSource": 0}},
+                "providers": {
+                    "state": "ok",
+                    "completedPhases": ["codegraphcontext-code seed: ok", "grepai-memory clone: ok"],
+                    "failedPhases": [],
+                },
+            }
+        )
+        cgc = ProviderNode(
+            id="codegraphcontext-code@grp", state="configured", ok=True,
+            scope="worktree", role="code", worktreeGroup="grp",
+        )
+        grepai = ProviderNode(
+            id="grepai-memory@grp", state="configured", ok=True,
+            scope="worktree", role="memory", worktreeGroup="grp",
+        )
+        nodes = build_engine_processes(
+            [facts], [], [grepai, cgc], [SetupProgressNode(group="grp", state="ok", completedCount=4)]
+        )
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        self.assertEqual(node.health, "nominal")
+        self.assertEqual(node.codeWorktree.factState, "observed")
+        self.assertEqual(node.memoryWorktree.factState, "observed")  # type: ignore[union-attr]
+        self.assertEqual([p.role for p in node.providers], ["code", "memory"])  # code before memory
+        states = {edge.kind: edge.state for edge in node.edges}
+        self.assertEqual(states["worktree-add"], "complete")
+        self.assertEqual(states["cgc-seed"], "complete")
+        self.assertEqual(states["grepai-clone"], "complete")
+        self.assertEqual(node.missingFacts, [])
+
+    def test_provider_setup_running(self) -> None:
+        facts = _facts(status={"code_worktree_exists": True, "memory_worktree_exists": True})
+        setup = SetupProgressNode(
+            group="grp", state="running", currentPhase="grepai-memory clone", heartbeatAgeSeconds=2.0
+        )
+        node = build_engine_processes([facts], [], [], [setup])[0]
+        self.assertEqual(node.phase, "provider-setup")
+        self.assertEqual(node.health, "running")
+        states = {edge.kind: edge.state for edge in node.edges}
+        self.assertEqual(states["cgc-seed"], "running")
+        self.assertEqual(states["grepai-clone"], "running")
+
+    def test_failed_setup_marks_failed(self) -> None:
+        setup = SetupProgressNode(
+            group="grp", state="failed", failedPhases=["grepai-memory clone: failed (stalled)"]
+        )
+        node = build_engine_processes(
+            [_facts(status={"code_worktree_exists": True})], [], [], [setup]
+        )[0]
+        self.assertEqual(node.health, "failed")
+        self.assertEqual({e.kind: e.state for e in node.edges}["grepai-clone"], "failed")
+
+    def test_missing_status_degrades_without_crashing(self) -> None:
+        node = build_engine_processes([_facts(status=None)], [], [], [])[0]
+        self.assertEqual(node.codeWorktree.factState, "missing")
+        self.assertTrue(any("not observed" in fact for fact in node.missingFacts))
+
+    def test_disabled_memory_has_no_memory_lane(self) -> None:
+        node = build_engine_processes(
+            [_facts(contract={"memory_mode": "disabled"}, status={"code_worktree_exists": True})],
+            [], [], [],
+        )[0]
+        self.assertIsNone(node.memorySource)
+        self.assertIsNone(node.memoryWorktree)
+        self.assertEqual(node.memoryMode, "disabled")
+        self.assertNotIn("grepai-clone", {edge.kind for edge in node.edges})
+
+    def test_sync_needed_when_behind_official(self) -> None:
+        facts = _facts(
+            status={
+                "code_worktree_exists": True,
+                "freshness": {"state": "behind-official", "code": {"baseBehindSource": 3}},
+            }
+        )
+        node = build_engine_processes([facts], [], [], [])[0]
+        self.assertEqual(node.phase, "sync-needed")
+        self.assertEqual(node.health, "blocked")
+        self.assertEqual(node.codeSource.behindSource, 3)
+        self.assertIn("sync", {edge.kind for edge in node.edges})
+
+    def test_join_uses_worktree_group_basename(self) -> None:
+        facts = _facts(contract={"worktree_group": "/w/r/260610-grp"}, status={"code_worktree_exists": True})
+        prov = ProviderNode(
+            id="cgc@260610-grp", state="configured", ok=True,
+            scope="worktree", role="code", worktreeGroup="260610-grp",
+        )
+        node = build_engine_processes([facts], [], [prov], [])[0]
+        self.assertEqual([p.id for p in node.providers], ["cgc@260610-grp"])
+
+    def test_actions_reuse_precomputed_enclosure_actions(self) -> None:
+        enc = _enclosure(closeoutStatus="completed", integrationStatus="not-started")
+        enriched = [enc.model_copy(update={"actions": enclosure_actions(enc)})]
+        node = build_engine_processes(
+            [_facts(status={"code_worktree_exists": True})], enriched, [], []
+        )[0]
+        self.assertTrue(any(action.action == "integrate" for action in node.actions))
+
+    def test_deterministic(self) -> None:
+        args = ([_facts(status={"code_worktree_exists": True})], [], [], [])
+        self.assertEqual(
+            build_engine_processes(*args)[0].model_dump(),
+            build_engine_processes(*args)[0].model_dump(),
+        )
+
+    def test_project_workspace_wires_engine_processes(self) -> None:
+        proj = project_workspace(
+            [], enclosures=[], providers=[], now=FRESH,
+            engine_process_facts=[_facts(status={"code_worktree_exists": True})],
+        )
+        self.assertEqual(len(proj.analytics.engineProcesses), 1)
+        self.assertEqual(proj.version, 2)
+
+    def test_3a_callers_get_empty_engine_processes(self) -> None:
+        proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
+        self.assertEqual(proj.analytics.engineProcesses, [])
+
+    def test_reader_emits_one_fact_per_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = default_contract(
+                task_name="demo task", repo_name="r", workflow_kind="light", memory_mode="disabled",
+                coordination_root=root, code_repo_path=root / "repo",
+                code_source_branch="main", code_work_branch="ar/x", code_base_commit="abc",
+                worktree_name="demo-wt",
+            )
+            contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+            write_contract(contract.contract_path, contract)
+            facts = read_engine_process_facts(root)
+            self.assertEqual(len(facts), 1)
+            self.assertEqual(facts[0].contract["task_name"], "demo task")
+            self.assertIn("phase", facts[0].guidance)
+
+    def test_start_progress_synthesizes_pre_contract_node(self) -> None:
+        entry = {
+            "schema": "ar-worktree-start-progress/v1",
+            "repoName": "agents-remember",
+            "taskName": "dm-v1.2",
+            "worktreeName": "v12-feat",
+            "worktreeGroup": "/w/agents-remember/v12-feat-ar",
+            "phase": "memory-blocked",
+            "memoryMode": "external",
+            "codeSourceBranch": "main",
+            "codeBaseCommit": "abc1234",
+            "blockedReason": "no exact ledger mapping for selected code base commit",
+            "completedPhases": ["preflight", "code-worktree"],
+            "choices": ["reconciliation", "disabled-memory", "custom"],
+            "sourceFile": "/w/temp/worktree-start/agents-remember/v12-feat.json",
+        }
+        nodes = build_engine_processes([], [], [], [], [entry])
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        self.assertEqual(node.phase, "memory-compatibility")
+        self.assertEqual(node.health, "blocked")
+        self.assertEqual(node.codeWorktree.factState, "observed")  # code-worktree completed
+        self.assertEqual(node.memoryWorktree.factState, "missing")  # type: ignore[union-attr]
+        self.assertTrue(any("contract not yet written" in fact for fact in node.missingFacts))
+        self.assertEqual(node.nextAction, "reconciliation")
+
+    def test_start_progress_skipped_when_contract_covers_the_group(self) -> None:
+        facts = _facts(
+            contract={"worktree_group": "/w/agents-remember/v12-feat-ar"},
+            status={"code_worktree_exists": True},
+        )
+        entry = {
+            "worktreeGroup": "/w/agents-remember/v12-feat-ar",
+            "phase": "memory-blocked",
+            "memoryMode": "external",
+            "sourceFile": "x",
+        }
+        nodes = build_engine_processes([facts], [], [], [], [entry])
+        self.assertEqual(len(nodes), 1)  # only the contract node — not double-rendered
+
+    def test_start_progress_write_read_clear_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_start_progress(
+                root, repo_name="r", task_name="t", worktree_name="wt",
+                worktree_group="/w/r/wt-ar", phase="memory-blocked", memory_mode="external",
+                blocked_reason="no ledger mapping", completed_phases=("preflight", "code-worktree"),
+                choices=("reconciliation",),
+            )
+            payload = read_start_progress(start_progress_path(root, "r", "wt"))
+            assert payload is not None
+            self.assertEqual(payload["phase"], "memory-blocked")
+            self.assertEqual(payload["blockedReason"], "no ledger mapping")
+            entries = read_start_progress_entries(root, now=FRESH)
+            self.assertEqual(len(entries), 1)
+            self.assertIn("ageSeconds", entries[0])
+            clear_start_progress(root, "r", "wt")
+            self.assertIsNone(read_start_progress(start_progress_path(root, "r", "wt")))
+            self.assertEqual(read_start_progress_entries(root, now=FRESH), [])
 
 
 if __name__ == "__main__":

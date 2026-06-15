@@ -30,6 +30,7 @@ from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot
 from agents_remember.observer.projection import (
     DriftSnapshotNode,
     EnclosureNode,
+    EngineProcessFacts,
     LedgerNode,
     ProviderNode,
     RouteCoverageNode,
@@ -53,6 +54,12 @@ from agents_remember.tasks import (
     step_done,
     step_total,
 )
+from agents_remember.worktrees.modules.guidance import (
+    contract_payload,
+    lifecycle_guidance,
+    status_payload,
+)
+from agents_remember.worktrees.start_progress import read_start_progress
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
@@ -178,6 +185,71 @@ def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
         integrationStatus=contract.integration_status,
         cleanup=contract.cleanup,
     )
+
+
+def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFacts]:
+    """Slice 5e: gather one fact bundle per worktree contract for the Engine Room map.
+
+    Globs the same ``tasks/<repo>/<task>/contract.md`` files as :func:`read_enclosures`, but
+    enriches each with the status-guidance facts the structural ``EnclosureNode`` omits (the
+    code/memory branches, base commits, worktree paths, existence/dirty flags, base freshness,
+    and provider-boot status). ``contract_payload`` and ``lifecycle_guidance`` are pure; only
+    ``status_payload`` touches git, and it is best-effort so a contract pointing at absent or
+    fake worktrees degrades to ``status=None`` (rendered as missing/derived) instead of
+    crashing the projection tick. A malformed contract is skipped, never fatal.
+    """
+    tasks_root = coordination_root / "tasks"
+    if not tasks_root.is_dir():
+        return []
+    facts: list[EngineProcessFacts] = []
+    for path in sorted(tasks_root.glob("*/*/contract.md")):
+        try:
+            contract = load_contract(path)
+        except (ContractError, OSError):
+            continue
+        facts.append(
+            EngineProcessFacts(
+                contract=contract_payload(contract),
+                guidance=lifecycle_guidance(contract),
+                status=_safe_status_payload(contract),
+            )
+        )
+    return facts
+
+
+def _safe_status_payload(contract: Any) -> dict[str, Any] | None:
+    """``status_payload`` is the only git-touching part; never let it crash the tick."""
+    try:
+        return status_payload(contract)
+    except Exception:  # a single worktree's git state must never fail the projection tick
+        return None
+
+
+def read_start_progress_entries(coordination_root: Path, *, now: datetime) -> list[dict[str, Any]]:
+    """Slice 5e §5.4: pre-contract worktree-start blocks (a start gated before its contract).
+
+    Reads the transient ``temp/worktree-start/<repo>/<worktree>.json`` files ``start.py`` writes
+    when a start blocks before writing its contract, stamping each with the heartbeat age. A start
+    that reached its contract has had this file cleared, so these are exactly the starts the
+    contract-keyed enclosure surface cannot see.
+    """
+    root = coordination_root / "temp" / "worktree-start"
+    if not root.is_dir():
+        return []
+    entries: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*/*.json")):
+        payload = read_start_progress(path)
+        if payload is None:
+            continue
+        updated = payload.get("updatedAt")
+        entries.append(
+            {
+                **payload,
+                "sourceFile": path.as_posix(),
+                "ageSeconds": age_seconds(updated, now) if isinstance(updated, str) else None,
+            }
+        )
+    return entries
 
 
 # --- analytical surface readers (slice 3b) -----------------------------------

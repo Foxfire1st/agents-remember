@@ -33,6 +33,7 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.start_progress import clear_start_progress, write_start_progress
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     default_contract,
@@ -398,6 +399,45 @@ def _fast_forward_stale_branches(
     return failures
 
 
+def _record_start_block(
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    phase: str,
+    reason: str,
+    completed: tuple[str, ...],
+    choices: tuple[str, ...],
+) -> None:
+    """Record a pre-contract start block (slice 5e §5.4) so the dashboard can see a start gated
+    before its contract exists. Best-effort; skipped on dry runs."""
+    if args.dry_run or args.worktree_name is None:
+        return
+    write_start_progress(
+        context.coordination_root,
+        repo_name=contract.repo_name,
+        task_name=contract.task_name,
+        worktree_name=args.worktree_name,
+        worktree_group=contract.worktree_group.as_posix(),
+        phase=phase,
+        memory_mode=contract.memory_mode,
+        code_source_branch=contract.code_source_branch,
+        code_base_commit=contract.code_base_commit,
+        code_repo_path=contract.code_repo_path.as_posix(),
+        code_worktree=contract.code_worktree.as_posix(),
+        blocked_reason=reason,
+        completed_phases=completed,
+        choices=choices,
+    )
+
+
+def _clear_start_block(context, contract: WorktreeContract, args: WorktreeArgs) -> None:
+    """The contract now anchors the enclosure; drop the transient start-progress file."""
+    if args.worktree_name is None:
+        return
+    clear_start_progress(context.coordination_root, contract.repo_name, args.worktree_name)
+
+
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
     repo = context.code_repository_root
@@ -416,6 +456,10 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
     stale_base_block = _stale_base_preflight(context, contract, args)
     if stale_base_block is not None:
+        _record_start_block(
+            context, contract, args, phase="stale-base-blocked",
+            reason=str(stale_base_block.get("summary", "")), completed=(), choices=(),
+        )
         return WorktreeCommandResult(2, stale_base_block)
     if args.stale_base_choice == "fast-forward":
         # A fast-forward recovery may have moved the source branches; rebuild the
@@ -435,10 +479,24 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     )
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":
+        raw_choices = memory_state.get("choices")
+        _record_start_block(
+            context, contract, args, phase="memory-blocked",
+            reason=str(memory_state.get("reason", "")),
+            completed=("preflight", "code-worktree"),
+            choices=tuple(str(choice) for choice in raw_choices)
+            if isinstance(raw_choices, list)
+            else (),
+        )
         return _blocked_memory_start_result(context, args, code_state, memory_state)
     contract = _contract_after_memory_start(contract, memory_state)
     provider_plan = plan_providers_for_start(context, contract, args)
     if provider_plan["state"] == "blocked":
+        _record_start_block(
+            context, contract, args, phase="provider-blocked",
+            reason=str(provider_plan.get("reason", "")),
+            completed=("preflight", "code-worktree", "memory-compatible"), choices=(),
+        )
         return _blocked_provider_start_result(
             context, args, code_state, memory_state, provider_plan
         )
@@ -446,6 +504,7 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     # anchor worktree_status polls while the background thread runs (GitHub #53).
     if not args.dry_run:
         write_contract(contract.contract_path, contract)
+        _clear_start_block(context, contract, args)
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(

@@ -195,7 +195,7 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seq, 0)
         self.assertIsNotNone(latest)
         assert latest is not None
-        self.assertEqual(latest.version, 1)
+        self.assertEqual(latest.version, 2)
 
     async def test_subscribe_receives_broadcast(self) -> None:
         projector = Projector(_config(self.tmp), interval=100)
@@ -246,7 +246,7 @@ class AppTests(unittest.TestCase):
             response = client.get("/api/state")
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["version"], 1)
+        self.assertEqual(body["version"], 2)
         self.assertEqual(body["lifecycles"], [])
 
     def test_root_serves_dashboard_bundle(self) -> None:

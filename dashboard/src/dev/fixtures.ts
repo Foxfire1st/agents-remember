@@ -4,6 +4,7 @@
 // build_attention_queue would compute for the same tree — kept in sync by eye (sidecar-free,
 // dashboard/** is out of memory scope).
 
+import { ENGINE_ROOM_SCENARIOS } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
 import type {
   EnclosureNode,
@@ -22,6 +23,7 @@ const EMPTY_ANALYTICS: WorkspaceProjection["analytics"] = {
   ledgers: [],
   taskDocuments: [],
   attentionQueue: [],
+  engineProcesses: [],
 };
 
 function lifecycle(
@@ -44,7 +46,7 @@ function lifecycle(
 function project(over: Partial<WorkspaceProjection> = {}): WorkspaceProjection {
   const { lifecycles = [], analytics, ...rest } = over;
   return {
-    version: 1,
+    version: 2,
     generatedAt: "2026-06-14T09:01:00+00:00",
     enclosures: [],
     providers: [],
@@ -421,4 +423,11 @@ export const GALLERY: GalleryEntry[] = [
     }),
   },
   { name: "empty", projection: project() },
+  ...ENGINE_ROOM_SCENARIOS.map((scenario) => ({
+    name: scenario.name,
+    projection: project({
+      providers: scenario.workspace,
+      analytics: { ...EMPTY_ANALYTICS, engineProcesses: scenario.processes },
+    }),
+  })),
 ];

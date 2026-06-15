@@ -31,12 +31,14 @@ from agents_remember.observer.reducer import project_workspace
 from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
+    read_engine_process_facts,
     read_ledger,
     read_providers,
     read_route_coverage,
     read_setup_progress_nodes,
     read_setup_summaries,
     read_sidecar_staleness,
+    read_start_progress_entries,
     read_task_documents,
     read_tool_reports,
 )
@@ -97,6 +99,8 @@ def project_and_write(
         tool_reports=read_tool_reports(coordination_root, now=moment),
         ledgers=ledgers,
         task_documents=read_task_documents(coordination_root, now=moment),
+        engine_process_facts=read_engine_process_facts(coordination_root),
+        engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
     )
     write_projection(root, projection)
     return projection
