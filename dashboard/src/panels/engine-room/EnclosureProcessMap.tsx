@@ -1,3 +1,7 @@
+import { motion } from "motion/react";
+import { useEffect, useRef } from "react";
+import gsap from "gsap";
+
 import { css } from "../../../styled-system/css";
 import type { CommitRefNode, EngineProcessNode, ProviderBootNode } from "../../types/projection";
 import {
@@ -8,12 +12,18 @@ import {
   engineName,
   engineSilhouette,
   engineState,
+  fleetingBanner,
+  fleetingChoice,
+  fleetingChoices,
+  fleetingLabel,
+  fleetingReason,
   nodeBox,
   nodeBranch,
   nodeCommit,
   nodeLabel,
   sectionLabel,
 } from "./engineRoomStyles";
+import { useShouldAnimate } from "./useShouldAnimate";
 
 type ConduitState =
   | "nominal"
@@ -81,10 +91,41 @@ function edgeState(node: EngineProcessNode, kind: string): ConduitState {
   return conduitState(node.edges.find((edge) => edge.kind === kind)?.state ?? "unknown");
 }
 
-// SVG lane connector (5f S0). Visual parity with the prior 2px <span> conduit, but an SVG
-// primitive so later slices draw it on (stroke-dashoffset) and carry flow chevrons. State still
-// comes from the model edge; `data-state` mirrors it for snapshots and the accessibility layer.
+// A pre-contract blocked-start node (5f §2.1): the reducer marks it with a "contract not yet written"
+// missing-fact. It is provisional, not fake — shown distinctly until it promotes (the morph is S3).
+function isFleeting(node: EngineProcessNode): boolean {
+  return node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
+}
+
+// Birth motion (5f S2). The lane connector draws on (GSAP stroke-dashoffset) when it carries real
+// flow; planned/blocked edges stay put. Honest-motion gate: under data-effects=off / reduced-motion
+// the line renders fully drawn with no tween (snapshot-stable).
 function SvgConduit({ state }: { state: ConduitState }) {
+  const lineRef = useRef<SVGLineElement>(null);
+  const animate = useShouldAnimate();
+  const draws = state === "nominal" || state === "complete" || state === "running";
+  useEffect(() => {
+    const line = lineRef.current;
+    if (!line) return;
+    if (!animate || !draws) {
+      gsap.set(line, { strokeDashoffset: 0 });
+      return;
+    }
+    const tween = gsap.fromTo(
+      line,
+      { strokeDasharray: 24, strokeDashoffset: 24 },
+      {
+        strokeDashoffset: 0,
+        duration: 0.35,
+        ease: "power1.out",
+        onComplete: () => gsap.set(line, { clearProps: "strokeDasharray,strokeDashoffset" }),
+      },
+    );
+    return () => {
+      tween.kill();
+      gsap.set(line, { clearProps: "strokeDasharray,strokeDashoffset" });
+    };
+  }, [state, animate, draws]);
   return (
     <svg
       className={conduitSvg}
@@ -93,8 +134,22 @@ function SvgConduit({ state }: { state: ConduitState }) {
       role="presentation"
       aria-hidden="true"
     >
-      <line x1="0" y1="1" x2="24" y2="1" data-state={state} className={conduitLine({ state })} />
+      <line x1="0" y1="1" x2="24" y2="1" ref={lineRef} data-state={state} className={conduitLine({ state })} />
     </svg>
+  );
+}
+
+function FleetingBanner({ node }: { node: EngineProcessNode }) {
+  return (
+    <div className={fleetingBanner} data-testid="fleeting-banner">
+      <span className={fleetingLabel}>⚠ Fleeting · blocked — creation gated, contract not yet written</span>
+      <span className={fleetingReason}>{node.summary}</span>
+      {node.nextAction ? (
+        <span className={fleetingChoices}>
+          <span className={fleetingChoice}>recover: {node.nextAction}</span>
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -139,11 +194,19 @@ function EngineUnit({
 }
 
 export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
+  const animate = useShouldAnimate();
   const codeEngine = node.providers.find((provider) => provider.role === "code");
   const memoryEngine = node.providers.find((provider) => provider.role === "memory");
   const externalMemory = node.memoryMode === "external" && node.memorySource && node.memoryWorktree;
   return (
-    <div className={mapWrap} data-testid="process-map">
+    <motion.div
+      className={mapWrap}
+      data-testid="process-map"
+      initial={animate ? { opacity: 0, scale: 0.985 } : false}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
+    >
+      {isFleeting(node) ? <FleetingBanner node={node} /> : null}
       <span className={sectionLabel}>Official line → enclosure</span>
       <div className={row} data-testid="code-lane">
         <CommitNode label="Code source" refNode={node.codeSource} />
@@ -170,6 +233,6 @@ export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
           Memory: {node.memoryMode} — no external memory lane
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

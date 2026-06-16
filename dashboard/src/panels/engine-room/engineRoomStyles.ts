@@ -381,6 +381,35 @@ export const conduitLine = cva({
   },
 });
 
+// --- fleeting (pre-contract blocked-start) banner (5f S2, §2.1) ---------------
+// A provisional enclosure born blocked: shown in the ghost/alarm register, honestly stating that
+// creation is gated and the contract is not yet written, plus the recovery choice. Provisional ≠ fake.
+export const fleetingBanner = css({
+  display: "grid",
+  gap: "0.2rem",
+  padding: "0.4rem 0.55rem",
+  border: "1px dashed token(colors.alarm)",
+  borderRadius: "3px",
+  background: "bgPanel",
+  opacity: "0.92",
+});
+export const fleetingLabel = css({
+  color: "alarm",
+  fontSize: "0.66rem",
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+});
+export const fleetingReason = css({ color: "ink", fontSize: "0.74rem", wordBreak: "break-word" });
+export const fleetingChoices = css({ display: "flex", flexWrap: "wrap", gap: "0.3rem" });
+export const fleetingChoice = css({
+  color: "cyan",
+  fontSize: "0.68rem",
+  border: "1px solid token(colors.cyan)",
+  borderRadius: "2px",
+  paddingInline: "0.35rem",
+  paddingBlock: "0.05rem",
+});
+
 export const engineRow = css({
   display: "flex",
   alignItems: "center",
