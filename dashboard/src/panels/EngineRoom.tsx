@@ -1,21 +1,31 @@
 import { type ReactNode, useState } from "react";
 
 import { css } from "../../styled-system/css";
-import { type EngineStack, engineState as engineRuntime } from "../data/selectors";
+import { type EngineStack, engineState as engineRuntime, selectQueue } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
-import type { ProviderNode } from "../types/projection";
+import type { EngineProcessNode, ProviderNode } from "../types/projection";
 import { BootTimeline } from "./engine-room/BootTimeline";
 import { buildEngineRoomModel } from "./engine-room/buildEngineRoomModel";
 import { DiagnosticsPanel } from "./engine-room/DiagnosticsPanel";
 import { EnclosureProcessMap } from "./engine-room/EnclosureProcessMap";
 import { EnclosureStackList } from "./engine-room/EnclosureStackList";
 import {
-  detailColumn,
   emptyState,
   engineSilhouette,
+  healthDot,
   officialStrip,
-  roomLayout,
+  phaseChip,
+  roomCaution,
+  roomGrid,
+  roomHeader,
+  roomHeaderMeta,
+  roomHeaderName,
+  roomHeaderNext,
+  roomHeaderSpacer,
+  roomShell,
+  roomStage,
+  roomZone,
   sectionLabel,
 } from "./engine-room/engineRoomStyles";
 
@@ -54,6 +64,29 @@ function OfficialStrip({ engines }: { engines: ProviderNode[] }) {
           </span>
         </span>
       ))}
+    </div>
+  );
+}
+
+// §4.2 header: the selected enclosure's identity + health + phase + next action, plus the
+// master-caution mirror (an alarm is never hidden by a full-bleed view, §4.1).
+function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
+  const queue = useDashboard(selectQueue);
+  const sev = queue[0]?.severity ?? "clear";
+  return (
+    <div className={roomHeader} data-testid="engine-room-header">
+      <span className={roomHeaderName}>{node.taskName}</span>
+      <span className={roomHeaderMeta}>
+        <span className={healthDot({ health: node.health })} aria-hidden="true" />
+        <span>{node.health}</span>
+        <span className={phaseChip({ health: node.health })}>{node.phase}</span>
+        <span>{node.repoName}</span>
+      </span>
+      {node.nextAction ? <span className={roomHeaderNext}>→ {node.nextAction}</span> : null}
+      <span className={roomHeaderSpacer} />
+      <span className={roomCaution({ sev })} data-testid="engine-room-caution">
+        ⚠ {queue.length} waiting
+      </span>
     </div>
   );
 }
@@ -108,17 +141,23 @@ export function EngineRoom() {
       </p>
     );
   } else {
+    // §4.2 full-width 3-zone room: header over [stack list | pod stage | boot + diagnostics].
     body = (
-      <div className={roomLayout}>
-        <EnclosureStackList
-          views={model.processes}
-          selectedKey={selected.enclosureKey}
-          onSelect={setSelectedGroup}
-        />
-        <div className={detailColumn}>
-          <EnclosureProcessMap node={selected.node} />
-          <BootTimeline node={selected.node} />
-          <DiagnosticsPanel node={selected.node} />
+      <div className={roomShell}>
+        <EngineRoomHeader node={selected.node} />
+        <div className={roomGrid}>
+          <EnclosureStackList
+            views={model.processes}
+            selectedKey={selected.enclosureKey}
+            onSelect={setSelectedGroup}
+          />
+          <div className={roomStage} data-testid="pod-stage">
+            <EnclosureProcessMap node={selected.node} />
+          </div>
+          <div className={roomZone} data-testid="engine-room-diagnostics">
+            <BootTimeline node={selected.node} />
+            <DiagnosticsPanel node={selected.node} />
+          </div>
         </div>
       </div>
     );

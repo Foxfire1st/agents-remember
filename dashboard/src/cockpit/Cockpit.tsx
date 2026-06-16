@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
 import { selectQueue } from "../data/selectors";
@@ -9,6 +10,7 @@ import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
 import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
+import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
 import { Hangar } from "../panels/Hangar";
 import { LifecycleList } from "../panels/LifecycleList";
@@ -20,6 +22,8 @@ import { Topology } from "../panels/Topology";
 // visible), a switchable centre viewport (Operations / Engine Room / Memory / Topology / Hangar),
 // and a persistent right rail (the event river ticker). The mode bar selects the viewport.
 // Selection is ephemeral UI state held here and shared across panels and views.
+// Slice 5f S1 (§4.1): the two "machine map" views (Engine Room / Topology) drop the rails and span
+// the full body width; the top-bar caution stays visible so an alarm is never hidden.
 type View = "operations" | "engine" | "memory" | "topology" | "hangar";
 
 const VIEWS: { id: View; label: string }[] = [
@@ -89,13 +93,24 @@ const connBadge = cva({
     },
   },
 });
-const body = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(300px, 1fr) minmax(420px, 2.2fr) minmax(260px, 0.95fr)",
-  gridTemplateRows: "minmax(0, 1fr)",
-  gap: "0.7rem",
-  flex: "1",
-  minHeight: "0",
+// The body grid: the railed 3-column shell, or a single full-width column for the machine-map
+// views (Engine Room / Topology), which render their own internal layout (5f §4.1).
+const bodyGrid = cva({
+  base: {
+    display: "grid",
+    gridTemplateRows: "minmax(0, 1fr)",
+    gap: "0.7rem",
+    flex: "1",
+    minHeight: "0",
+  },
+  variants: {
+    bleed: {
+      false: {
+        gridTemplateColumns: "minmax(300px, 1fr) minmax(420px, 2.2fr) minmax(260px, 0.95fr)",
+      },
+      true: { gridTemplateColumns: "1fr" },
+    },
+  },
 });
 const rail = css({
   display: "flex",
@@ -124,6 +139,10 @@ export function Cockpit() {
 export function CockpitShell() {
   const [view, setView] = useState<View>("operations");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const animate = useShouldAnimate();
+
+  // The machine-map views span full width: the rails hide and the view's own layout breathes.
+  const fullBleed = view === "engine" || view === "topology";
 
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
@@ -132,21 +151,39 @@ export function CockpitShell() {
     setView("operations");
   };
 
+  // Gated fade-in when the rails return (reduced-motion / data-effects=off → no tween). Leaving to
+  // a full-bleed view unmounts them for a clean expand; the determinism path stays snapshot-stable.
+  const railEnter = animate ? { initial: { opacity: 0 }, animate: { opacity: 1 } } : {};
+
   return (
     <div className={cx(shell, "cockpit--shell")}>
       <div className="crt-overlay" aria-hidden="true" />
       <TopBar />
-      <div className={cx(body, "shell__body")}>
-        <aside className={cx(rail, "rail rail--left")}>
-          <AttentionQueue onSelect={open} />
-          <LifecycleList selectedId={selectedId} onSelect={open} />
-        </aside>
+      <div className={cx(bodyGrid({ bleed: fullBleed }), "shell__body")} data-fullbleed={fullBleed}>
+        {!fullBleed && (
+          <motion.aside
+            key="rail-left"
+            className={cx(rail, "rail rail--left")}
+            transition={{ duration: 0.18 }}
+            {...railEnter}
+          >
+            <AttentionQueue onSelect={open} />
+            <LifecycleList selectedId={selectedId} onSelect={open} />
+          </motion.aside>
+        )}
         <main className={cx(viewport, "viewport")} data-view={view}>
           <ViewBody view={view} selectedId={selectedId} onOpen={open} />
         </main>
-        <aside className={cx(rail, "rail rail--right")}>
-          <EventRiver />
-        </aside>
+        {!fullBleed && (
+          <motion.aside
+            key="rail-right"
+            className={cx(rail, "rail rail--right")}
+            transition={{ duration: 0.18 }}
+            {...railEnter}
+          >
+            <EventRiver />
+          </motion.aside>
+        )}
       </div>
       <ModeBar items={VIEWS} value={view} onChange={setView} label="Views" />
     </div>

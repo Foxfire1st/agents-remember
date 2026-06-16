@@ -8,19 +8,90 @@ import { css, cva } from "../../../styled-system/css";
 
 // --- layout ------------------------------------------------------------------
 
-export const roomLayout = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(190px, 18rem) 1fr",
-  gap: "0.8rem",
+// Full-bleed Engine Room layout (5f S1, §4.2): a header strip over a 3-zone full-width grid —
+// enclosure stack list | the animated pod stage | boot timeline + diagnostics on the RIGHT.
+export const roomShell = css({
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.6rem",
   flex: "1",
   minHeight: "0",
-  alignItems: "start",
 });
 
-export const detailColumn = css({
+export const roomGrid = css({
   display: "grid",
+  gridTemplateColumns: "minmax(190px, 16rem) minmax(0, 1fr) minmax(280px, 22rem)",
   gap: "0.7rem",
+  flex: "1",
+  minHeight: "0",
+  alignItems: "stretch",
+});
+
+// The pod stage — the large, full-height centre where all §6–§7 motion plays.
+export const roomStage = css({
+  display: "flex",
+  flexDirection: "column",
   minWidth: "0",
+  minHeight: "0",
+});
+
+// A side zone (left stack list / right boot+diagnostics) that scrolls on its own.
+export const roomZone = css({
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.6rem",
+  minWidth: "0",
+  minHeight: "0",
+  overflowY: "auto",
+});
+
+// --- room header (selected enclosure · health · phase · next action + master-caution) ---------
+export const roomHeader = css({
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "0.6rem",
+  padding: "0.4rem 0.6rem",
+  border: "1px solid token(colors.grid)",
+  borderRadius: "3px",
+  borderLeftWidth: "3px",
+  borderLeftColor: "amber",
+});
+
+export const roomHeaderName = css({ color: "ink", fontSize: "0.85rem", fontWeight: "600" });
+export const roomHeaderMeta = css({
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "0.45rem",
+  color: "muted",
+  fontSize: "0.72rem",
+});
+export const roomHeaderSpacer = css({ flex: "1" });
+export const roomHeaderNext = css({ color: "cyan", fontSize: "0.72rem" });
+
+// The master-caution badge lifted into the room header while the rails are hidden (§4.1).
+export const roomCaution = cva({
+  base: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.3rem",
+    fontSize: "0.72rem",
+    letterSpacing: "0.04em",
+    paddingInline: "0.4rem",
+    paddingBlock: "0.1rem",
+    borderRadius: "2px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+  },
+  variants: {
+    sev: {
+      clear: { color: "mint", borderColor: "mint" },
+      info: { color: "cyan", borderColor: "cyan" },
+      warn: { color: "amber", borderColor: "amber" },
+      alarm: { color: "alarm", borderColor: "alarm", animation: "pulse 0.6s steps(1) infinite" },
+    },
+  },
 });
 
 export const officialStrip = css({
