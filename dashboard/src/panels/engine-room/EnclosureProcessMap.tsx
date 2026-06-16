@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import gsap from "gsap";
 
@@ -202,11 +202,29 @@ export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
     <motion.div
       className={mapWrap}
       data-testid="process-map"
+      layout={animate}
       initial={animate ? { opacity: 0, scale: 0.985 } : false}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
     >
-      {isFleeting(node) ? <FleetingBanner node={node} /> : null}
+      {/* T4 promotion morph (5f S3): the map is keyed-stable by worktreeGroup (S0), so a blocked
+          fleeting node solidifies in place into the contract-anchored enclosure — never a teleport.
+          The ghost banner fades out as the node promotes; `layout` carries the size morph. Gated:
+          under data-effects=off / reduced-motion it is an instant swap (no tween). */}
+      <AnimatePresence initial={false}>
+        {isFleeting(node) ? (
+          <motion.div
+            key="fleeting"
+            layout={animate}
+            initial={animate ? { opacity: 0 } : false}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: animate ? 0.3 : 0 }}
+          >
+            <FleetingBanner node={node} />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       <span className={sectionLabel}>Official line → enclosure</span>
       <div className={row} data-testid="code-lane">
         <CommitNode label="Code source" refNode={node.codeSource} />
