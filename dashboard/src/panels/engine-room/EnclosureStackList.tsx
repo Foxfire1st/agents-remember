@@ -17,19 +17,19 @@ const headWrap = css({ display: "flex", alignItems: "center", gap: "0.35rem", mi
 
 export function EnclosureStackList({
   views,
-  selectedId,
+  selectedKey,
   onSelect,
 }: {
   views: EngineProcessView[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  selectedKey: string | null;
+  onSelect: (key: string) => void;
 }) {
   return (
     <ListBox
       aria-label="Worktree enclosures"
       selectionMode="single"
       disallowEmptySelection
-      selectedKeys={selectedId ? [selectedId] : []}
+      selectedKeys={selectedKey ? [selectedKey] : []}
       onSelectionChange={(keys: Selection) => {
         if (keys === "all") return;
         for (const key of keys) {
@@ -44,8 +44,8 @@ export function EnclosureStackList({
     >
       {views.map(({ node, lifecycle }) => (
         <ListBoxItem
-          key={node.id}
-          id={node.id}
+          key={node.worktreeGroup}
+          id={node.worktreeGroup}
           textValue={`${node.taskName} ${node.repoName}`}
           className={stackItem({ health: node.health })}
           data-testid="enclosure-stack-item"

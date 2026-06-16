@@ -27,6 +27,7 @@ export function buildEngineRoomModel(
 
   const lifecycleById = new Map(lifecycles.map((lifecycle) => [lifecycle.id, lifecycle]));
   const processes = engineProcesses.map((node) => ({
+    enclosureKey: node.worktreeGroup,
     node,
     lifecycle: node.lifecycleId ? lifecycleById.get(node.lifecycleId) : undefined,
   }));

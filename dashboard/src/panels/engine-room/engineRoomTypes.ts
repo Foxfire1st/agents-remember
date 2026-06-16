@@ -12,6 +12,12 @@ import type {
 
 /** One enclosure process plus the live session (if any) driving it. */
 export interface EngineProcessView {
+  /**
+   * Stable React key for the enclosure = the node's `worktreeGroup`. It survives the
+   * fleeting→real id swap (start-progress id → contract-path id), so keying the list and the
+   * future promotion morph by this makes a block-clears transition one continuous element (5f §8.3).
+   */
+  enclosureKey: string;
   node: EngineProcessNode;
   lifecycle?: LifecycleProjection;
 }

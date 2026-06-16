@@ -87,7 +87,7 @@ export function EngineRoom() {
   const analytics = useDashboard((state) => state.analytics);
   const providers = useDashboard((state) => state.providers);
   const lifecycles = useDashboard((state) => state.lifecycles);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
   const model = buildEngineRoomModel(
     analytics?.engineProcesses ?? [],
@@ -95,7 +95,8 @@ export function EngineRoom() {
     Object.values(lifecycles),
   );
   const selected =
-    model.processes.find((view) => view.node.id === selectedId) ?? model.processes[0];
+    model.processes.find((view) => view.node.worktreeGroup === selectedGroup) ??
+    model.processes[0];
 
   let body: ReactNode;
   if (model.usesFallback) {
@@ -111,8 +112,8 @@ export function EngineRoom() {
       <div className={roomLayout}>
         <EnclosureStackList
           views={model.processes}
-          selectedId={selected.node.id}
-          onSelect={setSelectedId}
+          selectedKey={selected.enclosureKey}
+          onSelect={setSelectedGroup}
         />
         <div className={detailColumn}>
           <EnclosureProcessMap node={selected.node} />

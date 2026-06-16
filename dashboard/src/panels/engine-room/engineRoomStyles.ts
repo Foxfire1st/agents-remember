@@ -280,31 +280,32 @@ export const couplerBar = css({
   background: "bgPanel",
 });
 
-export const conduit = cva({
-  base: {
-    height: "2px",
-    borderRadius: "1px",
-    background: "token(colors.grid)",
-    alignSelf: "center",
-  },
+// SVG conduit (5f S0). The lane connector is now an SVG primitive (was a 2px <div> span) so later
+// slices can draw it on (stroke-dashoffset), carry travelling flow chevrons, and reroute. `conduitSvg`
+// sizes the <svg> like the old span; `conduitLine` colours the <line> by state — colour parity with
+// the prior recipe (running/planned read as dashed, failed flickers via the global `pulse` keyframe,
+// so the determinism freeze still applies). State always comes from the model, never a class alone.
+export const conduitSvg = css({
+  display: "block",
+  width: "100%",
+  height: "2px",
+  alignSelf: "center",
+  overflow: "visible",
+});
+
+export const conduitLine = cva({
+  base: { stroke: "token(colors.grid)", strokeWidth: "2", fill: "none" },
   variants: {
     state: {
-      nominal: { background: "token(colors.amber)" },
-      complete: { background: "token(colors.mint)" },
-      running: {
-        background:
-          "repeating-linear-gradient(90deg, token(colors.cyan) 0 6px, transparent 6px 12px)",
-      },
-      blocked: { background: "token(colors.alarm)" },
-      failed: { background: "token(colors.alarm)", animation: "pulse 0.6s steps(1) infinite" },
-      stale: { background: "token(colors.alarm)", opacity: "0.55" },
-      skipped: { background: "token(colors.grid)" },
-      planned: {
-        background:
-          "repeating-linear-gradient(90deg, token(colors.muted) 0 3px, transparent 3px 8px)",
-        opacity: "0.6",
-      },
-      unknown: { background: "token(colors.dormant)", opacity: "0.5" },
+      nominal: { stroke: "token(colors.amber)" },
+      complete: { stroke: "token(colors.mint)" },
+      running: { stroke: "token(colors.cyan)", strokeDasharray: "6 6" },
+      blocked: { stroke: "token(colors.alarm)" },
+      failed: { stroke: "token(colors.alarm)", animation: "pulse 0.6s steps(1) infinite" },
+      stale: { stroke: "token(colors.alarm)", opacity: "0.55" },
+      skipped: { stroke: "token(colors.grid)" },
+      planned: { stroke: "token(colors.muted)", strokeDasharray: "3 5", opacity: "0.6" },
+      unknown: { stroke: "token(colors.dormant)", opacity: "0.5" },
     },
   },
 });

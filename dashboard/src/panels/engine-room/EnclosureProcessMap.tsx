@@ -1,7 +1,8 @@
 import { css } from "../../../styled-system/css";
 import type { CommitRefNode, EngineProcessNode, ProviderBootNode } from "../../types/projection";
 import {
-  conduit,
+  conduitLine,
+  conduitSvg,
   couplerBar,
   engineMeta,
   engineName,
@@ -80,6 +81,23 @@ function edgeState(node: EngineProcessNode, kind: string): ConduitState {
   return conduitState(node.edges.find((edge) => edge.kind === kind)?.state ?? "unknown");
 }
 
+// SVG lane connector (5f S0). Visual parity with the prior 2px <span> conduit, but an SVG
+// primitive so later slices draw it on (stroke-dashoffset) and carry flow chevrons. State still
+// comes from the model edge; `data-state` mirrors it for snapshots and the accessibility layer.
+function SvgConduit({ state }: { state: ConduitState }) {
+  return (
+    <svg
+      className={conduitSvg}
+      viewBox="0 0 24 2"
+      preserveAspectRatio="none"
+      role="presentation"
+      aria-hidden="true"
+    >
+      <line x1="0" y1="1" x2="24" y2="1" data-state={state} className={conduitLine({ state })} />
+    </svg>
+  );
+}
+
 function CommitNode({ label, refNode }: { label: string; refNode: CommitRefNode }) {
   return (
     <div className={nodeBox({ factState: refNode.factState })}>
@@ -129,9 +147,9 @@ export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
       <span className={sectionLabel}>Official line → enclosure</span>
       <div className={row} data-testid="code-lane">
         <CommitNode label="Code source" refNode={node.codeSource} />
-        <span className={conduit({ state: edgeState(node, "worktree-add") })} aria-hidden="true" />
+        <SvgConduit state={edgeState(node, "worktree-add")} />
         <CommitNode label="Code worktree" refNode={node.codeWorktree} />
-        <span className={conduit({ state: edgeState(node, "cgc-seed") })} aria-hidden="true" />
+        <SvgConduit state={edgeState(node, "cgc-seed")} />
         <EngineUnit engine={codeEngine} role="code" />
       </div>
       <div className={couplerRow}>
@@ -142,9 +160,9 @@ export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
       {externalMemory && node.memorySource && node.memoryWorktree ? (
         <div className={row} data-testid="memory-lane">
           <CommitNode label="Memory source" refNode={node.memorySource} />
-          <span className={conduit({ state: edgeState(node, "ledger-map") })} aria-hidden="true" />
+          <SvgConduit state={edgeState(node, "ledger-map")} />
           <CommitNode label="Memory worktree" refNode={node.memoryWorktree} />
-          <span className={conduit({ state: edgeState(node, "grepai-clone") })} aria-hidden="true" />
+          <SvgConduit state={edgeState(node, "grepai-clone")} />
           <EngineUnit engine={memoryEngine} role="memory" />
         </div>
       ) : (

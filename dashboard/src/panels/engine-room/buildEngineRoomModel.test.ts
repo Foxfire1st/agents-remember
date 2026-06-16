@@ -98,4 +98,12 @@ describe("buildEngineRoomModel", () => {
     expect(model.fallbackStacks).toHaveLength(0);
     expect(model.processes).toHaveLength(1);
   });
+
+  it("exposes worktreeGroup as the enclosure key, stable across a fleeting→real id swap", () => {
+    const fleeting = buildEngineRoomModel([node({ id: "start:demo" })], [], []);
+    const real = buildEngineRoomModel([node({ id: "/contract.md" })], [], []);
+    expect(fleeting.processes[0]?.enclosureKey).toBe("/w/r/grp");
+    expect(real.processes[0]?.enclosureKey).toBe("/w/r/grp");
+    expect(fleeting.processes[0]?.enclosureKey).toBe(real.processes[0]?.enclosureKey);
+  });
 });
