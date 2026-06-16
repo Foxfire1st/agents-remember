@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 
 import { css } from "../../styled-system/css";
@@ -10,6 +11,7 @@ import { buildEngineRoomModel } from "./engine-room/buildEngineRoomModel";
 import { DiagnosticsPanel } from "./engine-room/DiagnosticsPanel";
 import { EnclosureProcessMap } from "./engine-room/EnclosureProcessMap";
 import { EnclosureStackList } from "./engine-room/EnclosureStackList";
+import { useShouldAnimate } from "./engine-room/useShouldAnimate";
 import {
   emptyState,
   engineSilhouette,
@@ -44,6 +46,17 @@ const fallbackStackBox = css({
 });
 const fallbackEngines = css({ display: "flex", gap: "0.7rem", flexWrap: "wrap" });
 
+// The human-gated lifecycle phases (T12–T18): a landing beat is in flight and waiting on a person.
+// Their phase chip pulses (gated) so the room reads as a machine being synced / landed / retired.
+const LIFECYCLE_PHASES = new Set([
+  "sync-needed",
+  "closeout-pending",
+  "commit-approval-pending",
+  "integration-pending",
+  "integration-blocked",
+  "cleanup-pending",
+]);
+
 function engineLabel(provider: ProviderNode): string {
   return provider.role === "memory" ? "GrepAI" : "CGC";
 }
@@ -69,17 +82,27 @@ function OfficialStrip({ engines }: { engines: ProviderNode[] }) {
 }
 
 // §4.2 header: the selected enclosure's identity + health + phase + next action, plus the
-// master-caution mirror (an alarm is never hidden by a full-bleed view, §4.1).
+// master-caution mirror. Slice 5f S5: the phase chip pulses while a human-gated lifecycle beat
+// (sync / closeout / integration / cleanup, T12–T18) is in flight — gated, instant under data-effects=off.
 function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
+  const animate = useShouldAnimate();
   const queue = useDashboard(selectQueue);
   const sev = queue[0]?.severity ?? "clear";
+  const phaseActive = LIFECYCLE_PHASES.has(node.phase);
+  const pulse = animate && phaseActive;
   return (
-    <div className={roomHeader} data-testid="engine-room-header">
+    <div className={roomHeader} data-testid="engine-room-header" data-phase-active={phaseActive}>
       <span className={roomHeaderName}>{node.taskName}</span>
       <span className={roomHeaderMeta}>
         <span className={healthDot({ health: node.health })} aria-hidden="true" />
         <span>{node.health}</span>
-        <span className={phaseChip({ health: node.health })}>{node.phase}</span>
+        <motion.span
+          className={phaseChip({ health: node.health })}
+          animate={pulse ? { opacity: [1, 0.5, 1] } : { opacity: 1 }}
+          transition={pulse ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0 }}
+        >
+          {node.phase}
+        </motion.span>
         <span>{node.repoName}</span>
       </span>
       {node.nextAction ? <span className={roomHeaderNext}>→ {node.nextAction}</span> : null}
