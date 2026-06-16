@@ -438,6 +438,35 @@ def _clear_start_block(context, contract: WorktreeContract, args: WorktreeArgs) 
     clear_start_progress(context.coordination_root, contract.repo_name, args.worktree_name)
 
 
+def _record_start_progress(
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    phase: str,
+    completed: tuple[str, ...],
+) -> None:
+    """Record a happy-path pre-contract start beat (§9) so the Engine Room can observe the enclosure
+    assembling rather than popping in at contract-write. Non-blocked (``blocked_reason`` stays None);
+    best-effort; skipped on dry runs."""
+    if args.dry_run or args.worktree_name is None:
+        return
+    write_start_progress(
+        context.coordination_root,
+        repo_name=contract.repo_name,
+        task_name=contract.task_name,
+        worktree_name=args.worktree_name,
+        worktree_group=contract.worktree_group.as_posix(),
+        phase=phase,
+        memory_mode=contract.memory_mode,
+        code_source_branch=contract.code_source_branch,
+        code_base_commit=contract.code_base_commit,
+        code_repo_path=contract.code_repo_path.as_posix(),
+        code_worktree=contract.code_worktree.as_posix(),
+        completed_phases=completed,
+    )
+
+
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
     repo = context.code_repository_root
@@ -469,6 +498,7 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     long_path_block = _long_path_preflight(contract)
     if long_path_block is not None:
         return WorktreeCommandResult(2, long_path_block)
+    _record_start_progress(context, contract, args, phase="preflight", completed=())
 
     code_state = ensure_worktree(
         repo,
@@ -476,6 +506,9 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
         contract.code_work_branch,
         contract.code_source_branch,
         args.dry_run,
+    )
+    _record_start_progress(
+        context, contract, args, phase="code-worktree", completed=("preflight",)
     )
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":

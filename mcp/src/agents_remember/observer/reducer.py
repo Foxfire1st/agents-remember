@@ -131,7 +131,8 @@ def project_workspace(
         ledgers=ledgers or [],
         task_documents=task_documents or [],
         attention_queue=build_attention_queue(
-            lifecycles, providers, drift_snapshots or [], setup_progress or []
+            lifecycles, providers, drift_snapshots or [], setup_progress or [],
+            engine_start_progress or [],
         ),
         engine_processes=engine_processes,
         stalest_limit=stalest_limit,
@@ -447,6 +448,7 @@ def build_attention_queue(
     providers: list[ProviderNode],
     drift_snapshots: list[DriftSnapshotNode],
     setup_progress: list[SetupProgressNode],
+    start_progress: list[dict[str, Any]] | None = None,
 ) -> list[AttentionItem]:
     """The home-screen attention queue: a ranked cross-section of what needs the human.
 
@@ -463,6 +465,7 @@ def build_attention_queue(
         *_provider_attention(providers),
         *_drift_attention(drift_snapshots),
         *_setup_attention(setup_progress),
+        *_start_attention(start_progress or []),
     ]
     items.sort(
         key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), -(item.waitSeconds or 0.0), item.id)
@@ -571,6 +574,32 @@ def _setup_attention(setup_progress: list[SetupProgressNode]) -> list[AttentionI
         for setup in setup_progress
         if setup.failedPhases or setup.state in {"failed", "stale"}
     ]
+
+
+def _start_attention(start_progress: list[dict[str, Any]]) -> list[AttentionItem]:
+    """A ``worktree_start`` gated before its contract was written -- the same master-caution the agent
+    raises in chat (§9). Only blocked entries are alarms; a happy-path progress beat (no
+    ``blockedReason``) is observability, not an alarm. Steady ``warn`` -- a human-choice gate, not a
+    fault (faults flicker, §3.2)."""
+    items: list[AttentionItem] = []
+    for entry in start_progress:
+        reason = _str_or_none(entry.get("blockedReason"))
+        if reason is None:
+            continue
+        group = str(entry.get("worktreeGroup", ""))
+        items.append(
+            AttentionItem(
+                id=f"blocked-start:{group.rsplit('/', 1)[-1]}",
+                kind="blocked-start",
+                severity="warn",
+                lane="worktree",
+                title="Worktree start blocked",
+                detail=reason,
+                enclosure=group or None,
+                repoId=_str_or_none(entry.get("repoName")),
+            )
+        )
+    return items
 
 
 # --- engine room process map (slice 5e) --------------------------------------

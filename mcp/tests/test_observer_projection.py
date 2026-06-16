@@ -52,6 +52,7 @@ from agents_remember.observer.projection_store import (
 )
 from agents_remember.observer.reducer import (
     build_analytics,
+    build_attention_queue,
     build_engine_processes,
     enclosure_actions,
     project_lifecycle,
@@ -1194,6 +1195,54 @@ class EngineProcessTests(unittest.TestCase):
             clear_start_progress(root, "r", "wt")
             self.assertIsNone(read_start_progress(start_progress_path(root, "r", "wt")))
             self.assertEqual(read_start_progress_entries(root, now=FRESH), [])
+
+    def test_blocked_start_raises_attention_parity(self) -> None:
+        # §9: a pre-contract blocked start raises the same master-caution the agent raises in chat.
+        blocked = {
+            "worktreeGroup": "/w/agents-remember/v12-feat-ar",
+            "repoName": "agents-remember",
+            "phase": "memory-blocked",
+            "blockedReason": "no exact ledger mapping for selected code base commit",
+        }
+        happy = {"worktreeGroup": "/w/agents-remember/dm-ar", "phase": "code-worktree"}
+        items = build_attention_queue([], [], [], [], [blocked, happy])
+        self.assertEqual(len(items), 1)  # only the blocked start is an alarm
+        item = items[0]
+        self.assertEqual(item.kind, "blocked-start")
+        self.assertEqual(item.id, "blocked-start:v12-feat-ar")
+        self.assertEqual(item.severity, "warn")
+        self.assertEqual(item.lane, "worktree")
+        self.assertEqual(item.detail, "no exact ledger mapping for selected code base commit")
+        self.assertEqual(item.repoId, "agents-remember")
+
+    def test_project_workspace_threads_blocked_start_into_attention(self) -> None:
+        # §9 wiring: project_workspace must thread engine_start_progress into the attention queue.
+        blocked = {
+            "worktreeGroup": "/w/agents-remember/v12-feat-ar",
+            "repoName": "agents-remember",
+            "phase": "memory-blocked",
+            "blockedReason": "no ledger mapping",
+        }
+        proj = project_workspace(
+            [], enclosures=[], providers=[], now=FRESH, engine_start_progress=[blocked]
+        )
+        kinds = [item.kind for item in proj.analytics.attentionQueue]
+        self.assertIn("blocked-start", kinds)
+
+    def test_happy_path_start_progress_is_observable_but_not_an_alarm(self) -> None:
+        # §9 gap (a): a happy-path pre-contract beat (no blockedReason) is observable as a synthesized
+        # node, but raises no attention item -- only blocked starts are alarms.
+        happy = {
+            "worktreeGroup": "/w/agents-remember/dm-ar",
+            "repoName": "agents-remember",
+            "taskName": "dm",
+            "phase": "code-worktree",
+            "memoryMode": "external",
+            "completedPhases": ["preflight"],
+        }
+        nodes = build_engine_processes([], [], [], [], [happy])
+        self.assertEqual(len(nodes), 1)  # observable as a (non-blocked) synthesized node
+        self.assertEqual(build_attention_queue([], [], [], [], [happy]), [])  # not an alarm
 
 
 if __name__ == "__main__":
