@@ -410,6 +410,10 @@ export const fleetingChoice = css({
   paddingBlock: "0.05rem",
 });
 
+// Power-up flow packet (5f S4, T8/T9): the travelling energy packet that runs along a conduit while
+// it carries real flow (DB clone / index seed). Cyan; GSAP animates its cx, gated by useShouldAnimate.
+export const conduitChevron = css({ fill: "token(colors.cyan)" });
+
 export const engineRow = css({
   display: "flex",
   alignItems: "center",

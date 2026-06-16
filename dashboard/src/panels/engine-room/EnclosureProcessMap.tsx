@@ -5,6 +5,7 @@ import gsap from "gsap";
 import { css } from "../../../styled-system/css";
 import type { CommitRefNode, EngineProcessNode, ProviderBootNode } from "../../types/projection";
 import {
+  conduitChevron,
   conduitLine,
   conduitSvg,
   couplerBar,
@@ -102,8 +103,10 @@ function isFleeting(node: EngineProcessNode): boolean {
 // the line renders fully drawn with no tween (snapshot-stable).
 function SvgConduit({ state }: { state: ConduitState }) {
   const lineRef = useRef<SVGLineElement>(null);
+  const flowRef = useRef<SVGCircleElement>(null);
   const animate = useShouldAnimate();
   const draws = state === "nominal" || state === "complete" || state === "running";
+  const flows = state === "running"; // T8/T9: a travelling energy packet while the conduit seeds/clones
   useEffect(() => {
     const line = lineRef.current;
     if (!line) return;
@@ -126,6 +129,23 @@ function SvgConduit({ state }: { state: ConduitState }) {
       gsap.set(line, { clearProps: "strokeDasharray,strokeDashoffset" });
     };
   }, [state, animate, draws]);
+  useEffect(() => {
+    const flow = flowRef.current;
+    if (!flow) return;
+    if (!animate || !flows) {
+      gsap.set(flow, { opacity: 0 }); // honest motion: no travelling packet under data-effects=off
+      return;
+    }
+    gsap.set(flow, { opacity: 1 });
+    const tween = gsap.fromTo(
+      flow,
+      { attr: { cx: 0 } },
+      { attr: { cx: 24 }, duration: 0.9, ease: "none", repeat: -1 },
+    );
+    return () => {
+      tween.kill();
+    };
+  }, [animate, flows]);
   return (
     <svg
       className={conduitSvg}
@@ -135,6 +155,9 @@ function SvgConduit({ state }: { state: ConduitState }) {
       aria-hidden="true"
     >
       <line x1="0" y1="1" x2="24" y2="1" ref={lineRef} data-state={state} className={conduitLine({ state })} />
+      {flows ? (
+        <circle ref={flowRef} cx="0" cy="1" r="1.3" className={conduitChevron} data-testid="conduit-flow" />
+      ) : null}
     </svg>
   );
 }

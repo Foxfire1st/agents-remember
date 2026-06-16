@@ -42,4 +42,15 @@ describe("EnclosureProcessMap fleeting rendering (5f S2)", () => {
     expect(container.querySelectorAll('[data-testid="code-lane"] svg line').length).toBe(2);
     expect(container.querySelectorAll('[data-testid="memory-lane"] svg line').length).toBe(2);
   });
+
+  it("renders a power-up flow packet only on a running (seeding/cloning) conduit (5f S4, T8/T9)", () => {
+    // engine-setup-running carries a running grepai-clone edge → one travelling packet.
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-setup-running")} />);
+    expect(container.querySelectorAll('[data-testid="conduit-flow"]').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders no flow packet when every conduit is settled", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(container.querySelectorAll('[data-testid="conduit-flow"]').length).toBe(0);
+  });
 });
