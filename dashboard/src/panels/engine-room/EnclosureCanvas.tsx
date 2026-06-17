@@ -18,6 +18,7 @@ import {
   engineGaugeLabel,
   engineGaugeOut,
   flowConduit,
+  flowPacket,
   sceneSvg,
   svgNodeBox,
   svgNodeLabel,
@@ -132,17 +133,21 @@ function Conduit({ edge }: { edge: EngineProcessEdge }) {
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
+  const d = `M${x1} ${y1} L ${x2} ${y2}`;
   return (
-    <path
-      className={flowConduit({ state: conduitState(edge.state) })}
-      d={`M${x1} ${y1} L ${x2} ${y2}`}
-      markerEnd="url(#er-chev)"
-      data-testid="conduit"
-      data-kind={edge.kind}
-      data-state={edge.state}
-    >
-      <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}</title>
-    </path>
+    <g data-testid="conduit" data-kind={edge.kind} data-state={edge.state}>
+      <path className={flowConduit({ state: conduitState(edge.state) })} d={d} pathLength={100} markerEnd="url(#er-chev)">
+        <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}</title>
+      </path>
+      {edge.state === "running" ? (
+        <circle
+          className={flowPacket}
+          r={4}
+          data-testid="conduit-packet"
+          style={{ offsetPath: `path('${d}')`, animation: "pktRun 1.4s linear infinite" }}
+        />
+      ) : null}
+    </g>
   );
 }
 

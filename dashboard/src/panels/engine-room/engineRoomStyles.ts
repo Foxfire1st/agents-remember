@@ -632,12 +632,14 @@ export const engineGaugeOut = cva({
 });
 
 export const engineCharge = cva({
-  base: {},
+  // transform-box/origin so the charge scaleY (chargeSweep keyframe) grows center-out, not bottom-up.
+  base: { transformBox: "fill-box", transformOrigin: "center" },
   variants: {
     runtimeState: {
       nominal: { fill: "token(colors.amber)", opacity: "0.16" },
       configured: { fill: "token(colors.amber)", opacity: "0.1" },
-      indexing: { fill: "token(colors.cyan)", opacity: "0.85" },
+      // indexing/booting: a center-out charge sweep (frozen to a settled full charge under effects=off).
+      indexing: { fill: "token(colors.cyan)", opacity: "0.85", animation: "chargeSweep 1.5s ease-out infinite" },
       down: { fill: "token(colors.alarm)", opacity: "0.5" },
       unknown: { fill: "token(colors.dormant)", opacity: "0" },
     },
@@ -677,8 +679,9 @@ export const flowConduit = cva({
   variants: {
     state: {
       nominal: { stroke: "token(colors.amber)", opacity: "0.8" },
-      complete: { stroke: "token(colors.mint)", opacity: "0.85" },
-      running: { stroke: "token(colors.cyan)" },
+      complete: { stroke: "token(colors.amber)", opacity: "0.6" },
+      // running (seed/clone): draws on (needs pathLength=100 on the path) then settles drawn.
+      running: { stroke: "token(colors.cyan)", strokeDasharray: "100 100", animation: "conduitDraw 0.6s cubic-bezier(.25,1,.4,1)" },
       blocked: { stroke: "token(colors.alarm)" },
       failed: { stroke: "token(colors.alarm)" },
       stale: { stroke: "token(colors.alarm)", opacity: "0.55" },
@@ -688,3 +691,7 @@ export const flowConduit = cva({
     },
   },
 });
+
+// The travelling flow packet — a cyan energy dot that runs along a seeding/cloning conduit (its
+// offset-path is set per-conduit in EnclosureCanvas). Hidden under effects=off (see index.css freeze).
+export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95" });

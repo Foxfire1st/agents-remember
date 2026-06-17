@@ -85,6 +85,43 @@
   }
 }
 
+/* Engine Room pod-stage motion (5g G2): the podracer engine charge grows center-out (the charge rect
+   sets transform-box: fill-box + transform-origin: center). Global keyframe, frozen by effects=off below
+   so the static end-state (a settled, fully-grown charge) is what screenshots / visual assertions see. */
+@keyframes chargeSweep {
+  0% {
+    transform: scaleY(0.06);
+    opacity: 0.95;
+  }
+  65% {
+    transform: scaleY(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+
+/* Conduit draw-on (stroke-dashoffset, needs pathLength=100 on the path) + the travelling flow packet
+   (offset-distance) — only on a running/seeding conduit. Frozen by effects=off → drawn, no packet. */
+@keyframes conduitDraw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pktRun {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */
@@ -93,4 +130,9 @@ html[data-effects="off"] *::before,
 html[data-effects="off"] *::after {
   animation: none !important;
   transition: none !important;
+}
+
+/* The travelling flow packet has no settled end-state — hide it entirely under the freeze (5g G2). */
+html[data-effects="off"] [data-testid="conduit-packet"] {
+  display: none;
 }
