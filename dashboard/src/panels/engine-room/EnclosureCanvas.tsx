@@ -19,6 +19,7 @@ import {
   engineDiv,
   engineGaugeLabel,
   engineGaugeOut,
+  engineReindexCharge,
   flowConduit,
   flowPacket,
   gateBar,
@@ -88,37 +89,51 @@ function BranchNode({ pos, label, refNode }: {
   refNode: CommitRefNode;
 }) {
   const cx = pos.x + pos.w / 2;
+  const branch = refNode.branch ?? "—";
+  // truncate to the box width (~7.4px/char at 14px); the full string is in the <title> (hover).
+  const maxChars = Math.max(8, Math.floor((pos.w - 20) / 7.4));
+  const flags = `${refNode.dirty ? " · dirty" : ""}${refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""}`;
+  const full = `${label}: ${branch}${refNode.commit ? ` @ ${refNode.commit}` : ""}${flags}`;
   return (
     <g data-testid="branch-node" data-fact={refNode.factState}>
+      <title>{full}</title>
       <rect className={svgNodeBox({ factState: refNode.factState })} x={pos.x} y={pos.y} width={pos.w} height={NODE_H} rx={8} />
       <text className={svgNodeLabel} x={cx} y={pos.y + 17} textAnchor="middle">{label}</text>
-      <text className={svgNodeTitle} x={cx} y={pos.y + 36} textAnchor="middle">{refNode.branch ?? "—"}</text>
+      <text className={svgNodeTitle} x={cx} y={pos.y + 36} textAnchor="middle">{truncate(branch, maxChars)}</text>
       {refNode.commit ? (
         <text className={svgNodeMeta} x={cx} y={pos.y + 52} textAnchor="middle">
           @{refNode.commit.slice(0, 8)}
-          {refNode.dirty ? " · dirty" : ""}
-          {refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""}
+          {flags}
         </text>
       ) : null}
     </g>
   );
 }
 
-function EngineGauge({ at, label, runtime }: {
+function EngineGauge({ at, label, runtime, reindex }: {
   at: { x: number; y: number };
   label: string;
   runtime: RuntimeState;
+  reindex?: boolean;
 }) {
+  const state = reindex ? "reindex" : runtime;
   return (
     <g
       transform={`translate(${at.x},${at.y})`}
       data-testid="engine-gauge"
-      data-runtime={runtime}
+      data-runtime={state}
       role="img"
-      aria-label={`${label} engine ${runtime}`}
+      aria-label={`${label} engine ${state}`}
     >
-      <rect className={engineGaugeOut({ runtimeState: runtime })} x={0} y={0} width={ENGINE.w} height={ENGINE.h} rx={5} />
-      <rect className={engineCharge({ runtimeState: runtime })} x={2} y={2} width={ENGINE.w - 4} height={ENGINE.h - 4} rx={3} />
+      <rect className={engineGaugeOut({ runtimeState: reindex ? "nominal" : runtime })} x={0} y={0} width={ENGINE.w} height={ENGINE.h} rx={5} />
+      <rect
+        className={reindex ? engineReindexCharge : engineCharge({ runtimeState: runtime })}
+        x={2}
+        y={2}
+        width={ENGINE.w - 4}
+        height={ENGINE.h - 4}
+        rx={3}
+      />
       {[14, 26, 38, 50, 62, 74, 86].map((y) => (
         <line className={engineDiv} key={y} x1={0} y1={y} x2={ENGINE.w} y2={y} />
       ))}
@@ -243,13 +258,26 @@ export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
   // failure overlays (5g G3)
   const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
-  const blockedEdges = node.edges.filter((e) => e.state === "blocked" || e.state === "failed");
-  const firstBlocked = blockedEdges.length ? EDGE_GEOM[blockedEdges[0].kind] : undefined;
+  // blocked = STEADY gate (a choice required); failed/down = FAULT → the engine flickers, no gate (G4).
+  const gatedEdges = node.edges.filter((e) => e.state === "blocked");
+  const firstGated = gatedEdges.length ? EDGE_GEOM[gatedEdges[0].kind] : undefined;
+  const memoryDown = memory?.runtimeState === "down";
+  const codeDown = code?.runtimeState === "down";
+  // the reason badge anchors at the blocked lane, else beside the faulting (down) engine
+  const reasonCenter = firstGated
+    ? { cx: (firstGated[0] + firstGated[2]) / 2, cy: (firstGated[1] + firstGated[3]) / 2 + 14 }
+    : memoryDown
+      ? { cx: 1084, cy: 562 }
+      : codeDown
+        ? { cx: 1084, cy: 88 }
+        : undefined;
   const recovery = [
     ...new Set(
-      [node.nextAction, ...node.actions.filter((a) => a.enabled).map((a) => a.action)].filter(
-        (value): value is string => Boolean(value),
-      ),
+      [
+        node.nextAction,
+        node.retryArgs ? "retry setup" : undefined,
+        ...node.actions.filter((a) => a.enabled).map((a) => a.action),
+      ].filter((value): value is string => Boolean(value)),
     ),
   ];
   return (
@@ -282,7 +310,7 @@ export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
         <BranchNode pos={POS.memoryWorktree} label="Memory worktree" refNode={node.memoryWorktree} />
       ) : null}
 
-      <EngineGauge at={ENGINE.cgc} label="CGC" runtime={runtimeState(code?.runtimeState)} />
+      <EngineGauge at={ENGINE.cgc} label="CGC" runtime={runtimeState(code?.runtimeState)} reindex={node.seedFallback} />
       {hasMemory ? <EngineGauge at={ENGINE.grepai} label="GrepAI" runtime={runtimeState(memory?.runtimeState)} /> : null}
 
       <WarpCoupler bound={hasMemory} label={`contract · ${node.taskId}`} />
@@ -296,13 +324,9 @@ export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
       {/* failure overlays (5g G3): a steady gate over each blocked lane + a local reason badge, the
           alarm-parity attention badge, and recovery chips. A fleeting (pre-contract) block keeps its
           ghost banner in EnclosureProcessMap, so the scene gate / reason / chips defer to it. */}
-      {!fleeting ? blockedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />) : null}
-      {!fleeting && firstBlocked ? (
-        <ReasonBadge
-          reason={node.summary}
-          cx={(firstBlocked[0] + firstBlocked[2]) / 2}
-          cy={(firstBlocked[1] + firstBlocked[3]) / 2 + 14}
-        />
+      {!fleeting ? gatedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />) : null}
+      {!fleeting && reasonCenter ? (
+        <ReasonBadge reason={node.summary} cx={reasonCenter.cx} cy={reasonCenter.cy} />
       ) : null}
       {isBlocked(node) ? <Attention /> : null}
       {!fleeting ? <RecoveryChips labels={recovery} /> : null}

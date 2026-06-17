@@ -228,6 +228,8 @@ export const phaseChip = cva({
     borderWidth: "1px",
     borderStyle: "solid",
     letterSpacing: "0.03em",
+    whiteSpace: "nowrap", // never wrap the phase ("provider-setup") in the stack-item head row
+    flexShrink: "0",
   },
   variants: {
     health: {
@@ -625,10 +627,20 @@ export const engineGaugeOut = cva({
       nominal: { stroke: "token(colors.amber)" },
       configured: { stroke: "token(colors.amber)", opacity: "0.7" },
       indexing: { stroke: "token(colors.cyan)" },
-      down: { stroke: "token(colors.alarm)" },
+      // down = FAULT → flicker (≤3/s, distinct from the STEADY blocked gate). Isolated to this engine.
+      down: { stroke: "token(colors.alarm)", animation: "pulse 0.5s steps(1) infinite" },
       unknown: { stroke: "token(colors.dormant)", strokeDasharray: "4 3", opacity: "0.6" },
     },
   },
+});
+
+// Reindex reroute (t9c, seedFallback) — an AMBER center-out pulse (a fallback, NOT the red fault).
+export const engineReindexCharge = css({
+  fill: "token(colors.amber)",
+  opacity: "0.85",
+  transformBox: "fill-box",
+  transformOrigin: "center",
+  animation: "chargeSweep 1.5s ease-out infinite",
 });
 
 export const engineCharge = cva({
