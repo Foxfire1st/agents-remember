@@ -175,7 +175,7 @@ export function EngineRoom() {
             onSelect={setSelectedGroup}
           />
           <div className={roomStage} data-testid="pod-stage">
-            <EnclosureProcessMap node={selected.node} />
+            <EnclosureProcessMap node={selected.node} workspaceEngines={model.workspaceEngines} />
           </div>
           <div className={roomZone} data-testid="engine-room-diagnostics">
             <BootTimeline node={selected.node} />
@@ -191,6 +191,7 @@ export function EngineRoom() {
       testid="engine-room"
       title={`Engine room · ${model.processes.length} ${model.processes.length === 1 ? "enclosure" : "enclosures"}`}
       className={sizing}
+      fill
     >
       {model.workspaceEngines.length > 0 ? <OfficialStrip engines={model.workspaceEngines} /> : null}
       {body}

@@ -72,6 +72,29 @@ const statusRow = css({
   fontSize: "0.78rem",
 });
 const dim = css({ color: "muted" });
+const effectsToggle = cva({
+  base: {
+    font: "inherit",
+    fontSize: "0.74rem",
+    letterSpacing: "0.06em",
+    paddingInline: "0.45rem",
+    paddingBlock: "0.08rem",
+    borderRadius: "2px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    cursor: "pointer",
+    background: "transparent",
+    transition: "color 0.15s ease, border-color 0.15s ease",
+    _hover: { borderColor: "muted" },
+    _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  },
+  variants: {
+    on: {
+      true: { color: "amber", borderColor: "amber" },
+      false: { color: "muted", borderColor: "grid" },
+    },
+  },
+});
 const caution = cva({
   base: { letterSpacing: "0.06em", color: "muted" },
   variants: {
@@ -236,6 +259,7 @@ function TopBar() {
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
         <ConnBadge conn={conn} />
+        <EffectsToggle />
       </div>
     </header>
   );
@@ -248,5 +272,37 @@ function ConnBadge({ conn }: { conn: ConnState }) {
     <span className={connBadge({ state: conn })} data-testid="conn">
       {label}
     </span>
+  );
+}
+
+// G6: a visible motion toggle. Flips html[data-effects] (which useShouldAnimate reads live, so the
+// engine-room backdrop + all gated motion respond at once) and persists the choice to the
+// `calm-cockpit` localStorage flag main.tsx reads on the next load. Default = effects on.
+function EffectsToggle() {
+  const [on, setOn] = useState(
+    () => typeof document === "undefined" || document.documentElement.dataset.effects !== "off",
+  );
+  const toggle = () => {
+    const next = !on;
+    setOn(next);
+    if (next) {
+      delete document.documentElement.dataset.effects;
+      window.localStorage.removeItem("calm-cockpit");
+    } else {
+      document.documentElement.dataset.effects = "off";
+      window.localStorage.setItem("calm-cockpit", "1");
+    }
+  };
+  return (
+    <button
+      type="button"
+      className={effectsToggle({ on })}
+      onClick={toggle}
+      aria-pressed={on}
+      data-testid="effects-toggle"
+      title={on ? "Effects on — click to calm (freeze motion + backdrop)" : "Calm — click to enable motion + backdrop"}
+    >
+      {on ? "✦ Effects" : "❄ Calm"}
+    </button>
   );
 }

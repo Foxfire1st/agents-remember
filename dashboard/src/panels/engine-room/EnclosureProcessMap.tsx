@@ -1,23 +1,27 @@
 import { AnimatePresence, motion } from "motion/react";
 
 import { css } from "../../../styled-system/css";
-import type { EngineProcessNode } from "../../types/projection";
+import type { EngineProcessNode, ProviderNode } from "../../types/projection";
 import { EnclosureCanvas } from "./EnclosureCanvas";
 import {
   abandonRecord,
+  backdrop,
+  backdropVideo,
   dissolveShell,
   fleetingBanner,
   fleetingChoice,
   fleetingChoices,
   fleetingLabel,
   fleetingReason,
+  stageContent,
 } from "./engineRoomStyles";
 import { useShouldAnimate } from "./useShouldAnimate";
 
 const mapWrap = css({
+  position: "relative", // G6: stacking context for the atmospheric backdrop
+  overflow: "hidden", // clip the backdrop video to the rounded box
   display: "flex",
   flexDirection: "column",
-  gap: "0.45rem",
   flex: "1",
   minHeight: "0",
   padding: "0.6rem",
@@ -60,7 +64,10 @@ function AbandonRecord({ node }: { node: EngineProcessNode }) {
 // solidifies in place into the contract-anchored enclosure (T4 morph, 5f S3) — never a teleport.
 // The ghost banner fades as the node promotes; `layout` carries the morph. Honest motion: under
 // data-effects=off / reduced-motion the shell is an instant swap (no tween).
-export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
+export function EnclosureProcessMap({ node, workspaceEngines = [] }: {
+  node: EngineProcessNode;
+  workspaceEngines?: ProviderNode[];
+}) {
   const animate = useShouldAnimate();
   // t18 — an abandoned enclosure renders as a dim, desaturated record (its static end-state).
   const abandoned = node.phase === "abandoned";
@@ -74,28 +81,44 @@ export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
     >
-      <AnimatePresence initial={false}>
-        {isFleeting(node) ? (
-          <motion.div
-            key="fleeting"
-            layout={animate}
-            initial={animate ? { opacity: 0 } : false}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: animate ? 0.3 : 0 }}
-          >
-            <FleetingBanner node={node} />
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-      {abandoned ? <AbandonRecord node={node} /> : null}
-      {abandoned ? (
-        <div className={dissolveShell} data-testid="dissolve">
-          <EnclosureCanvas node={node} />
+      {/* G6: faint blueprint boomerang backdrop — only when effects are on (absent + lazy when calm). */}
+      {animate ? (
+        <div className={backdrop} aria-hidden="true" data-testid="backdrop">
+          <video
+            className={backdropVideo}
+            src="/assets/blueprint-boomerang.mp4"
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+          />
         </div>
-      ) : (
-        <EnclosureCanvas node={node} />
-      )}
+      ) : null}
+      <div className={stageContent}>
+        <AnimatePresence initial={false}>
+          {isFleeting(node) ? (
+            <motion.div
+              key="fleeting"
+              layout={animate}
+              initial={animate ? { opacity: 0 } : false}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: animate ? 0.3 : 0 }}
+            >
+              <FleetingBanner node={node} />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+        {abandoned ? <AbandonRecord node={node} /> : null}
+        {abandoned ? (
+          <div className={dissolveShell} data-testid="dissolve">
+            <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} />
+          </div>
+        ) : (
+          <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} />
+        )}
+      </div>
     </motion.div>
   );
 }

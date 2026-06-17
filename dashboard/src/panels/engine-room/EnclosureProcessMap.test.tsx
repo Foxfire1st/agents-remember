@@ -1,12 +1,17 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { EngineProcessNode } from "../../types/projection";
+import type { EngineProcessNode, ProviderNode } from "../../types/projection";
 import { EnclosureProcessMap } from "./EnclosureProcessMap";
 import { ENGINE_ROOM_SCENARIOS } from "./fixtures";
 
 const KNOWN_EDGE_KINDS = new Set(["worktree-add", "ledger-map", "cgc-seed", "grepai-clone", "sync", "integration"]);
 const VALID_RUNTIME = new Set(["nominal", "configured", "indexing", "down", "unknown"]);
+// The shared official line's two workspace engines (CGC code + GrepAI memory), as the model lifts them.
+const WORKSPACE_ENGINES: ProviderNode[] = [
+  { id: "cgc", state: "ready", watcherUp: true, indexingState: "indexed", scope: "workspace", role: "code" },
+  { id: "grepai", state: "ready", watcherUp: true, indexingState: "indexed", scope: "workspace", role: "memory" },
+];
 
 function nodeFrom(name: string): EngineProcessNode {
   const scenario = ENGINE_ROOM_SCENARIOS.find((entry) => entry.name === name);
@@ -62,6 +67,38 @@ describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
     expect(container.querySelector('[data-testid="warp-coupler"]')?.getAttribute("data-bound")).toBe(String(external));
   });
 
+  it("renders the official-line (workspace) engines on the left when provided, plus their wiring (5g decals)", () => {
+    const node = nodeFrom("engine-bootstrap");
+    const external = hasExternalMemory(node);
+    const right = external ? 2 : 1;
+    const { container } = render(<EnclosureProcessMap node={node} workspaceEngines={WORKSPACE_ENGINES} />);
+    // the two official-line engines (left world) sit on top of the worktree engines (right world)…
+    expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(right + 2);
+    // …fed by their provider→branch wires, with the official code↔memory coupler when memory is external.
+    expect(container.querySelectorAll('[data-testid="official-wire"]').length).toBeGreaterThan(0);
+    expect(container.querySelector('[data-testid="warp-coupler-official"]') !== null).toBe(external);
+  });
+
+  it("omits the official-line engines + wiring when no workspace engines are supplied (default empty)", () => {
+    const node = nodeFrom("engine-bootstrap");
+    const external = hasExternalMemory(node);
+    const { container } = render(<EnclosureProcessMap node={node} />);
+    // no left-world engines or wires without workspace engines (right-world gauges unchanged)
+    expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(external ? 2 : 1);
+    expect(container.querySelectorAll('[data-testid="official-wire"]').length).toBe(0);
+  });
+
+  it("draws the canopy HUD frame (bevel rim + corner brackets + edge ticks)", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(container.querySelector('[data-testid="canopy-frame"]')).not.toBeNull();
+  });
+
+  it("annotates the worktree landing lane (ledger ▸ maps merge) only for an external-memory enclosure", () => {
+    const node = nodeFrom("engine-bootstrap");
+    const { container } = render(<EnclosureProcessMap node={node} />);
+    expect(container.querySelector('[data-testid="lane-ledger"]') !== null).toBe(hasExternalMemory(node));
+  });
+
   it("renders the official + worktree branch nodes (code & memory when external)", () => {
     const node = nodeFrom("engine-bootstrap");
     const external = hasExternalMemory(node);
@@ -103,5 +140,20 @@ describe("EnclosureCanvas — live + teardown (5g G5)", () => {
     expect(getByTestId("abandon-record").textContent).toContain("Abandoned");
     expect(queryByTestId("recovery-chips")).toBeNull();
     expect(queryByTestId("attention")).toBeNull();
+  });
+});
+
+describe("EnclosureProcessMap — atmospheric backdrop (5g G6)", () => {
+  it("mounts no backdrop under data-effects=off (determinism / reduced-motion)", () => {
+    const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(queryByTestId("backdrop")).toBeNull();
+  });
+
+  it("mounts the faint boomerang backdrop (aria-hidden, a <video>) when effects are on", () => {
+    document.documentElement.removeAttribute("data-effects"); // effects on for this case
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    const bd = getByTestId("backdrop");
+    expect(bd.getAttribute("aria-hidden")).toBe("true");
+    expect(bd.querySelector("video")).not.toBeNull();
   });
 });

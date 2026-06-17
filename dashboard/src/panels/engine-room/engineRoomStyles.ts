@@ -532,6 +532,8 @@ export const diagPanel = css({
   padding: "0.55rem 0.65rem",
   border: "1px solid token(colors.grid)",
   borderRadius: "3px",
+  alignContent: "start", // rows stay top-aligned when the box grows
+  flex: "1", // fill the right zone's remaining height (the boot timeline stays fixed) — stretch to the floor
 });
 
 export const diagRow = css({
@@ -693,6 +695,60 @@ export const engineGaugeLabel = css({
   fontWeight: "600",
 });
 
+// Podracer gauge detail (ported 1:1 from podstage.html .e-spine / .e-petal): a faint centre spine
+// plus the fanned flank petals — the fine lines that read each unit as an engine, not a bar. The
+// spine is constant; the petals follow the engine's runtime colour so they stay state-honest.
+export const engineSpine = css({ stroke: "token(colors.amber)", strokeWidth: "0.8", opacity: "0.28" });
+export const enginePetal = cva({
+  base: { strokeWidth: "1.4", strokeLinecap: "round" },
+  variants: {
+    runtimeState: {
+      nominal: { stroke: "token(colors.mint)", opacity: "0.6" },
+      configured: { stroke: "token(colors.dormant)", opacity: "0" }, // off → no petals
+      indexing: { stroke: "token(colors.cyan)", opacity: "0.6" },
+      down: { stroke: "token(colors.alarm)", opacity: "0.6" },
+      unknown: { stroke: "token(colors.dormant)", opacity: "0" },
+    },
+  },
+});
+
+// Official-line provider→branch wiring (podstage.html .wire): the workspace CGC/GrepAI feeding the
+// official code/memory nodes. Structural truth, present whenever the official engines exist.
+export const officialWire = css({
+  fill: "none",
+  stroke: "token(colors.amber)",
+  strokeWidth: "2",
+  opacity: "0.8",
+  strokeLinecap: "round",
+});
+
+// Canopy housing (podstage.html .canopy): the decorative HUD frame — a double bevel rim, the four L
+// corner brackets, and the edge ticks. Pure amber line-art at the stage edges; the group's stroke is
+// inherited by its children, while per-element strokeWidth/opacity are set inline. Carries no state.
+export const canopyStroke = css({ fill: "none", stroke: "token(colors.amber)" });
+
+// Lane annotation flags (podstage.html #ledger / #hist): small labelled markers on the worktree +
+// official landing lanes. Descriptive lane-role labels — the live status lives in the diagnostics
+// panel + node fact-states — toned per lane: ledger=amber, historical=dormant.
+export const laneFlag = cva({
+  base: { strokeWidth: "1" },
+  variants: {
+    tone: {
+      ledger: { fill: "oklch(0.24 0.03 250)", stroke: "token(colors.amber)" },
+      historical: { fill: "oklch(0.18 0.02 25)", stroke: "token(colors.dormant)" },
+    },
+  },
+});
+export const laneFlagText = cva({
+  base: { fontSize: "11px" },
+  variants: {
+    tone: {
+      ledger: { fill: "token(colors.amber)" },
+      historical: { fill: "token(colors.dormant)" },
+    },
+  },
+});
+
 // Warp coupler — the contract binding code===memory in the worktree (bound when external memory).
 export const warpCouplerG = cva({
   base: {},
@@ -791,4 +847,28 @@ export const abandonRecord = css({
   color: "muted",
   fontSize: "0.74rem",
   letterSpacing: "0.04em",
+});
+
+// --- G6: atmospheric blueprint backdrop (the faint amber-tinted boomerang) ----
+// Mounts behind the scene, gated to effects-on (useShouldAnimate) so it is absent + lazy under
+// reduced-motion / data-effects=off. aria-hidden + pointer-events:none — pure atmosphere, never state.
+export const backdrop = css({ position: "absolute", inset: "0", zIndex: "0", pointerEvents: "none", overflow: "hidden" });
+export const backdropVideo = css({
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  opacity: "0.14",
+  filter: "grayscale(1) sepia(1) saturate(2.6) hue-rotate(6deg) brightness(0.85) contrast(1.05)",
+  mixBlendMode: "screen",
+});
+// The scene content sits in its own layer above the backdrop.
+export const stageContent = css({
+  position: "relative",
+  zIndex: "1",
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.45rem",
+  flex: "1",
+  minWidth: "0",
+  minHeight: "0",
 });
