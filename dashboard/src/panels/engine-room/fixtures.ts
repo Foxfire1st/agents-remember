@@ -52,6 +52,7 @@ interface EdgeStates {
   ledger?: string;
   grepai?: string;
   sync?: string;
+  integration?: string;
 }
 
 function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
@@ -99,6 +100,16 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       kind: "sync",
       state: states.sync,
       label: "official line moved — sync",
+    });
+  }
+  if (states.integration) {
+    out.push({
+      id: "integration",
+      fromNode: "code-worktree",
+      toNode: "official-line",
+      kind: "integration",
+      state: states.integration,
+      label: "integrate ff-only → source",
     });
   }
   return out;
@@ -475,6 +486,47 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         actions: [{ action: "cleanup", enabled: true }],
         summary: "Integrated; provider runtime teardown + worktree removal pending.",
         nextAction: "request_cleanup_decision",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    name: "engine-integration-conflict",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "integration-blocked",
+        health: "blocked",
+        humanReviewStatus: "approved",
+        closeoutStatus: "completed",
+        integrationStatus: "conflict",
+        // the integration return-lane is blocked; the source line did NOT move (all-or-nothing).
+        edges: edges({ integration: "blocked" }),
+        actions: [],
+        nextAction: "resolve_integration_conflict",
+        summary: "Integration conflict on the source line — resolve manually; nothing landed (all-or-nothing).",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    name: "engine-abandoned",
+    processes: [
+      engineProcess({
+        id: "spike-ui",
+        taskName: "spike-ui-experiment",
+        repoName: "agents-remember",
+        phase: "abandoned",
+        health: "skipped",
+        humanReviewStatus: "n/a",
+        closeoutStatus: "not-started",
+        cleanup: "done",
+        providers: [],
+        actions: [],
+        nextAction: "",
+        summary: "Worktree abandoned without integration — record kept.",
       }),
     ],
     workspace: WORKSPACE,

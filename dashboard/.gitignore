@@ -4,6 +4,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 playwright-report/
+.playwright-cli/
 test-results/
 coverage/
 

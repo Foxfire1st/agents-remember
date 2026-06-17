@@ -20,6 +20,7 @@ import {
   engineGaugeLabel,
   engineGaugeOut,
   engineReindexCharge,
+  engineReindexOut,
   flowConduit,
   flowPacket,
   gateBar,
@@ -27,6 +28,8 @@ import {
   reasonDot,
   reasonText,
   sceneSvg,
+  stopBar,
+  stopText,
   svgChip,
   svgChipText,
   svgNodeBox,
@@ -81,6 +84,8 @@ const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   "cgc-seed": [900, 281, 1055, 150],
   "grepai-clone": [900, 403, 1055, 500],
   sync: [480, 289, 698, 289],
+  // integration = the worktree → official "landing" return lane (above the code lane); t14c STOPs it.
+  integration: [690, 234, 490, 234],
 };
 
 function BranchNode({ pos, label, refNode }: {
@@ -125,7 +130,7 @@ function EngineGauge({ at, label, runtime, reindex }: {
       role="img"
       aria-label={`${label} engine ${state}`}
     >
-      <rect className={engineGaugeOut({ runtimeState: reindex ? "nominal" : runtime })} x={0} y={0} width={ENGINE.w} height={ENGINE.h} rx={5} />
+      <rect className={reindex ? engineReindexOut : engineGaugeOut({ runtimeState: runtime })} x={0} y={0} width={ENGINE.w} height={ENGINE.h} rx={5} />
       <rect
         className={reindex ? engineReindexCharge : engineCharge({ runtimeState: runtime })}
         x={2}
@@ -252,25 +257,50 @@ function RecoveryChips({ labels }: { labels: string[] }) {
   );
 }
 
+// t14c — terminal integration conflict: a STOP at the integration lane's midpoint (flash → steady).
+// Heavier than the recoverable Gate; the source line does NOT move (all-or-nothing); no recovery chips.
+function TerminalStop({ edge }: { edge: EngineProcessEdge }) {
+  const geom = EDGE_GEOM[edge.kind];
+  if (!geom) return null;
+  const [x1, y1, x2, y2] = geom;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  return (
+    <g data-testid="terminal-stop" data-kind={edge.kind}>
+      <rect className={stopBar} x={cx - 64} y={cy - 13} width={128} height={26} rx={4} />
+      <text className={stopText} x={cx} y={cy + 4} textAnchor="middle">⛔ STOP · CONFLICT</text>
+    </g>
+  );
+}
+
 export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
   // failure overlays (5g G3)
   const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
+  // t14c — a terminal integration conflict draws a STOP (not the recoverable Gate) and no recovery chips.
+  const terminal = node.phase === "integration-blocked";
+  const terminalEdge = terminal
+    ? node.edges.find((e) => e.kind === "integration" && e.state === "blocked")
+    : undefined;
   // blocked = STEADY gate (a choice required); failed/down = FAULT → the engine flickers, no gate (G4).
-  const gatedEdges = node.edges.filter((e) => e.state === "blocked");
+  // The terminal-conflict integration edge is excluded — it renders as a STOP instead of a Gate.
+  const gatedEdges = node.edges.filter((e) => e.state === "blocked" && e !== terminalEdge);
   const firstGated = gatedEdges.length ? EDGE_GEOM[gatedEdges[0].kind] : undefined;
+  const stopGeom = terminalEdge ? EDGE_GEOM[terminalEdge.kind] : undefined;
   const memoryDown = memory?.runtimeState === "down";
   const codeDown = code?.runtimeState === "down";
-  // the reason badge anchors at the blocked lane, else beside the faulting (down) engine
-  const reasonCenter = firstGated
-    ? { cx: (firstGated[0] + firstGated[2]) / 2, cy: (firstGated[1] + firstGated[3]) / 2 + 14 }
-    : memoryDown
-      ? { cx: 1084, cy: 562 }
-      : codeDown
-        ? { cx: 1084, cy: 88 }
-        : undefined;
+  // the reason badge anchors at the STOP / blocked lane, else beside the faulting (down) engine
+  const reasonCenter = stopGeom
+    ? { cx: (stopGeom[0] + stopGeom[2]) / 2, cy: (stopGeom[1] + stopGeom[3]) / 2 + 16 }
+    : firstGated
+      ? { cx: (firstGated[0] + firstGated[2]) / 2, cy: (firstGated[1] + firstGated[3]) / 2 + 14 }
+      : memoryDown
+        ? { cx: 1084, cy: 562 }
+        : codeDown
+          ? { cx: 1084, cy: 88 }
+          : undefined;
   const recovery = [
     ...new Set(
       [
@@ -325,11 +355,12 @@ export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
           alarm-parity attention badge, and recovery chips. A fleeting (pre-contract) block keeps its
           ghost banner in EnclosureProcessMap, so the scene gate / reason / chips defer to it. */}
       {!fleeting ? gatedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />) : null}
+      {!fleeting && terminalEdge ? <TerminalStop edge={terminalEdge} /> : null}
       {!fleeting && reasonCenter ? (
         <ReasonBadge reason={node.summary} cx={reasonCenter.cx} cy={reasonCenter.cy} />
       ) : null}
       {isBlocked(node) ? <Attention /> : null}
-      {!fleeting ? <RecoveryChips labels={recovery} /> : null}
+      {!fleeting && !terminal ? <RecoveryChips labels={recovery} /> : null}
     </svg>
   );
 }

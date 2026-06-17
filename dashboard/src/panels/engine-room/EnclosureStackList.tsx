@@ -9,6 +9,7 @@ import {
   stackItemHead,
   stackList,
   stackMeta,
+  stackRepo,
   stackTaskName,
 } from "./engineRoomStyles";
 import type { EngineProcessView } from "./engineRoomTypes";
@@ -57,8 +58,8 @@ export function EnclosureStackList({
             </span>
             <span className={phaseChip({ health: node.health })}>{node.phase}</span>
           </div>
+          <div className={stackRepo}>{node.repoName}</div>
           <div className={stackMeta}>
-            <span>{node.repoName}</span>
             {lifecycle ? <span className={chip}>{lifecycle.state}</span> : null}
             <span className={chip}>review {node.humanReviewStatus}</span>
             <span className={chip}>closeout {node.closeoutStatus}</span>

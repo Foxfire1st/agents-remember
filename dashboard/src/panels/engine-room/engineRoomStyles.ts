@@ -20,7 +20,7 @@ export const roomShell = css({
 
 export const roomGrid = css({
   display: "grid",
-  gridTemplateColumns: "minmax(190px, 16rem) minmax(0, 1fr) minmax(280px, 22rem)",
+  gridTemplateColumns: "minmax(230px, 20rem) minmax(0, 1fr) minmax(280px, 22rem)",
   gap: "0.7rem",
   flex: "1",
   minHeight: "0",
@@ -122,7 +122,9 @@ export const stackList = css({
   listStyle: "none",
   margin: "0",
   padding: "0",
+  minWidth: "0", // shrink within the grid track so items can ellipsize, not overflow
   maxHeight: "100%",
+  overflowX: "hidden", // vertical scroll only; never a horizontal scrollbar
   overflowY: "auto",
   outline: "none",
 });
@@ -131,6 +133,7 @@ export const stackItem = cva({
   base: {
     display: "grid",
     gap: "0.25rem",
+    minWidth: "0",
     padding: "0.45rem 0.55rem",
     border: "1px solid token(colors.grid)",
     borderLeftWidth: "3px",
@@ -161,6 +164,7 @@ export const stackItemHead = css({
   alignItems: "center",
   gap: "0.4rem",
   justifyContent: "space-between",
+  minWidth: "0", // let the name column shrink/ellipsize so the phase pill never clips
 });
 
 export const stackTaskName = css({
@@ -171,9 +175,20 @@ export const stackTaskName = css({
   textOverflow: "ellipsis",
 });
 
+// The repo label sits on its own line above the status chips so the chip row reads as a clean group.
+export const stackRepo = css({
+  color: "muted",
+  fontSize: "0.68rem",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  minWidth: "0",
+});
+
 export const stackMeta = css({
   display: "flex",
   flexWrap: "wrap",
+  alignItems: "center",
   gap: "0.35rem",
   color: "muted",
   fontSize: "0.68rem",
@@ -436,8 +451,12 @@ export const engineSilhouette = cva({
   },
   variants: {
     runtimeState: {
-      nominal: { borderColor: "amber" },
-      configured: { borderColor: "amber", opacity: "0.8" },
+      // Active engine = GREEN (booted, running) — green/go, distinct from amber=warning, red=error, empty=off.
+      nominal: {
+        borderColor: "mint",
+        background: "repeating-linear-gradient(0deg, token(colors.mint) 0 4px, transparent 4px 8px)",
+      },
+      configured: { borderColor: "dormant", opacity: "0.7" }, // configured but not running → empty/off
       indexing: {
         borderColor: "cyan",
         background:
@@ -624,8 +643,8 @@ export const engineGaugeOut = cva({
   base: { fill: "token(colors.bg)", strokeWidth: "1.5", opacity: "0.95" },
   variants: {
     runtimeState: {
-      nominal: { stroke: "token(colors.amber)" },
-      configured: { stroke: "token(colors.amber)", opacity: "0.7" },
+      nominal: { stroke: "token(colors.mint)" }, // active = green
+      configured: { stroke: "token(colors.dormant)", opacity: "0.6" }, // inactive = empty/off
       indexing: { stroke: "token(colors.cyan)" },
       // down = FAULT → flicker (≤3/s, distinct from the STEADY blocked gate). Isolated to this engine.
       down: { stroke: "token(colors.alarm)", animation: "pulse 0.5s steps(1) infinite" },
@@ -643,13 +662,21 @@ export const engineReindexCharge = css({
   animation: "chargeSweep 1.5s ease-out infinite",
 });
 
+// The reindex OUTER stays amber (warning) so a rerouting engine reads amber-on-amber, not green-nominal.
+export const engineReindexOut = css({
+  fill: "token(colors.bg)",
+  stroke: "token(colors.amber)",
+  strokeWidth: "1.5",
+  opacity: "0.95",
+});
+
 export const engineCharge = cva({
   // transform-box/origin so the charge scaleY (chargeSweep keyframe) grows center-out, not bottom-up.
   base: { transformBox: "fill-box", transformOrigin: "center" },
   variants: {
     runtimeState: {
-      nominal: { fill: "token(colors.amber)", opacity: "0.16" },
-      configured: { fill: "token(colors.amber)", opacity: "0.1" },
+      nominal: { fill: "token(colors.mint)", opacity: "0.5" }, // active = a clear green fill ("on"), not a faint amber
+      configured: { fill: "token(colors.dormant)", opacity: "0" }, // inactive = empty (no fill)
       // indexing/booting: a center-out charge sweep (frozen to a settled full charge under effects=off).
       indexing: { fill: "token(colors.cyan)", opacity: "0.85", animation: "chargeSweep 1.5s ease-out infinite" },
       down: { fill: "token(colors.alarm)", opacity: "0.5" },
@@ -726,3 +753,42 @@ export const reasonDot = css({ fill: "token(colors.cyan)" });
 export const reasonText = css({ fill: "oklch(0.96 0.05 25)", fontSize: "11px", letterSpacing: "0.03em", fontWeight: "600" });
 export const svgChip = css({ fill: "token(colors.bgPanel)", stroke: "token(colors.amber)", strokeWidth: "1.1" });
 export const svgChipText = css({ fill: "token(colors.amber)", fontSize: "10.5px", letterSpacing: "0.02em" });
+
+// --- live + teardown overlays (5g G5) ----------------------------------------
+// t14c — terminal integration conflict: a STOP (flash 3× → steady), visually heavier than the
+// recoverable Gate. Source stays put (all-or-nothing); paired with NO recovery chips (human-only).
+export const stopBar = css({
+  fill: "token(colors.alarm)",
+  stroke: "oklch(0.96 0.05 25)",
+  strokeWidth: "1.2",
+  animation: "stopFlash 0.5s steps(1) 3",
+});
+export const stopText = css({
+  fill: "token(colors.bg)",
+  fontSize: "11px",
+  fontWeight: "700",
+  letterSpacing: "0.14em",
+});
+
+// t18 — abandon: the enclosure (canvas) dissolves to a dim, desaturated ghost while the record
+// banner above it stays legible. A flex passthrough so the svg keeps its flex:1 sizing.
+export const dissolveShell = css({
+  display: "flex",
+  flexDirection: "column",
+  flex: "1",
+  minHeight: "0",
+  opacity: "0.4",
+  filter: "grayscale(0.75)",
+  transition: "opacity 0.6s ease, filter 0.6s ease",
+});
+export const abandonRecord = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.4rem",
+  padding: "0.3rem 0.6rem",
+  border: "1px dashed token(colors.dormant)",
+  borderRadius: "3px",
+  color: "muted",
+  fontSize: "0.74rem",
+  letterSpacing: "0.04em",
+});

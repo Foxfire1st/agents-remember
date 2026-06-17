@@ -134,6 +134,17 @@
   }
 }
 
+/* t14c — terminal integration conflict: a brief flash (3×) then a steady STOP. Frozen by effects=off. */
+@keyframes stopFlash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */

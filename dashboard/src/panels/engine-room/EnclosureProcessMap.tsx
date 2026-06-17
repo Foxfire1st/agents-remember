@@ -4,6 +4,8 @@ import { css } from "../../../styled-system/css";
 import type { EngineProcessNode } from "../../types/projection";
 import { EnclosureCanvas } from "./EnclosureCanvas";
 import {
+  abandonRecord,
+  dissolveShell,
   fleetingBanner,
   fleetingChoice,
   fleetingChoices,
@@ -44,6 +46,15 @@ function FleetingBanner({ node }: { node: EngineProcessNode }) {
   );
 }
 
+// t18 — abandon: the enclosure dissolves (the shell dims + desaturates) and keeps an "abandoned" record.
+function AbandonRecord({ node }: { node: EngineProcessNode }) {
+  return (
+    <div className={abandonRecord} data-testid="abandon-record">
+      <span>⛌ Abandoned — {node.summary || "worktree retired without integration"}</span>
+    </div>
+  );
+}
+
 // The Engine Room pod stage: the bird's-eye `EnclosureCanvas` (5g) inside the promote-in-place
 // shell. The map is keyed-stable by worktreeGroup upstream (S0), so a blocked fleeting node
 // solidifies in place into the contract-anchored enclosure (T4 morph, 5f S3) — never a teleport.
@@ -51,10 +62,13 @@ function FleetingBanner({ node }: { node: EngineProcessNode }) {
 // data-effects=off / reduced-motion the shell is an instant swap (no tween).
 export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
   const animate = useShouldAnimate();
+  // t18 — an abandoned enclosure renders as a dim, desaturated record (its static end-state).
+  const abandoned = node.phase === "abandoned";
   return (
     <motion.div
       className={mapWrap}
       data-testid="process-map"
+      data-abandoned={abandoned || undefined}
       layout={animate}
       initial={animate ? { opacity: 0, scale: 0.985 } : false}
       animate={{ opacity: 1, scale: 1 }}
@@ -74,7 +88,14 @@ export function EnclosureProcessMap({ node }: { node: EngineProcessNode }) {
           </motion.div>
         ) : null}
       </AnimatePresence>
-      <EnclosureCanvas node={node} />
+      {abandoned ? <AbandonRecord node={node} /> : null}
+      {abandoned ? (
+        <div className={dissolveShell} data-testid="dissolve">
+          <EnclosureCanvas node={node} />
+        </div>
+      ) : (
+        <EnclosureCanvas node={node} />
+      )}
     </motion.div>
   );
 }

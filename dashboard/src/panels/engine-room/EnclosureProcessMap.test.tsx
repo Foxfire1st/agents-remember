@@ -5,7 +5,7 @@ import type { EngineProcessNode } from "../../types/projection";
 import { EnclosureProcessMap } from "./EnclosureProcessMap";
 import { ENGINE_ROOM_SCENARIOS } from "./fixtures";
 
-const KNOWN_EDGE_KINDS = new Set(["worktree-add", "ledger-map", "cgc-seed", "grepai-clone", "sync"]);
+const KNOWN_EDGE_KINDS = new Set(["worktree-add", "ledger-map", "cgc-seed", "grepai-clone", "sync", "integration"]);
 const VALID_RUNTIME = new Set(["nominal", "configured", "indexing", "down", "unknown"]);
 
 function nodeFrom(name: string): EngineProcessNode {
@@ -76,5 +76,32 @@ describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
     for (const gauge of gauges) {
       expect(VALID_RUNTIME.has(gauge.getAttribute("data-runtime") ?? "")).toBe(true);
     }
+  });
+});
+
+describe("EnclosureCanvas — live + teardown (5g G5)", () => {
+  it("t14c — a terminal integration conflict draws a STOP and suppresses recovery chips", () => {
+    const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-integration-conflict")} />);
+    expect(queryByTestId("terminal-stop")).not.toBeNull();
+    // terminal = human-only resolution: no recovery chips, and no thin Gate on the integration lane.
+    expect(queryByTestId("recovery-chips")).toBeNull();
+    expect(queryByTestId("gate")).toBeNull();
+    // it still raises the alarm-parity attention badge.
+    expect(queryByTestId("attention")).not.toBeNull();
+  });
+
+  it("t12b — a sync-blocked lane shows a steady gate + worktree_sync recovery (not a terminal STOP)", () => {
+    const { queryByTestId, getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-sync-needed")} />);
+    expect(queryByTestId("gate")).not.toBeNull();
+    expect(queryByTestId("terminal-stop")).toBeNull();
+    expect(getByTestId("recovery-chips").textContent).toContain("worktree_sync");
+  });
+
+  it("t18 — an abandoned enclosure dissolves to a dim record (no recovery chips, no attention)", () => {
+    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-abandoned")} />);
+    expect(getByTestId("process-map").getAttribute("data-abandoned")).toBe("true");
+    expect(getByTestId("abandon-record").textContent).toContain("Abandoned");
+    expect(queryByTestId("recovery-chips")).toBeNull();
+    expect(queryByTestId("attention")).toBeNull();
   });
 });
