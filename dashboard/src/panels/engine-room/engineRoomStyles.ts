@@ -562,3 +562,129 @@ export const actionRow = css({
   gap: "0.4rem",
   alignItems: "center",
 });
+
+// --- pod-stage bird's-eye (5g G1) --------------------------------------------
+// The two-world SVG scene: world labels, the dashed enclosure, branch nodes, podracer engine
+// gauges, the warp coupler, and the flow conduits. G1 is the static frame (nominal end-state) —
+// no keyframes here yet; the boot/failure motion (draw-on, center-out fill, gates) lands in G2+.
+// Colour still carries state (note 08): one recipe per semantic axis, driven off the model.
+
+export const sceneSvg = css({
+  display: "block",
+  width: "100%",
+  flex: "1",
+  minHeight: "0",
+  overflow: "visible",
+});
+
+export const worldLabel = css({
+  fill: "token(colors.muted)",
+  fontSize: "14px",
+  letterSpacing: "0.16em",
+  textTransform: "uppercase",
+});
+
+export const enclosureBorder = css({
+  fill: "none",
+  stroke: "token(colors.amber)",
+  strokeWidth: "1.8",
+  strokeDasharray: "9 7",
+  strokeLinecap: "round",
+  opacity: "0.5",
+});
+
+// Branch node (official / worktree, code / memory) — fact-state honesty carried by the stroke.
+export const svgNodeBox = cva({
+  base: { fill: "token(colors.bgPanel)", strokeWidth: "1.5" },
+  variants: {
+    factState: {
+      observed: { stroke: "token(colors.amber)" },
+      derived: { stroke: "token(colors.cyan)", strokeDasharray: "5 4" },
+      planned: { stroke: "token(colors.muted)", strokeDasharray: "2 4", opacity: "0.7" },
+      missing: { stroke: "token(colors.dormant)", strokeDasharray: "2 4", opacity: "0.6" },
+      "not-applicable": { stroke: "token(colors.grid)", opacity: "0.5" },
+    },
+  },
+});
+
+export const svgNodeLabel = css({
+  fill: "token(colors.muted)",
+  fontSize: "11px",
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+});
+export const svgNodeTitle = css({ fill: "token(colors.ink)", fontSize: "14px", fontWeight: "600" });
+export const svgNodeMeta = css({ fill: "token(colors.muted)", fontSize: "11px" });
+
+// Podracer engine gauge — outer column coloured by runtime; the charge fill shows the settled
+// (nominal) energy level. The center-out boot-fill GROWTH is G2 (this is the static end-state).
+export const engineGaugeOut = cva({
+  base: { fill: "token(colors.bg)", strokeWidth: "1.5", opacity: "0.95" },
+  variants: {
+    runtimeState: {
+      nominal: { stroke: "token(colors.amber)" },
+      configured: { stroke: "token(colors.amber)", opacity: "0.7" },
+      indexing: { stroke: "token(colors.cyan)" },
+      down: { stroke: "token(colors.alarm)" },
+      unknown: { stroke: "token(colors.dormant)", strokeDasharray: "4 3", opacity: "0.6" },
+    },
+  },
+});
+
+export const engineCharge = cva({
+  base: {},
+  variants: {
+    runtimeState: {
+      nominal: { fill: "token(colors.amber)", opacity: "0.16" },
+      configured: { fill: "token(colors.amber)", opacity: "0.1" },
+      indexing: { fill: "token(colors.cyan)", opacity: "0.85" },
+      down: { fill: "token(colors.alarm)", opacity: "0.5" },
+      unknown: { fill: "token(colors.dormant)", opacity: "0" },
+    },
+  },
+});
+
+export const engineDiv = css({ stroke: "token(colors.bg)", strokeWidth: "2", opacity: "0.85" });
+export const engineGaugeLabel = css({
+  fill: "token(colors.ink)",
+  fontSize: "12px",
+  letterSpacing: "0.1em",
+  fontWeight: "600",
+});
+
+// Warp coupler — the contract binding code===memory in the worktree (bound when external memory).
+export const warpCouplerG = cva({
+  base: {},
+  variants: { bound: { true: { opacity: "1" }, false: { opacity: "0.3" } } },
+});
+export const warpCouplerBar = css({
+  stroke: "token(colors.amber)",
+  strokeWidth: "9",
+  strokeLinecap: "round",
+  opacity: "0.95",
+});
+export const warpCouplerNode = css({
+  fill: "token(colors.amber)",
+  stroke: "token(colors.amber)",
+  strokeWidth: "1.2",
+});
+export const warpCouplerLabel = css({ fill: "token(colors.amber)", fontSize: "11px", letterSpacing: "0.04em" });
+
+// Flow conduit — the seed/clone/integrate/sync lanes; colour parity with `conduitLine` (5e), now
+// on a positioned SVG path. The travelling packet + draw-on tween return in G2.
+export const flowConduit = cva({
+  base: { fill: "none", strokeWidth: "2.4" },
+  variants: {
+    state: {
+      nominal: { stroke: "token(colors.amber)", opacity: "0.8" },
+      complete: { stroke: "token(colors.mint)", opacity: "0.85" },
+      running: { stroke: "token(colors.cyan)" },
+      blocked: { stroke: "token(colors.alarm)" },
+      failed: { stroke: "token(colors.alarm)" },
+      stale: { stroke: "token(colors.alarm)", opacity: "0.55" },
+      skipped: { stroke: "token(colors.grid)", opacity: "0.4" },
+      planned: { stroke: "token(colors.muted)", strokeDasharray: "3 5", opacity: "0.5" },
+      unknown: { stroke: "token(colors.dormant)", opacity: "0.4" },
+    },
+  },
+});

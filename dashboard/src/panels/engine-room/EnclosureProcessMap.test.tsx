@@ -5,6 +5,9 @@ import type { EngineProcessNode } from "../../types/projection";
 import { EnclosureProcessMap } from "./EnclosureProcessMap";
 import { ENGINE_ROOM_SCENARIOS } from "./fixtures";
 
+const KNOWN_EDGE_KINDS = new Set(["worktree-add", "ledger-map", "cgc-seed", "grepai-clone", "sync"]);
+const VALID_RUNTIME = new Set(["nominal", "configured", "indexing", "down", "unknown"]);
+
 function nodeFrom(name: string): EngineProcessNode {
   const scenario = ENGINE_ROOM_SCENARIOS.find((entry) => entry.name === name);
   const node = scenario?.processes[0];
@@ -12,7 +15,11 @@ function nodeFrom(name: string): EngineProcessNode {
   return node;
 }
 
-// Determinism: freeze motion so the fleeting/structural assertions are stable (no GSAP/Motion tween).
+function hasExternalMemory(node: EngineProcessNode): boolean {
+  return node.memoryMode === "external" && !!node.memoryWorktree;
+}
+
+// Determinism: freeze motion so the structural assertions are stable (no GSAP/Motion tween).
 beforeEach(() => {
   document.documentElement.dataset.effects = "off";
 });
@@ -21,7 +28,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe("EnclosureProcessMap fleeting rendering (5f S2)", () => {
+describe("EnclosureProcessMap — fleeting promote-in-place (5f S2)", () => {
   it("renders a fleeting banner (block reason + recovery) for a pre-contract blocked-start node", () => {
     const node = nodeFrom("engine-precontract-blocked");
     const { getByTestId } = render(<EnclosureProcessMap node={node} />);
@@ -31,26 +38,43 @@ describe("EnclosureProcessMap fleeting rendering (5f S2)", () => {
     expect(banner.textContent).toContain(node.nextAction ?? "");
   });
 
-  it("does not render a fleeting banner for a normal (contract-anchored) enclosure", () => {
+  it("renders no fleeting banner for a contract-anchored enclosure, and shows the pod-stage canvas", () => {
     const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
     expect(queryByTestId("fleeting-banner")).toBeNull();
     expect(queryByTestId("process-map")).not.toBeNull();
+    expect(queryByTestId("enclosure-canvas")).not.toBeNull();
+  });
+});
+
+describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
+  it("renders one flow conduit per known model edge", () => {
+    const node = nodeFrom("engine-bootstrap");
+    const expected = node.edges.filter((edge) => KNOWN_EDGE_KINDS.has(edge.kind)).length;
+    const { container } = render(<EnclosureProcessMap node={node} />);
+    expect(container.querySelectorAll('[data-testid="conduit"]').length).toBe(expected);
   });
 
-  it("renders the SVG conduits for both lanes", () => {
+  it("renders the podracer engine gauges + warp coupler, bound iff external memory", () => {
+    const node = nodeFrom("engine-bootstrap");
+    const external = hasExternalMemory(node);
+    const { container } = render(<EnclosureProcessMap node={node} />);
+    expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(external ? 2 : 1);
+    expect(container.querySelector('[data-testid="warp-coupler"]')?.getAttribute("data-bound")).toBe(String(external));
+  });
+
+  it("renders the official + worktree branch nodes (code & memory when external)", () => {
+    const node = nodeFrom("engine-bootstrap");
+    const external = hasExternalMemory(node);
+    const { container } = render(<EnclosureProcessMap node={node} />);
+    expect(container.querySelectorAll('[data-testid="branch-node"]').length).toBe(external ? 4 : 2);
+  });
+
+  it("drives every gauge's runtime state from the model (state lives in the projection, not the class)", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    expect(container.querySelectorAll('[data-testid="code-lane"] svg line').length).toBe(2);
-    expect(container.querySelectorAll('[data-testid="memory-lane"] svg line').length).toBe(2);
-  });
-
-  it("renders a power-up flow packet only on a running (seeding/cloning) conduit (5f S4, T8/T9)", () => {
-    // engine-setup-running carries a running grepai-clone edge → one travelling packet.
-    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-setup-running")} />);
-    expect(container.querySelectorAll('[data-testid="conduit-flow"]').length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("renders no flow packet when every conduit is settled", () => {
-    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    expect(container.querySelectorAll('[data-testid="conduit-flow"]').length).toBe(0);
+    const gauges = [...container.querySelectorAll('[data-testid="engine-gauge"]')];
+    expect(gauges.length).toBeGreaterThan(0);
+    for (const gauge of gauges) {
+      expect(VALID_RUNTIME.has(gauge.getAttribute("data-runtime") ?? "")).toBe(true);
+    }
   });
 });
