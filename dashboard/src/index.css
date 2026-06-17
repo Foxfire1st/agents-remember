@@ -122,6 +122,18 @@
   }
 }
 
+/* Attention badge — gentle alarm-parity breathing (NOT the sharp `pulse` fault flicker); a blocked/fault
+   state raises it (5g G3). Frozen by effects=off → static. */
+@keyframes attnBreath {
+  0%,
+  100% {
+    opacity: 0.78;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */

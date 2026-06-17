@@ -695,3 +695,22 @@ export const flowConduit = cva({
 // The travelling flow packet — a cyan energy dot that runs along a seeding/cloning conduit (its
 // offset-path is set per-conduit in EnclosureCanvas). Hidden under effects=off (see index.css freeze).
 export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95" });
+
+// --- failure overlays (5g G3) ------------------------------------------------
+// blocked = STEADY red gate over the blocked lane (a human choice required) — never the fault flicker
+// (that's the engine, G4). Every blocked/fault raises the alarm-parity attention badge. A local reason
+// badge (cyan-dot pointer + pill) states WHY at the lane; recovery chips offer the next action. All
+// driven off node.health / edge.state / missingFacts / nextAction — colour-as-state, no inferred chrome.
+export const gateBar = css({ fill: "token(colors.alarm)", opacity: "0.92" });
+export const attnBadge = css({
+  fill: "oklch(0.26 0.09 25)",
+  stroke: "token(colors.alarm)",
+  strokeWidth: "1.3",
+  animation: "attnBreath 1.3s ease-in-out infinite",
+});
+export const attnText = css({ fill: "oklch(0.93 0.08 25)", fontSize: "11px", letterSpacing: "0.12em", fontWeight: "600" });
+export const reasonBadge = css({ fill: "oklch(0.2 0.05 25)", stroke: "token(colors.alarm)", strokeWidth: "1.1" });
+export const reasonDot = css({ fill: "token(colors.cyan)" });
+export const reasonText = css({ fill: "oklch(0.96 0.05 25)", fontSize: "11px", letterSpacing: "0.03em", fontWeight: "600" });
+export const svgChip = css({ fill: "token(colors.bgPanel)", stroke: "token(colors.amber)", strokeWidth: "1.1" });
+export const svgChipText = css({ fill: "token(colors.amber)", fontSize: "10.5px", letterSpacing: "0.02em" });

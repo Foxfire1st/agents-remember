@@ -12,6 +12,8 @@ import type {
   EngineProcessNode,
 } from "../../types/projection";
 import {
+  attnBadge,
+  attnText,
   enclosureBorder,
   engineCharge,
   engineDiv,
@@ -19,7 +21,13 @@ import {
   engineGaugeOut,
   flowConduit,
   flowPacket,
+  gateBar,
+  reasonBadge,
+  reasonDot,
+  reasonText,
   sceneSvg,
+  svgChip,
+  svgChipText,
   svgNodeBox,
   svgNodeLabel,
   svgNodeMeta,
@@ -151,10 +159,99 @@ function Conduit({ edge }: { edge: EngineProcessEdge }) {
   );
 }
 
+// --- failure overlays (5g G3) ------------------------------------------------
+function isBlocked(node: EngineProcessNode): boolean {
+  return (
+    node.health === "blocked" ||
+    node.health === "failed" ||
+    node.health === "stale" ||
+    node.missingFacts.length > 0
+  );
+}
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+// Steady red gate over a blocked/failed lane — a human choice required, never the fault flicker (the
+// flicker is the engine, G4). Drawn at the blocked edge's midpoint.
+function Gate({ edge }: { edge: EngineProcessEdge }) {
+  const geom = EDGE_GEOM[edge.kind];
+  if (!geom) return null;
+  const [x1, y1, x2, y2] = geom;
+  return (
+    <rect
+      className={gateBar}
+      x={(x1 + x2) / 2 - 26}
+      y={(y1 + y2) / 2 - 6}
+      width={52}
+      height={12}
+      rx={3}
+      data-testid="gate"
+      data-kind={edge.kind}
+    />
+  );
+}
+
+// Alarm parity — a blocked/fault state raises this (breathing, not the fault flicker).
+function Attention() {
+  return (
+    <g data-testid="attention">
+      <rect className={attnBadge} x={958} y={10} width={172} height={24} rx={5} />
+      <text className={attnText} x={1044} y={26} textAnchor="middle">⚠ ATTENTION</text>
+    </g>
+  );
+}
+
+// A local reason badge (cyan-dot pointer + pill) stating WHY the lane is blocked, beside the gate.
+function ReasonBadge({ reason, cx, cy }: { reason: string; cx: number; cy: number }) {
+  const text = truncate(reason, 46);
+  const w = Math.max(120, text.length * 6.4 + 40);
+  const px = cx - w / 2;
+  return (
+    <g data-testid="gate-reason">
+      <rect className={reasonBadge} x={px} y={cy} width={w} height={22} rx={6} />
+      <circle className={reasonDot} cx={px + 15} cy={cy + 11} r={4} />
+      <text className={reasonText} x={px + 28} y={cy + 15}>{text}</text>
+    </g>
+  );
+}
+
+// Recovery choices (node.nextAction + enabled actions) as chips along the bottom of the stage.
+function RecoveryChips({ labels }: { labels: string[] }) {
+  if (!labels.length) return null;
+  let x = 690;
+  return (
+    <g data-testid="recovery-chips">
+      {labels.slice(0, 3).map((label) => {
+        const w = Math.max(110, label.length * 6.6 + 28);
+        const chip = (
+          <g key={label}>
+            <rect className={svgChip} x={x} y={600} width={w} height={22} rx={4} />
+            <text className={svgChipText} x={x + w / 2} y={615} textAnchor="middle">▸ {label}</text>
+          </g>
+        );
+        x += w + 12;
+        return chip;
+      })}
+    </g>
+  );
+}
+
 export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
+  // failure overlays (5g G3)
+  const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
+  const blockedEdges = node.edges.filter((e) => e.state === "blocked" || e.state === "failed");
+  const firstBlocked = blockedEdges.length ? EDGE_GEOM[blockedEdges[0].kind] : undefined;
+  const recovery = [
+    ...new Set(
+      [node.nextAction, ...node.actions.filter((a) => a.enabled).map((a) => a.action)].filter(
+        (value): value is string => Boolean(value),
+      ),
+    ),
+  ];
   return (
     <svg
       className={sceneSvg}
@@ -195,6 +292,20 @@ export function EnclosureCanvas({ node }: { node: EngineProcessNode }) {
           memory: {node.memoryMode} — no external lane
         </text>
       ) : null}
+
+      {/* failure overlays (5g G3): a steady gate over each blocked lane + a local reason badge, the
+          alarm-parity attention badge, and recovery chips. A fleeting (pre-contract) block keeps its
+          ghost banner in EnclosureProcessMap, so the scene gate / reason / chips defer to it. */}
+      {!fleeting ? blockedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />) : null}
+      {!fleeting && firstBlocked ? (
+        <ReasonBadge
+          reason={node.summary}
+          cx={(firstBlocked[0] + firstBlocked[2]) / 2}
+          cy={(firstBlocked[1] + firstBlocked[3]) / 2 + 14}
+        />
+      ) : null}
+      {isBlocked(node) ? <Attention /> : null}
+      {!fleeting ? <RecoveryChips labels={recovery} /> : null}
     </svg>
   );
 }
