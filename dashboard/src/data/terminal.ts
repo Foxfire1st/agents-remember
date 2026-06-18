@@ -102,6 +102,31 @@ export function connectTerminal(
   };
 }
 
+/** The launch kinds the opener understands (slice 6e-2b adds `"harness"`). */
+export type TerminalOpenKind = "terminal";
+
+/**
+ * Ask the server to **spawn + own** a session (slice 6e-2a opener): `POST /api/terminal/{id}` →
+ * `TerminalHost.open` (the command is server-resolved from `kind`, never sent). Returns `true` on
+ * success. Best-effort — the dev bench has no backend, so the caller still opens the (mock) socket.
+ */
+export async function openTerminalSession(
+  sessionId: string,
+  kind: TerminalOpenKind = "terminal",
+  base = "",
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Dev/test seam: a provider supplies a fake socket factory so the bench renders a live-looking
  * terminal with no backend. `null` (production) ⇒ a real same-origin `WebSocket`.

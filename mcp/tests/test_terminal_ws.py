@@ -17,7 +17,9 @@ import socket
 import sys
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 from fastapi.testclient import TestClient
@@ -31,6 +33,7 @@ from agents_remember.serving.app import (
     _TERMINAL_EXIT_FRAME,
     _apply_terminal_input,
     create_app,
+    resolve_terminal_launch,
 )
 from agents_remember.serving.terminal import TerminalHost
 
@@ -85,10 +88,24 @@ class _FakeTerminalHost:
         self.peer.settimeout(2.0)
         self.session = _FakeSession(sid, self._master.fileno())
         self.resizes: list[tuple[int, int]] = []
+        self.opened: list[dict[str, object]] = []
         self.shutdown_called = False
 
     def get(self, sid: str) -> _FakeSession | None:
         return self.session if sid == self.session.sid else None
+
+    def open(
+        self,
+        sid: str,
+        *,
+        cwd: Path,
+        command: Sequence[str],
+        lifecycle_id: str | None = None,
+    ) -> SimpleNamespace:
+        self.opened.append(
+            {"sid": sid, "cwd": cwd, "command": list(command), "lifecycle_id": lifecycle_id}
+        )
+        return SimpleNamespace(sid=sid, cwd=cwd)
 
     def read_nonblocking(self, _sid: str, max_bytes: int = 65536) -> bytes:
         try:
@@ -213,6 +230,37 @@ class TerminalWebSocketTests(unittest.TestCase):
         with TestClient(self.app):
             pass
         self.assertTrue(self.host.shutdown_called)
+
+    def test_post_open_spawns_shell_at_workspace_root(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post("/api/terminal/term-1", json={"kind": "terminal"})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["session"], "term-1")
+        self.assertEqual(body["kind"], "terminal")
+        self.assertEqual(len(self.host.opened), 1)
+        opened = self.host.opened[0]
+        self.assertEqual(opened["sid"], "term-1")
+        self.assertEqual(opened["cwd"], self.tmp)  # workspace_root (== _config's tmp)
+        self.assertEqual(len(cast(list, opened["command"])), 1)  # the shell argv
+
+    def test_post_open_rejects_unknown_kind(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post("/api/terminal/x", json={"kind": "bogus"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.host.opened, [])
+
+
+class ResolveTerminalLaunchTests(unittest.TestCase):
+    def test_terminal_kind_is_shell_at_workspace_root(self) -> None:
+        cwd, argv = resolve_terminal_launch(
+            "terminal", workspace_root=Path("/ws"), shell="/bin/zsh"
+        )
+        self.assertEqual((cwd, argv), (Path("/ws"), ["/bin/zsh"]))
+
+    def test_unknown_kind_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            resolve_terminal_launch("nope", workspace_root=Path("/ws"), shell="/bin/sh")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   connectTerminal,
+  openTerminalSession,
   parseTerminalControl,
   terminalSocketUrl,
   type TerminalSink,
@@ -147,5 +148,27 @@ describe("connectTerminal", () => {
     const s = sink();
     connectTerminal("lc-2", s, { socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("openTerminalSession", () => {
+  it("POSTs the kind to the session route and returns true on ok", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const ok = await openTerminalSession("t 1", "terminal");
+    expect(ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/t%201",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ kind: "terminal" }) }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("returns false on a non-ok response or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await openTerminalSession("t1")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await openTerminalSession("t1")).toBe(false);
+    vi.unstubAllGlobals();
   });
 });

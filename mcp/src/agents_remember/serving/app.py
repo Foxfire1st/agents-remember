@@ -32,8 +32,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import (
@@ -170,6 +172,35 @@ async def _bridge_terminal(
         await asyncio.gather(out_task, in_task, return_exceptions=True)
 
 
+DEFAULT_SHELL = "/bin/bash"
+"""Fallback when the dashboard process has no ``$SHELL`` (the generic-terminal command)."""
+
+
+class TerminalOpenRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}``: which kind of session to spawn.
+
+    Slice 6e-2a supports ``kind="terminal"`` (a shell). The harness registry (``kind="harness"``)
+    lands in 6e-2b. The server resolves the command from the kind -- only a kind id is on the
+    wire, never an argv -- so there is no command-injection surface.
+    """
+
+    kind: str = "terminal"
+    lifecycle_id: str | None = None
+
+
+def resolve_terminal_launch(
+    kind: str, *, workspace_root: Path, shell: str
+) -> tuple[Path, list[str]]:
+    """Resolve a launch ``kind`` to ``(cwd, argv)`` -- the server owns the command. Pure.
+
+    ``terminal`` spawns ``shell`` at the workspace root (the dashboard-owned scratch terminal,
+    slice 6e-2a). Unknown kinds raise ``ValueError``; the harness kinds land in 6e-2b.
+    """
+    if kind == "terminal":
+        return workspace_root, [shell]
+    raise ValueError(f"unknown terminal kind: {kind!r}")
+
+
 def create_app(
     config: McpRuntimeConfig,
     *,
@@ -272,6 +303,28 @@ def create_app(
         finally:
             with contextlib.suppress(RuntimeError):
                 await websocket.close()
+
+    @app.post("/api/terminal/{session}")
+    def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
+        # Mode B2 opener (slice 6e-2a): the dashboard *spawns + owns* a session, then the
+        # WebSocket above attaches to it. The command is server-resolved from the kind (never
+        # wire-supplied) and spawned as the dashboard's OS user/env at the workspace root.
+        shell = os.environ.get("SHELL") or DEFAULT_SHELL
+        try:
+            cwd, command = resolve_terminal_launch(
+                request.kind, workspace_root=config.workspace_root, shell=shell
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                content={"status": "bad-kind", "detail": str(exc)}, status_code=400
+            )
+        opened = host.open(
+            session, cwd=cwd, command=command, lifecycle_id=request.lifecycle_id
+        )
+        return JSONResponse(
+            content={"session": opened.sid, "kind": request.kind, "cwd": str(opened.cwd)},
+            status_code=200,
+        )
 
     mount_static(app)
     return app
