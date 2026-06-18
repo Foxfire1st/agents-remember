@@ -32,6 +32,7 @@ from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
+    read_gates,
     read_ledger,
     read_providers,
     read_route_coverage,
@@ -101,6 +102,7 @@ def project_and_write(
         task_documents=read_task_documents(coordination_root, now=moment),
         engine_process_facts=read_engine_process_facts(coordination_root),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
+        gates=read_gates(coordination_root),
     )
     write_projection(root, projection)
     return projection

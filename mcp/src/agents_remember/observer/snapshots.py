@@ -15,18 +15,25 @@ These functions do the file I/O at the projection's call edge; the fold itself
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.records import GateRecord
+from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     discover_onboarding_files,
     parse_table_metadata,
 )
-from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot_dir
+from agents_remember.observer.paths import (
+    DRIFT_SNAPSHOT_SCHEMA,
+    drift_snapshot_dir,
+    observer_logs_root,
+)
 from agents_remember.observer.projection import (
     DriftSnapshotNode,
     EnclosureNode,
@@ -185,6 +192,28 @@ def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
         integrationStatus=contract.integration_status,
         cleanup=contract.cleanup,
     )
+
+
+def read_gates(coordination_root: Path) -> list[GateRecord]:
+    """Every lifecycle's current (folded) gate set + the workspace log (slice 6c).
+
+    Reads the gate logs co-located with the event store under ``observer_logs_root``
+    and folds each by id (last-wins), so the projection sees live gate state with no
+    event machinery. A malformed log is skipped, never fatal to the tick.
+    """
+    root = observer_logs_root(coordination_root)
+    store = GateStore(root)
+    gates: list[GateRecord] = []
+    lifecycles_dir = root / "lifecycles"
+    if lifecycles_dir.is_dir():
+        for log in sorted(lifecycles_dir.glob("*/gates.jsonl")):
+            try:
+                gates.extend(store.current(log.parent.name).values())
+            except (OSError, ValueError):
+                continue
+    with contextlib.suppress(OSError, ValueError):
+        gates.extend(store.current(None).values())
+    return gates
 
 
 def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFacts]:

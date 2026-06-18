@@ -21,6 +21,8 @@ from types import SimpleNamespace
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane.records import create_gate, decide_gate
+from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     prepend_mapping,
@@ -33,6 +35,7 @@ from agents_remember.observer.events import Event
 from agents_remember.observer.paths import (
     DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
+    observer_logs_root,
     observer_root,
 )
 from agents_remember.observer.projection import (
@@ -64,6 +67,7 @@ from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
+    read_gates,
     read_ledger,
     read_providers,
     read_route_coverage,
@@ -607,6 +611,78 @@ class AttentionQueueTests(unittest.TestCase):
     def test_calm_tree_has_empty_queue(self) -> None:
         proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
         self.assertEqual(proj.analytics.attentionQueue, [])
+
+
+class GateProjectionTests(unittest.TestCase):
+    """Slice 6c: durable gates materialize onto the lifecycle + the attention queue."""
+
+    LATER = "2026-06-13T18:05:00+00:00"
+
+    def _open(self, *, gate_id: str = "G1", ts: str = T0):
+        return create_gate(
+            kind="closeout-approval", lifecycle_id="LC1", gate_id=gate_id, now=ts
+        )
+
+    def test_open_gate_materializes_onto_lifecycle(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[self._open()],
+        )
+        gate = proj.lifecycles[0].gate
+        assert gate is not None
+        self.assertEqual((gate.id, gate.kind, gate.state), ("G1", "closeout-approval", "open"))
+        self.assertEqual(gate.decisions, ["approve", "cancel", "reject", "request-revision"])
+
+    def test_decided_gate_is_not_attached(self) -> None:
+        decided = decide_gate(
+            self._open(), decision="approve", by="developer", via="dashboard",
+            note=None, now=self.LATER,
+        )
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[decided],
+        )
+        self.assertIsNone(proj.lifecycles[0].gate)
+
+    def test_latest_open_gate_wins(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[self._open(gate_id="A", ts=T0), self._open(gate_id="B", ts=self.LATER)],
+        )
+        gate = proj.lifecycles[0].gate
+        assert gate is not None
+        self.assertEqual(gate.id, "B")
+
+    def test_open_gate_adds_attention_item(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[self._open()],
+        )
+        item = next(i for i in proj.analytics.attentionQueue if i.kind == "gate-open")
+        self.assertEqual((item.severity, item.lane, item.lifecycleId), ("warn", "lifecycle", "LC1"))
+
+    def test_no_gates_leaves_lifecycle_and_queue_clean(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH
+        )
+        self.assertIsNone(proj.lifecycles[0].gate)
+        self.assertEqual([i for i in proj.analytics.attentionQueue if i.kind == "gate-open"], [])
+
+
+class GateReaderTests(unittest.TestCase):
+    def test_reads_lifecycle_and_workspace_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            store = GateStore(observer_logs_root(coord))
+            store.append(
+                create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id="G1", now=T0)
+            )
+            store.append(create_gate(kind="alarm-ack", lifecycle_id=None, gate_id="W1", now=T0))
+            self.assertEqual({g.id for g in read_gates(coord)}, {"G1", "W1"})
+
+    def test_missing_root_reads_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(read_gates(Path(tmp)), [])
 
 
 class DriftSnapshotReaderTests(unittest.TestCase):

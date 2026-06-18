@@ -26,6 +26,17 @@ export interface TokenSample {
   cumulative: number;
 }
 
+export interface GateNode {
+  id: string;
+  kind: string;
+  state: string;
+  decidedBy?: string;
+  decidedVia?: string;
+  decisions: string[];
+  packet: Record<string, unknown>;
+  ts: string;
+}
+
 export interface LifecycleProjection {
   id: string;
   state: State;
@@ -40,6 +51,7 @@ export interface LifecycleProjection {
   staleSeconds?: number;
   inferred: boolean;
   ask?: Record<string, unknown>;
+  gate?: GateNode;
   actions: ActionAvailability[];
   tokenSeries: TokenSample[];
 }

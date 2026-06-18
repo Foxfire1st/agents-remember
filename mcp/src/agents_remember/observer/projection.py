@@ -57,6 +57,28 @@ class TokenSample(BaseModel):
     cumulative: int
 
 
+class GateNode(BaseModel):
+    """A durable gate materialized into the projection (slice 6c): the dashboard's
+    review surface for a decision point on a lifecycle.
+
+    Distinct from the event-derived ``ask`` proto-gate -- this is the persisted
+    ``GateRecord`` (``controlplane``) the operator acts on. ``decisions`` is the set
+    of verbs the cockpit may POST for an open gate (empty once decided), so the UI
+    renders the affordances straight from the reducer, never inferring them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: str
+    state: str
+    decidedBy: str | None = None
+    decidedVia: str | None = None
+    decisions: list[str] = Field(default_factory=list)
+    packet: dict[str, Any] = Field(default_factory=dict)
+    ts: str
+
+
 class LifecycleProjection(BaseModel):
     """One lifecycle's resolved state, folded from its event log.
 
@@ -84,6 +106,9 @@ class LifecycleProjection(BaseModel):
     inferred: bool = False
     # The latest open block ask (the proto-gate); slice 06 materializes the record.
     ask: dict[str, Any] | None = None
+    # The durable gate materialized from the GateStore (slice 6c): the dashboard's
+    # review surface. None when the lifecycle has no open gate.
+    gate: GateNode | None = None
     actions: list[ActionAvailability] = Field(default_factory=list)
     # The cumulative-token fuel gauge, folded from the log's tool.completed events.
     tokenSeries: list[TokenSample] = Field(default_factory=list)
