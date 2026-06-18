@@ -116,6 +116,56 @@ def gate_decide_payload(
     )
 
 
+def gate_decide_for_lifecycle(
+    config: McpRuntimeConfig,
+    *,
+    lifecycle_id: str,
+    decision: str,
+    decided_by: str,
+    decided_via: DecidedVia,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Decide the lifecycle's latest still-open gate -- the dashboard's write path.
+
+    The dashboard targets a *lifecycle*, not a gate id (gate projection, which
+    would hand the UI a specific id, lands in a later slice), so this resolves the
+    newest ``open`` gate on the lifecycle and decides it. The serving layer calls
+    it with ``decided_by="developer"`` / ``decided_via="dashboard"`` -- the
+    un-forgeable counterpart to the agent's ``decided_by="model"`` path through
+    :func:`gate_decide_payload`, which server-side closeout enforcement makes
+    binding. Raises ``KeyError`` when the lifecycle has no open gate.
+    """
+    if decision not in DECISION_STATES:
+        raise ValueError(
+            f"unknown gate decision {decision!r}; expected one of {sorted(DECISION_STATES)}"
+        )
+    store = _store(config)
+    open_gates = [gate for gate in store.current(lifecycle_id).values() if gate.state == "open"]
+    if not open_gates:
+        raise KeyError(f"no open gate on lifecycle {lifecycle_id!r}")
+    gate = max(open_gates, key=lambda candidate: candidate.ts)
+    updated = decide_gate(
+        gate,
+        decision=decision,
+        by=decided_by,
+        via=decided_via,
+        note=note,
+        now=now_iso(),
+    )
+    store.append(updated)
+    return _tool_payload(
+        "gate_decide",
+        {
+            "ok": True,
+            "operation": "gate_decide",
+            "gateId": updated.id,
+            "state": updated.state,
+            "decidedBy": updated.decidedBy,
+            "decidedVia": updated.decidedVia,
+        },
+    )
+
+
 def gate_wait_payload(
     config: McpRuntimeConfig,
     *,

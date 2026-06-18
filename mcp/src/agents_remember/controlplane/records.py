@@ -145,3 +145,15 @@ def decide_gate(
             "decidedAt": now,
         }
     )
+
+
+def apply_gate(gate: GateRecord, *, now: str) -> GateRecord:
+    """A new snapshot marking an approved gate consumed by its mutating tool. Pure.
+
+    The ``applied`` transition this module's docstring anticipates: a mutating
+    tool (``worktree_closeout_apply``) records that it acted on the approval, so a
+    single approval cannot be replayed by a second closeout. Decision attribution
+    (``decidedBy`` / ``decidedVia`` / ``decidedAt`` / ``decisionNote``) carries
+    forward unchanged -- only ``state`` and ``ts`` advance.
+    """
+    return gate.model_copy(update={"ts": now, "state": "applied"})

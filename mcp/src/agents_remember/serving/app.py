@@ -11,9 +11,12 @@ Endpoints:
   byte-offset ``Last-Event-ID`` resume (slice 4b). A *separate* stream from ``/api/stream``:
   it resumes by byte offset, the state channel re-snapshots, so mixing them on one stream
   would be incoherent. The cockpit opens both (still well under the ~6 connections/origin cap).
-* ``POST /api/actions/{action}``-- the gate return-channel skeleton (slice 4b): validate the
-  action against the reducer's ``ActionAvailability``, capture attribution, and acknowledge.
-  It performs no mutation -- slice 06 enforces gate state in the MCP tools.
+* ``POST /api/actions/{action}``-- the gate return-channel. Lifecycle transitions
+  (``resume`` / ``integrate`` / ``cleanup``) are validated against the reducer's
+  ``ActionAvailability`` and acknowledged without mutation (slice 4b); gate-decision verbs
+  (``approve`` / ``reject`` / ``request-revision`` / ``cancel``) are recorded as
+  developer-attributed gate decisions (slice 6b), which server-side closeout enforcement
+  makes binding. Routing maps :class:`ActionOutcome` onto the response; see ``serving/actions.py``.
 
 Local-first posture: bind ``127.0.0.1`` only (the CLI default) with no auth in v1. This is a
 cockpit for the developer's own machine; exposing it (an SSH tunnel, a reverse proxy) hands an
@@ -37,6 +40,7 @@ from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel
 
+from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
@@ -127,6 +131,30 @@ def create_app(
         outcome = evaluate_action(
             snapshot, action, request.target, actor=request.actor, now=now_iso()
         )
+        if outcome.gate_decision is not None:
+            # The one durable side effect: record the operator's gate decision as
+            # developer-attributed -- un-forgeable vs. the agent's model-attributed
+            # path, and what server-side closeout enforcement (slice 6b) consumes.
+            try:
+                gate = gate_decide_for_lifecycle(
+                    config,
+                    lifecycle_id=outcome.gate_decision.lifecycle_id,
+                    decision=outcome.gate_decision.decision,
+                    decided_by="developer",
+                    decided_via="dashboard",
+                )
+            except KeyError as exc:
+                return JSONResponse(
+                    content={
+                        "status": "no-open-gate",
+                        "detail": str(exc),
+                        "target": request.target,
+                    },
+                    status_code=409,
+                )
+            return JSONResponse(
+                content={**outcome.body, "gate": gate}, status_code=outcome.status_code
+            )
         return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
     mount_static(app)

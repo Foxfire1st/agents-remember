@@ -30,8 +30,11 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
+from agents_remember.controlplane.records import create_gate
+from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.config import ConfigError, McpRuntimeConfig
 from agents_remember.observer.lifecycle_state import State
+from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import (
     ActionAvailability,
     Analytics,
@@ -43,7 +46,7 @@ from agents_remember.observer.projection import (
     WorkspaceProjection,
 )
 from agents_remember.observer.projection_store import project_and_write
-from agents_remember.serving.actions import evaluate_action
+from agents_remember.serving.actions import GateDecisionIntent, evaluate_action
 from agents_remember.serving.app import create_app, stream_events
 from agents_remember.serving.delta import DeltaEvent, diff_projection
 from agents_remember.serving.events import (
@@ -258,6 +261,50 @@ class AppTests(unittest.TestCase):
         # mount point and the app title are stable across rebuilds; hashed asset names are not.
         self.assertIn('<div id="root">', response.text)
         self.assertIn("Agents Remember", response.text)
+
+
+class ActionGateTests(unittest.TestCase):
+    """Slice 6b: gate-decision verbs carry an intent (pure) and the router records it."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def test_evaluate_action_emits_gate_intent_for_verbs(self) -> None:
+        outcome = evaluate_action(_projection(), "approve", "L1", actor="developer", now=_TS)
+        self.assertEqual(outcome.status_code, 202)
+        self.assertEqual(
+            outcome.gate_decision, GateDecisionIntent(lifecycle_id="L1", decision="approve")
+        )
+
+    def test_evaluate_action_transition_keeps_4b_skeleton(self) -> None:
+        # a non-gate action on an unknown target stays the 4b no-mutation skeleton
+        outcome = evaluate_action(_projection(), "integrate", "nope", actor="developer", now=_TS)
+        self.assertIsNone(outcome.gate_decision)
+        self.assertEqual(outcome.status_code, 404)
+
+    def test_api_action_approve_records_developer_decision(self) -> None:
+        store = GateStore(observer_logs_root(self.tmp))
+        store.append(
+            create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="G1", now=_TS)
+        )
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post("/api/actions/approve", json={"target": "L1"})
+        self.assertEqual(response.status_code, 202)
+        gate = response.json()["gate"]
+        self.assertEqual(gate["state"], "approved")
+        self.assertEqual(gate["decidedBy"], "developer")  # un-forgeable vs. the agent's model path
+        self.assertEqual(gate["decidedVia"], "dashboard")
+        self.assertEqual(store.current("L1")["G1"].state, "approved")
+
+    def test_api_action_approve_without_open_gate_is_409(self) -> None:
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post("/api/actions/approve", json={"target": "L1"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "no-open-gate")
 
 
 class StaticTests(unittest.TestCase):

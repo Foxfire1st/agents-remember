@@ -46,6 +46,50 @@ ending with the approval question, and never invoke `worktree_closeout_apply`
 report attached to its own approval prompt is a report the developer never
 sees.
 
+## Server-Side Gate Enforcement
+
+The chat approval gate above is the floor. When the lifecycle is connected to
+the dashboard, closeout is **also** enforced server-side through a durable
+`closeout-approval` gate, so a developer can approve from the cockpit and the
+mutating tool — not a UI button — is the security boundary.
+
+How it binds:
+
+1. To route approval through the dashboard, open the gate at the closeout point
+   and block on the developer:
+
+   ```text
+   gate_create(kind="closeout-approval", lifecycle_id="<id>", packet={ ...preview facts... })
+   gate_wait(gate_id="<id>", lifecycle_id="<id>", timeout_seconds=30)   # re-call until timedOut=false
+   ```
+
+2. The developer approves (or rejects / requests revision) from the dashboard.
+   Only the dashboard writes a **developer-attributed** decision
+   (`decidedBy="developer"`); the agent's own `gate_decide` is recorded
+   `decidedBy="model"`.
+
+3. `worktree_closeout_apply` reads the lifecycle's gate and **refuses** unless it
+   is `approved` by the developer. An `open`, `rejected`, `revision-requested`,
+   already-`applied`, or **model-approved** gate blocks the closeout; on success
+   the tool appends an `applied` snapshot so one approval cannot be replayed.
+
+Rules:
+
+1. **Never self-approve.** An agent calling `gate_decide(decision="approve")`
+   records a `model`-attributed approval, which enforcement rejects. Wait for the
+   developer's dashboard decision via `gate_wait`; never pass your own judgment off
+   as commit approval.
+2. **Opening a gate is opt-in and deliberate.** Open a `closeout-approval` gate
+   **only** when a developer is driving approval from the dashboard. Do **not**
+   open one in a pure-chat session with no cockpit watching — an `open` gate blocks
+   your own closeout until it is decided.
+3. **Gateless lifecycles are unchanged.** With no `closeout-approval` gate the chat
+   commit gate (`intent_note` after an explicit "commit") governs exactly as before;
+   enforcement is additive, never a new requirement on every closeout.
+4. The closeout preview/apply payload carries a `closeout_gate` block
+   (`enforced` / `permitted` / `gateId` / `reason`); relay it at the commit-approval
+   gate so the developer sees whether a dashboard gate is open, approved, or absent.
+
 ## Preconditions
 
 The `c-12-closeout` skill resolves or consumes the current `c-08-ar-coordination-context-resolver` context, requires external memory
