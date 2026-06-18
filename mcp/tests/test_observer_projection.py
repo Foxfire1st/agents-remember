@@ -63,6 +63,7 @@ from agents_remember.observer.reducer import (
     token_series,
 )
 from agents_remember.observer.snapshots import (
+    _git_commit_meta,
     _ledger_window,
     read_drift_snapshots,
     read_enclosures,
@@ -1051,6 +1052,90 @@ class LedgerReaderTests(unittest.TestCase):
         self.assertEqual(len(node.rows), LEDGER_WINDOW)
         self.assertEqual(node.closeoutCount, len(ledger.rows))  # the full total, not the window
         self.assertEqual(node.rows[0].codeCommit, f"code{LEDGER_WINDOW + 4:02d}")  # newest-first
+
+
+class LedgerCommitMetaTests(unittest.TestCase):
+    """5h Tier 2: best-effort commit message + date enrichment of the popover ledger window."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.tmp = Path(self._dir.name)
+
+    def _git(self, repo: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "-c", "user.email=t@example.com", "-c", "user.name=t", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    def _repo_with_commits(self, subjects: list[str]) -> tuple[Path, list[str]]:
+        repo = (self.tmp / "repo").resolve()
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+        shas: list[str] = []
+        for subject in subjects:
+            self._git(repo, "commit", "--allow-empty", "-m", subject)
+            shas.append(self._git(repo, "rev-parse", "HEAD"))
+        return repo, shas
+
+    def test_git_commit_meta_batches_and_maps(self) -> None:
+        repo, shas = self._repo_with_commits(["first subject", "second subject"])
+        meta = _git_commit_meta(repo.as_posix(), shas)
+        self.assertEqual(set(meta), set(shas))
+        date, subject = meta[shas[1]]
+        self.assertEqual(subject, "second subject")
+        self.assertRegex(date, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")  # committer ISO date
+
+    def test_git_commit_meta_drops_unknown_and_tolerates_bad_input(self) -> None:
+        repo, shas = self._repo_with_commits(["only one"])
+        # a bogus sha is dropped (no HEAD fallback); the real one still resolves
+        meta = _git_commit_meta(repo.as_posix(), [shas[0], "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"])
+        self.assertEqual(set(meta), {shas[0]})
+        # best-effort: a non-repo path, empty root, or empty commit list -> {}
+        self.assertEqual(_git_commit_meta((self.tmp / "nope").as_posix(), shas), {})
+        self.assertEqual(_git_commit_meta("", shas), {})
+        self.assertEqual(_git_commit_meta(repo.as_posix(), []), {})
+
+    def test_ledger_window_enriches_rows_when_commits_are_local(self) -> None:
+        repo, shas = self._repo_with_commits(["code change", "memory change"])
+        mem = (self.tmp / "mem").resolve()
+        mem.mkdir()
+        ledger = prepend_mapping(create_initial_ledger("repo-a", "base", "base"), shas[0], shas[1])
+        write_ledger(mem / "memory.md", ledger)
+        rows, total = _ledger_window(
+            (mem / "memory.md").as_posix(), code_root=repo.as_posix(), memory_root=repo.as_posix()
+        )
+        self.assertEqual(total, len(ledger.rows))
+        self.assertEqual(rows[0].codeSubject, "code change")
+        self.assertEqual(rows[0].memorySubject, "memory change")
+        self.assertIsNotNone(rows[0].codeDate)
+        self.assertIsNotNone(rows[0].memoryDate)
+
+    def test_ledger_window_leaves_meta_none_when_not_local(self) -> None:
+        # honest fallback: no probe roots -> rows still served with hashes, no message/date (never faked)
+        mem = (self.tmp / "mem2").resolve()
+        mem.mkdir()
+        ledger = prepend_mapping(create_initial_ledger("repo-a", "base", "base"), "cccc", "dddd")
+        write_ledger(mem / "memory.md", ledger)
+        rows, _ = _ledger_window((mem / "memory.md").as_posix())
+        self.assertEqual(rows[0].codeCommit, "cccc")
+        self.assertIsNone(rows[0].codeSubject)
+        self.assertIsNone(rows[0].codeDate)
+        self.assertIsNone(rows[0].memorySubject)
+        self.assertIsNone(rows[0].memoryDate)
+
+    def test_read_ledger_enriches_official_rows_with_code_root(self) -> None:
+        # memory.md lives in the (git) memory repo so its memory commits resolve; code_root carries the code side
+        repo, shas = self._repo_with_commits(["official code", "official memory"])
+        ledger = prepend_mapping(create_initial_ledger("repo-a", "base", "base"), shas[0], shas[1])
+        write_ledger(repo / "memory.md", ledger)
+        node = read_ledger(repo, code_root=repo)
+        assert node is not None
+        self.assertEqual(node.rows[0].codeSubject, "official code")
+        self.assertEqual(node.rows[0].memorySubject, "official memory")
 
 
 class DriftSnapshotProducerTests(unittest.TestCase):

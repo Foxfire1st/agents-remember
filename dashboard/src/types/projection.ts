@@ -142,6 +142,12 @@ export interface LedgerNode {
 export interface LedgerRefNode {
   codeCommit: string;
   memoryCommit: string;
+  // best-effort per-side commit message + committer ISO date (5h Tier 2); omitted when the commit
+  // isn't in the local repo or the probe failed — the row falls back to the hash alone (never faked)
+  codeSubject?: string;
+  codeDate?: string;
+  memorySubject?: string;
+  memoryDate?: string;
 }
 
 export interface TaskSubStepNode {

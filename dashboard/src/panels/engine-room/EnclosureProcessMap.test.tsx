@@ -289,3 +289,39 @@ describe("EnclosureCanvas — ledger popover (5h, worktree coupler)", () => {
     expect(screen.getByTestId("ledger-show-more").textContent).toContain("17 more");
   });
 });
+
+describe("EnclosureCanvas — ledger popover columns (5h Tier 2)", () => {
+  it("renders the 6-column row with commit message + compact date on both sides", async () => {
+    render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    fireEvent.click(screen.getByTestId("warp-coupler-ledger"));
+    const popover = await screen.findByTestId("ledger-popover");
+    const current = popover.querySelector('[data-current="true"]');
+    expect(current).not.toBeNull();
+    // the newest row carries the real 5h message + the recorded wall-clock (06-18 18:19), not a hash alone
+    expect(current?.textContent).toContain("dashboard(5h): ledger popover on both warp couplers");
+    expect(current?.textContent).toContain("06-18 18:19");
+    // 7 cells: code date | code msg | code hash | ⇄ seam | memory hash | memory msg | memory date
+    expect(current?.querySelectorAll("td").length).toBe(7);
+  });
+
+  it("falls back to the hash with empty message/date when a row has no probed metadata (honest)", async () => {
+    const node = {
+      ...nodeFrom("engine-bootstrap"),
+      ledgerRows: [{ codeCommit: "abc12345", memoryCommit: "def67890" }],
+      ledgerRowCount: 1,
+    };
+    render(<EnclosureProcessMap node={node} />);
+    fireEvent.click(screen.getByTestId("warp-coupler-ledger"));
+    const popover = await screen.findByTestId("ledger-popover");
+    const row = popover.querySelector("tbody tr");
+    const cells = row?.querySelectorAll("td");
+    expect(cells?.length).toBe(7);
+    expect(row?.textContent).toContain("abc12345"); // the code hash still shows
+    expect(row?.textContent).toContain("def67890"); // the memory hash still shows
+    // message + date cells stay empty (never faked): date(0) · msg(1) · msg(5) · date(6)
+    expect(cells?.[0].textContent).toBe("");
+    expect(cells?.[1].textContent).toBe("");
+    expect(cells?.[5].textContent).toBe("");
+    expect(cells?.[6].textContent).toBe("");
+  });
+});

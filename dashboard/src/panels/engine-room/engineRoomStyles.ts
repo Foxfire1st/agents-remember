@@ -817,7 +817,9 @@ export const ledgerCard = css({
   border: "1px solid token(colors.amber)",
   borderRadius: "4px",
   boxShadow: "0 6px 20px oklch(0 0 0 / 0.5)",
-  maxWidth: "22rem",
+  // widened for the Tier 2 6-column row (date | message | hash ⇄ hash | message | date); stays on-screen
+  // on narrow viewports, messages ellipsize (ledgerMsg), and the Tier-3 ledgerScroll owns height.
+  maxWidth: "min(92vw, 46rem)",
 });
 export const ledgerCardHead = css({
   color: "muted",
@@ -840,8 +842,18 @@ export const ledgerRowCss = cva({
   },
 });
 export const ledgerMore = css({ color: "muted", fontSize: "0.64rem", fontStyle: "italic" });
-// The rows scroll within a bounded height when expanded (≤25 served); the header + footer stay fixed.
-export const ledgerScroll = css({ maxHeight: "13rem", overflowY: "auto" });
+// The rows scroll within a bounded height; the header + footer stay fixed. Collapsed (8 rows) is compact;
+// expanding EXTENDS the frame to use the available height (≈ the full 25-row window), the inner scroll
+// kicking in only if it still overflows the viewport (React-Aria keeps the portaled popover on-screen).
+export const ledgerScroll = cva({
+  base: { overflowY: "auto" },
+  variants: {
+    expanded: {
+      true: { maxHeight: "min(72vh, 46rem)" },
+      false: { maxHeight: "13rem" },
+    },
+  },
+});
 // The "▾ show N more" expand control at the bottom of the popover — collapsed (8) → expanded (≤25), in place.
 export const ledgerShowMore = css({
   display: "block",
@@ -858,6 +870,23 @@ export const ledgerShowMore = css({
   marginTop: "0.1rem",
   _hover: { color: "amber" },
 });
+// Tier 2 row columns — date (muted, compact, tabular), message (truncates with ellipsis), the two hashes
+// meeting the centre seam (code right-aligned, memory left-aligned, mono), and the ⇄ seam glyph itself.
+export const ledgerDate = css({
+  color: "muted",
+  fontSize: "0.62rem",
+  fontVariantNumeric: "tabular-nums",
+  whiteSpace: "nowrap",
+});
+export const ledgerMsg = css({
+  maxWidth: "12rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+export const ledgerHashCode = css({ fontFamily: "mono", textAlign: "right" });
+export const ledgerHashMem = css({ fontFamily: "mono", textAlign: "left" });
+export const ledgerSeam = css({ color: "muted", paddingInline: "0.15rem", textAlign: "center" });
 
 // Flow conduit — the seed/clone/integrate/sync lanes; colour parity with `conduitLine` (5e), now
 // on a positioned SVG path. The travelling packet + draw-on tween return in G2.

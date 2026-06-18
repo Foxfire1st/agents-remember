@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
+from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     discover_onboarding_files,
@@ -56,6 +56,7 @@ from agents_remember.tasks import (
     step_done,
     step_total,
 )
+from agents_remember.worktrees.modules.git import run_git
 from agents_remember.worktrees.modules.guidance import (
     contract_payload,
     lifecycle_guidance,
@@ -210,7 +211,11 @@ def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFact
         except (ContractError, OSError):
             continue
         cp = contract_payload(contract)
-        ledger_rows, ledger_total = _ledger_window(cp.get("ledger_path"))
+        ledger_rows, ledger_total = _ledger_window(
+            cp.get("ledger_path"),
+            code_root=cp.get("code_worktree"),
+            memory_root=cp.get("memory_worktree"),
+        )
         facts.append(
             EngineProcessFacts(
                 contract=cp,
@@ -231,12 +236,16 @@ def _safe_status_payload(contract: Any) -> dict[str, Any] | None:
         return None
 
 
-def _ledger_window(ledger_path: Any) -> tuple[list[LedgerRefNode], int]:
+def _ledger_window(
+    ledger_path: Any, *, code_root: Any = None, memory_root: Any = None
+) -> tuple[list[LedgerRefNode], int]:
     """The worktree memory.md ledger window for the coupler popover (5h).
 
     Best-effort like ``status_payload``: a missing / invalid / unreadable ledger yields an empty
     window so the projection tick never fails. Returns the newest ``LEDGER_WINDOW`` rows plus the
-    total row count (for the popover's "+N more in memory.md" footer).
+    total row count (for the popover's "+N more in memory.md" footer). Each row is enriched with the
+    per-side commit message + date probed from ``code_root`` / ``memory_root`` (Tier 2); a row whose
+    commit is not in the local repo keeps only its hash.
     """
     if not isinstance(ledger_path, str) or not ledger_path:
         return [], 0
@@ -244,11 +253,83 @@ def _ledger_window(ledger_path: Any) -> tuple[list[LedgerRefNode], int]:
         ledger = load_ledger(Path(ledger_path))
     except (LedgerError, OSError):
         return [], 0
-    rows = [
-        LedgerRefNode(codeCommit=row.code_commit, memoryCommit=row.memory_commit)
-        for row in ledger.rows[:LEDGER_WINDOW]
-    ]
+    rows = _enrich_ledger_rows(
+        ledger.rows[:LEDGER_WINDOW], code_root=code_root, memory_root=memory_root
+    )
     return rows, len(ledger.rows)
+
+
+def _git_commit_meta(repo_root: Any, commits: list[str]) -> dict[str, tuple[str, str]]:
+    """Best-effort batched commit metadata for the ledger popover (5h Tier 2).
+
+    ONE ``git log`` per repo for the whole window (never one subprocess per commit): ``--no-walk``
+    shows only the named commits (no history traversal) and ``--ignore-missing`` drops any SHA that
+    is not in this local repo. Returns ``{full_hash: (committer_iso_date, subject)}`` for the commits
+    that resolved; ``{}`` on any failure (no repo path, git absent, non-zero exit) so the projection
+    tick never fails and the row honestly falls back to the hash alone. Metadata is never faked -- a
+    commit absent from the local repo simply has no entry (``--ignore-missing`` with an all-missing
+    set returns empty, never a HEAD fallback).
+    """
+    if not isinstance(repo_root, str) or not repo_root or not commits:
+        return {}
+    try:
+        result = run_git(
+            Path(repo_root),
+            ["log", "--no-walk", "--ignore-missing", "--format=%H%x1f%cI%x1f%s", *commits],
+        )
+    except OSError:
+        return {}
+    if result.returncode != 0:
+        return {}
+    meta: dict[str, tuple[str, str]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("\x1f")
+        if len(parts) == 3:
+            full_hash, iso_date, subject = parts
+            meta[full_hash] = (iso_date, subject)
+    return meta
+
+
+def _commit_meta_for(
+    commit: str, meta: dict[str, tuple[str, str]]
+) -> tuple[str | None, str | None]:
+    """Resolve a (possibly short) ledger SHA against the full-hash-keyed probe map (prefix-tolerant)."""
+    info = meta.get(commit)
+    if info is None:
+        info = next(
+            (value for full_hash, value in meta.items() if full_hash.startswith(commit)), None
+        )
+    if info is None:
+        return None, None
+    iso_date, subject = info
+    return iso_date, subject
+
+
+def _enrich_ledger_rows(
+    rows: list[LedgerRow], *, code_root: Any, memory_root: Any
+) -> list[LedgerRefNode]:
+    """Window rows -> served LedgerRefNodes, each carrying best-effort per-side commit meta (Tier 2).
+
+    One batched probe per side: code commits against ``code_root``, memory commits against
+    ``memory_root``. A row whose commit isn't in the local repo keeps its hash with no message/date.
+    """
+    code_meta = _git_commit_meta(code_root, [row.code_commit for row in rows])
+    memory_meta = _git_commit_meta(memory_root, [row.memory_commit for row in rows])
+    enriched: list[LedgerRefNode] = []
+    for row in rows:
+        code_date, code_subject = _commit_meta_for(row.code_commit, code_meta)
+        memory_date, memory_subject = _commit_meta_for(row.memory_commit, memory_meta)
+        enriched.append(
+            LedgerRefNode(
+                codeCommit=row.code_commit,
+                memoryCommit=row.memory_commit,
+                codeSubject=code_subject,
+                codeDate=code_date,
+                memorySubject=memory_subject,
+                memoryDate=memory_date,
+            )
+        )
+    return enriched
 
 
 def read_start_progress_entries(coordination_root: Path, *, now: datetime) -> list[dict[str, Any]]:
@@ -462,11 +543,13 @@ def read_tool_reports(coordination_root: Path, *, now: datetime) -> list[ToolRep
     return nodes
 
 
-def read_ledger(memory_root: Path) -> LedgerNode | None:
+def read_ledger(memory_root: Path, code_root: Path | None = None) -> LedgerNode | None:
     """Surface 8: a repo's memory-ledger currency (closeout count + last-verified commit).
 
     Ledger rows carry no timestamps, so only the count + currency are surfaced --
-    never a frequency-over-time series. Missing/invalid ledgers are skipped.
+    never a frequency-over-time series. Missing/invalid ledgers are skipped. The windowed rows for
+    the OFFICIAL coupler popover are enriched with each side's commit message + date probed from
+    ``code_root`` (the repo checkout) and ``memory_root`` (Tier 2); best-effort, absent when not local.
     """
     try:
         ledger = load_ledger(memory_root / "memory.md")
@@ -478,10 +561,11 @@ def read_ledger(memory_root: Path) -> LedgerNode | None:
         lastVerifiedCodeCommit=ledger.last_verified_code_commit,
         baseCodeCommit=ledger.base_code_commit,
         # the newest window for the OFFICIAL coupler popover (5h); closeoutCount stays the full total
-        rows=[
-            LedgerRefNode(codeCommit=row.code_commit, memoryCommit=row.memory_commit)
-            for row in ledger.rows[:LEDGER_WINDOW]
-        ],
+        rows=_enrich_ledger_rows(
+            ledger.rows[:LEDGER_WINDOW],
+            code_root=code_root.as_posix() if code_root is not None else None,
+            memory_root=memory_root.as_posix(),
+        ),
     )
 
 

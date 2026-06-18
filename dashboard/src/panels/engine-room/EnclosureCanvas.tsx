@@ -45,9 +45,14 @@ import {
   ledgerButtonLabel,
   ledgerCard,
   ledgerCardHead,
+  ledgerDate,
+  ledgerHashCode,
+  ledgerHashMem,
   ledgerMore,
+  ledgerMsg,
   ledgerRowCss,
   ledgerScroll,
+  ledgerSeam,
   ledgerShowMore,
   ledgerTable,
   officialWire,
@@ -219,6 +224,12 @@ function EngineGauge({ at, label, runtime, reindex }: {
 // A commit short-sha for the ledger-coupler label (the two linked hashes it stands for).
 const short = (commit: string | null | undefined): string => (commit ? commit.slice(0, 8) : "—");
 
+// The commit's recorded wall-clock (5h Tier 2): "2026-06-18T18:19:48+02:00" -> "06-18 18:19". A plain
+// string slice — no Date/timezone conversion, so it is deterministic + screenshot-stable and shows the
+// committer's recorded offset, not the viewer's locale. Absent date -> empty cell (honest hash-only row).
+const compactDate = (iso: string | undefined): string =>
+  iso && iso.length >= 16 ? iso.slice(5, 16).replace("T", " ") : "";
+
 // The warp coupler = the memory.md LEDGER link: the lookup-table row binding this side's code commit to
 // its memory commit across the two physically distinct repos (5h coupler-semantics fix; NOT the task
 // contract.md). A drawn chain-link glyph + the two linked short-hashes as the label, and — when bound —
@@ -245,7 +256,7 @@ function LedgerTable({ rows, total, currentCode }: {
   return (
     <div className={ledgerCard} data-testid="ledger-popover">
       <div className={ledgerCardHead}>memory.md ledger · code ⇄ memory</div>
-      <div className={ledgerScroll}>
+      <div className={ledgerScroll({ expanded })}>
         <table className={ledgerTable}>
           <tbody>
             {shown.map((row) => {
@@ -255,11 +266,17 @@ function LedgerTable({ rows, total, currentCode }: {
                   key={`${row.codeCommit}-${row.memoryCommit}`}
                   className={ledgerRowCss({ current })}
                   data-current={current || undefined}
-                  title={`${row.codeCommit} ⇄ ${row.memoryCommit}`}
                 >
-                  <td>{short(row.codeCommit)}</td>
-                  <td aria-hidden="true">⇄</td>
-                  <td>{short(row.memoryCommit)}</td>
+                  {/* 6 columns (Tier 2): date | message | code-hash ⇄ memory-hash | message | date —
+                      hashes meet the centre seam, message + date-time fan outward per side. Messages
+                      truncate (full text in `title`); an unprobed side shows an empty message/date cell. */}
+                  <td className={ledgerDate}>{compactDate(row.codeDate)}</td>
+                  <td className={ledgerMsg} title={row.codeSubject}>{row.codeSubject ?? ""}</td>
+                  <td className={ledgerHashCode} title={row.codeCommit}>{short(row.codeCommit)}</td>
+                  <td className={ledgerSeam} aria-hidden="true">⇄</td>
+                  <td className={ledgerHashMem} title={row.memoryCommit}>{short(row.memoryCommit)}</td>
+                  <td className={ledgerMsg} title={row.memorySubject}>{row.memorySubject ?? ""}</td>
+                  <td className={ledgerDate}>{compactDate(row.memoryDate)}</td>
                 </tr>
               );
             })}
@@ -293,6 +310,10 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
 }) {
   const cy = 342;
   const triggerRef = useRef<SVGRectElement>(null);
+  // the popover anchors to this invisible point HIGH in the scene (SVG coords → scales with the canvas),
+  // not the coupler button, so it opens in its old upper position and grows DOWNWARD from there (the
+  // coupler button stays the click trigger). 5h Tier 2 feedback.
+  const anchorRef = useRef<SVGRectElement>(null);
   const [open, setOpen] = useState(false);
   const ledgerRows = rows ?? [];
   const hasLedger = ledgerRows.length > 0; // a ledger-backed coupler opens its memory.md lookup table
@@ -300,6 +321,8 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
     <>
       <g className={warpCouplerG({ bound })} data-testid={testid} data-bound={bound}>
         <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
+        {/* invisible high anchor for the popover (upper position) — see anchorRef note above */}
+        <rect ref={anchorRef} x={x + 90} y={58} width={1} height={1} fill="none" pointerEvents="none" aria-hidden="true" />
         {bound ? (
           <>
             <line className={warpSurge({ dir: "up" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
@@ -342,8 +365,11 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
           <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text>
         ) : null}
       </g>
+      {/* anchored to the high anchorRef (not the coupler) so it sits in its old upper position and grows
+          DOWNWARD as it expands; shouldFlip=false keeps it from flipping up when the tall window meets the
+          viewport edge (the inner scroll covers it) */}
       {hasLedger ? (
-        <Popover triggerRef={triggerRef} isOpen={open} onOpenChange={setOpen} placement="top">
+        <Popover triggerRef={anchorRef} isOpen={open} onOpenChange={setOpen} placement="bottom" shouldFlip={false}>
           <Dialog aria-label="memory.md ledger lookup table">
             <LedgerTable rows={ledgerRows} total={total} currentCode={currentCode} />
           </Dialog>

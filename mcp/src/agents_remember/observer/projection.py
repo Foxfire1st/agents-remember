@@ -258,12 +258,22 @@ class LedgerRefNode(BaseModel):
 
     The warp couplers stand for the memory.md ledger link; the popover renders a window of these
     rows with this enclosure's row highlighted. Full SHAs (the popover shortens them for display).
+
+    The optional ``*Subject`` / ``*Date`` fields are the per-side commit message + committer ISO
+    date, probed best-effort from the local repos in the snapshots I/O layer (5h Tier 2: "hashes
+    alone don't tell a story"). They are ``None`` -- and, since the projection dumps
+    ``exclude_none=True``, omitted from the wire -- when the commit is not in the local repo or the
+    git probe could not run, so the popover row honestly falls back to the hash alone. Never faked.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     codeCommit: str
     memoryCommit: str
+    codeSubject: str | None = None
+    codeDate: str | None = None
+    memorySubject: str | None = None
+    memoryDate: str | None = None
 
 
 class LedgerNode(BaseModel):

@@ -42,15 +42,54 @@ const WORKSPACE = [wsEngine("codegraphcontext-code"), wsEngine("grepai-memory")]
 // the 25-row served cap (`LEDGER_WINDOW`) so the popover's collapse (8) → expand (≤25) → scroll is
 // exercised; the scenario's `ledgerRowCount` is the full total (> 25) so the "+N more in memory.md" footer
 // shows once expanded. Generated rows are illustrative, not live (the sidecar notes this).
+// Tier 2: each row also carries the per-side commit message + committer date (the popover's 6 columns).
+// The top 4 are the real 5h commits; the generated rows get stepped synthetic metadata so the expanded
+// bench popover reads complete. The honest "no metadata -> hash-only" fallback lives in a unit test.
 const LEDGER_ROWS: LedgerRefNode[] = [
-  { codeCommit: "08e9221a", memoryCommit: "d60a0511" },
-  { codeCommit: "dbb81260", memoryCommit: "d516c141" },
-  { codeCommit: "e8801dce", memoryCommit: "aea63c67" },
-  { codeCommit: "600f7fa3", memoryCommit: "1e667c6d" },
-  ...Array.from({ length: 21 }, (_, i) => ({
-    codeCommit: (0x1a2b3c4d + i * 0x01010101).toString(16).slice(-8),
-    memoryCommit: (0x9f8e7d6c - i * 0x01010101).toString(16).slice(-8),
-  })),
+  {
+    codeCommit: "08e9221a",
+    memoryCommit: "d60a0511",
+    codeSubject: "dashboard(5h): ledger popover on both warp couplers",
+    codeDate: "2026-06-18T18:19:48+02:00",
+    memorySubject: "memory(5h): ledger-popover sidecars + engine-room overview",
+    memoryDate: "2026-06-18T18:21:10+02:00",
+  },
+  {
+    codeCommit: "dbb81260",
+    memoryCommit: "d516c141",
+    codeSubject: "fix(dashboard): warp coupler = the memory.md ledger link (5h)",
+    codeDate: "2026-06-18T14:02:33+02:00",
+    memorySubject: "memory(5h): coupler-semantics onboarding",
+    memoryDate: "2026-06-18T14:05:50+02:00",
+  },
+  {
+    codeCommit: "e8801dce",
+    memoryCommit: "aea63c67",
+    codeSubject: "dashboard(5h): closeout train + ff-only/replay integration conduit",
+    codeDate: "2026-06-17T20:48:12+02:00",
+    memorySubject: "memory(5h): H2 integration-render sidecars",
+    memoryDate: "2026-06-17T20:51:02+02:00",
+  },
+  {
+    codeCommit: "600f7fa3",
+    memoryCommit: "1e667c6d",
+    codeSubject: "dashboard(5h): landing projection + live remote/PR probe (H1)",
+    codeDate: "2026-06-17T16:30:05+02:00",
+    memorySubject: "memory(5h): H1 landing-projection onboarding",
+    memoryDate: "2026-06-17T16:33:40+02:00",
+  },
+  ...Array.from({ length: 21 }, (_, i) => {
+    const dd = String(14 - (i % 13)).padStart(2, "0");
+    const hh = String(9 + (i % 9)).padStart(2, "0");
+    return {
+      codeCommit: (0x1a2b3c4d + i * 0x01010101).toString(16).slice(-8),
+      memoryCommit: (0x9f8e7d6c - i * 0x01010101).toString(16).slice(-8),
+      codeSubject: `chore(dashboard): maintenance pass ${21 - i}`,
+      codeDate: `2026-06-${dd}T${hh}:30:00+02:00`,
+      memorySubject: `memory: routine onboarding refresh ${21 - i}`,
+      memoryDate: `2026-06-${dd}T${hh}:32:00+02:00`,
+    };
+  }),
 ];
 // Per worktree-coupler default: every external-memory worktree has its own memory.md, so the worktree
 // coupler is always live (ledgerRowCount > the served window → the "+N more in memory.md" footer).

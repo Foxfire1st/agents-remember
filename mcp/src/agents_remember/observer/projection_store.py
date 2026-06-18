@@ -125,7 +125,7 @@ def _gather_repo_surfaces(
             read_sidecar_staleness(onboarding_root, repository=scope.repo_id, now=moment)
         )
         route_coverage.extend(read_route_coverage(onboarding_root, repository=scope.repo_id))
-        ledger = read_ledger(scope.memory_root)
+        ledger = read_ledger(scope.memory_root, code_root=scope.path)
         if ledger is not None:
             ledgers.append(ledger)
     return sidecar_staleness, route_coverage, ledgers
