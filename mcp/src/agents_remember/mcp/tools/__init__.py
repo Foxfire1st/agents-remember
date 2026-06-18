@@ -18,6 +18,12 @@ from .core import (
     server_info_payload,
     skills_install_payload,
 )
+from .gates import (
+    gate_create_payload,
+    gate_decide_payload,
+    gate_list_payload,
+    gate_wait_payload,
+)
 from .lifecycle import (
     lifecycle_block_payload,
     lifecycle_end_payload,
@@ -76,6 +82,10 @@ __all__ = [
     "codex_benchmark_run_payload",
     "context_packet_payload",
     "drift_check_payload",
+    "gate_create_payload",
+    "gate_decide_payload",
+    "gate_list_payload",
+    "gate_wait_payload",
     "grepai_search_payload",
     "grepai_trace_payload",
     "lifecycle_block_payload",

@@ -21,6 +21,10 @@ from .tools import (
     codex_benchmark_run_payload,
     context_packet_payload,
     drift_check_payload,
+    gate_create_payload,
+    gate_decide_payload,
+    gate_list_payload,
+    gate_wait_payload,
     grepai_search_payload,
     grepai_trace_payload,
     lifecycle_block_payload,
@@ -824,6 +828,76 @@ def create_server(config: McpRuntimeConfig) -> Any:
             subtask=subtask,
             section=section,
         )
+
+    @server.tool()
+    def gate_create(
+        kind: str,
+        lifecycle_id: str | None = None,
+        enclosure: str | None = None,
+        repo_id: str | None = None,
+        packet: dict[str, Any] | None = None,
+        required_decision: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Open a durable control-plane gate on a lifecycle: a decision point that needs
+        the human/operator (closeout approval, an answer, an alarm ack). Append-only and
+        attributed; returns the gate id. Read the gate set with gate_list, block on it with
+        gate_wait. kind: closeout-approval | integration-approval | cleanup-approval |
+        agent-question | provider-retry | alarm-ack. Creating a gate does not itself enforce
+        anything (mutating tools obeying gate state is a later slice)."""
+        return gate_create_payload(
+            config,
+            kind=kind,
+            lifecycle_id=lifecycle_id,
+            enclosure=enclosure,
+            repo_id=repo_id,
+            packet=packet,
+            required_decision=required_decision,
+        )
+
+    @server.tool()
+    def gate_decide(
+        gate_id: str,
+        decision: str,
+        lifecycle_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a decision on an open gate (decision: approve | reject | request-revision
+        | cancel). Append-only -- the decision is a new snapshot, never an overwrite. Over
+        MCP the decision is attributed to the model via the cli; the dashboard records
+        developer/dashboard decisions through its own path. That attribution is what a later
+        enforcement slice checks (a commit gate needs a developer-attributed approval), so an
+        agent recording a model decision here never counts as developer approval."""
+        return gate_decide_payload(
+            config,
+            gate_id=gate_id,
+            lifecycle_id=lifecycle_id,
+            decision=decision,
+            decided_by="model",
+            decided_via="cli",
+            note=note,
+        )
+
+    @server.tool()
+    def gate_wait(
+        gate_id: str,
+        lifecycle_id: str | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Block until a gate leaves the open state, or timeout_seconds elapses (bounded
+        poll). Returns the gate's state and whether it timed out. Use where an agent reaches
+        a gate and waits for the operator's decision."""
+        return gate_wait_payload(
+            config,
+            gate_id=gate_id,
+            lifecycle_id=lifecycle_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @server.tool()
+    def gate_list(lifecycle_id: str | None = None) -> dict[str, Any]:
+        """List the current (folded) gates for a lifecycle, or the workspace gates when no
+        lifecycle id is given. Read-only."""
+        return gate_list_payload(config, lifecycle_id=lifecycle_id)
 
     return server
 

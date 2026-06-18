@@ -257,6 +257,29 @@ def _task_doc_payloads(root: Path) -> dict[str, dict]:
     }
 
 
+def _gate_payloads(config) -> dict[str, dict]:
+    """Control-plane gate substrate: create a gate, then decide / wait / list it."""
+    created = tools.gate_create_payload(
+        config, kind="closeout-approval", lifecycle_id="gate-demo"
+    )
+    gate_id = created["gateId"]
+    return {
+        "gate_create": created,
+        "gate_decide": tools.gate_decide_payload(
+            config,
+            gate_id=gate_id,
+            lifecycle_id="gate-demo",
+            decision="approve",
+            decided_by="developer",
+            decided_via="dashboard",
+        ),
+        "gate_wait": tools.gate_wait_payload(
+            config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
+        ),
+        "gate_list": tools.gate_list_payload(config, lifecycle_id="gate-demo"),
+    }
+
+
 def _allowed_keys(model) -> set[str]:
     """Serialized keys the model is allowed to emit (field names plus aliases)."""
     allowed: set[str] = set()
@@ -276,8 +299,8 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(5)]
-        base, worktree, carryover, lifecycle, task_doc_root = (
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(6)]
+        base, worktree, carryover, lifecycle, task_doc_root, gate_root = (
             Path(d) for d in cls._temp_dirs
         )
         cls.payloads = {}
@@ -286,6 +309,7 @@ class ToolResponseConformanceTests(unittest.TestCase):
         cls.payloads.update(_carryover_payloads(carryover))
         cls.payloads.update(_lifecycle_payloads(lifecycle))
         cls.payloads.update(_task_doc_payloads(task_doc_root))
+        cls.payloads.update(_gate_payloads(_base_fixture(gate_root)))
 
     @classmethod
     def tearDownClass(cls) -> None:
