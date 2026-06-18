@@ -1,11 +1,13 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
+import { postGateDecision, type GateDecisionStatus } from "../data/actions";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
 import { TokenGauge } from "../grammar/TokenGauge";
 import type {
+  GateNode,
   Phase,
   ProviderNode,
   TaskCodeExampleNode,
@@ -71,18 +73,20 @@ const gate = css({
   background: "oklch(0.82 0.16 75 / 0.08)",
 });
 const gateActions = css({ display: "flex", gap: "0.3rem", margin: "0.4rem 0 0.2rem" });
-const chip = cva({
-  base: {
-    fontSize: "0.72rem",
-    paddingInline: "0.4rem",
-    paddingBlock: "0.1rem",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "cyan",
-    borderRadius: "10px",
-    color: "cyan",
-  },
-  variants: { disabled: { true: { borderColor: "grid", color: "oklch(0.6 0.02 250)" } } },
+const gateButton = css({
+  fontSize: "0.72rem",
+  paddingInline: "0.5rem",
+  paddingBlock: "0.15rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "cyan",
+  borderRadius: "10px",
+  color: "cyan",
+  background: "transparent",
+  cursor: "pointer",
+  font: "inherit",
+  _hover: { background: "oklch(0.7 0.1 200 / 0.12)" },
+  _disabled: { borderColor: "grid", color: "oklch(0.6 0.02 250)", cursor: "default" },
 });
 const gateNote = css({
   margin: "0.2rem 0 0",
@@ -248,9 +252,9 @@ const taskdocDecisions = css({
 const taskdocDecision = css({ fontSize: "0.84rem" });
 const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
 
-// The selected lifecycle: phase stepper, the open-gate banner (display-only — the gate control
-// plane is slice 06), the task-document content (analytics.taskDocuments), the lifecycle → worktree
-// → provider spine, and the token gauge.
+// The selected lifecycle: phase stepper, the Gate Review drawer (slice 6c — POSTs a developer
+// decision to /api/actions, server-enforced at closeout) or the proto-gate ask banner fallback, the
+// task-document content (analytics.taskDocuments), the lifecycle → worktree → provider spine, and tokens.
 export function DetailPanel({ selectedId }: { selectedId: string | null }) {
   const lifecycle = useDashboard((s) => (selectedId ? s.lifecycles[selectedId] : undefined));
   const analytics = useDashboard((s) => s.analytics);
@@ -299,23 +303,14 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
         ))}
       </ol>
 
-      {askQuestion ? (
+      {lifecycle.gate ? (
+        <GateReview lifecycleId={lifecycle.id} gateNode={lifecycle.gate} />
+      ) : askQuestion ? (
         <div className={gate} data-testid="gate-banner">
           <div>
             <strong>Gate</strong> · {askQuestion}
           </div>
-          <div className={gateActions}>
-            {lifecycle.actions.map((action) => (
-              <span
-                key={action.action}
-                className={chip({ disabled: !action.enabled })}
-                title={action.disabledReason ?? undefined}
-              >
-                {action.action}
-              </span>
-            ))}
-          </div>
-          <p className={gateNote}>display-only — gate control plane is slice 06</p>
+          <p className={gateNote}>awaiting the agent — no durable gate opened yet</p>
         </div>
       ) : null}
 
@@ -346,6 +341,49 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
         <TokenGauge series={lifecycle.tokenSeries} />
       </div>
     </Panel>
+  );
+}
+
+const GATE_STATUS_TEXT: Record<GateDecisionStatus, string> = {
+  idle: "your decision is recorded server-side and enforced at closeout",
+  posting: "recording…",
+  recorded: "decision recorded",
+  "no-open-gate": "no open gate (already decided?)",
+  error: "could not reach the server — retry",
+};
+
+// The Gate Review drawer (slice 6c): the durable gate's decision verbs as real buttons that POST to
+// /api/actions (6b records the developer/dashboard decision; closeout enforces it). Status is honest —
+// posting → recorded / no-open-gate / error — never a fake "sent".
+function GateReview({ lifecycleId, gateNode }: { lifecycleId: string; gateNode: GateNode }) {
+  const [status, setStatus] = useState<GateDecisionStatus>("idle");
+  const decide = async (verb: string) => {
+    setStatus("posting");
+    setStatus(await postGateDecision(lifecycleId, verb));
+  };
+  return (
+    <div className={gate} data-testid="gate-review">
+      <div>
+        <strong>Gate</strong> · {gateNode.kind} · {gateNode.state}
+      </div>
+      <div className={gateActions}>
+        {gateNode.decisions.map((verb) => (
+          <button
+            key={verb}
+            type="button"
+            className={gateButton}
+            disabled={status === "posting"}
+            onClick={() => decide(verb)}
+            data-testid={`gate-${verb}`}
+          >
+            {verb}
+          </button>
+        ))}
+      </div>
+      <p className={gateNote} data-testid="gate-status">
+        {GATE_STATUS_TEXT[status]}
+      </p>
+    </div>
   );
 }
 

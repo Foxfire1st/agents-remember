@@ -422,6 +422,44 @@ export const GALLERY: GalleryEntry[] = [
       },
     }),
   },
+  {
+    name: "gate-review",
+    projection: project({
+      lifecycles: [
+        lifecycle({
+          id: "closeout-005",
+          state: "blocked",
+          phase: "close",
+          repoId: "agents-remember",
+          enclosure: "wt-a",
+          staleSeconds: 30,
+          gate: {
+            id: "01HGATE",
+            kind: "closeout-approval",
+            state: "open",
+            decisions: ["approve", "cancel", "reject", "request-revision"],
+            packet: { changedPaths: 6 },
+            ts: "2026-06-14T09:00:30+00:00",
+          },
+        }),
+      ],
+      providers: [ok("codegraphcontext-code"), ok("grepai-memory")],
+      analytics: {
+        ...EMPTY_ANALYTICS,
+        attentionQueue: [
+          {
+            id: "gate:01HGATE",
+            kind: "gate-open",
+            severity: "warn",
+            lane: "lifecycle",
+            title: "Gate — closeout-approval",
+            detail: "awaiting your decision",
+            lifecycleId: "closeout-005",
+          },
+        ],
+      },
+    }),
+  },
   { name: "empty", projection: project() },
   ...ENGINE_ROOM_SCENARIOS.map((scenario) => ({
     name: scenario.name,
