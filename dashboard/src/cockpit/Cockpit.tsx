@@ -8,6 +8,7 @@ import { dashboardStore, useDashboard } from "../data/store";
 import { connectEvents, connectState } from "../data/stream";
 import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
+import { Chats } from "../panels/Chats";
 import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
@@ -22,9 +23,10 @@ import { Topology } from "../panels/Topology";
 // visible), a switchable centre viewport (Operations / Engine Room / Memory / Topology / Hangar),
 // and a persistent right rail (the event river ticker). The mode bar selects the viewport.
 // Selection is ephemeral UI state held here and shared across panels and views.
-// Slice 5f S1 (§4.1): the two "machine map" views (Engine Room / Topology) drop the rails and span
-// the full body width; the top-bar caution stays visible so an alarm is never hidden.
-type View = "operations" | "engine" | "memory" | "topology" | "hangar";
+// Slice 5f S1 (§4.1): the "machine map" views (Engine Room / Topology) and the Chats terminal
+// (slice 6e) drop the rails and span the full body width; the top-bar caution stays visible so an
+// alarm is never hidden.
+type View = "operations" | "engine" | "memory" | "topology" | "hangar" | "chats";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "operations", label: "Operations" },
@@ -32,6 +34,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "memory", label: "Memory" },
   { id: "topology", label: "Topology" },
   { id: "hangar", label: "Hangar" },
+  { id: "chats", label: "Chats" },
 ];
 
 // Shell layout (slice 5d: co-located Panda css). The shell pins to the viewport so the top + mode
@@ -164,8 +167,9 @@ export function CockpitShell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const animate = useShouldAnimate();
 
-  // The machine-map views span full width: the rails hide and the view's own layout breathes.
-  const fullBleed = view === "engine" || view === "topology";
+  // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
+  // layout breathes.
+  const fullBleed = view === "engine" || view === "topology" || view === "chats";
 
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
@@ -231,6 +235,8 @@ function ViewBody({
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
+    case "chats":
+      return <Chats />;
     case "operations":
     default:
       return <DetailPanel selectedId={selectedId} />;

@@ -2,7 +2,9 @@ import { useEffect } from "react";
 
 import { CockpitShell } from "../cockpit/Cockpit";
 import { dashboardStore } from "../data/store";
+import { TerminalSocketContext } from "../data/terminal";
 import { GALLERY } from "./fixtures";
+import { mockTerminalSocketFactory } from "./mockTerminalSocket";
 
 // The gallery (note 15): the exact model-C shell rendered against a hand-authored fixture state,
 // switchable by `?state=`. It hydrates the real store (no live stream) so the screenshot-annotate
@@ -21,7 +23,9 @@ export function Bench() {
   }, [fixture]);
 
   return (
-    <>
+    // The dev mock socket makes the Chats view (slice 6e) render a live-looking terminal with no
+    // backend; production has no provider, so the real cockpit uses a same-origin WebSocket.
+    <TerminalSocketContext.Provider value={mockTerminalSocketFactory}>
       <nav className="bench__nav bench-overlay" aria-label="gallery states">
         {GALLERY.map((entry) => (
           <a
@@ -34,6 +38,6 @@ export function Bench() {
         ))}
       </nav>
       <CockpitShell />
-    </>
+    </TerminalSocketContext.Provider>
   );
 }
