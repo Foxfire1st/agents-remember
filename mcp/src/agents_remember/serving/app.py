@@ -31,11 +31,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import (
+    FastAPI,
+    Header,
+    HTTPException,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel
@@ -46,6 +54,7 @@ from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
+from agents_remember.serving.terminal import TerminalHost, TerminalSession
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -76,18 +85,107 @@ async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]
         )
 
 
+_TERMINAL_EXIT_FRAME = json.dumps({"type": "exit"})
+"""The text frame sent to the browser once the PTY child exits (then the socket closes)."""
+
+
+def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
+    """Apply one client text frame to the session: a ``stdin`` write or a ``resize``.
+
+    Malformed frames and unknown types are ignored; the fixed-argv host (slice 6d) accepts
+    only these two control shapes, never an arbitrary command, so the wire carries no
+    spawn surface.
+    """
+    try:
+        message = json.loads(text)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(message, dict):
+        return
+    if message.get("type") == "stdin":
+        data = message.get("data")
+        if isinstance(data, str):
+            with contextlib.suppress(KeyError, OSError):
+                host.write(session, data.encode())
+    elif message.get("type") == "resize":
+        cols, rows = message.get("cols"), message.get("rows")
+        if isinstance(cols, int) and isinstance(rows, int):
+            with contextlib.suppress(KeyError, OSError):
+                host.resize(session, cols=cols, rows=rows)
+
+
+async def _terminal_to_socket(
+    websocket: WebSocket, outbound: asyncio.Queue[bytes | None]
+) -> None:
+    """Forward queued PTY output frames to the browser until the EOF sentinel (``None``)."""
+    while True:
+        chunk = await outbound.get()
+        if chunk is None:
+            break
+        await websocket.send_bytes(chunk)
+    with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+        await websocket.send_text(_TERMINAL_EXIT_FRAME)
+
+
+async def _socket_to_terminal(
+    websocket: WebSocket, host: TerminalHost, session: str
+) -> None:
+    """Forward browser frames (``stdin`` / ``resize``) to the PTY until the socket closes."""
+    with contextlib.suppress(WebSocketDisconnect):
+        async for text in websocket.iter_text():
+            _apply_terminal_input(host, session, text)
+
+
+async def _bridge_terminal(
+    websocket: WebSocket, host: TerminalHost, session: TerminalSession
+) -> None:
+    """Pump PTY <-> WebSocket until the child exits or the client disconnects.
+
+    The PTY master fd is watched via ``loop.add_reader`` (no polling); readable output is
+    queued and sent as **binary** frames (raw VT bytes for xterm.js), and an EOF sentinel
+    closes the outbound pump. Client disconnect ends the inbound pump; either ending cancels
+    the other. The session is left open -- tmux keeps it alive for a reconnect (persistence).
+    """
+    loop = asyncio.get_running_loop()
+    outbound: asyncio.Queue[bytes | None] = asyncio.Queue()
+    fd = session.master_fd
+
+    def _on_readable() -> None:
+        data = host.read_nonblocking(session.sid)
+        if data:
+            outbound.put_nowait(data)
+        elif not session.is_alive:
+            loop.remove_reader(fd)
+            outbound.put_nowait(None)
+
+    loop.add_reader(fd, _on_readable)
+    out_task = asyncio.create_task(_terminal_to_socket(websocket, outbound))
+    in_task = asyncio.create_task(_socket_to_terminal(websocket, host, session.sid))
+    try:
+        await asyncio.wait({out_task, in_task}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        loop.remove_reader(fd)
+        out_task.cancel()
+        in_task.cancel()
+        await asyncio.gather(out_task, in_task, return_exceptions=True)
+
+
 def create_app(
     config: McpRuntimeConfig,
     *,
     interval: float = 1.0,
     now: Callable[[], datetime] | None = None,
     before_tick: Callable[[datetime], object] | None = None,
+    terminal_host: TerminalHost | None = None,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
     ``now`` / ``before_tick`` default to live behaviour; sim wires a replay clock + feeder.
+    ``terminal_host`` defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend);
+    tests inject a fake to drive the WebSocket bridge without a real PTY.
     """
     projector = Projector(config, interval=interval, now=now, before_tick=before_tick)
+    host = terminal_host if terminal_host is not None else TerminalHost()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -99,6 +197,7 @@ def create_app(
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            host.shutdown()
 
     app = FastAPI(title="Agents Remember dashboard", lifespan=lifespan)
 
@@ -156,6 +255,23 @@ def create_app(
                 content={**outcome.body, "gate": gate}, status_code=outcome.status_code
             )
         return JSONResponse(content=outcome.body, status_code=outcome.status_code)
+
+    @app.websocket("/api/terminal/{session}")
+    async def api_terminal(websocket: WebSocket, session: str) -> None:
+        # Mode B2 (slice 6d-2): bridge a live terminal-host session to xterm.js. Attach-only
+        # -- the session is opened out-of-band (the lifecycle-correlated launch is a later
+        # slice); an unknown id is refused with a private close code. Same localhost posture
+        # as the rest of the app (the host spawns a fixed argv, never a wire-supplied command).
+        await websocket.accept()
+        session_obj = host.get(session)
+        if session_obj is None:
+            await websocket.close(code=4404)
+            return
+        try:
+            await _bridge_terminal(websocket, host, session_obj)
+        finally:
+            with contextlib.suppress(RuntimeError):
+                await websocket.close()
 
     mount_static(app)
     return app
