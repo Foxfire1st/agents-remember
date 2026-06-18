@@ -849,6 +849,22 @@ export const abandonRecord = css({
   letterSpacing: "0.04em",
 });
 
+// --- 5h H2: closeout train + landing integration --------------------------------
+// T13 closeout train — the known closeout order (code → onboarding → quality → memory → ledger) as a
+// derived 5-beat strip on closeout-pending (5f §9). Each beat group sweeps in via `closeoutSweep` (with
+// a per-beat animation-delay set inline in the canvas); the global effects=off freeze settles it to the
+// all-done strip. mint = the settled/done look (colour parity with the green=active engine palette, G5).
+export const closeoutTrainLabel = css({ fill: "token(colors.muted)", fontSize: "9px", letterSpacing: "0.08em" });
+export const closeoutRail = css({ stroke: "token(colors.mint)", strokeWidth: "1.4", opacity: "0.35", strokeDasharray: "2 4" });
+export const closeoutBeatG = css({ animation: "closeoutSweep 0.45s ease-out backwards" });
+export const closeoutBeat = css({
+  fill: "oklch(0.24 0.04 160)",
+  stroke: "token(colors.mint)",
+  strokeWidth: "1",
+  opacity: "0.95",
+});
+export const closeoutBeatLabel = css({ fill: "token(colors.mint)", fontSize: "9.5px", letterSpacing: "0.02em" });
+
 // --- G6: atmospheric blueprint backdrop (the faint amber-tinted boomerang) ----
 // Mounts behind the scene, gated to effects-on (useShouldAnimate) so it is absent + lazy under
 // reduced-motion / data-effects=off. aria-hidden + pointer-events:none — pure atmosphere, never state.

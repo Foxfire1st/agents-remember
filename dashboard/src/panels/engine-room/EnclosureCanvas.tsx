@@ -17,6 +17,11 @@ import {
   attnBadge,
   attnText,
   canopyStroke,
+  closeoutBeat,
+  closeoutBeatG,
+  closeoutBeatLabel,
+  closeoutRail,
+  closeoutTrainLabel,
   enclosureBorder,
   engineCharge,
   engineDiv,
@@ -205,15 +210,20 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler" }: {
   );
 }
 
-function Conduit({ edge }: { edge: EngineProcessEdge }) {
+function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: string }) {
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
-  const d = `M${x1} ${y1} L ${x2} ${y2}`;
+  // T14b — a `replay` integration bends the landing return lane around the parallel work that moved the
+  // official line (vs the straight `ff-only` fast-forward). Same draw-on/packet idiom, a different path.
+  const bent = edge.kind === "integration" && strategy === "replay";
+  const d = bent
+    ? `M${x1} ${y1} C ${x1 - 60} ${y1 - 54}, ${x2 + 60} ${y1 - 54}, ${x2} ${y2}`
+    : `M${x1} ${y1} L ${x2} ${y2}`;
   return (
-    <g data-testid="conduit" data-kind={edge.kind} data-state={edge.state}>
+    <g data-testid="conduit" data-kind={edge.kind} data-state={edge.state} data-strategy={bent ? "replay" : undefined}>
       <path className={flowConduit({ state: conduitState(edge.state) })} d={d} pathLength={100} markerEnd="url(#er-chev)">
-        <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}</title>
+        <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}{bent ? " — replay (around parallel work)" : ""}</title>
       </path>
       {edge.state === "running" ? (
         <circle
@@ -334,6 +344,32 @@ function LaneFlag({ x, y, w, h, label, tone, testid }: {
   );
 }
 
+// T13 — closeout train (5h H2): the known closeout order plays as a derived left-to-right strip on
+// closeout-pending (5f §9 allows deriving the fixed order). Each beat group sweeps in via `closeoutSweep`
+// with a per-beat delay; the global effects=off freeze settles it to the all-done strip. aria-hidden —
+// the derived order is observability, not live status (which stays in the diagnostics panel).
+const CLOSEOUT_BEATS = ["code", "onboard", "quality", "memory", "ledger"] as const;
+function CloseoutTrain({ x, y }: { x: number; y: number }) {
+  const bw = 60;
+  const gap = 8;
+  const railEnd = x + CLOSEOUT_BEATS.length * (bw + gap) - gap;
+  return (
+    <g data-testid="closeout-train" aria-hidden="true">
+      <text className={closeoutTrainLabel} x={x} y={y - 6}>closeout order ▸</text>
+      <line className={closeoutRail} x1={x} y1={y + 11} x2={railEnd} y2={y + 11} />
+      {CLOSEOUT_BEATS.map((beat, i) => {
+        const bx = x + i * (bw + gap);
+        return (
+          <g key={beat} className={closeoutBeatG} style={{ animationDelay: `${i * 0.28}s` }}>
+            <rect className={closeoutBeat} x={bx} y={y} width={bw} height={22} rx={4} />
+            <text className={closeoutBeatLabel} x={bx + bw / 2} y={y + 15} textAnchor="middle">{beat}</text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 export function EnclosureCanvas({ node, workspaceEngines = [] }: {
   node: EngineProcessNode;
   workspaceEngines?: ProviderNode[];
@@ -378,6 +414,11 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
       ].filter((value): value is string => Boolean(value)),
     ),
   ];
+  // T14 — the official source line advances to its landing tip (read from the landing arc's source ref:
+  // origin/main if the PR resolved it, else origin/<feat>). Only while a landing strategy is recorded.
+  const landingSource =
+    node.landing.find((ref) => ref.kind === "origin-main") ??
+    node.landing.find((ref) => ref.kind === "origin-feat");
   return (
     <svg
       className={sceneSvg}
@@ -398,7 +439,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
       <text className={worldLabel} x={930} y={40}>Worktree enclosure</text>
       {hasMemory ? <rect className={enclosureBorder} x={674} y={76} width={474} height={506} rx={18} /> : null}
 
-      {node.edges.map((edge) => <Conduit key={edge.id} edge={edge} />)}
+      {node.edges.map((edge) => <Conduit key={edge.id} edge={edge} strategy={node.integrationStrategy} />)}
 
       <BranchNode pos={POS.codeSource} label="Code source" refNode={node.codeSource} />
       <BranchNode pos={POS.codeWorktree} label="Code worktree" refNode={node.codeWorktree} />
@@ -426,6 +467,21 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
           contract marker. Descriptive lane labels; the live status stays in the diagnostics panel. */}
       {hasMemory ? <LaneFlag x={730} y={476} w={140} h={24} label="ledger ▸ maps merge" tone="ledger" testid="lane-ledger" /> : null}
       {node.phase === "abandoned" ? <LaneFlag x={300} y={560} w={180} h={26} label="contract · historical" tone="historical" testid="lane-historical" /> : null}
+
+      {/* 5h H2 — the landing arc: the closeout train (T13) on closeout-pending, and the official source
+          line advancing to its landing tip (T14). The full remote/PR strip + carryover packet is H3. */}
+      {node.phase === "closeout-pending" ? <CloseoutTrain x={700} y={508} /> : null}
+      {node.integrationStrategy && landingSource ? (
+        <LaneFlag
+          x={300}
+          y={216}
+          w={180}
+          h={20}
+          label={`▸ ${landingSource.label} · ${landingSource.state}`}
+          tone="ledger"
+          testid="lane-landing-source"
+        />
+      ) : null}
 
       {!hasMemory ? (
         <text className={svgNodeMeta} x={930} y={420} textAnchor="middle" data-testid="memory-lane-absent">

@@ -145,6 +145,18 @@
   }
 }
 
+/* T13 closeout train (5h H2): the known closeout order plays as a derived left-to-right sweep on
+   closeout-pending (5f §9 — deriving the fixed order is allowed). Per-beat animation-delay is set
+   inline; frozen by effects=off → the settled all-done strip (every beat at rest opacity). */
+@keyframes closeoutSweep {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */

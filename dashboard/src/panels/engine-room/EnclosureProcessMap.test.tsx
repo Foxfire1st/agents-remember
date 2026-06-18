@@ -51,6 +51,32 @@ describe("EnclosureProcessMap — fleeting promote-in-place (5f S2)", () => {
   });
 });
 
+describe("EnclosureCanvas — landing arc (5h H2)", () => {
+  it("plays the closeout train (5 beats) on closeout-pending", () => {
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-landing-closeout")} />);
+    expect(getByTestId("closeout-train").querySelectorAll("rect").length).toBe(5);
+  });
+
+  it("draws the integration conduit straight for ff-only and bent for replay", () => {
+    const ff = render(<EnclosureProcessMap node={nodeFrom("engine-landing-ffonly")} />);
+    expect(ff.container.querySelector('[data-kind="integration"]')?.getAttribute("data-strategy")).toBeNull();
+    cleanup();
+    const replay = render(<EnclosureProcessMap node={nodeFrom("engine-landing-merged")} />);
+    expect(replay.container.querySelector('[data-kind="integration"]')?.getAttribute("data-strategy")).toBe("replay");
+  });
+
+  it("advances the official source line to its landing tip when a strategy is recorded", () => {
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-landing-ffonly")} />);
+    expect(getByTestId("lane-landing-source").textContent).toContain("origin/");
+  });
+
+  it("shows neither the closeout train nor the landing-source flag for a plain enclosure", () => {
+    const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(queryByTestId("closeout-train")).toBeNull();
+    expect(queryByTestId("lane-landing-source")).toBeNull();
+  });
+});
+
 describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
   it("renders one flow conduit per known model edge", () => {
     const node = nodeFrom("engine-bootstrap");

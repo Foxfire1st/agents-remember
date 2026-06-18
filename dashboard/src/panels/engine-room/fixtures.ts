@@ -545,6 +545,25 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
     workspace: WORKSPACE,
   },
   {
+    // 5h T13 — closeout train: the known closeout order plays on closeout-pending (before integration).
+    name: "engine-landing-closeout",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "closeout-pending",
+        health: "nominal",
+        humanReviewStatus: "approved",
+        closeoutStatus: "in-progress",
+        landing: [landingRef("origin-feat", "origin/feat-…", "planned", "planned", "pushes after closeout")],
+        summary: "Closeout approved; running the closeout order (code → onboarding → quality → memory → ledger).",
+        nextAction: "closeout",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
     // 5h T14 — successful ff-only landing, mid-arc: source pushed, PR open, memory not yet carried.
     name: "engine-landing-ffonly",
     processes: [
