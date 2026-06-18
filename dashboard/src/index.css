@@ -157,6 +157,36 @@
   }
 }
 
+/* Warp-core surge (5h coupler fix): a hot band born at the ledger coupler, splitting up + down,
+   repeating — the ledger link is live (ported from podstage.html `.cpl-surge`). Frozen by effects=off
+   → hidden (no settled state, like the flow packet). */
+@keyframes warpSurgeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  18% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-24px);
+  }
+}
+@keyframes warpSurgeDown {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  18% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */
@@ -169,5 +199,10 @@ html[data-effects="off"] *::after {
 
 /* The travelling flow packet has no settled end-state — hide it entirely under the freeze (5g G2). */
 html[data-effects="off"] [data-testid="conduit-packet"] {
+  display: none;
+}
+
+/* The warp-core surge has no settled state either — hide it under the freeze (5h coupler fix). */
+html[data-effects="off"] [data-testid="warp-surge"] {
   display: none;
 }

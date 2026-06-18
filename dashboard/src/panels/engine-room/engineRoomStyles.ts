@@ -767,6 +767,27 @@ export const warpCouplerNode = css({
 });
 export const warpCouplerLabel = css({ fill: "token(colors.amber)", fontSize: "11px", letterSpacing: "0.04em" });
 
+// The ledger-coupler link icon (5h coupler fix) — a drawn chain-link glyph (two interlocking rings,
+// amber line-art) replacing the contract node; reads as 🔗 but in the blueprint ink + can carry state.
+export const warpLinkGlyph = css({ fill: "none", stroke: "token(colors.amber)", strokeWidth: "1.6" });
+// Warp-core surge: two hot bands born at the link, splitting up + down (only when bound). The keyframes
+// live in index.css (freezable); hidden under effects=off (no settled state). Ported from podstage.html.
+export const warpSurge = cva({
+  base: {
+    stroke: "oklch(0.95 0.1 90)",
+    strokeWidth: "7",
+    strokeLinecap: "round",
+    opacity: "0",
+    filter: "drop-shadow(0 0 5px token(colors.amber))",
+  },
+  variants: {
+    dir: {
+      up: { animation: "warpSurgeUp 1.6s cubic-bezier(.4,0,.5,1) infinite" },
+      down: { animation: "warpSurgeDown 1.6s cubic-bezier(.4,0,.5,1) infinite" },
+    },
+  },
+});
+
 // Flow conduit — the seed/clone/integrate/sync lanes; colour parity with `conduitLine` (5e), now
 // on a positioned SVG path. The travelling packet + draw-on tween return in G2.
 export const flowConduit = cva({

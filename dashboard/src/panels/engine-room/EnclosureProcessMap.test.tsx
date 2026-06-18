@@ -77,6 +77,22 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
   });
 });
 
+describe("EnclosureCanvas — ledger coupler (5h coupler fix)", () => {
+  it("labels the coupler with its code⇄memory commit pair, not the contract", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    const text = container.querySelector('[data-testid="warp-coupler"]')?.textContent ?? "";
+    expect(text).toContain("⇄");
+    expect(text).not.toContain("contract");
+  });
+
+  it("renders the chain-link glyph + the warp-core surge bands when bound", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(container.querySelectorAll('[data-testid="warp-link"]').length).toBeGreaterThan(0);
+    // two surge bands (up + down) per bound coupler
+    expect(container.querySelectorAll('[data-testid="warp-surge"]').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
   it("renders one flow conduit per known model edge", () => {
     const node = nodeFrom("engine-bootstrap");

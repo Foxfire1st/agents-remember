@@ -52,7 +52,8 @@ import {
   warpCouplerBar,
   warpCouplerG,
   warpCouplerLabel,
-  warpCouplerNode,
+  warpLinkGlyph,
+  warpSurge,
   worldLabel,
 } from "./engineRoomStyles";
 
@@ -195,17 +196,35 @@ function EngineGauge({ at, label, runtime, reindex }: {
   );
 }
 
+// A commit short-sha for the ledger-coupler label (the two linked hashes it stands for).
+const short = (commit: string | null | undefined): string => (commit ? commit.slice(0, 8) : "—");
+
+// The warp coupler = the memory.md LEDGER link: the lookup-table row binding this side's code commit to
+// its memory commit across the two physically distinct repos (5h coupler-semantics fix; NOT the task
+// contract.md). A drawn chain-link glyph + the two linked short-hashes as the label, and — when bound —
+// the warp-core surge (two hot bands born at the link, splitting up + down; ported from podstage.html).
 function WarpCoupler({ x, bound, label, testid = "warp-coupler" }: {
   x: number;
   bound: boolean;
   label?: string;
   testid?: string;
 }) {
+  const cy = 342;
   return (
     <g className={warpCouplerG({ bound })} data-testid={testid} data-bound={bound}>
       <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
-      <rect className={warpCouplerNode} x={x - 7} y={335} width={14} height={14} rx={3} />
-      {label ? <text className={warpCouplerLabel} x={x + 14} y={346}>{label}</text> : null}
+      {bound ? (
+        <>
+          <line className={warpSurge({ dir: "up" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+          <line className={warpSurge({ dir: "down" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+        </>
+      ) : null}
+      {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
+      <g className={warpLinkGlyph} aria-hidden="true" data-testid="warp-link">
+        <ellipse cx={x} cy={cy - 3} rx={5} ry={4} />
+        <ellipse cx={x} cy={cy + 3} rx={5} ry={4} />
+      </g>
+      {label ? <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text> : null}
     </g>
   );
 }
@@ -456,12 +475,12 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
       {officialMemory && hasMemory ? <line className={officialWire} x1={135} y1={466} x2={300} y2={432} data-testid="official-wire" /> : null}
       {officialCode ? <EngineGauge at={ENGINE.mcgc} label="CGC" runtime={runtimeState(engineState(officialCode))} /> : null}
       {officialMemory ? <EngineGauge at={ENGINE.mgrep} label="GrepAI" runtime={runtimeState(engineState(officialMemory))} /> : null}
-      {hasMemory ? <WarpCoupler x={OFFICIAL_COUPLER_X} bound={hasMemory} testid="warp-coupler-official" /> : null}
+      {hasMemory ? <WarpCoupler x={OFFICIAL_COUPLER_X} bound={hasMemory} testid="warp-coupler-official" label={`${short(node.codeSource.commit)} ⇄ ${short(node.memorySource?.commit)}`} /> : null}
 
       <EngineGauge at={ENGINE.cgc} label="CGC" runtime={runtimeState(code?.runtimeState)} reindex={node.seedFallback} />
       {hasMemory ? <EngineGauge at={ENGINE.grepai} label="GrepAI" runtime={runtimeState(memory?.runtimeState)} /> : null}
 
-      <WarpCoupler x={COUPLER_X} bound={hasMemory} label={`contract · ${node.taskId}`} />
+      <WarpCoupler x={COUPLER_X} bound={hasMemory} label={`${short(node.codeWorktree.commit)} ⇄ ${short(node.memoryWorktree?.commit)}`} />
 
       {/* Lane annotations (podstage.html #ledger / #hist): the worktree landing lane + a historical
           contract marker. Descriptive lane labels; the live status stays in the diagnostics panel. */}
