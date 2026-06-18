@@ -102,24 +102,48 @@ export function connectTerminal(
   };
 }
 
-/** The launch kinds the opener understands (slice 6e-2b adds `"harness"`). */
-export type TerminalOpenKind = "terminal";
+/** The launch kinds the opener understands: a plain shell, or a named harness (slice 6e-2b). */
+export type TerminalOpenKind = "terminal" | "harness";
+
+/** One supported harness as `GET /api/harnesses` reports it — `detected` ⇒ a launch button appears. */
+export interface HarnessInfo {
+  id: string;
+  name: string;
+  detected: boolean;
+}
+
+/**
+ * Ask the server which supported harnesses are installed (slice 6e-2b `GET /api/harnesses`). Returns
+ * `[]` on any failure — the dev bench has no backend, so the Chats strip just shows ＋ Terminal.
+ */
+export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
+  try {
+    const response = await fetch(`${base}/api/harnesses`);
+    if (!response.ok) return [];
+    const body = (await response.json()) as { harnesses?: HarnessInfo[] };
+    return body.harnesses ?? [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Ask the server to **spawn + own** a session (slice 6e-2a opener): `POST /api/terminal/{id}` →
- * `TerminalHost.open` (the command is server-resolved from `kind`, never sent). Returns `true` on
- * success. Best-effort — the dev bench has no backend, so the caller still opens the (mock) socket.
+ * `TerminalHost.open` (the command is server-resolved from `kind` + `harness`, never sent). Returns
+ * `true` on success. Best-effort — the dev bench has no backend, so the caller still opens the (mock)
+ * socket. For `kind="harness"`, pass the harness id (slice 6e-2b).
  */
 export async function openTerminalSession(
   sessionId: string,
   kind: TerminalOpenKind = "terminal",
   base = "",
+  harness?: string,
 ): Promise<boolean> {
   try {
     const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind }),
+      body: JSON.stringify(harness ? { kind, harness } : { kind }),
     });
     return response.ok;
   } catch {

@@ -54,6 +54,12 @@ from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
+from agents_remember.serving.harnesses import (
+    Which,
+    detect_harnesses,
+    find_harness,
+    is_detected,
+)
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
@@ -179,25 +185,44 @@ DEFAULT_SHELL = "/bin/bash"
 class TerminalOpenRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}``: which kind of session to spawn.
 
-    Slice 6e-2a supports ``kind="terminal"`` (a shell). The harness registry (``kind="harness"``)
-    lands in 6e-2b. The server resolves the command from the kind -- only a kind id is on the
-    wire, never an argv -- so there is no command-injection surface.
+    ``kind="terminal"`` spawns a shell (slice 6e-2a); ``kind="harness"`` spawns the supported TUI
+    harness named by ``harness`` (its id, e.g. ``"claude"`` -- slice 6e-2b). The server resolves the
+    command from the kind/harness id -- only ids are on the wire, never an argv -- so there is no
+    command-injection surface.
     """
 
     kind: str = "terminal"
+    harness: str | None = None
     lifecycle_id: str | None = None
 
 
 def resolve_terminal_launch(
-    kind: str, *, workspace_root: Path, shell: str
+    kind: str,
+    *,
+    workspace_root: Path,
+    shell: str,
+    harness: str | None = None,
+    which: Which | None = None,
 ) -> tuple[Path, list[str]]:
-    """Resolve a launch ``kind`` to ``(cwd, argv)`` -- the server owns the command. Pure.
+    """Resolve a launch ``kind`` to ``(cwd, argv)`` -- the server owns the command.
 
     ``terminal`` spawns ``shell`` at the workspace root (the dashboard-owned scratch terminal,
-    slice 6e-2a). Unknown kinds raise ``ValueError``; the harness kinds land in 6e-2b.
+    slice 6e-2a). ``harness`` spawns the registered TUI harness ``harness`` (its id) at the same
+    root (slice 6e-2b), rejecting an absent id, an unknown id, or one whose CLI is not installed
+    (``which`` defaults to :func:`shutil.which`). Every other kind raises ``ValueError`` -- the
+    opener endpoint turns that into a 400.
     """
     if kind == "terminal":
         return workspace_root, [shell]
+    if kind == "harness":
+        if harness is None:
+            raise ValueError("harness kind requires a harness id")
+        found = find_harness(harness)
+        if found is None:
+            raise ValueError(f"unknown harness: {harness!r}")
+        if not is_detected(found, which=which):
+            raise ValueError(f"harness not installed: {harness!r}")
+        return workspace_root, list(found.argv)
     raise ValueError(f"unknown terminal kind: {kind!r}")
 
 
@@ -304,15 +329,30 @@ def create_app(
             with contextlib.suppress(RuntimeError):
                 await websocket.close()
 
+    @app.get("/api/harnesses")
+    def api_harnesses() -> dict[str, Any]:
+        # The supported TUI harnesses + whether each is installed here (slice 6e-2b). The dashboard
+        # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
+        return {
+            "harnesses": [
+                {"id": h.id, "name": h.name, "detected": h.detected}
+                for h in detect_harnesses()
+            ]
+        }
+
     @app.post("/api/terminal/{session}")
     def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
-        # Mode B2 opener (slice 6e-2a): the dashboard *spawns + owns* a session, then the
-        # WebSocket above attaches to it. The command is server-resolved from the kind (never
-        # wire-supplied) and spawned as the dashboard's OS user/env at the workspace root.
+        # Mode B2 opener (slice 6e-2a; harness kinds 6e-2b): the dashboard *spawns + owns* a
+        # session, then the WebSocket above attaches to it. The command is server-resolved from the
+        # kind/harness id (never wire-supplied) and spawned as the dashboard's OS user/env at the
+        # workspace root.
         shell = os.environ.get("SHELL") or DEFAULT_SHELL
         try:
             cwd, command = resolve_terminal_launch(
-                request.kind, workspace_root=config.workspace_root, shell=shell
+                request.kind,
+                workspace_root=config.workspace_root,
+                shell=shell,
+                harness=request.harness,
             )
         except ValueError as exc:
             return JSONResponse(
@@ -322,7 +362,12 @@ def create_app(
             session, cwd=cwd, command=command, lifecycle_id=request.lifecycle_id
         )
         return JSONResponse(
-            content={"session": opened.sid, "kind": request.kind, "cwd": str(opened.cwd)},
+            content={
+                "session": opened.sid,
+                "kind": request.kind,
+                "harness": request.harness,
+                "cwd": str(opened.cwd),
+            },
             status_code=200,
         )
 

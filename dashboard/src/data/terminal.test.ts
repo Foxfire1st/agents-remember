@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   connectTerminal,
+  fetchHarnesses,
   openTerminalSession,
   parseTerminalControl,
   terminalSocketUrl,
@@ -169,6 +170,43 @@ describe("openTerminalSession", () => {
     expect(await openTerminalSession("t1")).toBe(false);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await openTerminalSession("t1")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("includes the harness id in the body for kind=harness", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const ok = await openTerminalSession("s1", "harness", "", "claude");
+    expect(ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/s1",
+      expect.objectContaining({ body: JSON.stringify({ kind: "harness", harness: "claude" }) }),
+    );
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("fetchHarnesses", () => {
+  it("returns the harness list the endpoint reports", async () => {
+    const harnesses = [
+      { id: "claude", name: "Claude Code", detected: true },
+      { id: "pi", name: "Pi.dev", detected: false },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ harnesses }) }),
+    );
+    expect(await fetchHarnesses()).toEqual(harnesses);
+    vi.unstubAllGlobals();
+  });
+
+  it("returns [] on a non-ok response, a missing key, or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await fetchHarnesses()).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
+    expect(await fetchHarnesses()).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await fetchHarnesses()).toEqual([]);
     vi.unstubAllGlobals();
   });
 });

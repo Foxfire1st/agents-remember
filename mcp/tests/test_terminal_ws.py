@@ -17,10 +17,11 @@ import socket
 import sys
 import tempfile
 import unittest
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -45,6 +46,16 @@ def _config(tmp: Path) -> McpRuntimeConfig:
         workspace_root=tmp,
         transcript_root=tmp / "logs" / "mcp",
     )
+
+
+def _which(*installed: str) -> Callable[[str], str | None]:
+    """A ``shutil.which`` fake: resolves only the named commands (else ``None``)."""
+    present = set(installed)
+
+    def which(command: str) -> str | None:
+        return f"/usr/bin/{command}" if command in present else None
+
+    return which
 
 
 class _RecordingHost:
@@ -250,6 +261,46 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.host.opened, [])
 
+    def test_get_harnesses_lists_supported_set_with_detection(self) -> None:
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            response = client.get("/api/harnesses")
+        self.assertEqual(response.status_code, 200)
+        harnesses = response.json()["harnesses"]
+        self.assertEqual([h["id"] for h in harnesses], ["claude", "codex", "pi"])
+        self.assertEqual(
+            {h["id"]: h["detected"] for h in harnesses},
+            {"claude": True, "codex": False, "pi": False},
+        )
+
+    def test_post_open_harness_spawns_registry_argv_at_workspace_root(self) -> None:
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/h-1", json={"kind": "harness", "harness": "claude"}
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual((body["kind"], body["harness"]), ("harness", "claude"))
+        self.assertEqual(len(self.host.opened), 1)
+        opened = self.host.opened[0]
+        self.assertEqual(opened["command"], ["claude"])  # server-resolved argv, never wire-supplied
+        self.assertEqual(opened["cwd"], self.tmp)  # workspace_root
+
+    def test_post_open_harness_rejects_uninstalled(self) -> None:
+        with patch("shutil.which", _which()), TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/h-2", json={"kind": "harness", "harness": "claude"}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.host.opened, [])
+
+    def test_post_open_harness_rejects_unknown_id(self) -> None:
+        with patch("shutil.which", _which("gemini")), TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/h-3", json={"kind": "harness", "harness": "gemini"}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.host.opened, [])
+
 
 class ResolveTerminalLaunchTests(unittest.TestCase):
     def test_terminal_kind_is_shell_at_workspace_root(self) -> None:
@@ -261,6 +312,42 @@ class ResolveTerminalLaunchTests(unittest.TestCase):
     def test_unknown_kind_raises(self) -> None:
         with self.assertRaises(ValueError):
             resolve_terminal_launch("nope", workspace_root=Path("/ws"), shell="/bin/sh")
+
+    def test_harness_kind_resolves_registry_argv_at_workspace_root(self) -> None:
+        cwd, argv = resolve_terminal_launch(
+            "harness",
+            workspace_root=Path("/ws"),
+            shell="/bin/sh",
+            harness="claude",
+            which=_which("claude"),
+        )
+        self.assertEqual((cwd, argv), (Path("/ws"), ["claude"]))
+
+    def test_harness_kind_without_id_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            resolve_terminal_launch(
+                "harness", workspace_root=Path("/ws"), shell="/bin/sh", which=_which("claude")
+            )
+
+    def test_harness_kind_unknown_id_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            resolve_terminal_launch(
+                "harness",
+                workspace_root=Path("/ws"),
+                shell="/bin/sh",
+                harness="gemini",
+                which=_which("gemini"),
+            )
+
+    def test_harness_kind_not_installed_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            resolve_terminal_launch(
+                "harness",
+                workspace_root=Path("/ws"),
+                shell="/bin/sh",
+                harness="claude",
+                which=_which(),
+            )
 
 
 if __name__ == "__main__":
