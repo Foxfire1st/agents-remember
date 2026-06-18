@@ -122,9 +122,14 @@ const OFFICIAL_COUPLER_X = 390; // official-line code↔memory coupler (podstage
 const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   "worktree-add": [480, 281, 698, 281],
   "ledger-map": [480, 403, 698, 403],
-  "cgc-seed": [900, 281, 1055, 150],
-  "grepai-clone": [900, 403, 1055, 500],
-  sync: [480, 289, 698, 289],
+  // Provider conduits run from the box's side-edge MIDDLE to the engine's INNER corner, pointing INTO
+  // the engine (it reads + indexes the source); the chevron shows only when running (see Conduit).
+  "cgc-seed": [900, 281, 1057, 198],
+  "grepai-clone": [900, 403, 1057, 452],
+  // sync shares the code intake lane's CENTRELINE with worktree-add (same source→worktree channel,
+  // a later phase of it) — collinear, not stacked 8px below, so the blocked sync reads as one
+  // centred line on the lane rather than a confusing off-centre double.
+  sync: [480, 281, 698, 281],
   // integration = the worktree → official "landing" return lane (above the code lane); t14c STOPs it.
   integration: [690, 234, 490, 234],
 };
@@ -186,8 +191,9 @@ function EngineGauge({ at, label, runtime, reindex }: {
       {/* podstage .e-spine + .e-petal: a faint centre spine + fanned flank petals (runtime-coloured). */}
       <line className={engineSpine} x1={ENGINE.w / 2} y1={4} x2={ENGINE.w / 2} y2={ENGINE.h - 4} />
       {[
+        // left flank + right flank mirror each other across the gauge centre (both fan toward the gauge)
         [-8, 26, -2, 22], [-8, 48, -2, 48], [-8, 70, -2, 74],
-        [ENGINE.w + 2, 26, ENGINE.w + 8, 22], [ENGINE.w + 2, 48, ENGINE.w + 8, 48], [ENGINE.w + 2, 70, ENGINE.w + 8, 74],
+        [ENGINE.w + 2, 22, ENGINE.w + 8, 26], [ENGINE.w + 2, 48, ENGINE.w + 8, 48], [ENGINE.w + 2, 74, ENGINE.w + 8, 70],
       ].map(([x1, y1, x2, y2], i) => (
         <line className={enginePetal({ runtimeState: runtime })} key={i} x1={x1} y1={y1} x2={x2} y2={y2} />
       ))}
@@ -241,7 +247,13 @@ function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: strin
     : `M${x1} ${y1} L ${x2} ${y2}`;
   return (
     <g data-testid="conduit" data-kind={edge.kind} data-state={edge.state} data-strategy={bent ? "replay" : undefined}>
-      <path className={flowConduit({ state: conduitState(edge.state) })} d={d} pathLength={100} markerEnd="url(#er-chev)">
+      <path
+        className={flowConduit({ state: conduitState(edge.state) })}
+        d={d}
+        pathLength={100}
+        // arrow tip only on an ACTION (running flow); a nominal/static line is just a connection
+        markerEnd={edge.state === "running" ? "url(#er-chev)" : undefined}
+      >
         <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}{bent ? " — replay (around parallel work)" : ""}</title>
       </path>
       {edge.state === "running" ? (
@@ -448,7 +460,9 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
       data-testid="enclosure-canvas"
     >
       <defs>
-        <marker id="er-chev" viewBox="0 0 10 10" refX="6.5" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+        {/* refX sits at the chevron's VISUAL tip (geom apex 8.5 + the round join's ~1.1) so the
+            arrowhead lands ON the line end, never overshooting past it into the target engine/box. */}
+        <marker id="er-chev" viewBox="0 0 10 10" refX="9.6" refY="5" markerWidth="9" markerHeight="9" orient="auto">
           <path d="M1.5 1 L8.5 5 L1.5 9" fill="none" stroke="context-stroke" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </marker>
       </defs>
@@ -471,8 +485,8 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
 
       {/* Official-line (left world): the workspace engines + their wiring + the official code↔memory
           coupler, ported from podstage.html (m-cgc / m-grep / w-m-* / cpl-main). Real providers. */}
-      {officialCode ? <line className={officialWire} x1={135} y1={185} x2={300} y2={252} data-testid="official-wire" /> : null}
-      {officialMemory && hasMemory ? <line className={officialWire} x1={135} y1={466} x2={300} y2={432} data-testid="official-wire" /> : null}
+      {officialCode ? <line className={officialWire} x1={135} y1={198} x2={300} y2={281} data-testid="official-wire" /> : null}
+      {officialMemory && hasMemory ? <line className={officialWire} x1={135} y1={452} x2={300} y2={403} data-testid="official-wire" /> : null}
       {officialCode ? <EngineGauge at={ENGINE.mcgc} label="CGC" runtime={runtimeState(engineState(officialCode))} /> : null}
       {officialMemory ? <EngineGauge at={ENGINE.mgrep} label="GrepAI" runtime={runtimeState(engineState(officialMemory))} /> : null}
       {hasMemory ? <WarpCoupler x={OFFICIAL_COUPLER_X} bound={hasMemory} testid="warp-coupler-official" label={`${short(node.codeSource.commit)} ⇄ ${short(node.memorySource?.commit)}`} /> : null}

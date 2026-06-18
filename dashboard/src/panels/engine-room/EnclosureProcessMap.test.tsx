@@ -158,6 +158,49 @@ describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
   });
 });
 
+describe("EnclosureCanvas — conduit wiring polish (5h cleanup)", () => {
+  it("tips a conduit only on a running flow (action) — a complete/nominal connection carries no arrowhead", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-setup-running")} />);
+    const running = container.querySelector('[data-kind="grepai-clone"][data-state="running"] path');
+    const complete = container.querySelector('[data-kind="cgc-seed"] path');
+    expect(running?.getAttribute("marker-end")).toBe("url(#er-chev)");
+    expect(complete?.getAttribute("marker-end")).toBeNull();
+  });
+
+  it("seats the chevron reference at its visual tip so the arrowhead lands on the line end, not past it", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    // refX < the chevron apex (8.5) overshoots the endpoint into the target engine — see the marker comment.
+    expect(container.querySelector("marker#er-chev")?.getAttribute("refX")).toBe("9.6");
+  });
+
+  it("wires each provider conduit from the box-edge midpoint into the engine's inner corner", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    // code box right-edge midpoint (900,281) → CGC inner corner (1057,198); memory midpoint (900,403) → GrepAI (1057,452)
+    expect(container.querySelector('[data-kind="cgc-seed"] path')?.getAttribute("d")).toBe("M900 281 L 1057 198");
+    expect(container.querySelector('[data-kind="grepai-clone"] path')?.getAttribute("d")).toBe("M900 403 L 1057 452");
+  });
+
+  it("keeps the sync lane on the worktree-add centreline (one centred line, not an offset double)", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-sync-needed")} />);
+    const sync = container.querySelector('[data-kind="sync"] path')?.getAttribute("d");
+    const add = container.querySelector('[data-kind="worktree-add"] path')?.getAttribute("d");
+    expect(sync).toBe("M480 281 L 698 281");
+    expect(add).toBe("M480 281 L 698 281"); // collinear: same y on both ends, so they read as one centred line
+  });
+
+  it("fans six engine petals with mirrored flanks (symmetric across the gauge centre)", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    const gauge = container.querySelector('[data-testid="engine-gauge"]');
+    const lines = [...(gauge?.querySelectorAll("line") ?? [])];
+    const mid = (l: Element) => (Number(l.getAttribute("y1")) + Number(l.getAttribute("y2"))) / 2;
+    // petals are the only gauge lines whose x sits outside the gauge body [0, ENGINE.w=54]
+    const left = lines.filter((l) => Number(l.getAttribute("x1")) < 0).map(mid).sort((a, b) => a - b);
+    const right = lines.filter((l) => Number(l.getAttribute("x1")) > 54).map(mid).sort((a, b) => a - b);
+    expect(left).toEqual([24, 48, 72]);
+    expect(right).toEqual([24, 48, 72]); // each flank's petal midpoints mirror the other
+  });
+});
+
 describe("EnclosureCanvas — live + teardown (5g G5)", () => {
   it("t14c — a terminal integration conflict draws a STOP and suppresses recovery chips", () => {
     const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-integration-conflict")} />);
