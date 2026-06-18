@@ -248,6 +248,18 @@ export interface EngineProcessEdge {
   detail?: string;
 }
 
+// One remote/PR participant in the successful-landing arc (slice 5h). `factState` is the honesty
+// axis (like CommitRefNode): observed = a live git/gh probe confirmed it; planned = expected but not
+// yet; missing = the probe could not run (e.g. gh absent). The cockpit never animates a planned PR
+// as a live one.
+export interface LandingRefNode {
+  kind: string; // origin-main | origin-feat | origin-mem-main | pr
+  label: string; // "origin/main" | "PR #128"
+  state: string; // behind | tip | open | merged | pushed | planned | unknown
+  factState: ProcessFactState;
+  detail?: string;
+}
+
 export interface EngineProcessNode {
   id: string; // the contract path — the stable enclosure id (== EnclosureNode.enclosure)
   enclosure: string;
@@ -267,6 +279,7 @@ export interface EngineProcessNode {
   humanReviewStatus: string;
   closeoutStatus: string;
   integrationStatus: string;
+  integrationStrategy?: string; // ff-only | replay; absent until the integration decision is recorded (5h)
   cleanup: string;
   setupState?: string; // running | stale | failed | failed-unchecked | ok | complete | prepared
   currentPhase?: string;
@@ -277,6 +290,7 @@ export interface EngineProcessNode {
   retryArgs?: Record<string, unknown>;
   providers: ProviderBootNode[];
   edges: EngineProcessEdge[];
+  landing: LandingRefNode[]; // the successful-landing arc (slice 5h); empty until closeout/integration
   actions: ActionAvailability[];
   nextAction?: string; // the lifecycle-guidance next operation (display/copy only until slice 06)
   summary: string;

@@ -431,6 +431,25 @@ class EngineProcessEdge(BaseModel):
     detail: str | None = None
 
 
+class LandingRefNode(BaseModel):
+    """One remote/PR participant in the successful-landing arc (slice 5h).
+
+    The landing tail references refs the *worktree* projection has no node for -- ``origin/main``,
+    ``origin/<feat>``, the PR, ``origin/mem-main``. Like :class:`CommitRefNode`, ``factState`` is the
+    honesty axis so the cockpit never animates a *planned* PR as an observed one: ``observed`` means a
+    live probe (``git ls-remote`` / ``gh``) confirmed it, ``planned`` is an expected-but-not-yet step,
+    and ``missing`` is a probe that could not run (e.g. ``gh`` absent/unauthed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str  # origin-main | origin-feat | origin-mem-main | pr
+    label: str  # display: "origin/main", "PR #128"
+    state: str  # behind | tip | open | merged | pushed | planned | unknown
+    factState: str = "planned"  # observed | derived | planned | missing
+    detail: str | None = None
+
+
 class EngineProcessNode(BaseModel):
     """One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).
 
@@ -466,6 +485,9 @@ class EngineProcessNode(BaseModel):
     humanReviewStatus: str
     closeoutStatus: str
     integrationStatus: str
+    integrationStrategy: str | None = (
+        None  # ff-only | replay; None until the integration decision is recorded (5h)
+    )
     cleanup: str
 
     # Provider boot: one setup-progress sequence per worktree group (slice 3b reused).
@@ -479,6 +501,9 @@ class EngineProcessNode(BaseModel):
 
     providers: list[ProviderBootNode] = Field(default_factory=list)
     edges: list[EngineProcessEdge] = Field(default_factory=list)
+    # The successful-landing arc -- remote/PR refs observed during closeout/integration (5h). Empty
+    # until the lifecycle reaches a landing phase or when no probe could run.
+    landing: list[LandingRefNode] = Field(default_factory=list)
     actions: list[ActionAvailability] = Field(default_factory=list)
     # The lifecycle-guidance next operation + human one-liner (display/copy only until slice 06).
     nextAction: str | None = None

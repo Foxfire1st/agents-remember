@@ -29,6 +29,7 @@ function node(over: Partial<EngineProcessNode> = {}): EngineProcessNode {
     seedFallback: false,
     providers: [],
     edges: [],
+    landing: [],
     actions: [],
     summary: "",
     missingFacts: [],

@@ -8,6 +8,8 @@ import type {
   CommitRefNode,
   EngineProcessEdge,
   EngineProcessNode,
+  LandingRefNode,
+  ProcessFactState,
   ProviderBootNode,
   ProviderNode,
 } from "../../types/projection";
@@ -44,6 +46,16 @@ function boot(role: "code" | "memory", runtimeState = "nominal"): ProviderBootNo
     runtimeState,
     factState: "observed",
   };
+}
+
+function landingRef(
+  kind: string,
+  label: string,
+  state: string,
+  factState: ProcessFactState = "observed",
+  detail?: string,
+): LandingRefNode {
+  return { kind, label, state, factState, ...(detail ? { detail } : {}) };
 }
 
 interface EdgeStates {
@@ -157,6 +169,7 @@ function engineProcess(
     seedFallback: false,
     providers: [boot("code"), boot("memory")],
     edges: edges({}),
+    landing: [],
     actions: [],
     nextAction: "continue_work",
     summary: "Worktree task started; continue the wrapped workflow before closeout.",
@@ -527,6 +540,62 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         actions: [],
         nextAction: "",
         summary: "Worktree abandoned without integration — record kept.",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // 5h T14 — successful ff-only landing, mid-arc: source pushed, PR open, memory not yet carried.
+    name: "engine-landing-ffonly",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "integration-pending",
+        health: "nominal",
+        humanReviewStatus: "approved",
+        closeoutStatus: "completed",
+        integrationStrategy: "ff-only",
+        cleanup: "pending",
+        edges: edges({ integration: "running" }),
+        landing: [
+          landingRef("origin-feat", "origin/feat-…", "pushed", "observed", "a1b2c3d4"),
+          landingRef("pr", "PR #128", "open", "observed", "checks green"),
+          landingRef("origin-main", "origin/main", "tip", "observed"),
+          landingRef("origin-mem-main", "origin/mem-main", "planned", "planned", "after carryover"),
+        ],
+        summary: "Closeout complete; integrating ff-only — source pushed, PR open.",
+        nextAction: "request_integration_decision",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // 5h T14b/T16 — replay onto a moved main, PR merged, memory carried over; cleanup pending.
+    name: "engine-landing-merged",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "cleanup-pending",
+        health: "nominal",
+        humanReviewStatus: "approved",
+        closeoutStatus: "completed",
+        integrationStatus: "completed",
+        integrationStrategy: "replay",
+        cleanup: "pending",
+        edges: edges({ integration: "complete" }),
+        landing: [
+          landingRef("origin-feat", "origin/feat-…", "merged", "observed"),
+          landingRef("pr", "PR #128", "merged", "observed", "merged into main"),
+          landingRef("origin-main", "origin/main", "tip", "observed", "advanced"),
+          landingRef("origin-mem-main", "origin/mem-main", "pushed", "observed", "carryover done"),
+        ],
+        actions: [{ action: "cleanup", enabled: true }],
+        summary: "Replayed onto moved main; PR merged, memory carried over — cleanup pending.",
+        nextAction: "request_cleanup_decision",
       }),
     ],
     workspace: WORKSPACE,

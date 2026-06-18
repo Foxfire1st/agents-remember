@@ -39,6 +39,7 @@ from agents_remember.observer.projection import (
     EngineProcessEdge,
     EngineProcessFacts,
     EngineProcessNode,
+    LandingRefNode,
     LedgerNode,
     LifecycleProjection,
     Metrics,
@@ -118,7 +119,10 @@ def project_workspace(
     lifecycles = lifecycles + _persistent_lifecycles(enriched, lifecycles)
     sidecars = sidecar_staleness or []
     engine_processes = build_engine_processes(
-        engine_process_facts or [], enriched, providers, setup_progress or [],
+        engine_process_facts or [],
+        enriched,
+        providers,
+        setup_progress or [],
         engine_start_progress or [],
     )
     analytics = build_analytics(
@@ -131,7 +135,10 @@ def project_workspace(
         ledgers=ledgers or [],
         task_documents=task_documents or [],
         attention_queue=build_attention_queue(
-            lifecycles, providers, drift_snapshots or [], setup_progress or [],
+            lifecycles,
+            providers,
+            drift_snapshots or [],
+            setup_progress or [],
             engine_start_progress or [],
         ),
         engine_processes=engine_processes,
@@ -707,27 +714,41 @@ def _start_process_node(entry: dict[str, Any]) -> EngineProcessNode:
     )
     edges = [
         EngineProcessEdge(
-            id="code-worktree-add", fromNode="code-source", toNode="code-worktree",
-            kind="worktree-add", state="complete" if code_exists else "planned",
+            id="code-worktree-add",
+            fromNode="code-source",
+            toNode="code-worktree",
+            kind="worktree-add",
+            state="complete" if code_exists else "planned",
             label="add code worktree",
         ),
         EngineProcessEdge(
-            id="cgc-seed", fromNode="code-worktree", toNode="cgc-engine",
-            kind="cgc-seed", state="planned", label="CGC seed",
+            id="cgc-seed",
+            fromNode="code-worktree",
+            toNode="cgc-engine",
+            kind="cgc-seed",
+            state="planned",
+            label="CGC seed",
         ),
     ]
     if memory_mode == "external":
         edges.append(
             EngineProcessEdge(
-                id="memory-worktree-add", fromNode="memory-source", toNode="memory-worktree",
-                kind="ledger-map", state="blocked" if blocked_reason else "planned",
+                id="memory-worktree-add",
+                fromNode="memory-source",
+                toNode="memory-worktree",
+                kind="ledger-map",
+                state="blocked" if blocked_reason else "planned",
                 label="ledger-map + memory worktree",
             )
         )
         edges.append(
             EngineProcessEdge(
-                id="grepai-clone", fromNode="memory-worktree", toNode="grepai-engine",
-                kind="grepai-clone", state="planned", label="GrepAI clone",
+                id="grepai-clone",
+                fromNode="memory-worktree",
+                toNode="grepai-engine",
+                kind="grepai-clone",
+                state="planned",
+                label="GrepAI clone",
             )
         )
     missing = [f"start gated at {phase} — contract not yet written"]
@@ -876,6 +897,7 @@ def _engine_process(
         humanReviewStatus=str(cp.get("human_review_status", "")),
         closeoutStatus=str(cp.get("closeout_status", "")),
         integrationStatus=str(cp.get("integration_status", "")),
+        integrationStrategy=_str_or_none(cp.get("integration_strategy")),
         cleanup=str(cp.get("cleanup", "")),
         setupState=setup_state,
         currentPhase=current_phase,
@@ -886,6 +908,7 @@ def _engine_process(
         retryArgs=retry_args,
         providers=boot,
         edges=edges,
+        landing=[LandingRefNode(**ref) for ref in (status.get("landing") or [])],
         actions=list(enclosure.actions) if enclosure else [],
         nextAction=_str_or_none(guidance.get("nextOperation")),
         summary=str(guidance.get("summary", "")),
@@ -922,7 +945,9 @@ def _ref_fact_state(has_status: bool, exists: object) -> str:
     return "missing"
 
 
-def _process_phase(guidance_phase: object, setup_state: str | None, *, behind_official: bool) -> str:
+def _process_phase(
+    guidance_phase: object, setup_state: str | None, *, behind_official: bool
+) -> str:
     base = _GUIDANCE_PHASE.get(str(guidance_phase or ""), "unknown")
     if base != "worktree-started":
         return base
@@ -973,7 +998,10 @@ def _process_edges(
             toNode="cgc-engine",
             kind="cgc-seed",
             state=_seed_edge_state(
-                setup_state, failed_phases, any(node.role == "code" for node in boot), "codegraphcontext"
+                setup_state,
+                failed_phases,
+                any(node.role == "code" for node in boot),
+                "codegraphcontext",
             ),
             label="CGC seed",
         ),
@@ -996,7 +1024,10 @@ def _process_edges(
                 toNode="grepai-engine",
                 kind="grepai-clone",
                 state=_seed_edge_state(
-                    setup_state, failed_phases, any(node.role == "memory" for node in boot), "grepai"
+                    setup_state,
+                    failed_phases,
+                    any(node.role == "memory" for node in boot),
+                    "grepai",
                 ),
                 label="GrepAI clone",
             )

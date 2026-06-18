@@ -145,7 +145,9 @@ def _enclosure(**overrides: str) -> EnclosureNode:
 class FoldTests(unittest.TestCase):
     def test_seed_from_started(self) -> None:
         proj = project_lifecycle([_started()], now=FRESH)
-        self.assertEqual((proj.id, proj.state, proj.phase, proj.fleeting), ("LC1", "running", "request", True))
+        self.assertEqual(
+            (proj.id, proj.state, proj.phase, proj.fleeting), ("LC1", "running", "request", True)
+        )
         self.assertEqual(proj.startedAt, T0)
         self.assertFalse(proj.inferred)
         self.assertEqual(proj.tokens, 0)
@@ -162,7 +164,10 @@ class FoldTests(unittest.TestCase):
         self.assertIsNone(proj.ask)
 
     def test_blocked_keeps_ask(self) -> None:
-        log = [_started(), _event("lifecycle.blocked", ts="2026-06-13T18:00:10+00:00", ask={"kind": "decision"})]
+        log = [
+            _started(),
+            _event("lifecycle.blocked", ts="2026-06-13T18:00:10+00:00", ask={"kind": "decision"}),
+        ]
         proj = project_lifecycle(log, now=FRESH)
         self.assertEqual(proj.state, "blocked")
         self.assertEqual(proj.ask, {"kind": "decision"})
@@ -170,8 +175,22 @@ class FoldTests(unittest.TestCase):
     def test_tokens_aggregate(self) -> None:
         log = [
             _started(),
-            _event("tool.completed", ts="2026-06-13T18:00:05+00:00", trust="observed", tool="a", tokens=100, ok=True),
-            _event("tool.completed", ts="2026-06-13T18:00:10+00:00", trust="observed", tool="b", tokens=50, ok=True),
+            _event(
+                "tool.completed",
+                ts="2026-06-13T18:00:05+00:00",
+                trust="observed",
+                tool="a",
+                tokens=100,
+                ok=True,
+            ),
+            _event(
+                "tool.completed",
+                ts="2026-06-13T18:00:10+00:00",
+                trust="observed",
+                tool="b",
+                tokens=50,
+                ok=True,
+            ),
         ]
         self.assertEqual(project_lifecycle(log, now=FRESH).tokens, 150)
 
@@ -193,8 +212,20 @@ class FoldTests(unittest.TestCase):
         self.assertEqual((proj.scope, proj.enclosure, proj.repoId), ("repo-a", "/c.md", "repo-a"))
 
     def test_ended_outcomes(self) -> None:
-        done = project_lifecycle([_started(), _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="completed")], now=FRESH)
-        dropped = project_lifecycle([_started(), _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="abandoned")], now=FRESH)
+        done = project_lifecycle(
+            [
+                _started(),
+                _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="completed"),
+            ],
+            now=FRESH,
+        )
+        dropped = project_lifecycle(
+            [
+                _started(),
+                _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="abandoned"),
+            ],
+            now=FRESH,
+        )
         self.assertEqual(done.state, "completed")
         self.assertEqual(dropped.state, "abandoned")
 
@@ -208,7 +239,14 @@ class DeterminismTests(unittest.TestCase):
         log = [
             _started(),
             _event("lifecycle.phase-changed", ts="2026-06-13T18:00:05+00:00", phase="build"),
-            _event("tool.completed", ts="2026-06-13T18:00:10+00:00", trust="observed", tool="a", tokens=7, ok=True),
+            _event(
+                "tool.completed",
+                ts="2026-06-13T18:00:10+00:00",
+                trust="observed",
+                tool="a",
+                tokens=7,
+                ok=True,
+            ),
         ]
         first = project_lifecycle(log, now=STALE).model_dump()
         second = project_lifecycle(log, now=STALE).model_dump()
@@ -235,14 +273,26 @@ class InferredLayerTests(unittest.TestCase):
     def test_persistent_dormant_not_abandoned(self) -> None:
         log = [
             _started(fleeting=True),
-            _event("lifecycle.promoted", ts="2026-06-13T18:00:05+00:00", trust="observed", actor="system", scope="repo-a"),
+            _event(
+                "lifecycle.promoted",
+                ts="2026-06-13T18:00:05+00:00",
+                trust="observed",
+                actor="system",
+                scope="repo-a",
+            ),
         ]
         proj = project_lifecycle(log, now=DORMANT)
         self.assertEqual(proj.state, "paused")  # stale, but never auto-abandoned
         self.assertTrue(proj.inferred)
 
     def test_terminal_survives_staleness(self) -> None:
-        proj = project_lifecycle([_started(), _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="completed")], now=DORMANT)
+        proj = project_lifecycle(
+            [
+                _started(),
+                _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="completed"),
+            ],
+            now=DORMANT,
+        )
         self.assertEqual(proj.state, "completed")
         self.assertFalse(proj.inferred)
 
@@ -250,20 +300,42 @@ class InferredLayerTests(unittest.TestCase):
 class CorrectionTests(unittest.TestCase):
     def test_correction_overrides_state(self) -> None:
         ended = _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="completed")
-        correction = _event("correction.recorded", ts="2026-06-13T18:00:10+00:00", trust="inferred", actor="system", corrects=ended.id, state="abandoned")
+        correction = _event(
+            "correction.recorded",
+            ts="2026-06-13T18:00:10+00:00",
+            trust="inferred",
+            actor="system",
+            corrects=ended.id,
+            state="abandoned",
+        )
         proj = project_lifecycle([_started(), ended, correction], now=FRESH)
         self.assertEqual(proj.state, "abandoned")
 
     def test_malformed_correction_ignored(self) -> None:
         ended = _event("lifecycle.ended", ts="2026-06-13T18:00:05+00:00", outcome="completed")
-        bogus = _event("correction.recorded", ts="2026-06-13T18:00:10+00:00", trust="inferred", actor="system", corrects=ended.id, state="not-a-state")
+        bogus = _event(
+            "correction.recorded",
+            ts="2026-06-13T18:00:10+00:00",
+            trust="inferred",
+            actor="system",
+            corrects=ended.id,
+            state="not-a-state",
+        )
         proj = project_lifecycle([_started(), ended, bogus], now=FRESH)
         self.assertEqual(proj.state, "completed")
 
 
 class ActionAvailabilityTests(unittest.TestCase):
     def test_resume_enabled_only_when_blocked(self) -> None:
-        blocked = project_lifecycle([_started(), _event("lifecycle.blocked", ts="2026-06-13T18:00:10+00:00", ask={"kind": "question"})], now=FRESH)
+        blocked = project_lifecycle(
+            [
+                _started(),
+                _event(
+                    "lifecycle.blocked", ts="2026-06-13T18:00:10+00:00", ask={"kind": "question"}
+                ),
+            ],
+            now=FRESH,
+        )
         running = project_lifecycle([_started()], now=FRESH)
         self.assertTrue(_action(blocked.actions, "resume").enabled)
         self.assertFalse(_action(running.actions, "resume").enabled)
@@ -289,12 +361,24 @@ class WorkspaceTests(unittest.TestCase):
     def test_tree_and_metrics(self) -> None:
         logs = [
             [_started(lifecycle_id="LC1", ts=T0)],
-            [_started(lifecycle_id="LC2", ts=T0), _event("lifecycle.blocked", lifecycle_id="LC2", ts="2026-06-13T18:00:05+00:00", ask={"kind": "question"})],
+            [
+                _started(lifecycle_id="LC2", ts=T0),
+                _event(
+                    "lifecycle.blocked",
+                    lifecycle_id="LC2",
+                    ts="2026-06-13T18:00:05+00:00",
+                    ask={"kind": "question"},
+                ),
+            ],
         ]
         proj = project_workspace(
             logs,
             enclosures=[_enclosure()],
-            providers=[ProviderNode(id="cgc", state="ready", ok=True, watcherUp=True, indexingState="indexed")],
+            providers=[
+                ProviderNode(
+                    id="cgc", state="ready", ok=True, watcherUp=True, indexingState="indexed"
+                )
+            ],
             now=FRESH,
         )
         # 2 event-backed (running, blocked) + 1 synthesized persistent paused from the enclosure
@@ -307,7 +391,13 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(_action(proj.enclosures[0].actions, "integrate").enabled)
         synthesized = next(lc for lc in proj.lifecycles if lc.state == "paused")
         self.assertEqual(
-            (synthesized.id, synthesized.fleeting, synthesized.inferred, synthesized.phase, synthesized.lastEventTs),
+            (
+                synthesized.id,
+                synthesized.fleeting,
+                synthesized.inferred,
+                synthesized.phase,
+                synthesized.lastEventTs,
+            ),
             ("r/t", False, True, "close", ""),
         )
 
@@ -388,8 +478,20 @@ class SnapshotReaderTests(unittest.TestCase):
                 {
                     "checkedAt": T0,
                     "providers": {
-                        "codegraphcontext-code": {"id": "codegraphcontext-code", "state": "ready", "ok": True, "watcherUp": True, "indexingState": "indexed"},
-                        "grepai-memory": {"id": "grepai-memory", "state": "stopped", "ok": False, "watcherUp": False, "indexingState": "unknown"},
+                        "codegraphcontext-code": {
+                            "id": "codegraphcontext-code",
+                            "state": "ready",
+                            "ok": True,
+                            "watcherUp": True,
+                            "indexingState": "indexed",
+                        },
+                        "grepai-memory": {
+                            "id": "grepai-memory",
+                            "state": "stopped",
+                            "ok": False,
+                            "watcherUp": False,
+                            "indexingState": "unknown",
+                        },
                     },
                 }
             ),
@@ -415,7 +517,11 @@ class SnapshotReaderTests(unittest.TestCase):
                 {
                     "checkedAt": T0,
                     "providers": {
-                        "codegraphcontext-code": {"id": "codegraphcontext-code", "state": "ready", "ok": True},
+                        "codegraphcontext-code": {
+                            "id": "codegraphcontext-code",
+                            "state": "ready",
+                            "ok": True,
+                        },
                     },
                 }
             ),
@@ -429,7 +535,9 @@ class SnapshotReaderTests(unittest.TestCase):
                     "schema": "ar-worktree-provider-state/v1",
                     "repoName": "device-management",
                     "worktreeGroup": str(runtime.parent),
-                    "isolatedProviderSettings": {"providers": ["codegraphcontext-code", "grepai-memory"]},
+                    "isolatedProviderSettings": {
+                        "providers": ["codegraphcontext-code", "grepai-memory"]
+                    },
                 }
             ),
             encoding="utf-8",
@@ -442,7 +550,11 @@ class SnapshotReaderTests(unittest.TestCase):
         nodes = {node.id: node for node in read_providers(config, now=FRESH)}
         self.assertEqual(
             set(nodes),
-            {"codegraphcontext-code", "codegraphcontext-code@260612-x-ar", "grepai-memory@260612-x-ar"},
+            {
+                "codegraphcontext-code",
+                "codegraphcontext-code@260612-x-ar",
+                "grepai-memory@260612-x-ar",
+            },
         )
         self.assertEqual(nodes["codegraphcontext-code"].scope, "workspace")
         code = nodes["codegraphcontext-code@260612-x-ar"]
@@ -490,8 +602,22 @@ class TokenSeriesTests(unittest.TestCase):
     def test_cumulative_series_from_tool_events(self) -> None:
         log = [
             _started(),
-            _event("tool.completed", ts="2026-06-13T18:00:05+00:00", trust="observed", tool="a", tokens=100, ok=True),
-            _event("tool.completed", ts="2026-06-13T18:00:10+00:00", trust="observed", tool="b", tokens=50, ok=True),
+            _event(
+                "tool.completed",
+                ts="2026-06-13T18:00:05+00:00",
+                trust="observed",
+                tool="a",
+                tokens=100,
+                ok=True,
+            ),
+            _event(
+                "tool.completed",
+                ts="2026-06-13T18:00:10+00:00",
+                trust="observed",
+                tool="b",
+                tokens=50,
+                ok=True,
+            ),
         ]
         self.assertEqual(
             [(s.ts, s.cumulative) for s in token_series(log)],
@@ -499,7 +625,17 @@ class TokenSeriesTests(unittest.TestCase):
         )
 
     def test_series_on_projection(self) -> None:
-        log = [_started(), _event("tool.completed", ts="2026-06-13T18:00:05+00:00", trust="observed", tool="a", tokens=7, ok=True)]
+        log = [
+            _started(),
+            _event(
+                "tool.completed",
+                ts="2026-06-13T18:00:05+00:00",
+                trust="observed",
+                tool="a",
+                tokens=7,
+                ok=True,
+            ),
+        ]
         proj = project_lifecycle(log, now=FRESH)
         self.assertEqual([s.cumulative for s in proj.tokenSeries], [7])
 
@@ -509,15 +645,17 @@ class TokenSeriesTests(unittest.TestCase):
 
 class StalenessHistogramTests(unittest.TestCase):
     def _node(self, age: float | None) -> SidecarStaleNode:
-        return SidecarStaleNode(onboardingFile="x", repository="r", lastVerifiedDate="d", ageSeconds=age)
+        return SidecarStaleNode(
+            onboardingFile="x", repository="r", lastVerifiedDate="d", ageSeconds=age
+        )
 
     def test_buckets_by_age(self) -> None:
         nodes = [
-            self._node(3600.0),            # <7d
-            self._node(10 * 86400.0),      # 7-30d
-            self._node(60 * 86400.0),      # 30-90d
-            self._node(200 * 86400.0),     # >90d
-            self._node(None),              # unknown
+            self._node(3600.0),  # <7d
+            self._node(10 * 86400.0),  # 7-30d
+            self._node(60 * 86400.0),  # 30-90d
+            self._node(200 * 86400.0),  # >90d
+            self._node(None),  # unknown
         ]
         hist = staleness_histogram(nodes)
         self.assertEqual(hist, {"<7d": 1, "7-30d": 1, "30-90d": 1, ">90d": 1, "unknown": 1})
@@ -525,13 +663,21 @@ class StalenessHistogramTests(unittest.TestCase):
 
 class AnalyticsAssemblyTests(unittest.TestCase):
     def _stale(self, age: float) -> SidecarStaleNode:
-        return SidecarStaleNode(onboardingFile=f"f{age}", repository="r", lastVerifiedDate="d", ageSeconds=age)
+        return SidecarStaleNode(
+            onboardingFile=f"f{age}", repository="r", lastVerifiedDate="d", ageSeconds=age
+        )
 
     def test_stalest_leaderboard_is_bounded_and_oldest_first(self) -> None:
         nodes = [self._stale(float(i) * 86400.0) for i in range(20)]
         analytics = build_analytics(
-            drift_snapshots=[], sidecar_staleness=nodes, setup_summaries=[], setup_progress=[],
-            route_coverage=[], tool_reports=[], ledgers=[], stalest_limit=5,
+            drift_snapshots=[],
+            sidecar_staleness=nodes,
+            setup_summaries=[],
+            setup_progress=[],
+            route_coverage=[],
+            tool_reports=[],
+            ledgers=[],
+            stalest_limit=5,
         )
         self.assertEqual(len(analytics.stalestSidecars), 5)
         self.assertEqual(analytics.stalestSidecars[0].ageSeconds, 19 * 86400.0)
@@ -539,9 +685,16 @@ class AnalyticsAssemblyTests(unittest.TestCase):
     def test_project_workspace_wires_analytics_and_histogram(self) -> None:
         sidecars = [self._stale(3600.0), self._stale(200 * 86400.0)]
         proj = project_workspace(
-            [[_started()]], enclosures=[], providers=[], now=FRESH,
+            [[_started()]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
             sidecar_staleness=sidecars,
-            drift_snapshots=[DriftSnapshotNode(repository="r", branch="main", counts={"drifted": 1}, actionableCount=1)],
+            drift_snapshots=[
+                DriftSnapshotNode(
+                    repository="r", branch="main", counts={"drifted": 1}, actionableCount=1
+                )
+            ],
         )
         self.assertEqual(proj.metrics.stalenessHistogram["<7d"], 1)
         self.assertEqual(proj.metrics.stalenessHistogram[">90d"], 1)
@@ -579,13 +732,20 @@ class AttentionQueueTests(unittest.TestCase):
         self.assertEqual((blocked.lifecycleId, blocked.detail), ("LC2", "Approve the plan?"))
 
     def test_stale_session_is_info(self) -> None:
-        proj = project_workspace([[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=STALE)
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=STALE
+        )
         item = proj.analytics.attentionQueue[0]
-        self.assertEqual((item.kind, item.severity, item.lifecycleId), ("stale-session", "info", "LC1"))
+        self.assertEqual(
+            (item.kind, item.severity, item.lifecycleId), ("stale-session", "info", "LC1")
+        )
 
     def test_dormant_fleeting_is_info(self) -> None:
         proj = project_workspace(
-            [[_started(fleeting=True, lifecycle_id="LC1")]], enclosures=[], providers=[], now=DORMANT
+            [[_started(fleeting=True, lifecycle_id="LC1")]],
+            enclosures=[],
+            providers=[],
+            now=DORMANT,
         )
         self.assertEqual(proj.analytics.attentionQueue[0].kind, "dormant-fleeting")
 
@@ -596,12 +756,15 @@ class AttentionQueueTests(unittest.TestCase):
             providers=[],
             now=FRESH,
             drift_snapshots=[
-                DriftSnapshotNode(repository="repo-a", branch="main", counts={"drifted": 2}, actionableCount=2)
+                DriftSnapshotNode(
+                    repository="repo-a", branch="main", counts={"drifted": 2}, actionableCount=2
+                )
             ],
             setup_progress=[SetupProgressNode(group="g1", state="ok", failedPhases=["cgc setup"])],
         )
         self.assertEqual(
-            {item.kind for item in proj.analytics.attentionQueue}, {"actionable-drift", "failed-setup"}
+            {item.kind for item in proj.analytics.attentionQueue},
+            {"actionable-drift", "failed-setup"},
         )
 
     def test_calm_tree_has_empty_queue(self) -> None:
@@ -615,11 +778,29 @@ class DriftSnapshotReaderTests(unittest.TestCase):
         self.addCleanup(self._dir.cleanup)
         self.coord = Path(self._dir.name)
 
-    def _write(self, repo: str, branch: str, counts: dict, *, schema: str = DRIFT_SNAPSHOT_SCHEMA, actionable: int = 0) -> None:  # type: ignore[type-arg]
+    def _write(
+        self,
+        repo: str,
+        branch: str,
+        counts: dict,
+        *,
+        schema: str = DRIFT_SNAPSHOT_SCHEMA,
+        actionable: int = 0,
+    ) -> None:  # type: ignore[type-arg]
         directory = drift_snapshot_dir(self.coord)
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"{repo}__{branch}.json").write_text(
-            json.dumps({"schema": schema, "repository": repo, "branch": branch, "checkedAt": T0, "counts": counts, "actionableCount": actionable, "rows": []}),
+            json.dumps(
+                {
+                    "schema": schema,
+                    "repository": repo,
+                    "branch": branch,
+                    "checkedAt": T0,
+                    "counts": counts,
+                    "actionableCount": actionable,
+                    "rows": [],
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -680,7 +861,16 @@ class SetupSummaryReaderTests(unittest.TestCase):
 
     def test_reads_latest_summary(self) -> None:
         (self.setup / "last-setup.json").write_text(
-            json.dumps({"action": "setup", "ok": True, "ready": True, "state": "ok", "generatedAt": T0, "resultCounts": {"total": 3, "ok": 3, "failed": 0, "skipped": 0}}),
+            json.dumps(
+                {
+                    "action": "setup",
+                    "ok": True,
+                    "ready": True,
+                    "state": "ok",
+                    "generatedAt": T0,
+                    "resultCounts": {"total": 3, "ok": 3, "failed": 0, "skipped": 0},
+                }
+            ),
             encoding="utf-8",
         )
         nodes = read_setup_summaries(self.coord, now=STALE)
@@ -690,8 +880,12 @@ class SetupSummaryReaderTests(unittest.TestCase):
         self.assertEqual(nodes[0].snapshotStaleSeconds, 600.0)
 
     def test_skips_full_debug_copy(self) -> None:
-        (self.setup / "last-setup.json").write_text(json.dumps({"action": "setup", "ok": True}), encoding="utf-8")
-        (self.setup / "last-setup-full.json").write_text(json.dumps({"action": "setup-full"}), encoding="utf-8")
+        (self.setup / "last-setup.json").write_text(
+            json.dumps({"action": "setup", "ok": True}), encoding="utf-8"
+        )
+        (self.setup / "last-setup-full.json").write_text(
+            json.dumps({"action": "setup-full"}), encoding="utf-8"
+        )
         self.assertEqual([n.action for n in read_setup_summaries(self.coord, now=FRESH)], ["setup"])
 
 
@@ -704,15 +898,36 @@ class SetupProgressReaderTests(unittest.TestCase):
     def _write(self, group: str, payload: dict) -> None:  # type: ignore[type-arg]
         directory = self.coord / "worktrees" / "repo-a" / group / "provider-runtime"
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "setup-progress.json").write_text(json.dumps({"schema": PROGRESS_SCHEMA, **payload}), encoding="utf-8")
+        (directory / "setup-progress.json").write_text(
+            json.dumps({"schema": PROGRESS_SCHEMA, **payload}), encoding="utf-8"
+        )
 
     def test_reads_finished_progress(self) -> None:
-        self._write("grp-ok", {"state": "ok", "startedAt": T0, "finishedAt": "2026-06-13T18:00:05+00:00", "completedPhases": [{"provider": "cgc", "action": "setup", "ok": True}]})
+        self._write(
+            "grp-ok",
+            {
+                "state": "ok",
+                "startedAt": T0,
+                "finishedAt": "2026-06-13T18:00:05+00:00",
+                "completedPhases": [{"provider": "cgc", "action": "setup", "ok": True}],
+            },
+        )
         nodes = read_setup_progress_nodes(self.coord, now=FRESH)
-        self.assertEqual((nodes[0].group, nodes[0].state, nodes[0].completedCount), ("grp-ok", "ok", 1))
+        self.assertEqual(
+            (nodes[0].group, nodes[0].state, nodes[0].completedCount), ("grp-ok", "ok", 1)
+        )
 
     def test_stale_running_projects_stale(self) -> None:
-        self._write("grp-run", {"state": "running", "startedAt": T0, "updatedAt": T0, "currentPhase": {"provider": "cgc", "action": "index", "startedAt": T0}, "completedPhases": []})
+        self._write(
+            "grp-run",
+            {
+                "state": "running",
+                "startedAt": T0,
+                "updatedAt": T0,
+                "currentPhase": {"provider": "cgc", "action": "index", "startedAt": T0},
+                "completedPhases": [],
+            },
+        )
         node = read_setup_progress_nodes(self.coord, now=STALE)[0]
         self.assertEqual(node.state, "stale")
         self.assertEqual(node.currentPhase, "cgc index")
@@ -731,11 +946,29 @@ class RouteCoverageReaderTests(unittest.TestCase):
     def _write(self, rel: str, route: str, counts: dict) -> None:  # type: ignore[type-arg]
         path = self.onb / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"schemaVersion": 1, "repository": "repo-a", "route": route, "coverageCounts": counts}), encoding="utf-8")
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "repository": "repo-a",
+                    "route": route,
+                    "coverageCounts": counts,
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def test_reads_coverage_per_route(self) -> None:
-        self._write("overview.index.json", "", {"sourceFilesInScope": 10, "fileSidecars": 7, "childRoutes": 2})
-        self._write("mcp/overview.index.json", "mcp", {"sourceFilesInScope": 5, "fileSidecars": 5, "childRoutes": 0})
+        self._write(
+            "overview.index.json",
+            "",
+            {"sourceFilesInScope": 10, "fileSidecars": 7, "childRoutes": 2},
+        )
+        self._write(
+            "mcp/overview.index.json",
+            "mcp",
+            {"sourceFilesInScope": 5, "fileSidecars": 5, "childRoutes": 0},
+        )
         by_route = {n.route: n for n in read_route_coverage(self.onb, repository="repo-a")}
         self.assertEqual(set(by_route), {"", "mcp"})
         self.assertEqual(by_route[""].sourceFilesInScope, 10)
@@ -780,7 +1013,10 @@ class LedgerReaderTests(unittest.TestCase):
         node = read_ledger(self.mem)
         self.assertIsNotNone(node)
         assert node is not None
-        self.assertEqual((node.repository, node.closeoutCount, node.lastVerifiedCodeCommit), ("repo-a", 2, "cccc"))
+        self.assertEqual(
+            (node.repository, node.closeoutCount, node.lastVerifiedCodeCommit),
+            ("repo-a", 2, "cccc"),
+        )
 
     def test_missing_ledger_is_none(self) -> None:
         self.assertIsNone(read_ledger(self.mem / "nope"))
@@ -797,16 +1033,51 @@ class DriftSnapshotProducerTests(unittest.TestCase):
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "feat-x", str(repo)], check=True, capture_output=True)
         subprocess.run(
-            ["git", "-C", str(repo), "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init"],
-            check=True, capture_output=True,
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "user.name=t",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+            check=True,
+            capture_output=True,
         )
         coord = (self.tmp / "coord").resolve()
         onboarding = (self.tmp / "onb").resolve()
         onboarding.mkdir()
         context = SimpleNamespace(coordination_root=coord, onboarding_root=onboarding)
         rows = [
-            DriftRow("onboarding/a.md", "a.py", "repo-x", "external", "h", "d", "up to date", "high", "none", "ok"),
-            DriftRow("onboarding/b.md", "b.py", "repo-x", "external", "h", "d", "drifted", "medium", "logic", "changed"),
+            DriftRow(
+                "onboarding/a.md",
+                "a.py",
+                "repo-x",
+                "external",
+                "h",
+                "d",
+                "up to date",
+                "high",
+                "none",
+                "ok",
+            ),
+            DriftRow(
+                "onboarding/b.md",
+                "b.py",
+                "repo-x",
+                "external",
+                "h",
+                "d",
+                "drifted",
+                "medium",
+                "logic",
+                "changed",
+            ),
         ]
         summary._write_drift_snapshot(repo, context, rows)
         nodes = read_drift_snapshots(coord, now=FRESH)
@@ -857,21 +1128,41 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
         directory = drift_snapshot_dir(self.coord)
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "repo-a__main.json").write_text(
-            json.dumps({"schema": DRIFT_SNAPSHOT_SCHEMA, "repository": "repo-a", "branch": "main", "checkedAt": T0, "counts": {"drifted": 1}, "actionableCount": 1, "rows": []}),
+            json.dumps(
+                {
+                    "schema": DRIFT_SNAPSHOT_SCHEMA,
+                    "repository": "repo-a",
+                    "branch": "main",
+                    "checkedAt": T0,
+                    "counts": {"drifted": 1},
+                    "actionableCount": 1,
+                    "rows": [],
+                }
+            ),
             encoding="utf-8",
         )
-        write_ledger(self.mem / "memory.md", prepend_mapping(create_initial_ledger("repo-a", "aaaa", "bbbb"), "cccc", "dddd"))
+        write_ledger(
+            self.mem / "memory.md",
+            prepend_mapping(create_initial_ledger("repo-a", "aaaa", "bbbb"), "cccc", "dddd"),
+        )
         (self.mem / "onboarding" / "a.py.md").write_text(
             "| Field | Value |\n| --- | --- |\n| doc_type | `file-level-onboarding` |\n| lastVerifiedCommitDate | 2026-06-13T17:00:00+00:00 |\n",
             encoding="utf-8",
         )
         write_task_doc(
             self.coord / "tasks" / "repo-a" / "demo",
-            TaskDocument.model_validate({
-                "id": "D", "slug": "task", "title": "Demo", "kind": "light", "repo": "repo-a",
-                "createdAt": "2026-01-01T00:00", "lifecycleId": "LC1",
-                "steps": [{"id": "S1", "title": "a", "status": "done"}],
-            }),
+            TaskDocument.model_validate(
+                {
+                    "id": "D",
+                    "slug": "task",
+                    "title": "Demo",
+                    "kind": "light",
+                    "repo": "repo-a",
+                    "createdAt": "2026-01-01T00:00",
+                    "lifecycleId": "LC1",
+                    "steps": [{"id": "S1", "title": "a", "status": "done"}],
+                }
+            ),
         )
         proj = project_and_write(config, now=FRESH)
         self.assertEqual(len(proj.analytics.driftSnapshots), 1)
@@ -881,7 +1172,9 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
         self.assertEqual(proj.metrics.stalenessHistogram["<7d"], 1)
         self.assertEqual(len(proj.analytics.taskDocuments), 1)
         self.assertEqual(proj.analytics.taskDocuments[0].lifecycleId, "LC1")
-        state = json.loads((observer_root(config) / "latest-state.json").read_text(encoding="utf-8"))
+        state = json.loads(
+            (observer_root(config) / "latest-state.json").read_text(encoding="utf-8")
+        )
         self.assertIn("analytics", state)
 
 
@@ -893,18 +1186,28 @@ class TaskDocumentsReaderTests(unittest.TestCase):
 
     def _doc(self, **over: object) -> TaskDocument:
         base: dict[str, object] = {
-            "id": "D", "slug": "task", "title": "Demo", "kind": "light",
-            "repo": "repo-a", "createdAt": "2026-01-01T00:00",
+            "id": "D",
+            "slug": "task",
+            "title": "Demo",
+            "kind": "light",
+            "repo": "repo-a",
+            "createdAt": "2026-01-01T00:00",
         }
         base.update(over)
         return TaskDocument.model_validate(base)
 
     def test_reads_lifecycle_keyed_progress(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "demo"
-        write_task_doc(root, self._doc(lifecycleId="LC1", steps=[
-            {"id": "S1", "title": "a", "status": "done"},
-            {"id": "S2", "title": "b", "status": "inProgress"},
-        ]))
+        write_task_doc(
+            root,
+            self._doc(
+                lifecycleId="LC1",
+                steps=[
+                    {"id": "S1", "title": "a", "status": "done"},
+                    {"id": "S2", "title": "b", "status": "inProgress"},
+                ],
+            ),
+        )
         nodes = read_task_documents(self.coord, now=FRESH)
         self.assertEqual(len(nodes), 1)
         self.assertEqual(
@@ -922,12 +1225,18 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         # A master spans the series, carries no lifecycleId (schema-enforced), and must
         # never surface as a lifecycle node in the observer projection.
         root = self.coord / "tasks" / "repo-a" / "series"
-        master = TaskDocument.model_validate({
-            "id": "series", "slug": "series", "title": "Series", "kind": "master",
-            "repo": "repo-a", "createdAt": "2026-01-01T00:00",
-            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
-            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
-        })
+        master = TaskDocument.model_validate(
+            {
+                "id": "series",
+                "slug": "series",
+                "title": "Series",
+                "kind": "master",
+                "repo": "repo-a",
+                "createdAt": "2026-01-01T00:00",
+                "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+                "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+            }
+        )
         write_task_doc(root, master)
         self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
 
@@ -936,12 +1245,22 @@ class TaskDocumentsReaderTests(unittest.TestCase):
 
     def test_build_analytics_includes_task_documents(self) -> None:
         node = TaskDocNode(
-            lifecycleId="LC1", repository="repo-a", title="t", status="planning",
-            kind="light", docPath="p",
+            lifecycleId="LC1",
+            repository="repo-a",
+            title="t",
+            status="planning",
+            kind="light",
+            docPath="p",
         )
         analytics = build_analytics(
-            drift_snapshots=[], sidecar_staleness=[], setup_summaries=[], setup_progress=[],
-            route_coverage=[], tool_reports=[], ledgers=[], task_documents=[node],
+            drift_snapshots=[],
+            sidecar_staleness=[],
+            setup_summaries=[],
+            setup_progress=[],
+            route_coverage=[],
+            tool_reports=[],
+            ledgers=[],
+            task_documents=[node],
         )
         self.assertEqual(len(analytics.taskDocuments), 1)
         self.assertEqual(analytics.taskDocuments[0].lifecycleId, "LC1")
@@ -1006,21 +1325,35 @@ class EngineProcessTests(unittest.TestCase):
                 "freshness": {"state": "current", "code": {"baseBehindSource": 0}},
                 "providers": {
                     "state": "ok",
-                    "completedPhases": ["codegraphcontext-code seed: ok", "grepai-memory clone: ok"],
+                    "completedPhases": [
+                        "codegraphcontext-code seed: ok",
+                        "grepai-memory clone: ok",
+                    ],
                     "failedPhases": [],
                 },
             }
         )
         cgc = ProviderNode(
-            id="codegraphcontext-code@grp", state="configured", ok=True,
-            scope="worktree", role="code", worktreeGroup="grp",
+            id="codegraphcontext-code@grp",
+            state="configured",
+            ok=True,
+            scope="worktree",
+            role="code",
+            worktreeGroup="grp",
         )
         grepai = ProviderNode(
-            id="grepai-memory@grp", state="configured", ok=True,
-            scope="worktree", role="memory", worktreeGroup="grp",
+            id="grepai-memory@grp",
+            state="configured",
+            ok=True,
+            scope="worktree",
+            role="memory",
+            worktreeGroup="grp",
         )
         nodes = build_engine_processes(
-            [facts], [], [grepai, cgc], [SetupProgressNode(group="grp", state="ok", completedCount=4)]
+            [facts],
+            [],
+            [grepai, cgc],
+            [SetupProgressNode(group="grp", state="ok", completedCount=4)],
         )
         self.assertEqual(len(nodes), 1)
         node = nodes[0]
@@ -1037,7 +1370,10 @@ class EngineProcessTests(unittest.TestCase):
     def test_provider_setup_running(self) -> None:
         facts = _facts(status={"code_worktree_exists": True, "memory_worktree_exists": True})
         setup = SetupProgressNode(
-            group="grp", state="running", currentPhase="grepai-memory clone", heartbeatAgeSeconds=2.0
+            group="grp",
+            state="running",
+            currentPhase="grepai-memory clone",
+            heartbeatAgeSeconds=2.0,
         )
         node = build_engine_processes([facts], [], [], [setup])[0]
         self.assertEqual(node.phase, "provider-setup")
@@ -1064,7 +1400,9 @@ class EngineProcessTests(unittest.TestCase):
     def test_disabled_memory_has_no_memory_lane(self) -> None:
         node = build_engine_processes(
             [_facts(contract={"memory_mode": "disabled"}, status={"code_worktree_exists": True})],
-            [], [], [],
+            [],
+            [],
+            [],
         )[0]
         self.assertIsNone(node.memorySource)
         self.assertIsNone(node.memoryWorktree)
@@ -1085,10 +1423,16 @@ class EngineProcessTests(unittest.TestCase):
         self.assertIn("sync", {edge.kind for edge in node.edges})
 
     def test_join_uses_worktree_group_basename(self) -> None:
-        facts = _facts(contract={"worktree_group": "/w/r/260610-grp"}, status={"code_worktree_exists": True})
+        facts = _facts(
+            contract={"worktree_group": "/w/r/260610-grp"}, status={"code_worktree_exists": True}
+        )
         prov = ProviderNode(
-            id="cgc@260610-grp", state="configured", ok=True,
-            scope="worktree", role="code", worktreeGroup="260610-grp",
+            id="cgc@260610-grp",
+            state="configured",
+            ok=True,
+            scope="worktree",
+            role="code",
+            worktreeGroup="260610-grp",
         )
         node = build_engine_processes([facts], [], [prov], [])[0]
         self.assertEqual([p.id for p in node.providers], ["cgc@260610-grp"])
@@ -1108,9 +1452,52 @@ class EngineProcessTests(unittest.TestCase):
             build_engine_processes(*args)[0].model_dump(),
         )
 
+    def test_landing_and_strategy_default_empty(self) -> None:
+        # Additive 5h fields: no landing observation + no recorded strategy -> empty/None (no break).
+        node = build_engine_processes([_facts(status={"code_worktree_exists": True})], [], [], [])[
+            0
+        ]
+        self.assertEqual(node.landing, [])
+        self.assertIsNone(node.integrationStrategy)
+
+    def test_landing_and_strategy_mapped_from_facts(self) -> None:
+        node = build_engine_processes(
+            [
+                _facts(
+                    contract={"integration_strategy": "ff-only"},
+                    status={
+                        "code_worktree_exists": True,
+                        "landing": [
+                            {
+                                "kind": "origin-feat",
+                                "label": "origin/feat-x",
+                                "state": "pushed",
+                                "factState": "observed",
+                            },
+                            {
+                                "kind": "pr",
+                                "label": "PR #128",
+                                "state": "open",
+                                "factState": "observed",
+                            },
+                        ],
+                    },
+                )
+            ],
+            [],
+            [],
+            [],
+        )[0]
+        self.assertEqual(node.integrationStrategy, "ff-only")
+        self.assertEqual([ref.kind for ref in node.landing], ["origin-feat", "pr"])
+        self.assertEqual(node.landing[1].state, "open")
+
     def test_project_workspace_wires_engine_processes(self) -> None:
         proj = project_workspace(
-            [], enclosures=[], providers=[], now=FRESH,
+            [],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
             engine_process_facts=[_facts(status={"code_worktree_exists": True})],
         )
         self.assertEqual(len(proj.analytics.engineProcesses), 1)
@@ -1124,9 +1511,15 @@ class EngineProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = default_contract(
-                task_name="demo task", repo_name="r", workflow_kind="light", memory_mode="disabled",
-                coordination_root=root, code_repo_path=root / "repo",
-                code_source_branch="main", code_work_branch="ar/x", code_base_commit="abc",
+                task_name="demo task",
+                repo_name="r",
+                workflow_kind="light",
+                memory_mode="disabled",
+                coordination_root=root,
+                code_repo_path=root / "repo",
+                code_source_branch="main",
+                code_work_branch="ar/x",
+                code_base_commit="abc",
                 worktree_name="demo-wt",
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1180,9 +1573,15 @@ class EngineProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_start_progress(
-                root, repo_name="r", task_name="t", worktree_name="wt",
-                worktree_group="/w/r/wt-ar", phase="memory-blocked", memory_mode="external",
-                blocked_reason="no ledger mapping", completed_phases=("preflight", "code-worktree"),
+                root,
+                repo_name="r",
+                task_name="t",
+                worktree_name="wt",
+                worktree_group="/w/r/wt-ar",
+                phase="memory-blocked",
+                memory_mode="external",
+                blocked_reason="no ledger mapping",
+                completed_phases=("preflight", "code-worktree"),
                 choices=("reconciliation",),
             )
             payload = read_start_progress(start_progress_path(root, "r", "wt"))

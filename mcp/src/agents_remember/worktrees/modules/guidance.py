@@ -9,6 +9,7 @@ from agents_remember.worktrees.modules.git import (
     contract_has_worktree_changes,
     worktree_dirty,
 )
+from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -198,5 +199,8 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
     freshness = base_freshness(contract)
     if freshness is not None:
         payload["freshness"] = freshness
+    landing = landing_refs(contract)
+    if landing is not None:
+        payload["landing"] = landing
     payload.update(guidance)
     return payload
