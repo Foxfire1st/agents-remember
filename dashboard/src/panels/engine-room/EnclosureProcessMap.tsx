@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 
 import { css } from "../../../styled-system/css";
-import type { EngineProcessNode, ProviderNode } from "../../types/projection";
+import type { EngineProcessNode, LedgerNode, ProviderNode } from "../../types/projection";
 import { EnclosureCanvas } from "./EnclosureCanvas";
 import {
   abandonRecord,
@@ -64,9 +64,10 @@ function AbandonRecord({ node }: { node: EngineProcessNode }) {
 // solidifies in place into the contract-anchored enclosure (T4 morph, 5f S3) — never a teleport.
 // The ghost banner fades as the node promotes; `layout` carries the morph. Honest motion: under
 // data-effects=off / reduced-motion the shell is an instant swap (no tween).
-export function EnclosureProcessMap({ node, workspaceEngines = [] }: {
+export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedger }: {
   node: EngineProcessNode;
   workspaceEngines?: ProviderNode[];
+  officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
   // t18 — an abandoned enclosure renders as a dim, desaturated record (its static end-state).
@@ -113,10 +114,10 @@ export function EnclosureProcessMap({ node, workspaceEngines = [] }: {
         {abandoned ? <AbandonRecord node={node} /> : null}
         {abandoned ? (
           <div className={dissolveShell} data-testid="dissolve">
-            <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} />
+            <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
           </div>
         ) : (
-          <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} />
+          <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
         )}
       </div>
     </motion.div>

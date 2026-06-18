@@ -30,6 +30,8 @@ function node(over: Partial<EngineProcessNode> = {}): EngineProcessNode {
     providers: [],
     edges: [],
     landing: [],
+    ledgerRows: [],
+    ledgerRowCount: 0,
     actions: [],
     summary: "",
     missingFacts: [],

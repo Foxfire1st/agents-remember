@@ -6,10 +6,15 @@
 // prototype's viewBox (0 0 1200 660). State always comes from the model (factState / runtimeState /
 // edge.state), never a class name alone — so the truth stays in the projection, not the render.
 
+import { useRef, useState } from "react";
+import { Dialog, Popover } from "react-aria-components";
+
 import type {
   CommitRefNode,
   EngineProcessEdge,
   EngineProcessNode,
+  LedgerNode,
+  LedgerRefNode,
   ProviderNode,
 } from "../../types/projection";
 import { engineState } from "../../data/selectors";
@@ -36,6 +41,15 @@ import {
   gateBar,
   laneFlag,
   laneFlagText,
+  ledgerButton,
+  ledgerButtonLabel,
+  ledgerCard,
+  ledgerCardHead,
+  ledgerMore,
+  ledgerRowCss,
+  ledgerScroll,
+  ledgerShowMore,
+  ledgerTable,
   officialWire,
   reasonBadge,
   reasonDot,
@@ -209,29 +223,133 @@ const short = (commit: string | null | undefined): string => (commit ? commit.sl
 // its memory commit across the two physically distinct repos (5h coupler-semantics fix; NOT the task
 // contract.md). A drawn chain-link glyph + the two linked short-hashes as the label, and — when bound —
 // the warp-core surge (two hot bands born at the link, splitting up + down; ported from podstage.html).
-function WarpCoupler({ x, bound, label, testid = "warp-coupler" }: {
+// Default-show the newest LEDGER_PREVIEW rows; "▾ show N more" expands in place to the full served window
+// (≤ LEDGER_WINDOW = 25), which scrolls. Older rows stay in the file ("+N more in memory.md"). The
+// full-history browser is the post-ship viewer (agents-remember#88).
+const LEDGER_PREVIEW = 8;
+
+// The ledger-popover content (5h): the memory.md lookup table the coupler stands for, with THIS enclosure's
+// row highlighted. Short SHAs for display (full pair in the row `title`). HTML inside a React-Aria Dialog.
+function LedgerTable({ rows, total, currentCode }: {
+  rows: LedgerRefNode[];
+  total: number;
+  currentCode?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  // prefix-tolerant: the ledger holds full 40-char SHAs, the node commit may be a short prefix
+  const isCurrent = (code: string): boolean =>
+    !!currentCode && (code.startsWith(currentCode) || currentCode.startsWith(code));
+  const shown = expanded ? rows : rows.slice(0, LEDGER_PREVIEW);
+  const hiddenServed = rows.length - shown.length; // served rows the collapsed view is hiding
+  const beyondWindow = total - rows.length; // older rows that live only in the file
+  return (
+    <div className={ledgerCard} data-testid="ledger-popover">
+      <div className={ledgerCardHead}>memory.md ledger · code ⇄ memory</div>
+      <div className={ledgerScroll}>
+        <table className={ledgerTable}>
+          <tbody>
+            {shown.map((row) => {
+              const current = isCurrent(row.codeCommit);
+              return (
+                <tr
+                  key={`${row.codeCommit}-${row.memoryCommit}`}
+                  className={ledgerRowCss({ current })}
+                  data-current={current || undefined}
+                  title={`${row.codeCommit} ⇄ ${row.memoryCommit}`}
+                >
+                  <td>{short(row.codeCommit)}</td>
+                  <td aria-hidden="true">⇄</td>
+                  <td>{short(row.memoryCommit)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {hiddenServed > 0 ? (
+        <button
+          type="button"
+          className={ledgerShowMore}
+          data-testid="ledger-show-more"
+          onClick={() => setExpanded(true)}
+        >
+          ▾ show {hiddenServed} more
+        </button>
+      ) : beyondWindow > 0 ? (
+        <div className={ledgerMore}>+{beyondWindow} more in memory.md</div>
+      ) : null}
+    </div>
+  );
+}
+
+function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0, currentCode }: {
   x: number;
   bound: boolean;
   label?: string;
   testid?: string;
+  rows?: LedgerRefNode[];
+  total?: number;
+  currentCode?: string;
 }) {
   const cy = 342;
+  const triggerRef = useRef<SVGRectElement>(null);
+  const [open, setOpen] = useState(false);
+  const ledgerRows = rows ?? [];
+  const hasLedger = ledgerRows.length > 0; // a ledger-backed coupler opens its memory.md lookup table
   return (
-    <g className={warpCouplerG({ bound })} data-testid={testid} data-bound={bound}>
-      <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
-      {bound ? (
-        <>
-          <line className={warpSurge({ dir: "up" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
-          <line className={warpSurge({ dir: "down" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
-        </>
-      ) : null}
-      {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
-      <g className={warpLinkGlyph} aria-hidden="true" data-testid="warp-link">
-        <ellipse cx={x} cy={cy - 3} rx={5} ry={4} />
-        <ellipse cx={x} cy={cy + 3} rx={5} ry={4} />
+    <>
+      <g className={warpCouplerG({ bound })} data-testid={testid} data-bound={bound}>
+        <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
+        {bound ? (
+          <>
+            <line className={warpSurge({ dir: "up" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+            <line className={warpSurge({ dir: "down" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+          </>
+        ) : null}
+        {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
+        <g className={warpLinkGlyph} aria-hidden="true" data-testid="warp-link">
+          <ellipse cx={x} cy={cy - 3} rx={5} ry={4} />
+          <ellipse cx={x} cy={cy + 3} rx={5} ry={4} />
+        </g>
+        {/* the coupler label: a ledger-backed coupler renders it as a clickable BUTTON (rect + label + a ▾
+            "open" caret) beside the link glyph, opening the memory.md popover; otherwise a plain label.
+            A <button> can't live in svg, so the rect is the trigger and the label text sits on top. */}
+        {hasLedger ? (
+          <>
+            <rect
+              ref={triggerRef}
+              className={ledgerButton}
+              x={x + 20}
+              y={cy - 10}
+              width={140}
+              height={20}
+              rx={4}
+              role="button"
+              tabIndex={0}
+              aria-label={`open memory.md ledger — ${ledgerRows.length} of ${total} rows`}
+              data-testid={`${testid}-ledger`}
+              onClick={() => setOpen((value) => !value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setOpen((value) => !value);
+                }
+              }}
+            />
+            <text className={ledgerButtonLabel} x={x + 27} y={cy + 4}>{label ?? "ledger"} ▾</text>
+          </>
+        ) : label ? (
+          <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text>
+        ) : null}
       </g>
-      {label ? <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text> : null}
-    </g>
+      {hasLedger ? (
+        <Popover triggerRef={triggerRef} isOpen={open} onOpenChange={setOpen} placement="top">
+          <Dialog aria-label="memory.md ledger lookup table">
+            <LedgerTable rows={ledgerRows} total={total} currentCode={currentCode} />
+          </Dialog>
+        </Popover>
+      ) : null}
+    </>
   );
 }
 
@@ -401,9 +519,10 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
   );
 }
 
-export function EnclosureCanvas({ node, workspaceEngines = [] }: {
+export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }: {
   node: EngineProcessNode;
   workspaceEngines?: ProviderNode[];
+  officialLedger?: LedgerNode;
 }) {
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
@@ -489,12 +608,29 @@ export function EnclosureCanvas({ node, workspaceEngines = [] }: {
       {officialMemory && hasMemory ? <line className={officialWire} x1={135} y1={452} x2={300} y2={403} data-testid="official-wire" /> : null}
       {officialCode ? <EngineGauge at={ENGINE.mcgc} label="CGC" runtime={runtimeState(engineState(officialCode))} /> : null}
       {officialMemory ? <EngineGauge at={ENGINE.mgrep} label="GrepAI" runtime={runtimeState(engineState(officialMemory))} /> : null}
-      {hasMemory ? <WarpCoupler x={OFFICIAL_COUPLER_X} bound={hasMemory} testid="warp-coupler-official" label={`${short(node.codeSource.commit)} ⇄ ${short(node.memorySource?.commit)}`} /> : null}
+      {hasMemory ? (
+        <WarpCoupler
+          x={OFFICIAL_COUPLER_X}
+          bound={hasMemory}
+          testid="warp-coupler-official"
+          label={`${short(node.codeSource.commit)} ⇄ ${short(node.memorySource?.commit)}`}
+          rows={officialLedger?.rows}
+          total={officialLedger?.closeoutCount}
+          currentCode={node.codeSource.commit ?? undefined}
+        />
+      ) : null}
 
       <EngineGauge at={ENGINE.cgc} label="CGC" runtime={runtimeState(code?.runtimeState)} reindex={node.seedFallback} />
       {hasMemory ? <EngineGauge at={ENGINE.grepai} label="GrepAI" runtime={runtimeState(memory?.runtimeState)} /> : null}
 
-      <WarpCoupler x={COUPLER_X} bound={hasMemory} label={`${short(node.codeWorktree.commit)} ⇄ ${short(node.memoryWorktree?.commit)}`} />
+      <WarpCoupler
+        x={COUPLER_X}
+        bound={hasMemory}
+        label={`${short(node.codeWorktree.commit)} ⇄ ${short(node.memoryWorktree?.commit)}`}
+        rows={node.ledgerRows}
+        total={node.ledgerRowCount}
+        currentCode={node.codeWorktree.commit ?? undefined}
+      />
 
       {/* Lane annotations (podstage.html #ledger / #hist): the worktree landing lane + a historical
           contract marker. Descriptive lane labels; the live status stays in the diagnostics panel. */}

@@ -36,9 +36,11 @@ from agents_remember.observer.paths import (
     observer_root,
 )
 from agents_remember.observer.projection import (
+    LEDGER_WINDOW,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
+    LedgerRefNode,
     ProviderNode,
     SetupProgressNode,
     SidecarStaleNode,
@@ -61,6 +63,7 @@ from agents_remember.observer.reducer import (
     token_series,
 )
 from agents_remember.observer.snapshots import (
+    _ledger_window,
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
@@ -1021,6 +1024,34 @@ class LedgerReaderTests(unittest.TestCase):
     def test_missing_ledger_is_none(self) -> None:
         self.assertIsNone(read_ledger(self.mem / "nope"))
 
+    def test_ledger_window_returns_newest_rows_and_total(self) -> None:
+        # 5h coupler popover: the newest LEDGER_WINDOW rows (newest-first) + the full total for "+N more".
+        ledger = create_initial_ledger("repo-a", "base-code", "base-mem")
+        for i in range(LEDGER_WINDOW + 3):  # more rows than the window
+            ledger = prepend_mapping(ledger, f"code{i:02d}", f"mem{i:02d}")
+        write_ledger(self.mem / "memory.md", ledger)
+        rows, total = _ledger_window((self.mem / "memory.md").as_posix())
+        self.assertEqual(len(rows), LEDGER_WINDOW)
+        self.assertEqual(total, len(ledger.rows))  # total is the full count, not the window
+        self.assertIsInstance(rows[0], LedgerRefNode)
+        self.assertEqual(rows[0].codeCommit, f"code{LEDGER_WINDOW + 2:02d}")  # newest-first
+
+    def test_ledger_window_missing_or_none_is_empty(self) -> None:
+        self.assertEqual(_ledger_window((self.mem / "nope.md").as_posix()), ([], 0))
+        self.assertEqual(_ledger_window(None), ([], 0))
+
+    def test_reads_windowed_rows_with_full_count(self) -> None:
+        # 5h official coupler: read_ledger surfaces the newest LEDGER_WINDOW rows; closeoutCount stays total.
+        ledger = create_initial_ledger("repo-a", "base-code", "base-mem")
+        for i in range(LEDGER_WINDOW + 5):
+            ledger = prepend_mapping(ledger, f"code{i:02d}", f"mem{i:02d}")
+        write_ledger(self.mem / "memory.md", ledger)
+        node = read_ledger(self.mem)
+        assert node is not None
+        self.assertEqual(len(node.rows), LEDGER_WINDOW)
+        self.assertEqual(node.closeoutCount, len(ledger.rows))  # the full total, not the window
+        self.assertEqual(node.rows[0].codeCommit, f"code{LEDGER_WINDOW + 4:02d}")  # newest-first
+
 
 class DriftSnapshotProducerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -1275,6 +1306,8 @@ def _facts(
     contract: dict | None = None,  # type: ignore[type-arg]
     status: dict | None = None,  # type: ignore[type-arg]
     guidance: dict | None = None,  # type: ignore[type-arg]
+    ledger_rows: list[LedgerRefNode] | None = None,
+    ledger_row_count: int = 0,
 ) -> EngineProcessFacts:
     base_contract: dict[str, object] = {
         "contract_path": "/c.md",
@@ -1309,11 +1342,33 @@ def _facts(
         "nextOperation": "continue_work",
     }
     base_guidance.update(guidance or {})
-    return EngineProcessFacts(contract=base_contract, guidance=base_guidance, status=status)
+    return EngineProcessFacts(
+        contract=base_contract,
+        guidance=base_guidance,
+        status=status,
+        ledger_rows=ledger_rows or [],
+        ledger_row_count=ledger_row_count,
+    )
 
 
 class EngineProcessTests(unittest.TestCase):
     """The slice-5e enclosure-centered process map (``build_engine_processes``)."""
+
+    def test_ledger_rows_pass_through_to_the_worktree_coupler(self) -> None:
+        # 5h: the worktree coupler popover reads node.ledgerRows/ledgerRowCount. The reducer is a pure
+        # fold, so the windowed rows ride in on EngineProcessFacts (read in the I/O layer) and pass through.
+        rows = [
+            LedgerRefNode(codeCommit="08e9221a", memoryCommit="d60a0511"),
+            LedgerRefNode(codeCommit="600f7fa3", memoryCommit="1e667c6d"),
+        ]
+        node = build_engine_processes([_facts(ledger_rows=rows, ledger_row_count=11)], [], [], [])[0]
+        self.assertEqual(node.ledgerRows, rows)
+        self.assertEqual(node.ledgerRowCount, 11)
+
+    def test_ledger_rows_default_empty(self) -> None:
+        node = build_engine_processes([_facts()], [], [], [])[0]
+        self.assertEqual(node.ledgerRows, [])
+        self.assertEqual(node.ledgerRowCount, 0)
 
     def test_successful_bootstrap_is_observed_and_complete(self) -> None:
         facts = _facts(

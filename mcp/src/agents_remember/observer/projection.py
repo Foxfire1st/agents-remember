@@ -18,7 +18,7 @@ enclosures (North-Star #4) from being keyed to a single repo.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -247,12 +247,34 @@ class ToolReportNode(BaseModel):
     ageSeconds: float | None = None
 
 
+LEDGER_WINDOW = 25
+"""Newest-N memory.md ledger rows served per coupler popover (5h). Bounded at 25 = the performance guard:
+the popover defaults to the first 8 and expands in place to these 25; older rows stay in the file
+(the "+N more in memory.md" footer). The full-history browser is the post-ship viewer (agents-remember#88)."""
+
+
+class LedgerRefNode(BaseModel):
+    """One memory.md ledger row -- a code-commit -> memory-commit mapping (5h coupler popover).
+
+    The warp couplers stand for the memory.md ledger link; the popover renders a window of these
+    rows with this enclosure's row highlighted. Full SHAs (the popover shortens them for display).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    codeCommit: str
+    memoryCommit: str
+
+
 class LedgerNode(BaseModel):
     """A repo's memory ledger currency (slice 3b, surface 8).
 
     ``closeoutCount`` is the ledger row count (one row per closeout); the rows carry
     no timestamps, so "closeouts over time" is deliberately not projected -- only the
     count + the last-verified-code-commit currency.
+
+    ``rows`` is the newest ``LEDGER_WINDOW`` code<->memory mappings for the OFFICIAL coupler
+    popover (5h); ``closeoutCount`` stays the full total so the popover's "+N more" footer is right.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -261,6 +283,7 @@ class LedgerNode(BaseModel):
     closeoutCount: int = 0
     lastVerifiedCodeCommit: str
     baseCodeCommit: str
+    rows: list[LedgerRefNode] = Field(default_factory=list)
 
 
 class TaskSubStepNode(BaseModel):
@@ -481,6 +504,10 @@ class EngineProcessNode(BaseModel):
     memorySource: CommitRefNode | None = None
     memoryWorktree: CommitRefNode | None = None
     ledgerPath: str | None = None
+    # The memory.md ledger window for the WORKTREE coupler popover (5h): newest ``LEDGER_WINDOW`` rows
+    # mapping this worktree's code<->memory commits, plus the total count for the "+N more" footer.
+    ledgerRows: list[LedgerRefNode] = Field(default_factory=list)
+    ledgerRowCount: int = 0
 
     humanReviewStatus: str
     closeoutStatus: str
@@ -530,6 +557,10 @@ class EngineProcessFacts:
     contract: dict[str, Any]
     guidance: dict[str, Any]
     status: dict[str, Any] | None
+    # The worktree memory.md ledger window for the coupler popover (5h) -- read in the I/O layer
+    # (snapshots) so the reducer stays a pure fold; newest ``LEDGER_WINDOW`` rows + the total count.
+    ledger_rows: list[LedgerRefNode] = field(default_factory=list)
+    ledger_row_count: int = 0
 
 
 class Analytics(BaseModel):

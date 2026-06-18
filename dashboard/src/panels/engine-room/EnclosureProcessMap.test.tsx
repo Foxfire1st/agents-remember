@@ -1,9 +1,9 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { EngineProcessNode, ProviderNode } from "../../types/projection";
 import { EnclosureProcessMap } from "./EnclosureProcessMap";
-import { ENGINE_ROOM_SCENARIOS } from "./fixtures";
+import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from "./fixtures";
 
 const KNOWN_EDGE_KINDS = new Set(["worktree-add", "ledger-map", "cgc-seed", "grepai-clone", "sync", "integration"]);
 const VALID_RUNTIME = new Set(["nominal", "configured", "indexing", "down", "unknown"]);
@@ -240,5 +240,52 @@ describe("EnclosureProcessMap — atmospheric backdrop (5g G6)", () => {
     const bd = getByTestId("backdrop");
     expect(bd.getAttribute("aria-hidden")).toBe("true");
     expect(bd.querySelector("video")).not.toBeNull();
+  });
+});
+
+describe("EnclosureCanvas — ledger popover (5h, worktree coupler)", () => {
+  it("opens the lookup table on the worktree coupler, highlights this row, and starts collapsed at 8", async () => {
+    render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(screen.queryByTestId("ledger-popover")).toBeNull(); // closed until the button is clicked
+    fireEvent.click(screen.getByTestId("warp-coupler-ledger"));
+    const popover = await screen.findByTestId("ledger-popover");
+    // default view is the newest 8 (the served window is 25 of 40 total)
+    expect(popover.querySelectorAll("tbody tr").length).toBe(8);
+    expect(popover.querySelector('[data-current="true"]')?.textContent).toContain("08e9221a");
+    // collapsed → a "show 17 more" control (25 served − 8 shown), and NOT yet the file footer
+    expect(screen.getByTestId("ledger-show-more").textContent).toContain("17 more");
+    expect(popover.textContent).not.toContain("more in memory.md");
+  });
+
+  it("extends in place to the full served window (≤25) and then points at the file for the rest", async () => {
+    render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    fireEvent.click(screen.getByTestId("warp-coupler-ledger"));
+    await screen.findByTestId("ledger-popover");
+    fireEvent.click(screen.getByTestId("ledger-show-more")); // expand
+    const popover = screen.getByTestId("ledger-popover");
+    expect(popover.querySelectorAll("tbody tr").length).toBe(25); // the served cap
+    expect(screen.queryByTestId("ledger-show-more")).toBeNull(); // fully expanded → no expand control
+    expect(popover.textContent).toContain("+15 more in memory.md"); // 40 total − 25 served
+  });
+
+  it("gives a coupler no ledger trigger when it carries no rows (no officialLedger supplied)", () => {
+    render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} workspaceEngines={WORKSPACE_ENGINES} />);
+    expect(screen.queryByTestId("warp-coupler-ledger")).not.toBeNull(); // worktree coupler has rows
+    expect(screen.queryByTestId("warp-coupler-official-ledger")).toBeNull(); // official one was given none
+  });
+
+  it("opens the popover on the official coupler too, highlighting the official source row", async () => {
+    render(
+      <EnclosureProcessMap
+        node={nodeFrom("engine-bootstrap")}
+        workspaceEngines={WORKSPACE_ENGINES}
+        officialLedger={OFFICIAL_LEDGER}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("warp-coupler-official-ledger"));
+    const popover = await screen.findByTestId("ledger-popover");
+    // the official coupler highlights the official source commit (08e9221a)
+    expect(popover.querySelector('[data-current="true"]')?.textContent).toContain("08e9221a");
+    expect(screen.getByTestId("ledger-show-more").textContent).toContain("17 more");
   });
 });

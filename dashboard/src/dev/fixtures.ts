@@ -4,7 +4,7 @@
 // build_attention_queue would compute for the same tree — kept in sync by eye (sidecar-free,
 // dashboard/** is out of memory scope).
 
-import { ENGINE_ROOM_SCENARIOS } from "../panels/engine-room/fixtures";
+import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
 import type {
   EnclosureNode,
@@ -364,12 +364,17 @@ export const GALLERY: GalleryEntry[] = [
             closeoutCount: 95,
             lastVerifiedCodeCommit: "c041ff5fade1",
             baseCodeCommit: "85af25823437",
+            rows: [
+              { codeCommit: "c041ff5fade1", memoryCommit: "dd436bcae902" },
+              { codeCommit: "08e9221abcd0", memoryCommit: "d60a0511ef34" },
+            ],
           },
           {
             repository: "repo-b",
             closeoutCount: 12,
             lastVerifiedCodeCommit: "abc1234def56",
             baseCodeCommit: "abc1234def56",
+            rows: [{ codeCommit: "abc1234def56", memoryCommit: "fed4321cba98" }],
           },
         ],
         stalestSidecars: [
@@ -430,7 +435,11 @@ export const GALLERY: GalleryEntry[] = [
       name: scenario.name,
       projection: project({
         providers: scenario.workspace,
-        analytics: { ...EMPTY_ANALYTICS, engineProcesses: scenario.processes },
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          engineProcesses: scenario.processes,
+          ledgers: [OFFICIAL_LEDGER], // the official coupler resolves its repo's ledger from analytics.ledgers
+        },
       }),
     }),
   ),

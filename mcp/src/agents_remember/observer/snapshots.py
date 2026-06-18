@@ -28,10 +28,12 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery i
 )
 from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot_dir
 from agents_remember.observer.projection import (
+    LEDGER_WINDOW,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
     LedgerNode,
+    LedgerRefNode,
     ProviderNode,
     RouteCoverageNode,
     SetupProgressNode,
@@ -207,11 +209,15 @@ def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFact
             contract = load_contract(path)
         except (ContractError, OSError):
             continue
+        cp = contract_payload(contract)
+        ledger_rows, ledger_total = _ledger_window(cp.get("ledger_path"))
         facts.append(
             EngineProcessFacts(
-                contract=contract_payload(contract),
+                contract=cp,
                 guidance=lifecycle_guidance(contract),
                 status=_safe_status_payload(contract),
+                ledger_rows=ledger_rows,
+                ledger_row_count=ledger_total,
             )
         )
     return facts
@@ -223,6 +229,26 @@ def _safe_status_payload(contract: Any) -> dict[str, Any] | None:
         return status_payload(contract)
     except Exception:  # a single worktree's git state must never fail the projection tick
         return None
+
+
+def _ledger_window(ledger_path: Any) -> tuple[list[LedgerRefNode], int]:
+    """The worktree memory.md ledger window for the coupler popover (5h).
+
+    Best-effort like ``status_payload``: a missing / invalid / unreadable ledger yields an empty
+    window so the projection tick never fails. Returns the newest ``LEDGER_WINDOW`` rows plus the
+    total row count (for the popover's "+N more in memory.md" footer).
+    """
+    if not isinstance(ledger_path, str) or not ledger_path:
+        return [], 0
+    try:
+        ledger = load_ledger(Path(ledger_path))
+    except (LedgerError, OSError):
+        return [], 0
+    rows = [
+        LedgerRefNode(codeCommit=row.code_commit, memoryCommit=row.memory_commit)
+        for row in ledger.rows[:LEDGER_WINDOW]
+    ]
+    return rows, len(ledger.rows)
 
 
 def read_start_progress_entries(coordination_root: Path, *, now: datetime) -> list[dict[str, Any]]:
@@ -451,6 +477,11 @@ def read_ledger(memory_root: Path) -> LedgerNode | None:
         closeoutCount=len(ledger.rows),
         lastVerifiedCodeCommit=ledger.last_verified_code_commit,
         baseCodeCommit=ledger.base_code_commit,
+        # the newest window for the OFFICIAL coupler popover (5h); closeoutCount stays the full total
+        rows=[
+            LedgerRefNode(codeCommit=row.code_commit, memoryCommit=row.memory_commit)
+            for row in ledger.rows[:LEDGER_WINDOW]
+        ],
     )
 
 

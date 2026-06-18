@@ -153,6 +153,10 @@ export function EngineRoom() {
   const selected =
     model.processes.find((view) => view.node.worktreeGroup === selectedGroup) ??
     model.processes[0];
+  // the OFFICIAL coupler popover reads the repo's main ledger (5h); the worktree coupler reads node.ledgerRows
+  const officialLedger = selected
+    ? analytics?.ledgers.find((ledger) => ledger.repository === selected.node.repoName)
+    : undefined;
 
   let body: ReactNode;
   if (model.usesFallback) {
@@ -175,7 +179,11 @@ export function EngineRoom() {
             onSelect={setSelectedGroup}
           />
           <div className={roomStage} data-testid="pod-stage">
-            <EnclosureProcessMap node={selected.node} workspaceEngines={model.workspaceEngines} />
+            <EnclosureProcessMap
+              node={selected.node}
+              workspaceEngines={model.workspaceEngines}
+              officialLedger={officialLedger}
+            />
           </div>
           <div className={roomZone} data-testid="engine-room-diagnostics">
             <BootTimeline node={selected.node} />

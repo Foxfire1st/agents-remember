@@ -788,6 +788,77 @@ export const warpSurge = cva({
   },
 });
 
+// 5h ledger popover — clicking a coupler's link glyph opens the memory.md lookup table (code⇄memory
+// rows, this enclosure's row highlighted). The trigger is an SVG hit-rect over the glyph (a <button> can't
+// live in SVG); the popover content is HTML in a React-Aria Dialog, portaled out of the <svg>.
+// The coupler label is now a visible BUTTON (an SVG rect — a <button> can't live in svg): a faint amber
+// chip that brightens on hover, so it reads as "click me" (5h feedback). The label text sits on top with
+// pointer-events off, so clicks land on the rect.
+export const ledgerButton = css({
+  fill: "oklch(0.22 0.02 250 / 0.55)",
+  stroke: "token(colors.amber)",
+  strokeWidth: "1",
+  cursor: "pointer",
+  transition: "fill 0.12s ease",
+  _hover: { fill: "oklch(0.3 0.04 250 / 0.85)" },
+  _focusVisible: { outline: "none", stroke: "token(colors.cyan)", strokeWidth: "1.6" },
+});
+export const ledgerButtonLabel = css({
+  fill: "token(colors.amber)",
+  fontSize: "11px",
+  letterSpacing: "0.03em",
+  pointerEvents: "none",
+});
+export const ledgerCard = css({
+  display: "grid",
+  gap: "0.3rem",
+  padding: "0.5rem 0.6rem",
+  background: "bgPanel",
+  border: "1px solid token(colors.amber)",
+  borderRadius: "4px",
+  boxShadow: "0 6px 20px oklch(0 0 0 / 0.5)",
+  maxWidth: "22rem",
+});
+export const ledgerCardHead = css({
+  color: "muted",
+  fontSize: "0.62rem",
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+});
+export const ledgerTable = css({
+  borderCollapse: "collapse",
+  fontSize: "0.72rem",
+  color: "ink",
+  "& td": { paddingInline: "0.35rem", paddingBlock: "0.12rem", whiteSpace: "nowrap" },
+});
+export const ledgerRowCss = cva({
+  base: { color: "muted" },
+  variants: {
+    current: {
+      true: { color: "amber", background: "oklch(0.24 0.03 250)", fontWeight: "600" },
+    },
+  },
+});
+export const ledgerMore = css({ color: "muted", fontSize: "0.64rem", fontStyle: "italic" });
+// The rows scroll within a bounded height when expanded (≤25 served); the header + footer stay fixed.
+export const ledgerScroll = css({ maxHeight: "13rem", overflowY: "auto" });
+// The "▾ show N more" expand control at the bottom of the popover — collapsed (8) → expanded (≤25), in place.
+export const ledgerShowMore = css({
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  background: "transparent",
+  border: "none",
+  borderTop: "1px solid token(colors.grid)",
+  color: "cyan",
+  fontSize: "0.66rem",
+  fontFamily: "inherit",
+  cursor: "pointer",
+  paddingBlock: "0.3rem",
+  marginTop: "0.1rem",
+  _hover: { color: "amber" },
+});
+
 // Flow conduit — the seed/clone/integrate/sync lanes; colour parity with `conduitLine` (5e), now
 // on a positioned SVG path. The travelling packet + draw-on tween return in G2.
 export const flowConduit = cva({

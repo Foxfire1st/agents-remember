@@ -894,6 +894,8 @@ def _engine_process(
         memorySource=memory_source,
         memoryWorktree=memory_worktree,
         ledgerPath=ledger_path,
+        ledgerRows=fact.ledger_rows,
+        ledgerRowCount=fact.ledger_row_count,
         humanReviewStatus=str(cp.get("human_review_status", "")),
         closeoutStatus=str(cp.get("closeout_status", "")),
         integrationStatus=str(cp.get("integration_status", "")),

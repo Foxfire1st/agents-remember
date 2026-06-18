@@ -9,6 +9,8 @@ import type {
   EngineProcessEdge,
   EngineProcessNode,
   LandingRefNode,
+  LedgerNode,
+  LedgerRefNode,
   ProcessFactState,
   ProviderBootNode,
   ProviderNode,
@@ -34,6 +36,36 @@ const wsEngine = (id: string, indexingState = "indexed"): ProviderNode => ({
 });
 
 const WORKSPACE = [wsEngine("codegraphcontext-code"), wsEngine("grepai-memory")];
+
+// The served memory.md ledger window for the coupler popover (5h). The newest row maps the fixture's
+// current worktree/source commits (08e9221a ⇄ d60a0511), so the popover highlights it. The window fills to
+// the 25-row served cap (`LEDGER_WINDOW`) so the popover's collapse (8) → expand (≤25) → scroll is
+// exercised; the scenario's `ledgerRowCount` is the full total (> 25) so the "+N more in memory.md" footer
+// shows once expanded. Generated rows are illustrative, not live (the sidecar notes this).
+const LEDGER_ROWS: LedgerRefNode[] = [
+  { codeCommit: "08e9221a", memoryCommit: "d60a0511" },
+  { codeCommit: "dbb81260", memoryCommit: "d516c141" },
+  { codeCommit: "e8801dce", memoryCommit: "aea63c67" },
+  { codeCommit: "600f7fa3", memoryCommit: "1e667c6d" },
+  ...Array.from({ length: 21 }, (_, i) => ({
+    codeCommit: (0x1a2b3c4d + i * 0x01010101).toString(16).slice(-8),
+    memoryCommit: (0x9f8e7d6c - i * 0x01010101).toString(16).slice(-8),
+  })),
+];
+// Per worktree-coupler default: every external-memory worktree has its own memory.md, so the worktree
+// coupler is always live (ledgerRowCount > the served window → the "+N more in memory.md" footer).
+const LEDGER_TOTAL = 40;
+
+// The repo's main memory ledger (Analytics.ledgers) — the OFFICIAL coupler popover reads this. The newest
+// row maps the fixture's official source commit (08e9221a), so the official coupler highlights it too;
+// closeoutCount is the full total (> the served window) so the popover's "+N more" footer renders.
+export const OFFICIAL_LEDGER: LedgerNode = {
+  repository: "agents-remember",
+  closeoutCount: LEDGER_TOTAL,
+  lastVerifiedCodeCommit: "08e9221a",
+  baseCodeCommit: "a59553db",
+  rows: LEDGER_ROWS,
+};
 
 function ref(over: Partial<CommitRefNode> = {}): CommitRefNode {
   return { factState: "observed", ...over };
@@ -170,6 +202,8 @@ function engineProcess(
     providers: [boot("code"), boot("memory")],
     edges: edges({}),
     landing: [],
+    ledgerRows: LEDGER_ROWS,
+    ledgerRowCount: LEDGER_TOTAL,
     actions: [],
     nextAction: "continue_work",
     summary: "Worktree task started; continue the wrapped workflow before closeout.",
@@ -426,6 +460,8 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         completedPhases: [],
         providers: [],
         edges: edges({ ledger: "blocked", cgc: "planned", grepai: "planned" }),
+        ledgerRows: [], // no ledger mapping yet — the coupler popover stays empty (no fake rows)
+        ledgerRowCount: 0,
         summary: "External memory blocked: no ledger mapping for the selected code base commit.",
         missingFacts: [
           "memory worktree not present on disk",
@@ -453,6 +489,8 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         completedPhases: [],
         providers: [],
         edges: edges({ ledger: "blocked", cgc: "planned", grepai: "planned" }),
+        ledgerRows: [], // pre-contract: no ledger mapping yet → empty coupler popover
+        ledgerRowCount: 0,
         summary: "no exact ledger mapping for selected code base commit",
         nextAction: "reconciliation",
         missingFacts: [

@@ -131,9 +131,17 @@ export interface ToolReportNode {
 
 export interface LedgerNode {
   repository: string;
-  closeoutCount: number;
+  closeoutCount: number; // the FULL row total (the popover "+N more" footer derives from it)
   lastVerifiedCodeCommit: string;
   baseCodeCommit: string;
+  rows: LedgerRefNode[]; // newest window for the official coupler popover (5h)
+}
+
+// One memory.md ledger row — a code→memory commit mapping (5h coupler popover). Full SHAs; the popover
+// shortens them for display and highlights this enclosure's row.
+export interface LedgerRefNode {
+  codeCommit: string;
+  memoryCommit: string;
 }
 
 export interface TaskSubStepNode {
@@ -276,6 +284,10 @@ export interface EngineProcessNode {
   memorySource?: CommitRefNode;
   memoryWorktree?: CommitRefNode;
   ledgerPath?: string;
+  // The memory.md ledger window for the WORKTREE coupler popover (5h): newest rows mapping this
+  // worktree's code↔memory commits + the total count (for the "+N more in memory.md" footer).
+  ledgerRows: LedgerRefNode[];
+  ledgerRowCount: number;
   humanReviewStatus: string;
   closeoutStatus: string;
   integrationStatus: string;
