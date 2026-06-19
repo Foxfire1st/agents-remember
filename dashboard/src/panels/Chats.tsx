@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
-import { css, cva } from "../../styled-system/css";
+import { css } from "../../styled-system/css";
 import { fetchHarnesses, openTerminalSession, type HarnessInfo } from "../data/terminal";
+import { SessionList, type OpenSession } from "./SessionList";
 
 // xterm.js is heavy and probes the canvas on import, so the terminal is code-split and only pulled
 // in when a session is open (keeps it out of the cockpit's initial bundle + out of the jsdom module
@@ -10,14 +11,10 @@ const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: mo
 
 // The Chats view (slice 6e): the visible Mode B2 surface. The **"＋ Terminal"** control asks the
 // server to spawn + own a session (a shell at the workspace root, slice 6e-2a) and then the xterm
-// terminal attaches over the 6d WebSocket — the dashboard owns the session it created. Each open
-// session is a closable tab. Per-harness launch buttons (slice 6e-2b) sit beside ＋ Terminal — one
-// per *detected* harness (Claude Code / Codex / Pi.dev), launching that agent at the workspace root.
-
-interface OpenSession {
-  id: string;
-  label: string;
-}
+// terminal attaches over the 6d WebSocket — the dashboard owns the session it created. Per-harness
+// launch buttons (slice 6e-2b) sit beside ＋ Terminal — one per *detected* harness (Claude Code /
+// Codex / Pi.dev), launching that agent at the workspace root. Open sessions live in a left-rail
+// switcher (slice 6e-2c, `SessionList`); selecting one drives the terminal beside it.
 
 // Placeholder monograms (swap for real brand glyphs later) — distinct two-letter marks so Claude
 // Code and Codex don't both collapse to "C".
@@ -42,7 +39,12 @@ const strip = css({
   borderBottomStyle: "solid",
   borderBottomColor: "grid",
 });
-const newButton = css({
+// ＋ Terminal and every harness button share one golden look (slice 6e-2c: the muted/grey harness
+// buttons read as disabled — give them ＋ Terminal's amber border + text).
+const launchButton = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.32rem",
   font: "inherit",
   fontSize: "0.74rem",
   letterSpacing: "0.04em",
@@ -58,72 +60,26 @@ const newButton = css({
   _hover: { background: "rgba(232, 193, 112, 0.1)" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-const harnessButton = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.32rem",
-  font: "inherit",
-  fontSize: "0.74rem",
-  letterSpacing: "0.04em",
-  paddingInline: "0.5rem",
-  paddingBlock: "0.15rem",
-  borderRadius: "2px",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  color: "muted",
-  background: "transparent",
-  cursor: "pointer",
-  _hover: { borderColor: "amber", color: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
 const harnessIcon = css({ flexShrink: 0, display: "block" });
-const tab = cva({
-  base: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.1rem",
-    borderRadius: "2px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    paddingLeft: "0.5rem",
-  },
-  variants: {
-    active: { true: { borderColor: "amber" }, false: { borderColor: "grid" } },
-  },
+const body = css({ display: "flex", flex: "1", minHeight: "0", gap: "0.5rem" });
+const sidebar = css({
+  display: "flex",
+  flexDirection: "column",
+  flexShrink: 0,
+  width: "13rem",
+  minHeight: "0",
+  borderRightWidth: "1px",
+  borderRightStyle: "solid",
+  borderRightColor: "grid",
+  paddingRight: "0.4rem",
 });
-const tabLabel = cva({
-  base: {
-    font: "inherit",
-    fontSize: "0.74rem",
-    maxWidth: "16ch",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    paddingBlock: "0.15rem",
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-  },
-  variants: {
-    active: { true: { color: "amber" }, false: { color: "muted" } },
-  },
-});
-const closeButton = css({
-  font: "inherit",
-  fontSize: "0.7rem",
-  color: "muted",
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  paddingInline: "0.3rem",
-  _hover: { color: "alarm" },
-});
+const terminalArea = css({ display: "flex", flex: "1", minWidth: "0", minHeight: "0" });
 const empty = css({
   display: "flex",
   flex: "1",
   alignItems: "center",
   justifyContent: "center",
+  textAlign: "center",
   color: "muted",
   fontSize: "0.82rem",
 });
@@ -186,7 +142,7 @@ export function Chats() {
       <header className={strip}>
         <button
           type="button"
-          className={newButton}
+          className={launchButton}
           onClick={() => void startSession("Terminal", "terminal")}
           data-testid="chats-new-terminal"
         >
@@ -198,7 +154,7 @@ export function Chats() {
             <button
               key={harness.id}
               type="button"
-              className={harnessButton}
+              className={launchButton}
               onClick={() => void startSession(harness.name, "harness", harness.id)}
               data-testid={`chats-new-harness-${harness.id}`}
             >
@@ -206,37 +162,31 @@ export function Chats() {
               <span>{harness.name}</span>
             </button>
           ))}
-        {sessions.map((session) => (
-          <span key={session.id} className={tab({ active: session.id === activeId })}>
-            <button
-              type="button"
-              className={tabLabel({ active: session.id === activeId })}
-              onClick={() => setActiveId(session.id)}
-              data-testid={`chats-tab-${session.id}`}
-            >
-              {session.label}
-            </button>
-            <button
-              type="button"
-              className={closeButton}
-              onClick={() => closeSession(session.id)}
-              aria-label={`Close ${session.label}`}
-            >
-              ✕
-            </button>
-          </span>
-        ))}
       </header>
-      {activeId ? (
-        <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
-          <Terminal key={activeId} sessionId={activeId} />
-        </Suspense>
-      ) : (
-        <div className={empty}>
-          ＋ Terminal opens a shell the dashboard owns; harness buttons launch a supported agent — both
-          at the workspace root.
+      <div className={body}>
+        {sessions.length > 0 && (
+          <aside className={sidebar}>
+            <SessionList
+              sessions={sessions}
+              activeId={activeId}
+              onSelect={(id) => setActiveId(id)}
+              onClose={closeSession}
+            />
+          </aside>
+        )}
+        <div className={terminalArea}>
+          {activeId ? (
+            <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
+              <Terminal key={activeId} sessionId={activeId} />
+            </Suspense>
+          ) : (
+            <div className={empty}>
+              ＋ Terminal opens a shell the dashboard owns; harness buttons launch a supported agent —
+              both at the workspace root.
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
