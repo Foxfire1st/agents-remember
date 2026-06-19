@@ -47,6 +47,9 @@ class SubStep(_Doc):
 class Step(_Doc):
     id: str
     title: str
+    # The checkbox line (the deliverable), distinct from the heading ``title`` (R2). Optional and
+    # ``None``-defaulted so ``exclude_none`` keeps existing step JSON byte-identical.
+    outcome: str | None = None
     status: StepStatus = "pending"
     substeps: list[SubStep] = Field(default_factory=list)
 

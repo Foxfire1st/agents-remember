@@ -195,8 +195,6 @@ class RenderTests(unittest.TestCase):
                     "",
                     "### S1 — Do",
                     "",
-                    "- [x] Do",
-                    "",
                     "---",
                     "",
                     "## Proposed Code Examples",
@@ -252,6 +250,22 @@ class RenderTests(unittest.TestCase):
         )
         self.assertIn("- [ ] Parent", md)
         self.assertIn("  - [x] child — n", md)
+
+    def test_step_outcome_on_checkbox_and_bare_step_has_no_echo(self) -> None:
+        md = render_markdown(
+            _doc(
+                steps=[
+                    {"id": "S1", "title": "schema", "outcome": "ar-task-document/v1 lands"},
+                    {"id": "S2", "title": "bare", "status": "done"},
+                ]
+            )
+        )
+        # the checkbox carries the distinct outcome, not the heading title
+        self.assertIn("### S1 — schema", md)
+        self.assertIn("- [ ] ar-task-document/v1 lands", md)
+        # a bare step (no outcome, no substeps) is just its heading -- no redundant title echo
+        self.assertIn("### S2 — bare", md)
+        self.assertNotIn("] bare", md)
 
     def test_decision_cell_escapes_pipe_and_newline(self) -> None:
         md = render_markdown(

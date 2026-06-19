@@ -113,10 +113,14 @@ def _step_lines(steps: list[Step]) -> list[str]:
         return ["_No steps defined yet._"]
     blocks: list[list[str]] = []
     for step in steps:
-        block = [f"### {step.id} — {step.title}", "", f"- [{_checkbox(step.status)}] {step.title}"]
-        for sub in step.substeps:
-            suffix = f" — {sub.note}" if sub.note else ""
-            block.append(f"  - [{_checkbox(sub.status)}] {sub.title}{suffix}")
+        # The heading is the step title; the checkbox carries the distinct outcome (R2). A bare step
+        # (no outcome, no substeps) is just its heading -- no redundant title echo.
+        block = [f"### {step.id} — {step.title}"]
+        if step.outcome or step.substeps:
+            block += ["", f"- [{_checkbox(step.status)}] {step.outcome or step.title}"]
+            for sub in step.substeps:
+                suffix = f" — {sub.note}" if sub.note else ""
+                block.append(f"  - [{_checkbox(sub.status)}] {sub.title}{suffix}")
         blocks.append(block)
     return _join_blocks(blocks)
 
