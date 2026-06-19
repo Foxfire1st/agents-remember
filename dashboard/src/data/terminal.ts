@@ -18,6 +18,14 @@ export interface TerminalSink {
 export interface TerminalConnection {
   sendInput(data: string): void;
   sendResize(cols: number, rows: number): void;
+  /** Resolves once the session looks ready for input — its output has gone quiet (the harness finished
+   *  booting and is at its prompt) or a timeout elapses. The highlight composer waits on this so a
+   *  context package isn't dropped into a still-starting harness (slice 6f). */
+  whenReady(): Promise<void>;
+  /** Epoch ms of the most recent PTY output (0 if none yet). The submit-confirm loop watches this to
+   *  tell whether a programmatic Enter actually submitted — once it does, the harness starts responding
+   *  and output resumes. */
+  lastOutputAt(): number;
   dispose(): void;
 }
 
@@ -64,6 +72,60 @@ export function bracketedPaste(text: string): string {
 }
 
 /**
+ * Strip bytes that an interactive TUI reads as *keystrokes* (not data) when injected over stdin —
+ * most importantly `0x1a` (Ctrl-Z → suspend) — plus any bracketed-paste markers already embedded in
+ * the text, so a selection can never break out of the paste that wraps it. Keeps `\n` (multi-line)
+ * and `\t`; drops the rest of the C0 range (incl. raw `\r`, ESC) and `0x7f` (DEL). Pure — unit-tested.
+ * The backend also strips `0x1a` from every write (defence in depth); this keeps the injected *package*
+ * clean of all control noise, not just the suspend byte.
+ */
+export function sanitizeForInjection(text: string): string {
+  return (
+    text
+      // eslint-disable-next-line no-control-regex -- strip embedded (ESC-framed) bracketed-paste markers
+      .replace(/\x1b\[20[01]~/g, "")
+      // eslint-disable-next-line no-control-regex -- intentional control-byte scrub of injected text
+      .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "") // C0 except \t (0x09) / \n (0x0a); drops \r, ESC, 0x1a, DEL
+  );
+}
+
+const _delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const PASTE_SETTLE_MS = 250; // let the paste→pending-input widget render before submitting
+const CR_ECHO_SETTLE_MS = 250; // let the Enter's OWN echo land so it folds into the baseline, not a response
+const SUBMIT_RETRY_MS = 1800; // re-send Enter once on this cadence (tuned in S0 against a live harness)
+const SUBMIT_TIMEOUT_MS = 9000; // give up confirming after this and surface an error, never silently
+
+/**
+ * Submit a just-injected paste and confirm it took. A single programmatic `\r` is unreliable: Claude
+ * Code's Ink input treats a written CR as a *newline*, not a submit, and the paste→widget conversion is
+ * async, so a same-tick Enter is swallowed (leaving `[Pasted text #N]` unsent). So: let the paste render,
+ * send `\r`, **let the CR's own echo settle into the baseline** (so the echo can't be mistaken for a
+ * response — the false-positive that would report a phantom "delivered"), then watch for output that
+ * advances *past* that baseline = the harness actually responding. Re-send Enter at most ONCE (in case
+ * the first was swallowed) rather than spamming CRs into a pane the operator may be typing into.
+ * Resolves `true` once a response is observed, `false` on timeout. The output-activity signal is a
+ * best-effort heuristic; a Claude Code `UserPromptSubmit` hook is the robust upgrade if it proves flaky.
+ */
+export async function submitAndConfirm(conn: TerminalConnection): Promise<boolean> {
+  await _delay(PASTE_SETTLE_MS);
+  conn.sendInput("\r"); // submit
+  await _delay(CR_ECHO_SETTLE_MS); // fold the Enter's echo into the baseline below
+  const baseline = conn.lastOutputAt();
+  const startedAt = Date.now();
+  let resent = false;
+  while (Date.now() - startedAt < SUBMIT_TIMEOUT_MS) {
+    await _delay(SUBMIT_RETRY_MS);
+    if (conn.lastOutputAt() > baseline) return true; // output after the CR echo settled ⇒ responded
+    if (!resent) {
+      conn.sendInput("\r"); // one more Enter in case the first was swallowed, then stop re-sending
+      resent = true;
+    }
+  }
+  return false;
+}
+
+/**
  * Open a WebSocket to the 6d bridge and pump it into `sink`. **Binary** frames are raw PTY bytes
  * (written verbatim — the VT stream xterm renders); a `{type:"exit"}` text frame or a socket close
  * ends the session exactly once. The returned handle emits the `{type:stdin|resize}` text frames
@@ -83,6 +145,14 @@ export function connectTerminal(
   // completes, so its resize frame would be dropped (send requires OPEN) and the PTY/tmux would stay
   // at the spawn-default size — the terminal renders small until something else triggers a resize.
   let pendingResize: { cols: number; rows: number } | null = null;
+  // Stdin queued before the socket opens — a create-then-send (slice 6f) injects into a brand-new
+  // session whose handshake hasn't completed, so the first package would be dropped. Replayed on open;
+  // normal typed keystrokes arrive after open and send directly.
+  let pendingInput: string[] = [];
+  // Output-readiness (slice 6f): track when PTY output last arrived so `whenReady` can wait for a
+  // booting harness to settle at its prompt before a package is injected.
+  let lastOutputAt = 0;
+  let sawOutput = false;
   const end = () => {
     if (!ended) {
       ended = true;
@@ -92,6 +162,8 @@ export function connectTerminal(
 
   socket.onmessage = (event: MessageEvent) => {
     if (event.data instanceof ArrayBuffer) {
+      sawOutput = true;
+      lastOutputAt = Date.now();
       sink.write(new Uint8Array(event.data));
     } else if (typeof event.data === "string" && parseTerminalControl(event.data) === "exit") {
       end();
@@ -109,14 +181,33 @@ export function connectTerminal(
   // though the first fit() fired mid-handshake (the resize race that left the terminal rendering small).
   socket.onopen = () => {
     if (pendingResize) send({ type: "resize", cols: pendingResize.cols, rows: pendingResize.rows });
+    for (const data of pendingInput) send({ type: "stdin", data });
+    pendingInput = [];
   };
 
   return {
-    sendInput: (data) => send({ type: "stdin", data }),
+    sendInput: (data) => {
+      if (socket.readyState === WS_OPEN) send({ type: "stdin", data });
+      else pendingInput.push(data);
+    },
     sendResize: (cols, rows) => {
       pendingResize = { cols, rows };
       send({ type: "resize", cols, rows });
     },
+    whenReady: () =>
+      new Promise<void>((resolve) => {
+        const IDLE_MS = 700; // output quiet this long ⇒ the harness has settled at its prompt
+        const TIMEOUT_MS = 8000; // fallback so a chatty/animated harness still receives the package
+        const startedAt = Date.now();
+        const tick = () => {
+          const now = Date.now();
+          if (now - startedAt >= TIMEOUT_MS) return resolve();
+          if (sawOutput && now - lastOutputAt >= IDLE_MS) return resolve();
+          setTimeout(tick, 150);
+        };
+        tick();
+      }),
+    lastOutputAt: () => lastOutputAt,
     dispose: () => {
       ended = true; // an intentional teardown must not echo `onExit` via the close handler
       socket.close();
@@ -170,6 +261,33 @@ export async function openTerminalSession(
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Upload a pasted image to the session's host (slice 6f images): `POST /api/terminal/{id}/image`
+ * (multipart) → the backend saves it under the session cwd and returns the absolute on-disk `path`.
+ * The terminal channel is text-only, so an image is carried by injecting this path (Claude Code's TUI
+ * auto-detects an on-disk image path and attaches it before the model runs). Returns `null` on any
+ * failure (bad type / too large / unknown session / network) so the composer can surface a fallback.
+ */
+export async function uploadSessionImage(
+  sessionId: string,
+  file: File,
+  base = "",
+): Promise<string | null> {
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}/image`, {
+      method: "POST",
+      body: form,
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { path?: string };
+    return body.path ?? null;
+  } catch {
+    return null;
   }
 }
 

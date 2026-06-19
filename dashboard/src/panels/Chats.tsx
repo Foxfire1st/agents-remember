@@ -1,14 +1,14 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { css } from "../../styled-system/css";
-import { sessionStore, useSessions } from "../data/sessions";
 import {
-  bracketedPaste,
-  fetchHarnesses,
-  openTerminalSession,
-  type HarnessInfo,
-  type TerminalConnection,
-} from "../data/terminal";
+  createSession,
+  registerConnection,
+  sendToSession,
+  sessionStore,
+  useSessions,
+} from "../data/sessions";
+import { bracketedPaste, fetchHarnesses, sanitizeForInjection, type HarnessInfo } from "../data/terminal";
 import { SessionComposer } from "./SessionComposer";
 import { SessionList } from "./SessionList";
 
@@ -138,9 +138,6 @@ export function Chats() {
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
-  // Each mounted terminal reports its live connection here, keyed by session id; the composer injects
-  // into whichever one is active. A ref (not state) so a new connection never re-renders on keystroke.
-  const conns = useRef<Map<string, TerminalConnection>>(new Map());
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
   // only for detected ones. `[]` (no backend / failure) just leaves ＋ Terminal alone.
@@ -154,12 +151,8 @@ export function Chats() {
     };
   }, []);
 
-  const startSession = async (label: string, kind: "terminal" | "harness", harness?: string) => {
-    const id = crypto.randomUUID();
-    // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
-    await openTerminalSession(id, kind, "", harness);
-    sessionStore.getState().add(label, id);
-  };
+  const startSession = (label: string, kind: "terminal" | "harness", harness?: string) =>
+    createSession(label, kind, harness);
 
   return (
     <section className={wrap} data-testid="chats">
@@ -212,16 +205,13 @@ export function Chats() {
                   <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
                     <Terminal
                       sessionId={session.id}
-                      onConnection={(conn) => {
-                        if (conn) conns.current.set(session.id, conn);
-                        else conns.current.delete(session.id);
-                      }}
+                      onConnection={(conn) => registerConnection(session.id, conn)}
                     />
                   </Suspense>
                 </div>
               ))}
               <SessionComposer
-                onSend={(text) => conns.current.get(activeId)?.sendInput(bracketedPaste(text))}
+                onSend={(text) => sendToSession(activeId, bracketedPaste(sanitizeForInjection(text)))}
               />
             </>
           ) : (

@@ -227,6 +227,22 @@ class TerminalHostPtyTests(unittest.TestCase):
         rows, cols, _, _ = struct.unpack("HHHH", packed)
         self.assertEqual((rows, cols), (24, 80))
 
+    def test_harness_write_strips_ctrl_z_suspend_byte(self) -> None:
+        # For a suspend-unsafe (bare-pane harness) session, 0x1a (Ctrl-Z) is dropped before it reaches
+        # the PTY -- it would suspend the harness with no shell to `fg` it back. `cat` echoes whatever it
+        # receives, so the readback proves the byte never arrived (the surrounding "a"/"b" are contiguous).
+        self.host.open("z", cwd=self.tmp, command=["cat"], suspend_unsafe=True)
+        self.host.write("z", b"a\x1ab\n")
+        out = _read_until(self.host, "z", b"ab")
+        self.assertIn(b"ab", out)
+        self.assertNotIn(b"\x1a", out)
+
+    def test_harness_write_all_ctrl_z_is_noop(self) -> None:
+        # An all-Ctrl-Z frame to a harness collapses to empty and must not write (or raise) -- nothing cat.
+        self.host.open("z2", cwd=self.tmp, command=["cat"], suspend_unsafe=True)
+        self.host.write("z2", b"\x1a\x1a")
+        self.assertEqual(self.host.read_nonblocking("z2"), b"")
+
     @unittest.skipUnless(_HAS_TRUE, "needs `true` for an immediately-exiting child")
     def test_read_empty_after_child_exit(self) -> None:
         self.host.open("done", cwd=self.tmp, command=["true"])
@@ -235,6 +251,62 @@ class TerminalHostPtyTests(unittest.TestCase):
         assert session is not None
         self.assertFalse(session.is_alive)
         self.assertEqual(self.host.read_nonblocking("done"), b"")
+
+
+class _PipeWriteSpawner:
+    """Backs each session's ``master_fd`` with the WRITE end of a pipe so a test reads back exactly the
+    bytes :meth:`TerminalHost.write` forwarded -- no PTY line discipline, so 0x1a is never consumed as a
+    signal. The complement of :class:`_FakeSpawner` (which exposes a readable master)."""
+
+    def __init__(self) -> None:
+        self.read_fds: list[int] = []
+
+    def __call__(self, _argv: Sequence[str], _cwd: Path) -> PtyProcess:
+        read_fd, write_fd = os.pipe()
+        self.read_fds.append(read_fd)
+        return PtyProcess(
+            master_fd=write_fd, pid=7000 + len(self.read_fds), terminate=lambda: None, poll=lambda: None
+        )
+
+
+class TerminalHostSuspendScopingTests(unittest.TestCase):
+    """The 0x1a (Ctrl-Z) strip is scoped to suspend-unsafe harness sessions; shells keep job control."""
+
+    def setUp(self) -> None:
+        self.spawner = _PipeWriteSpawner()
+        self.host = TerminalHost(spawn=self.spawner)
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        self.host.shutdown()
+        for read_fd in self.spawner.read_fds:
+            with contextlib.suppress(OSError):
+                os.close(read_fd)
+
+    def test_harness_session_strips_ctrl_z(self) -> None:
+        self.host.open("h", cwd=self.tmp, command=["claude"], suspend_unsafe=True)
+        self.host.write("h", b"a\x1ab")
+        self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"ab")
+
+    def test_shell_session_keeps_ctrl_z(self) -> None:
+        # A plain shell (suspend_unsafe defaults False) must NOT lose Ctrl-Z -- it is the legitimate
+        # job-control keystroke to background a foreground program back to the prompt.
+        self.host.open("s", cwd=self.tmp, command=["bash"])
+        self.host.write("s", b"a\x1ab")
+        self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"a\x1ab")
+
+    def test_harness_all_ctrl_z_writes_nothing(self) -> None:
+        self.host.open("h2", cwd=self.tmp, command=["claude"], suspend_unsafe=True)
+        self.host.write("h2", b"\x1a\x1a")  # collapses to empty -> no os.write
+        os.set_blocking(self.spawner.read_fds[0], False)
+        with self.assertRaises(BlockingIOError):
+            os.read(self.spawner.read_fds[0], 64)
+
+    def test_unknown_session_all_ctrl_z_still_raises(self) -> None:
+        # _require runs BEFORE the strip, so an all-0x1a frame to an unknown sid still raises -- pins the
+        # require-before-strip ordering the suppress(KeyError) on the WS path would otherwise hide.
+        with self.assertRaises(KeyError):
+            self.host.write("ghost", b"\x1a\x1a")
 
 
 @unittest.skipUnless(_HAS_TMUX, "needs tmux for the end-to-end persistence path")

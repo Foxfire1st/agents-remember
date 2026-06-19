@@ -14,6 +14,7 @@ import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
 import { Hangar } from "../panels/Hangar";
+import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
 import { Topology } from "../panels/Topology";
@@ -233,6 +234,10 @@ export function CockpitShell() {
         )}
       </div>
       <ModeBar items={VIEWS} value={view} onChange={setView} label="Views" />
+      {/* Slice 6f: a cockpit-wide composer that a text selection raises — send the selection (+ a
+          message) to a chat session as a context package. Mounted once here so it works on every view;
+          renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
+      <HighlightComposer onSent={() => setView("chats")} />
     </div>
   );
 }

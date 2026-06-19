@@ -37,12 +37,16 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
+from uuid import uuid4
 
 from fastapi import (
     FastAPI,
+    File,
     Header,
     HTTPException,
+    Request,
     Response,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -95,6 +99,30 @@ async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]
 
 _TERMINAL_EXIT_FRAME = json.dumps({"type": "exit"})
 """The text frame sent to the browser once the PTY child exits (then the socket closes)."""
+
+_IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "gif", "webp"})
+"""Image extensions Claude Code's vision accepts (slice 6f). BMP/TIFF/SVG are rejected -- BMP is the
+documented WSL clipboard paste-failure root, and the others are not vision formats."""
+
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+"""Per-image upload cap. The Claude API allows ~10 MB but the claude-code CLI has historically enforced a
+5 MB local cap, so clamp to the smaller bound; an oversized image is rejected, never silently truncated.
+(The handler caps the bytes it buffers; a full pre-parse bound on the multipart spool would need ASGI
+body-limit middleware -- tracked as a follow-up, acceptable on the single-user localhost cockpit.)"""
+
+
+def _looks_like_image(body: bytes, ext: str) -> bool:
+    """Cheap magic-byte sniff so a non-image saved with an image extension is rejected (defence in depth
+    on top of the extension check). Conservative -- only the well-known signatures, mismatch -> reject."""
+    if ext == "png":
+        return body.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext in {"jpg", "jpeg"}:
+        return body.startswith(b"\xff\xd8\xff")
+    if ext == "gif":
+        return body.startswith((b"GIF87a", b"GIF89a"))
+    if ext == "webp":
+        return len(body) >= 12 and body[:4] == b"RIFF" and body[8:12] == b"WEBP"
+    return False
 
 
 def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
@@ -359,7 +387,13 @@ def create_app(
                 content={"status": "bad-kind", "detail": str(exc)}, status_code=400
             )
         opened = host.open(
-            session, cwd=cwd, command=command, lifecycle_id=request.lifecycle_id
+            session,
+            cwd=cwd,
+            command=command,
+            lifecycle_id=request.lifecycle_id,
+            # A harness is a bare pane with no shell to `fg`; the host strips Ctrl-Z for it. A plain
+            # shell keeps Ctrl-Z so its job control works (slice 6f hardening).
+            suspend_unsafe=request.kind == "harness",
         )
         return JSONResponse(
             content={
@@ -370,6 +404,40 @@ def create_app(
             },
             status_code=200,
         )
+
+    @app.post("/api/terminal/{session}/image")
+    async def api_terminal_image(
+        session: str, request: Request, file: Annotated[UploadFile, File()]
+    ) -> Response:
+        # Slice 6f images: the terminal channel is text-only, so a pasted screenshot is carried by
+        # saving it under the session's own cwd and injecting the on-disk path (Claude Code auto-attaches
+        # an image path before the model runs). Same localhost posture as the rest of serving/; writes
+        # ONLY under the session cwd, with a uuid basename (no traversal) and validated type (extension +
+        # magic bytes) + size. Returns the absolute path the composer injects over {type:stdin}.
+        # SECURITY NOTE: like the rest of serving/ this is unauthenticated and 127.0.0.1-bound, but unlike
+        # the JSON POSTs it is multipart (a CORS "simple request", preflight-free). The write target is
+        # keyed by an unguessable client UUID, so cross-origin/CSRF writes can't target a real session;
+        # an Origin/Host allowlist for all write routes is folded into the documented remote-auth story.
+        session_obj = host.get(session)
+        if session_obj is None:
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        if session_obj.cwd is None:
+            return JSONResponse(content={"status": "no-cwd"}, status_code=409)
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > _MAX_IMAGE_BYTES + 4096:
+            return JSONResponse(content={"status": "too-large"}, status_code=413)  # fast reject
+        ext = Path(file.filename or "").suffix.lstrip(".").lower()
+        if ext not in _IMAGE_EXTS:
+            return JSONResponse(content={"status": "bad-type"}, status_code=400)
+        body = await file.read(_MAX_IMAGE_BYTES + 1)  # +1 so an at-cap read still detects oversize
+        if len(body) > _MAX_IMAGE_BYTES:
+            return JSONResponse(content={"status": "too-large"}, status_code=413)
+        if not body or not _looks_like_image(body, ext):
+            return JSONResponse(content={"status": "bad-type"}, status_code=400)  # empty / not an image
+        dest = session_obj.cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
+        return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
 
     mount_static(app)
     return app

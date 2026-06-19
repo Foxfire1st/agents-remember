@@ -6,7 +6,10 @@ import {
   fetchHarnesses,
   openTerminalSession,
   parseTerminalControl,
+  sanitizeForInjection,
+  submitAndConfirm,
   terminalSocketUrl,
+  uploadSessionImage,
   type TerminalSink,
 } from "./terminal";
 
@@ -132,6 +135,24 @@ describe("connectTerminal", () => {
     expect(socket.sent).toEqual([]);
   });
 
+  it("whenReady resolves once PTY output goes quiet (the booting-harness gate, slice 6f)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { conn, socket } = connect(sink());
+      socket.pushBinary(new Uint8Array([66, 79, 79, 84])); // boot output
+      let ready = false;
+      void conn.whenReady().then(() => {
+        ready = true;
+      });
+      await vi.advanceTimersByTimeAsync(300); // < the 700ms idle window
+      expect(ready).toBe(false);
+      await vi.advanceTimersByTimeAsync(600); // now quiet > 700ms ⇒ ready
+      expect(ready).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("flushes the latest resize once the socket opens (the handshake race)", () => {
     const s = sink();
     const { conn, socket } = connect(s);
@@ -209,6 +230,107 @@ describe("openTerminalSession", () => {
       "/api/terminal/s1",
       expect.objectContaining({ body: JSON.stringify({ kind: "harness", harness: "claude" }) }),
     );
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("sanitizeForInjection (6f hardening)", () => {
+  it("strips the Ctrl-Z suspend byte and other C0 controls but keeps \\n and \\t", () => {
+    expect(sanitizeForInjection("a\x1ab")).toBe("ab"); // 0x1a (Ctrl-Z) — the suspend byte
+    expect(sanitizeForInjection("a\x03b")).toBe("ab"); // 0x03 (Ctrl-C)
+    expect(sanitizeForInjection("a\rb")).toBe("ab"); // 0x0d (CR) — never inside a paste body
+    expect(sanitizeForInjection("a\x7fb")).toBe("ab"); // DEL
+    expect(sanitizeForInjection("l1\nl2\tend")).toBe("l1\nl2\tend"); // multi-line + tab preserved
+    expect(sanitizeForInjection("hello 🌍")).toBe("hello 🌍"); // ordinary unicode untouched
+  });
+
+  it("removes embedded bracketed-paste markers so a selection cannot break out of its own paste", () => {
+    expect(sanitizeForInjection("a\x1b[200~x\x1b[201~b")).toBe("axb");
+  });
+});
+
+describe("submitAndConfirm (6f hardening)", () => {
+  it("resolves true once the harness responds AFTER the CR echo settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = sink();
+      const { conn, socket } = connect(s);
+      let result: boolean | undefined;
+      void submitAndConfirm(conn).then((v) => {
+        result = v;
+      });
+      await vi.advanceTimersByTimeAsync(250); // paste-settle → Enter sent
+      expect(socket.sent).toContainEqual(JSON.stringify({ type: "stdin", data: "\r" }));
+      await vi.advanceTimersByTimeAsync(250); // CR-echo-settle → baseline captured
+      socket.pushBinary(new Uint8Array([1])); // harness responds AFTER the baseline
+      await vi.advanceTimersByTimeAsync(1800); // next tick observes the new output
+      expect(result).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT false-positive on the Enter's own echo (the phantom-delivered guard)", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = sink();
+      const { conn, socket } = connect(s);
+      let result: boolean | undefined;
+      void submitAndConfirm(conn).then((v) => {
+        result = v;
+      });
+      await vi.advanceTimersByTimeAsync(250); // paste-settle → Enter sent
+      socket.pushBinary(new Uint8Array([2])); // the Enter's OWN echo lands during the echo-settle window
+      await vi.advanceTimersByTimeAsync(250); // echo folds INTO the baseline
+      await vi.advanceTimersByTimeAsync(9500); // no further output (submit swallowed) → times out
+      expect(result).toBe(false); // echo alone is not treated as a response
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up (false) and re-sends Enter exactly once (capped, not spamming) when nothing responds", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = sink();
+      const { conn, socket } = connect(s);
+      let result: boolean | undefined;
+      void submitAndConfirm(conn).then((v) => {
+        result = v;
+      });
+      await vi.advanceTimersByTimeAsync(250 + 250 + 9500); // settle windows + past the submit timeout
+      expect(result).toBe(false);
+      const enters = socket.sent.filter((f) => JSON.parse(f).data === "\r").length;
+      expect(enters).toBe(2); // initial Enter + ONE resend, then it stops re-sending into the live pane
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("uploadSessionImage", () => {
+  it("POSTs the image to the session route and returns the saved path", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ path: "/cwd/.dashboard-pastes/a.png" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File([new Uint8Array([1, 2])], "shot.png", { type: "image/png" });
+    expect(await uploadSessionImage("s 1", file)).toBe("/cwd/.dashboard-pastes/a.png");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/s%201/image",
+      expect.objectContaining({ method: "POST" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("returns null on a non-ok response, a missing path, or a network error", async () => {
+    const file = new File([new Uint8Array([1])], "x.png", { type: "image/png" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await uploadSessionImage("s1", file)).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
+    expect(await uploadSessionImage("s1", file)).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await uploadSessionImage("s1", file)).toBeNull();
     vi.unstubAllGlobals();
   });
 });

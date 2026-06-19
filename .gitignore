@@ -11,3 +11,4 @@ __pycache__/
 .coverage
 uv.lock
 mcp/tests/fixtures/sim-rich/
+.dashboard-pastes/

@@ -31,6 +31,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.app import (
+    _MAX_IMAGE_BYTES,
     _TERMINAL_EXIT_FRAME,
     _apply_terminal_input,
     create_app,
@@ -75,9 +76,10 @@ class _RecordingHost:
 class _FakeSession:
     """A terminal-session stand-in: the fields `_bridge_terminal` reads."""
 
-    def __init__(self, sid: str, master_fd: int) -> None:
+    def __init__(self, sid: str, master_fd: int, cwd: Path | None = None) -> None:
         self.sid = sid
         self.master_fd = master_fd
+        self.cwd = cwd
         self.alive = True
 
     @property
@@ -93,11 +95,11 @@ class _FakeTerminalHost:
     child (`end`).
     """
 
-    def __init__(self, sid: str = "live") -> None:
+    def __init__(self, sid: str = "live", cwd: Path | None = None) -> None:
         self._master, self.peer = socket.socketpair()
         self._master.setblocking(False)
         self.peer.settimeout(2.0)
-        self.session = _FakeSession(sid, self._master.fileno())
+        self.session = _FakeSession(sid, self._master.fileno(), cwd=cwd)
         self.resizes: list[tuple[int, int]] = []
         self.opened: list[dict[str, object]] = []
         self.shutdown_called = False
@@ -112,9 +114,16 @@ class _FakeTerminalHost:
         cwd: Path,
         command: Sequence[str],
         lifecycle_id: str | None = None,
+        suspend_unsafe: bool = False,
     ) -> SimpleNamespace:
         self.opened.append(
-            {"sid": sid, "cwd": cwd, "command": list(command), "lifecycle_id": lifecycle_id}
+            {
+                "sid": sid,
+                "cwd": cwd,
+                "command": list(command),
+                "lifecycle_id": lifecycle_id,
+                "suspend_unsafe": suspend_unsafe,
+            }
         )
         return SimpleNamespace(sid=sid, cwd=cwd)
 
@@ -188,7 +197,7 @@ class TerminalWebSocketTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
-        self.host = _FakeTerminalHost()
+        self.host = _FakeTerminalHost(cwd=self.tmp)
         self.app = create_app(
             _config(self.tmp), interval=100, terminal_host=cast(TerminalHost, self.host)
         )
@@ -254,6 +263,7 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(opened["sid"], "term-1")
         self.assertEqual(opened["cwd"], self.tmp)  # workspace_root (== _config's tmp)
         self.assertEqual(len(cast(list, opened["command"])), 1)  # the shell argv
+        self.assertFalse(opened["suspend_unsafe"])  # a shell keeps Ctrl-Z (job control)
 
     def test_post_open_rejects_unknown_kind(self) -> None:
         with TestClient(self.app) as client:
@@ -284,6 +294,7 @@ class TerminalWebSocketTests(unittest.TestCase):
         opened = self.host.opened[0]
         self.assertEqual(opened["command"], ["claude"])  # server-resolved argv, never wire-supplied
         self.assertEqual(opened["cwd"], self.tmp)  # workspace_root
+        self.assertTrue(opened["suspend_unsafe"])  # a bare-pane harness gets the Ctrl-Z strip
 
     def test_post_open_harness_rejects_uninstalled(self) -> None:
         with patch("shutil.which", _which()), TestClient(self.app) as client:
@@ -300,6 +311,103 @@ class TerminalWebSocketTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.host.opened, [])
+
+
+class TerminalImageEndpointTests(unittest.TestCase):
+    """`POST /api/terminal/{session}/image` (slice 6f): save a pasted image under the session cwd."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.host = _FakeTerminalHost(cwd=self.tmp)
+        self.app = create_app(
+            _config(self.tmp), interval=100, terminal_host=cast(TerminalHost, self.host)
+        )
+
+    def tearDown(self) -> None:
+        self.host.close()
+        self._dir.cleanup()
+
+    def test_saves_under_session_cwd_and_returns_path(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"fake-image-body"
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image", files={"file": ("shot.png", png, "image/png")}
+            )
+        self.assertEqual(response.status_code, 200)
+        path = Path(response.json()["path"])
+        self.assertEqual(path.parent.name, ".dashboard-pastes")
+        self.assertTrue(path.is_relative_to(self.tmp.resolve()))
+        self.assertEqual(path.suffix, ".png")
+        self.assertEqual(path.read_bytes(), png)  # flushed to disk before the path is injected
+
+    def test_hostile_filename_yields_uuid_name_under_cwd(self) -> None:
+        # The client filename is used ONLY to derive the extension; the basename is always a uuid, so a
+        # path-bearing name cannot escape the session cwd. Pins the no-traversal contract.
+        png = b"\x89PNG\r\n\x1a\n" + b"body"
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image",
+                files={"file": ("../../etc/passwd.png", png, "image/png")},
+            )
+        self.assertEqual(response.status_code, 200)
+        path = Path(response.json()["path"])
+        self.assertTrue(path.is_relative_to(self.tmp.resolve()))
+        self.assertEqual(path.parent.name, ".dashboard-pastes")
+        stem = path.stem  # the uuid hex, never the client-supplied name
+        self.assertEqual(len(stem), 32)
+        self.assertTrue(all(c in "0123456789abcdef" for c in stem))
+
+    def test_rejects_non_image_type(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image", files={"file": ("notes.txt", b"hello", "text/plain")}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "bad-type")
+
+    def test_rejects_non_image_content_for_image_extension(self) -> None:
+        # Magic-byte sniff: an image extension with non-image bytes is rejected, not saved as a .png.
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image", files={"file": ("shot.png", b"not a real png", "image/png")}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "bad-type")
+
+    def test_rejects_empty_body(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image", files={"file": ("shot.png", b"", "image/png")}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "bad-type")
+
+    def test_rejects_oversize_post_read(self) -> None:
+        with patch("agents_remember.serving.app._MAX_IMAGE_BYTES", 8), TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image", files={"file": ("big.png", b"\x89PNG\r\n\x1a\n" + b"xx", "image/png")}
+            )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["status"], "too-large")
+
+    def test_rejects_oversize_via_content_length(self) -> None:
+        # A blatantly oversize upload is rejected fast on Content-Length, without patching the cap down.
+        big = b"\x00" * (_MAX_IMAGE_BYTES + 10_000)
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/image", files={"file": ("big.png", big, "image/png")}
+            )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["status"], "too-large")
+
+    def test_unknown_session_is_404(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/ghost/image", files={"file": ("shot.png", b"\x89PNG", "image/png")}
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "unknown-session")
 
 
 class ResolveTerminalLaunchTests(unittest.TestCase):

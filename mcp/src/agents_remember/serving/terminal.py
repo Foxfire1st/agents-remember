@@ -52,6 +52,13 @@ _TMUX_NAME_PREFIX = "ar"
 _UNSAFE_TMUX_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 """tmux session names cannot contain ``.`` or ``:``; everything outside this class is collapsed."""
 
+_SUSPEND_BYTE = b"\x1a"
+"""Ctrl-Z (SIGTSTP), stripped from stdin writes to **suspend-unsafe** sessions only (bare-pane harnesses
+like ``claude``). Such a pane has no job-control shell, so a suspend soft-locks it -- there is no ``fg``
+to type -- and the operator's message is lost (Claude Code self-suspends on this byte). A plain
+``kind="terminal"`` *shell* session keeps Ctrl-Z, where it is the legitimate keystroke to background a
+foreground program to the prompt (``fg``/``bg`` work there). Scoping is per-session (slice 6f hardening)."""
+
 
 @dataclass(frozen=True)
 class PtyProcess:
@@ -87,6 +94,9 @@ class TerminalSession:
     command: tuple[str, ...]
     lifecycle_id: str | None
     process: PtyProcess = field(repr=False)
+    suspend_unsafe: bool = False
+    """True for a bare-pane harness (no shell to ``fg``) -- :meth:`TerminalHost.write` strips Ctrl-Z for
+    it; a plain shell session leaves False so its job control keeps working."""
 
     @property
     def master_fd(self) -> int:
@@ -192,6 +202,7 @@ class TerminalHost:
         command: Sequence[str],
         lifecycle_id: str | None = None,
         name: str | None = None,
+        suspend_unsafe: bool = False,
     ) -> TerminalSession:
         """Open (or re-attach) the session ``sid`` running ``command`` in ``cwd``.
 
@@ -215,6 +226,7 @@ class TerminalHost:
             command=harness,
             lifecycle_id=lifecycle_id,
             process=process,
+            suspend_unsafe=suspend_unsafe,
         )
         self._sessions[sid] = session
         return session
@@ -232,8 +244,19 @@ class TerminalHost:
         return [s for s in self._sessions.values() if s.lifecycle_id == lifecycle_id]
 
     def write(self, sid: str, data: bytes) -> None:
-        """Write browser keystrokes to the session's PTY (raises ``KeyError`` if unknown)."""
-        os.write(self._require(sid).master_fd, data)
+        """Write browser keystrokes to the session's PTY (raises ``KeyError`` if unknown).
+
+        For a **suspend-unsafe** session (a bare-pane harness), Ctrl-Z (:data:`_SUSPEND_BYTE`) is
+        stripped first -- it would suspend the harness with no shell to ``fg`` it back, dropping the
+        operator's message. A plain shell session keeps Ctrl-Z so its job control still works. The strip
+        covers both injected packages and live xterm keystrokes for the harness; an all-Ctrl-Z frame to
+        a harness becomes a no-op write, while an unknown sid still raises ``KeyError`` first.
+        """
+        session = self._require(sid)  # resolve first so an unknown sid still raises KeyError
+        if session.suspend_unsafe:
+            data = data.replace(_SUSPEND_BYTE, b"")
+        if data:
+            os.write(session.master_fd, data)
 
     def read_nonblocking(self, sid: str, max_bytes: int = _READ_CHUNK) -> bytes:
         """Drain up to ``max_bytes`` of child output without blocking.
