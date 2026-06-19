@@ -6,9 +6,12 @@
 // prototype's viewBox (0 0 1200 660). State always comes from the model (factState / runtimeState /
 // edge.state), never a class name alone — so the truth stays in the projection, not the render.
 
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Dialog, Popover } from "react-aria-components";
+import { AnimatePresence, motion } from "motion/react";
+import gsap from "gsap";
 
+import { useShouldAnimate } from "./useShouldAnimate";
 import type {
   CommitRefNode,
   EngineProcessEdge,
@@ -40,6 +43,7 @@ import {
   flowConduit,
   flowPacket,
   gateBar,
+  landingEnter,
   laneFlag,
   laneFlagText,
   ledgerButton,
@@ -59,15 +63,12 @@ import {
   officialWire,
   prBadge,
   prBadgeLabel,
-  prBadgeSub,
   reasonBadge,
   reasonDot,
   reasonText,
   remoteChip,
   remoteChipLabel,
   remoteChipState,
-  remoteConnector,
-  remoteConnectorCarry,
   remoteStripHeader,
   sceneSvg,
   stopBar,
@@ -134,10 +135,15 @@ function CanopyFrame() {
 // --- geometry (ported 1:1 from podstage.html) --------------------------------
 const NODE_H = 62;
 const POS = {
-  codeSource: { x: 300, y: 250, w: 180 },
+  codeSource: { x: 300, y: 250, w: 180 }, // = mockup m-code (the OFFICIAL LINE = main, left)
   memorySource: { x: 300, y: 372, w: 180 },
-  codeWorktree: { x: 700, y: 250, w: 200 },
+  codeWorktree: { x: 700, y: 250, w: 200 }, // = mockup w-code (worktree, right)
   memoryWorktree: { x: 700, y: 372, w: 200 },
+  // The feat/fix source branch — the THIRD tier the worktree was actually branched off (5f §7.4). It
+  // lives in the GAP between main and the worktree and is shown only during landing (mockup feat-code /
+  // feat-mem, x512 w136), so the closeout reads main → feat → worktree, never main = feat.
+  featCode: { x: 512, y: 250, w: 136 },
+  featMemory: { x: 512, y: 372, w: 136 },
 } as const;
 const ENGINE = {
   cgc: { x: 1057, y: 102 }, grepai: { x: 1057, y: 452 }, // worktree (enclosure) engines, right world
@@ -151,23 +157,61 @@ const OFFICIAL_COUPLER_X = 390; // official-line code↔memory coupler (podstage
 const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   "worktree-add": [480, 281, 698, 281],
   "ledger-map": [480, 403, 698, 403],
-  // Provider conduits run from the box's side-edge MIDDLE to the engine's INNER corner, pointing INTO
-  // the engine (it reads + indexes the source); the chevron shows only when running (see Conduit).
-  "cgc-seed": [900, 281, 1057, 198],
-  "grepai-clone": [900, 403, 1057, 452],
+  // Provider CLONE arrows (5f §7.2 "cloned-from, not re-indexed"): the worktree engines are SEEDED BY
+  // CLONING the official-line engines — a fast copy of the index / vector DB — NOT rebuilt from the
+  // worktree code. So the seed/clone flow runs official-provider -> worktree-provider, sweeping across
+  // the whole stage (CGC arcs over the top, GrepAI under the bottom; see the clone-arc path in Conduit),
+  // and it is TRANSIENT — drawn only while the clone is running, gone at idle. The persistent
+  // worktree-engine -> branch wiring is a separate static wire (worktree-wire), mirroring the left world.
+  "cgc-seed": [135, 150, 1057, 150],
+  "grepai-clone": [135, 500, 1057, 500],
   // sync shares the code intake lane's CENTRELINE with worktree-add (same source→worktree channel,
   // a later phase of it) — collinear, not stacked 8px below, so the blocked sync reads as one
   // centred line on the lane rather than a confusing off-centre double.
   sync: [480, 281, 698, 281],
-  // integration = the worktree → official "landing" return lane (above the code lane); t14c STOPs it.
-  integration: [690, 234, 490, 234],
+  // integration = the worktree's closeout commits returning to the feat/fix SOURCE branch in the gap
+  // (the mockup's D2 int-code: worktree → feat, M700 281 L 648 281); t14c STOPs it. The push flow then
+  // carries feat → origin/feat.
+  integration: [700, 281, 650, 281],
 };
 
-function BranchNode({ pos, label, refNode }: {
+// The build-up "branch-copy": a worktree node is born from its official-line node, rising from nothing
+// while sliding in from the main side. Driven by the honesty axis — a `planned` worktree ref is not yet
+// on disk (hidden, offset toward main), `observed`/`derived` is materialised (in place). Official-line
+// nodes are always `observed`, so they stay settled. The sceneSvg transition tweens between these as the
+// projection advances (and freezes instant under data-effects=off, so the count/presence tests stand).
+function branchEnter(factState: CommitRefNode["factState"]): { opacity: number; dx: number } {
+  switch (factState) {
+    case "observed":
+    case "derived":
+      return { opacity: 1, dx: 0 };
+    case "planned":
+      return { opacity: 0, dx: -90 };
+    case "missing":
+      return { opacity: 0.22, dx: 0 };
+    default:
+      return { opacity: 0.45, dx: 0 };
+  }
+}
+
+// During landing the official-line node reads as the protected branch (main) — the feat/fix SOURCE the
+// worktree was branched off is shown as its own tier in the gap. Same on-disk commit; only the branch
+// label flips, so the closeout reads main ◂ feat ◂ worktree instead of collapsing main and feat into one.
+function mainRef(src: CommitRefNode): CommitRefNode {
+  return { ...src, branch: "main" };
+}
+
+function BranchNode({ pos, label, refNode, landingIn = false, detaching = false }: {
   pos: { x: number; y: number; w: number };
   label: string;
   refNode: CommitRefNode;
+  landingIn?: boolean;
+  detaching?: boolean;
 }) {
+  const enter = branchEnter(refNode.factState);
+  // a DETACHING worktree (cleanup de-materialise) drifts OUT to the right as it fades — not in from main
+  // (which is the build-up branch-copy direction). Same fade; only the slide direction flips.
+  const dx = detaching && enter.opacity === 0 ? 64 : enter.dx;
   const cx = pos.x + pos.w / 2;
   const branch = refNode.branch ?? "—";
   // truncate to the box width (~7.4px/char at 14px); the full string is in the <title> (hover).
@@ -175,7 +219,14 @@ function BranchNode({ pos, label, refNode }: {
   const flags = `${refNode.dirty ? " · dirty" : ""}${refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""}`;
   const full = `${label}: ${branch}${refNode.commit ? ` @ ${refNode.commit}` : ""}${flags}`;
   return (
-    <g data-testid="branch-node" data-fact={refNode.factState}>
+    <g
+      data-testid="branch-node"
+      data-fact={refNode.factState}
+      // `landingIn` fades + lifts the node in on mount (the feat/fix tier that appears at landing), so it
+      // doesn't pop. Frozen under data-effects=off (the count/presence tests stay synchronous).
+      className={landingIn ? landingEnter : undefined}
+      style={{ opacity: enter.opacity, transform: dx ? `translateX(${dx}px)` : undefined }}
+    >
       <title>{full}</title>
       <rect className={svgNodeBox({ factState: refNode.factState })} x={pos.x} y={pos.y} width={pos.w} height={NODE_H} rx={8} />
       <text className={svgNodeLabel} x={cx} y={pos.y + 17} textAnchor="middle">{label}</text>
@@ -190,13 +241,17 @@ function BranchNode({ pos, label, refNode }: {
   );
 }
 
-function EngineGauge({ at, label, runtime, reindex }: {
+function EngineGauge({ at, label, runtime, reindex, present = true }: {
   at: { x: number; y: number };
   label: string;
   runtime: RuntimeState;
   reindex?: boolean;
+  present?: boolean;
 }) {
   const state = reindex ? "reindex" : runtime;
+  // `present` is the build-up gate: a worktree engine only materialises once the provider runtime
+  // deploys (B3). Until then it is faded out (the left-world engines are always present). The opacity
+  // tween rides the sceneSvg transition; the SVG `transform` position attribute is untouched.
   return (
     <g
       transform={`translate(${at.x},${at.y})`}
@@ -204,6 +259,7 @@ function EngineGauge({ at, label, runtime, reindex }: {
       data-runtime={state}
       role="img"
       aria-label={`${label} engine ${state}`}
+      style={{ opacity: present ? 1 : 0 }}
     >
       <rect className={reindex ? engineReindexOut : engineGaugeOut({ runtimeState: runtime })} x={0} y={0} width={ENGINE.w} height={ENGINE.h} rx={5} />
       <rect
@@ -309,7 +365,7 @@ function LedgerTable({ rows, total, currentCode }: {
   );
 }
 
-function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0, currentCode }: {
+function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0, currentCode, visible = true }: {
   x: number;
   bound: boolean;
   label?: string;
@@ -317,6 +373,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   rows?: LedgerRefNode[];
   total?: number;
   currentCode?: string;
+  visible?: boolean;
 }) {
   const cy = 342;
   const triggerRef = useRef<SVGRectElement>(null);
@@ -329,7 +386,12 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   const hasLedger = ledgerRows.length > 0; // a ledger-backed coupler opens its memory.md lookup table
   return (
     <>
-      <g className={warpCouplerG({ bound })} data-testid={testid} data-bound={bound}>
+      <g
+        className={warpCouplerG({ bound })}
+        data-testid={testid}
+        data-bound={bound}
+        style={{ opacity: visible ? undefined : 0 }}
+      >
         <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
         {/* invisible high anchor for the popover (upper position) — see anchorRef note above */}
         <rect ref={anchorRef} x={x + 90} y={58} width={1} height={1} fill="none" pointerEvents="none" aria-hidden="true" />
@@ -390,18 +452,51 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
 }
 
 function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: string }) {
+  // Hooks run before the (kind-stable) early return so the hook order is constant per edge instance.
+  const pathRef = useRef<SVGPathElement>(null);
+  const animate = useShouldAnimate();
+  // GSAP owns the conduit draw-on (5f §8): when a lane goes `running` (a seed/clone in flight) it draws
+  // from source to target (strokeDashoffset 100 → 0) — the "cloned from main" sweep. Keyed on edge.state
+  // so a planned → running cycle re-draws each time. stroke-dashoffset is excluded from the sceneSvg
+  // transition, so GSAP owns it alone; under data-effects=off this never runs and the path rests drawn.
+  useLayoutEffect(() => {
+    const path = pathRef.current;
+    if (!path || !animate || edge.state !== "running") return;
+    const ctx = gsap.context(() => {
+      gsap.fromTo(path, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.6, ease: "power2.out" });
+    });
+    return () => ctx.revert();
+  }, [edge.state, animate]);
+
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
   // T14b — a `replay` integration bends the landing return lane around the parallel work that moved the
   // official line (vs the straight `ff-only` fast-forward). Same draw-on/packet idiom, a different path.
   const bent = edge.kind === "integration" && strategy === "replay";
+  // The provider-clone arrows sweep across the whole stage from the official engine to the worktree
+  // engine — CGC bows OVER the top, GrepAI UNDER the bottom (the "copies + rewrites index" / "clones
+  // vector DB" beat). Transient: shown only while running, gone at idle (see the opacity below).
+  const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
+  const dip = edge.kind === "grepai-clone" ? 104 : -116; // GrepAI bows down; CGC bows up
   const d = bent
     ? `M${x1} ${y1} C ${x1 - 60} ${y1 - 54}, ${x2 + 60} ${y1 - 54}, ${x2} ${y2}`
-    : `M${x1} ${y1} L ${x2} ${y2}`;
+    : cloneArc
+      ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
+      : `M${x1} ${y1} L ${x2} ${y2}`;
   return (
-    <g data-testid="conduit" data-kind={edge.kind} data-state={edge.state} data-strategy={bent ? "replay" : undefined}>
+    <g
+      data-testid="conduit"
+      data-kind={edge.kind}
+      data-state={edge.state}
+      data-strategy={bent ? "replay" : undefined}
+      // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while
+      // the clone is running (gone at idle); every other lane fades in as it activates. The sceneSvg
+      // transition eases the opacity (frozen instant under data-effects=off).
+      style={{ opacity: cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1 }}
+    >
       <path
+        ref={pathRef}
         className={flowConduit({ state: conduitState(edge.state) })}
         d={d}
         pathLength={100}
@@ -517,14 +612,20 @@ function TerminalStop({ edge }: { edge: EngineProcessEdge }) {
 }
 
 // Lane annotation flag (podstage.html #ledger / #hist): a small toned plate labelling a landing lane.
-function LaneFlag({ x, y, w, h, label, tone, testid }: {
+function LaneFlag({ x, y, w, h, label, tone, testid, visible = true, enter = false }: {
   x: number; y: number; w: number; h: number; label: string;
-  tone: "ledger" | "historical"; testid: string;
+  tone: "ledger" | "historical"; testid: string; visible?: boolean; enter?: boolean;
 }) {
   // truncate to the box (laneFlagText is 11px ≈ 6 units/char) so a long branch name never overflows;
-  // the full label is on hover.
+  // the full label is on hover. `visible` lets a lane annotation fade with its enclosure during the
+  // build-up (it stays in the DOM for the presence tests; the sceneSvg transition eases the opacity).
+  // `enter` adds the landing-tail fade+lift for a flag that only mounts when the enclosure starts to land.
   return (
-    <g data-testid={testid}>
+    <g
+      data-testid={testid}
+      className={enter ? landingEnter : undefined}
+      style={{ opacity: visible ? undefined : 0 }}
+    >
       <title>{label}</title>
       <rect className={laneFlag({ tone })} x={x} y={y} width={w} height={h} rx={3} />
       <text className={laneFlagText({ tone })} x={x + w / 2} y={y + h / 2 + 5} textAnchor="middle">
@@ -560,18 +661,21 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
   );
 }
 
-// --- 5h H3: remote/PR strip beyond the official line (T15 code PR+push, T16 carryover) -----------
-// The upstream the official line reports into. Rendered in canonical D3→D4 order (code first: feat →
-// PR → main; memory after: mem-main) regardless of feed order, so the governed sequence reads in a
-// single frozen frame: mem-main stays dashed/"planned" until the code PR merges, then settles done.
-const REMOTE_ORDER = ["origin-feat", "pr", "origin-main", "origin-mem-main"] as const;
-const REMOTE_X = 250;
-const REMOTE_Y = 56;
-const REMOTE_W = 168; // chip width — a peer of the 180-wide branch nodes, so the label reads at the same scale
-const REMOTE_H = 46; // two comfortable text lines (label + state), not two cramped ones
-const REMOTE_GAP = 30; // breathing room + the connector run between chips
-const REMOTE_GROUP_GAP = 36; // extra gap before origin/mem-main — the code→memory carryover handoff (T16)
-// The strip is the SUCCESSFUL-LANDING arc — it shows only while an enclosure is actually retiring to the
+// --- 5h H3: remote/landing dock beyond the official line (T15 code PR+push, T16 carryover) ---------
+// Geometry copied from podstage.html (the mockup): the CODE remotes sit side-by-side at the TOP and
+// read RIGHT → LEFT — origin/feat (just pushed from the worktree, on the right) ▸ a PR merge-arrow ▸
+// origin/main (merged into the official line, on the left). The MEMORY remote (origin/mem-main) is
+// mirrored to the BOTTOM, beneath the memory lane. The directional landing flows (push ↑ / pull ↓ /
+// push-mem ↓ — see LandingFlows) wire the dock to the branch nodes so it reads as the governed flow.
+const RBOX_W = 148; // = mockup r-box width
+const RBOX_H = 36;
+const REMOTE_POS: Record<string, { x: number; y: number }> = {
+  "origin-main": { x: 344, y: 66 }, // = mockup r-main: top, above main (merges into it)
+  "origin-feat": { x: 512, y: 66 }, // = mockup r-branch: top, above feat (just pushed)
+  "origin-mem-main": { x: 344, y: 522 }, // = mockup r-memmain: mirrored to the bottom
+};
+const PR_CX = 502; // centre of the gap between origin/main (right edge 492) and origin/feat (left edge 512)
+// The dock is the SUCCESSFUL-LANDING arc — it shows only while an enclosure is actually retiring to the
 // official line (closeout → integration → cleanup), not for every live worktree the probe touched.
 const LANDING_PHASES = new Set(["closeout-pending", "integration-pending", "cleanup-pending"]);
 type RemoteTone = "planned" | "live" | "done";
@@ -589,74 +693,115 @@ function remoteStateWord(ref: LandingRefNode): string {
   return ref.state || "—";
 }
 
-function RemoteChip({ x, refNode }: { x: number; refNode: LandingRefNode }) {
+function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
+  const pos = REMOTE_POS[refNode.kind];
+  if (!pos) return null;
   const tone = remoteTone(refNode);
   return (
-    <g data-testid="remote-chip" data-kind={refNode.kind} data-tone={tone}>
+    <g data-testid="remote-chip" data-kind={refNode.kind} data-tone={tone} className={landingEnter}>
       <title>{`${refNode.label} · ${refNode.detail ?? refNode.state}`}</title>
-      <rect className={remoteChip({ tone })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={7} />
-      <text className={remoteChipLabel({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 20} textAnchor="middle">
+      <rect className={remoteChip({ tone })} x={pos.x} y={pos.y} width={RBOX_W} height={RBOX_H} rx={7} />
+      <text className={remoteChipLabel({ tone })} x={pos.x + RBOX_W / 2} y={pos.y + 18} textAnchor="middle">
         {truncate(refNode.label, 18)}
       </text>
-      <text className={remoteChipState({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 37} textAnchor="middle">
+      <text className={remoteChipState({ tone })} x={pos.x + RBOX_W / 2} y={pos.y + 33} textAnchor="middle">
         {truncate(remoteStateWord(refNode), 18)}
       </text>
     </g>
   );
 }
 
-function PrBadge({ x, refNode }: { x: number; refNode: LandingRefNode }) {
+// PR ▸ merge — the mockup renders this as a leftward merge arrow in the gap between origin/feat and
+// origin/main (the merge direction: origin/feat merges into origin/main), with the PR id + state on a
+// line beneath the dock. (prBadge's stroke carries the open=amber / merged=mint colour onto the arrow.)
+function PrBadge({ refNode }: { refNode: LandingRefNode }) {
   const state = refNode.state === "merged" ? "merged" : "open";
   const sub = state === "merged" ? "merged" : refNode.state;
+  const top = REMOTE_POS["origin-main"].y;
+  const cy = top + RBOX_H / 2;
   return (
-    <g data-testid="pr-badge" data-state={state}>
+    <g data-testid="pr-badge" data-state={state} className={landingEnter}>
       <title>{refNode.detail ? `${refNode.label} · ${sub} · ${refNode.detail}` : `${refNode.label} · ${sub}`}</title>
-      <rect className={prBadge({ state })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={REMOTE_H / 2} />
-      <text className={prBadgeLabel({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 20} textAnchor="middle">
-        {truncate(refNode.label, 16)}
-      </text>
-      <text className={prBadgeSub({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 37} textAnchor="middle">
-        {truncate(sub, 18)}
+      <line className={prBadge({ state })} x1={PR_CX + 11} y1={cy} x2={PR_CX - 9} y2={cy} strokeWidth={2.6} markerEnd="url(#er-chev)" />
+      <text className={prBadgeLabel({ state })} x={PR_CX} y={top + RBOX_H + 15} textAnchor="middle">
+        {truncate(refNode.label, 14)} · {sub}
       </text>
     </g>
   );
 }
 
+// The remote/landing dock (copied from podstage.html): code remotes side-by-side at the TOP
+// (origin/feat right ▸ PR merge-arrow ▸ origin/main left), the memory remote mirrored to the BOTTOM.
+// Each chip is placed by REMOTE_POS, not laid out in a row — so the strip reads as the governed flow,
+// wired to the branch nodes by LandingFlows (push ↑ / pull ↓ / push-mem ↓).
 function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
-  const ordered = REMOTE_ORDER.map((kind) => refs.find((ref) => ref.kind === kind)).filter(
-    (ref): ref is LandingRefNode => Boolean(ref),
-  );
-  if (!ordered.length) return null;
-  const xOf = (i: number) =>
-    REMOTE_X + i * (REMOTE_W + REMOTE_GAP) + (ordered[i].kind === "origin-mem-main" ? REMOTE_GROUP_GAP : 0);
-  const midY = REMOTE_Y + REMOTE_H / 2;
-  // Centre the header in the clear gap between the OFFICIAL LINE / WORKTREE ENCLOSURE corner labels.
-  const headerX = (REMOTE_X + xOf(ordered.length - 1) + REMOTE_W) / 2;
+  const byKind = (kind: string) => refs.find((ref) => ref.kind === kind);
+  const main = byKind("origin-main");
+  const feat = byKind("origin-feat");
+  const pr = byKind("pr");
+  const memMain = byKind("origin-mem-main");
+  if (!main && !feat && !pr && !memMain) return null;
   return (
     <g data-testid="remote-strip">
-      <text className={remoteStripHeader} x={headerX} y={REMOTE_Y - 14} textAnchor="middle">
-        remote ▸ landing
+      <text className={remoteStripHeader} x={PR_CX} y={REMOTE_POS["origin-main"].y - 12} textAnchor="middle">
+        remote ▸ origin
       </text>
-      {/* connectors under the chips: solid amber wires the code chain (feat→PR→main), dashed for the
-          code→memory carryover handoff into origin/mem-main */}
-      {ordered.slice(1).map((ref, i) => (
-        <line
-          key={`conn-${ref.kind}`}
-          data-testid="remote-connector"
-          className={ref.kind === "origin-mem-main" ? remoteConnectorCarry : remoteConnector}
-          x1={xOf(i) + REMOTE_W}
-          y1={midY}
-          x2={xOf(i + 1)}
-          y2={midY}
-        />
-      ))}
-      {ordered.map((ref, i) =>
-        ref.kind === "pr" ? (
-          <PrBadge key={ref.kind} x={xOf(i)} refNode={ref} />
-        ) : (
-          <RemoteChip key={ref.kind} x={xOf(i)} refNode={ref} />
-        ),
-      )}
+      {main ? <RemoteChip refNode={main} /> : null}
+      {feat ? <RemoteChip refNode={feat} /> : null}
+      {pr ? <PrBadge refNode={pr} /> : null}
+      {memMain ? <RemoteChip refNode={memMain} /> : null}
+    </g>
+  );
+}
+
+// The directional landing flows wiring the dock to the branch nodes (copied from the mockup's p-push /
+// p-pull / p-push-mem). They make the code land RIGHT → LEFT visible: the official-line code node pushes
+// UP to origin/feat, the merged origin/main pulls DOWN onto the official line, and the memory node
+// pushes DOWN to origin/mem-main. Each fades in with the dock; the GSAP draw-on lives in LandingFlow.
+function LandingFlow({ d, show, kind }: { d: string; show: boolean; kind: string }) {
+  const pathRef = useRef<SVGPathElement>(null);
+  const animate = useShouldAnimate();
+  useLayoutEffect(() => {
+    const path = pathRef.current;
+    if (!path || !animate || !show) return;
+    const ctx = gsap.context(() => {
+      gsap.fromTo(path, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.7, ease: "power2.out" });
+    });
+    return () => ctx.revert();
+  }, [show, animate]);
+  return (
+    <path
+      ref={pathRef}
+      data-testid="landing-flow"
+      data-kind={kind}
+      // NO landingEnter here: a flow's visibility is purely `show`. With landingEnter, a NOT-yet-active
+      // flow would fade in to opacity 1 then snap back to the inline opacity 0 — a phantom flash. The
+      // sceneSvg opacity transition eases it in when `show` flips true; GSAP then draws it on.
+      className={flowConduit({ state: "running" })}
+      d={d}
+      pathLength={100}
+      markerEnd={show ? "url(#er-chev)" : undefined}
+      style={{ opacity: show ? 1 : 0 }}
+    />
+  );
+}
+
+function LandingFlows({ refs }: { refs: LandingRefNode[] }) {
+  const resolved = (kind: string) => {
+    const ref = refs.find((r) => r.kind === kind);
+    return ref ? ref.factState !== "planned" && ref.state !== "planned" : false;
+  };
+  return (
+    <g data-testid="landing-flows" aria-hidden="true">
+      {/* flow paths copied verbatim from the mockup (p-push-code / p-pull-code / p-carry-mem / p-push-mem) */}
+      {/* push: the feat/fix source pushes UP to origin/feat */}
+      <LandingFlow kind="push" show={resolved("origin-feat")} d="M580 250 L 586 100" />
+      {/* pull: merged origin/main pulls DOWN onto local main (the official line advances) */}
+      <LandingFlow kind="pull" show={resolved("origin-main")} d="M418 100 L 432 250" />
+      {/* carry: the feat memory carries over LEFT into local main memory (T16) */}
+      <LandingFlow kind="carry" show={resolved("origin-mem-main")} d="M512 403 L 480 403" />
+      {/* push-mem: local main memory pushes DOWN to origin/mem-main (mirrored to the bottom) */}
+      <LandingFlow kind="push-mem" show={resolved("origin-mem-main")} d="M390 434 L 418 524" />
     </g>
   );
 }
@@ -666,9 +811,18 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   workspaceEngines?: ProviderNode[];
   officialLedger?: LedgerNode;
 }) {
+  const animate = useShouldAnimate();
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
+  // Build-up materialisation gates (the honesty axis): the enclosure shell + the worktree coupler only
+  // appear once the matching worktree ref is observed on disk; the worktree engines materialise when
+  // their provider runtime deploys (B3). At main-only B0 these are all `planned`/absent → faded out, so
+  // the left world stands alone and the enclosure assembles as the projection advances.
+  const codeWtMaterialised =
+    node.codeWorktree.factState === "observed" || node.codeWorktree.factState === "derived";
+  const memWtMaterialised =
+    node.memoryWorktree?.factState === "observed" || node.memoryWorktree?.factState === "derived";
   // Official-line (workspace) engines — the real shared CGC/GrepAI feeding the official line (left
   // world); runtime derived like the OfficialStrip so the two surfaces always agree.
   const officialCode = workspaceEngines.find((engine) => engine.role === "code");
@@ -706,15 +860,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       ].filter((value): value is string => Boolean(value)),
     ),
   ];
-  // T14 — the official source line advances to its landing tip (read from the landing arc's source ref:
-  // origin/main if the PR resolved it, else origin/<feat>). Only while a landing strategy is recorded.
-  // only a *resolved* source advances the official line — a `missing` probe or an `unknown` tip (e.g. the
-  // feat branch was deleted after the PR merged on a completed enclosure) carries no signal and is dropped.
-  const resolvedRef = (ref: LandingRefNode) => ref.factState !== "missing" && ref.state !== "unknown";
-  const landingSource =
-    node.landing?.find((ref) => ref.kind === "origin-main" && resolvedRef(ref)) ??
-    node.landing?.find((ref) => ref.kind === "origin-feat" && resolvedRef(ref));
-  // 5h H3 — show the landing strip only while the enclosure is actually retiring to the official line,
+  // 5h H3 — show the landing dock only while the enclosure is actually retiring to the official line,
   // and only the refs the probe could resolve: a `missing` ref (probe couldn't run, e.g. gh absent)
   // carries no signal and is dropped, never rendered as an "unknown" chip.
   const landingRefs = (node.landing ?? []).filter((ref) => ref.factState !== "missing");
@@ -747,17 +893,42 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       <CanopyFrame />
       <text className={worldLabel} x={55} y={40}>Official line · workspace</text>
       <text className={worldLabel} x={930} y={40}>Worktree enclosure</text>
-      {hasMemory ? <rect className={enclosureBorder} x={674} y={76} width={474} height={506} rx={18} /> : null}
+      {hasMemory ? (
+        <rect
+          className={enclosureBorder}
+          x={674}
+          y={76}
+          width={474}
+          height={506}
+          rx={18}
+          // the enclosure shell only exists once the code worktree materialises (B1); at main-only B0 it
+          // is faded out, so the build-up draws the border in as the first worktree copies in from main.
+          style={{ opacity: codeWtMaterialised ? undefined : 0 }}
+        />
+      ) : null}
 
       {node.edges.map((edge) => <Conduit key={edge.id} edge={edge} strategy={node.integrationStrategy} />)}
 
-      <BranchNode pos={POS.codeSource} label="Code source" refNode={node.codeSource} />
-      <BranchNode pos={POS.codeWorktree} label="Code worktree" refNode={node.codeWorktree} />
+      {/* THREE-TIER (5f §7.4, copied 1-to-1 from the mockup): the OFFICIAL LINE is MAIN (the protected
+          branch) — ALWAYS, in the build-up and the landing — and the worktree forks from it on the right.
+          The feat/fix SOURCE the worktree was branched off appears in the GAP only during landing (the
+          mockup's tear-down reveal), so closeout reads main ◂ feat ◂ worktree. The official-line nodes
+          never relabel/remount across the transition; the feat tier fades in (landingIn). */}
+      <BranchNode pos={POS.codeSource} label="Official line · main" refNode={mainRef(node.codeSource)} />
       {hasMemory && node.memorySource ? (
-        <BranchNode pos={POS.memorySource} label="Memory source" refNode={node.memorySource} />
+        <BranchNode pos={POS.memorySource} label="Official line · main" refNode={mainRef(node.memorySource)} />
       ) : null}
+      {showLanding ? (
+        <>
+          <BranchNode pos={POS.featCode} label="feat ▸ source" refNode={node.codeSource} landingIn />
+          {hasMemory && node.memorySource ? (
+            <BranchNode pos={POS.featMemory} label="feat ▸ source" refNode={node.memorySource} landingIn />
+          ) : null}
+        </>
+      ) : null}
+      <BranchNode pos={POS.codeWorktree} label="Code worktree" refNode={node.codeWorktree} detaching={retiring} />
       {hasMemory && node.memoryWorktree ? (
-        <BranchNode pos={POS.memoryWorktree} label="Memory worktree" refNode={node.memoryWorktree} />
+        <BranchNode pos={POS.memoryWorktree} label="Memory worktree" refNode={node.memoryWorktree} detaching={retiring} />
       ) : null}
 
       {/* Official-line (left world): the workspace engines + their wiring + the official code↔memory
@@ -778,12 +949,50 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
         />
       ) : null}
 
-      <EngineGauge at={ENGINE.cgc} label="CGC" runtime={runtimeState(code?.runtimeState)} reindex={node.seedFallback} />
-      {hasMemory ? <EngineGauge at={ENGINE.grepai} label="GrepAI" runtime={runtimeState(memory?.runtimeState)} /> : null}
+      {/* Worktree engine → branch wiring (mirror of the official-line wires): the cloned engine serves
+          its own branch. This is the PERSISTENT structural link — present once the engine materialises,
+          and it stays at idle — distinct from the transient clone arrows that copy the index across from
+          the official engines (which vanish when the clone completes). */}
+      <line
+        className={officialWire}
+        x1={1057}
+        y1={198}
+        x2={900}
+        y2={281}
+        data-testid="worktree-wire"
+        style={{ opacity: code ? undefined : 0 }}
+      />
+      {hasMemory ? (
+        <line
+          className={officialWire}
+          x1={1057}
+          y1={452}
+          x2={900}
+          y2={403}
+          data-testid="worktree-wire"
+          style={{ opacity: memory ? undefined : 0 }}
+        />
+      ) : null}
+      <EngineGauge
+        at={ENGINE.cgc}
+        label="CGC"
+        runtime={runtimeState(code?.runtimeState)}
+        reindex={node.seedFallback}
+        present={!!code}
+      />
+      {hasMemory ? (
+        <EngineGauge
+          at={ENGINE.grepai}
+          label="GrepAI"
+          runtime={runtimeState(memory?.runtimeState)}
+          present={!!memory}
+        />
+      ) : null}
 
       <WarpCoupler
         x={COUPLER_X}
         bound={hasMemory}
+        visible={memWtMaterialised}
         label={`${short(node.codeWorktree.commit)} ⇄ ${short(node.memoryWorktree?.commit)}`}
         rows={node.ledgerRows}
         total={node.ledgerRowCount}
@@ -792,7 +1001,18 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
 
       {/* Lane annotations (podstage.html #ledger / #hist): the worktree landing lane + a historical
           contract marker. Descriptive lane labels; the live status stays in the diagnostics panel. */}
-      {hasMemory ? <LaneFlag x={730} y={476} w={140} h={24} label="ledger ▸ maps merge" tone="ledger" testid="lane-ledger" /> : null}
+      {hasMemory ? (
+        <LaneFlag
+          x={730}
+          y={476}
+          w={140}
+          h={24}
+          label="ledger ▸ maps merge"
+          tone="ledger"
+          testid="lane-ledger"
+          visible={memWtMaterialised}
+        />
+      ) : null}
       {retiring ? <LaneFlag x={300} y={560} w={180} h={26} label="contract · historical" tone="historical" testid="lane-historical" /> : null}
       {cleanupTip ? (
         <LaneFlag
@@ -803,28 +1023,40 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           label={`▸ back into ${cleanupTip.label} · ${cleanupTip.state}`}
           tone="ledger"
           testid="lane-back-into-main"
+          enter
         />
       ) : null}
 
       {/* 5h H2 — the landing arc: the closeout train (T13) on closeout-pending, and the official source
           line advancing to its landing tip (T14). */}
-      {node.phase === "closeout-pending" ? <CloseoutTrain x={700} y={508} /> : null}
-      {node.integrationStrategy && landingSource ? (
-        <LaneFlag
-          x={300}
-          y={216}
-          w={180}
-          h={20}
-          label={`▸ ${landingSource.label} · ${landingSource.state}`}
-          tone="ledger"
-          testid="lane-landing-source"
-        />
+      {/* The closeout train (T13) glides in when closeout starts and glides OUT when the phase advances
+          to integration (instead of vanishing). Motion owns the enter/exit; `transition: none` opts the
+          group out of the sceneSvg transition so the two systems never write opacity at once. Under
+          data-effects=off it is an instant mount/unmount (the 5-rect presence test stays synchronous). */}
+      <AnimatePresence>
+        {node.phase === "closeout-pending" ? (
+          <motion.g
+            key="closeout-train"
+            style={{ transition: "none" }}
+            initial={animate ? { opacity: 0, y: 8 } : false}
+            animate={{ opacity: 1, y: 0 }}
+            exit={animate ? { opacity: 0, y: 8 } : { opacity: 0 }}
+            transition={{ duration: animate ? 0.4 : 0 }}
+          >
+            <CloseoutTrain x={700} y={508} />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      {/* 5h H3 — the remote/landing dock beyond the official line (copied from the mockup): code remotes
+          at the top (origin/feat ▸ PR ▸ origin/main, reading right→left), the memory remote mirrored to
+          the bottom, wired to the branch nodes by the directional landing flows (push ↑ / pull ↓ /
+          push-mem ↓). Shown only while the enclosure is landing, with `missing` probe refs dropped. */}
+      {showLanding ? (
+        <>
+          <LandingFlows refs={landingRefs} />
+          <RemoteStrip refs={landingRefs} />
+        </>
       ) : null}
-
-      {/* 5h H3 — the remote/PR strip beyond the official line: T15 code PR+push (origin/feat → PR →
-          origin/main) then T16 carryover (origin/mem-main), in the governed code-first order. Shown only
-          while the enclosure is landing, with the unresolved (`missing`) probe refs dropped. */}
-      {showLanding ? <RemoteStrip refs={landingRefs} /> : null}
 
       {!hasMemory ? (
         <text className={svgNodeMeta} x={930} y={420} textAnchor="middle" data-testid="memory-lane-absent">

@@ -187,6 +187,22 @@
   }
 }
 
+/* Landing-tail enter (5i): the conditionally-mounted landing elements — the remote/PR strip chips,
+   the closeout train, the landing lane flags — would otherwise POP in when the phase advances. This
+   fades + lifts them in on mount (staggered per chip via animation-delay), so the landing reads as
+   smoothly as the build-up. `backwards` holds the hidden start state through the delay. Frozen by
+   effects=off (the rule below) → the element shows at its natural opacity, synchronously, for tests. */
+@keyframes landingIn {
+  from {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */

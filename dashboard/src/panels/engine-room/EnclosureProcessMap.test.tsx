@@ -65,56 +65,20 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
     expect(replay.container.querySelector('[data-kind="integration"]')?.getAttribute("data-strategy")).toBe("replay");
   });
 
-  it("advances the official source line to its landing tip when a strategy is recorded", () => {
-    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-landing-ffonly")} />);
-    expect(getByTestId("lane-landing-source").textContent).toContain("origin/");
-  });
-
-  it("shows neither the closeout train nor the landing-source flag for a plain enclosure", () => {
+  it("shows no closeout train and no landing dock for a plain (non-landing) enclosure", () => {
     const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
     expect(queryByTestId("closeout-train")).toBeNull();
-    expect(queryByTestId("lane-landing-source")).toBeNull();
+    expect(queryByTestId("remote-strip")).toBeNull();
   });
 
   it("renders without crashing when the projection node omits the landing arc (pre-5h/persisted data)", () => {
     // A projection produced before the slice-5h `landing` field omits it entirely (not []); the
-    // canvas must degrade to no landing-source flag, never throw on `node.landing.find`.
+    // canvas must degrade to no landing dock, never throw on `node.landing.find`.
     const node = { ...nodeFrom("engine-landing-ffonly") };
     delete (node as { landing?: unknown }).landing;
     const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={node} />);
     expect(getByTestId("enclosure-canvas")).not.toBeNull();
-    expect(queryByTestId("lane-landing-source")).toBeNull();
-  });
-
-  it("drops the landing-source flag when the source ref is unknown/missing (branch deleted post-merge)", () => {
-    // a completed enclosure whose feat branch was deleted after the PR merged → the probe returns
-    // state "unknown" / factState "missing"; the flag must NOT render a stale `▸ … · unknown`.
-    const base = nodeFrom("engine-landing-ffonly");
-    const node = {
-      ...base,
-      landing: base.landing?.map((ref) =>
-        ref.kind === "origin-main" || ref.kind === "origin-feat"
-          ? { ...ref, state: "unknown", factState: "missing" as const }
-          : ref,
-      ),
-    };
-    const { queryByTestId } = render(<EnclosureProcessMap node={node} />);
-    expect(queryByTestId("lane-landing-source")).toBeNull();
-  });
-
-  it("truncates a long landing-source branch name, full name on hover (no overflow)", () => {
-    const base = nodeFrom("engine-landing-ffonly");
-    const longName = "origin/feat/some-really-long-branch-name-that-would-overflow-the-box";
-    const node = {
-      ...base,
-      landing: base.landing?.map((ref) =>
-        ref.kind === "origin-main" ? { ...ref, label: longName, state: "tip" } : ref,
-      ),
-    };
-    const { getByTestId } = render(<EnclosureProcessMap node={node} />);
-    const flag = getByTestId("lane-landing-source");
-    expect(flag.querySelector("title")?.textContent).toContain(longName); // full label on hover
-    expect(flag.querySelector("text")?.textContent).toContain("…"); // visible text truncated
+    expect(queryByTestId("remote-strip")).toBeNull();
   });
 });
 
@@ -254,11 +218,12 @@ describe("EnclosureCanvas — conduit wiring polish (5h cleanup)", () => {
     expect(container.querySelector("marker#er-chev")?.getAttribute("refX")).toBe("9.6");
   });
 
-  it("wires each provider conduit from the box-edge midpoint into the engine's inner corner", () => {
+  it("draws the provider clone arrows from the official engine across to the worktree engine (cloned-from, not re-indexed)", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    // code box right-edge midpoint (900,281) → CGC inner corner (1057,198); memory midpoint (900,403) → GrepAI (1057,452)
-    expect(container.querySelector('[data-kind="cgc-seed"] path')?.getAttribute("d")).toBe("M900 281 L 1057 198");
-    expect(container.querySelector('[data-kind="grepai-clone"] path')?.getAttribute("d")).toBe("M900 403 L 1057 452");
+    // 5f §7.2: the seed/clone copies the index ACROSS from the official-line engine — CGC bows over the
+    // top (official 135,150 → worktree 1057,150), GrepAI under the bottom — NOT worktree-node → engine.
+    expect(container.querySelector('[data-kind="cgc-seed"] path')?.getAttribute("d")).toBe("M135 150 C 345 34, 847 34, 1057 150");
+    expect(container.querySelector('[data-kind="grepai-clone"] path')?.getAttribute("d")).toBe("M135 500 C 345 604, 847 604, 1057 500");
   });
 
   it("keeps the sync lane on the worktree-add centreline (one centred line, not an offset double)", () => {
@@ -310,10 +275,12 @@ describe("EnclosureCanvas — live + teardown (5g G5)", () => {
 });
 
 describe("EnclosureCanvas — cleanup teardown (5h H4)", () => {
-  it("de-materialises a landed enclosure: success record + dissolve + historical chip (not abandon)", () => {
+  it("de-materialises a landed enclosure: success record + historical chip, no full-dim (not abandon)", () => {
     const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cleanup-pending")} />);
     expect(getByTestId("process-map").getAttribute("data-teardown")).toBe("cleanup");
-    expect(queryByTestId("dissolve")).not.toBeNull();
+    // a landed cleanup de-materialises only the WORKTREE side (main stays bright) — it does NOT wrap in
+    // the full-dim dissolve shell (that is reserved for abandon, which dissolves the whole enclosure).
+    expect(queryByTestId("dissolve")).toBeNull();
     expect(getByTestId("cleanup-record").textContent).toContain("Landed");
     expect(getByTestId("lane-historical").textContent).toContain("historical");
     // success ≠ abandon: no abandon record, data-abandoned unset.

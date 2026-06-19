@@ -132,7 +132,10 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
         </AnimatePresence>
         {teardown === "abandon" ? <AbandonRecord node={node} /> : null}
         {teardown === "cleanup" ? <CleanupRecord node={node} /> : null}
-        {teardown ? (
+        {/* abandon dissolves the WHOLE enclosure (failure, nothing landed); a landed CLEANUP only
+            de-materialises the WORKTREE side — main stays bright. That fade lives inside the canvas
+            (the worktree refs go `planned`), so cleanup does NOT wrap in the full-dim dissolve shell. */}
+        {teardown === "abandon" ? (
           <div className={dissolveShell} data-testid="dissolve">
             <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
           </div>

@@ -259,6 +259,33 @@ const bootBase = { id: BOOT_ID, taskName: "device-management", repoName: "agents
 
 const bootStages: EngineRoomScenario[] = [
   {
+    // B0 — main only: the official line + workspace engines exist; the enclosure is not yet
+    // materialised. Worktree refs are `planned` (not on disk), no providers, every edge planned —
+    // so the canvas renders the left world solid and the worktree side at rest (the build-up's
+    // honest start, = podstage B0). No missingFacts: a not-yet-created enclosure is not an alarm.
+    name: "engine-boot-0-main-only",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "worktree-started",
+        health: "running",
+        codeWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        setupState: undefined,
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "planned", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        ledgerRows: [],
+        ledgerRowCount: 0,
+        summary: "worktree_start invoked — the official line is at rest; the enclosure is not yet materialised.",
+        nextAction: "continue_work",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // B1 — the code worktree copies in from the official line (branch-copy); memory still planned.
     name: "engine-boot-1-code-worktree",
     processes: [
       engineProcess({
@@ -269,15 +296,16 @@ const bootStages: EngineRoomScenario[] = [
         setupState: undefined,
         completedPhases: [],
         providers: [],
-        edges: edges({ cgc: "planned", ledger: "planned", grepai: "planned" }),
-        summary: "Code worktree created; resolving external memory compatibility.",
+        edges: edges({ worktreeAdd: "complete", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        summary: "Code worktree forked from the official line; resolving external memory compatibility.",
         nextAction: "continue_work",
-        missingFacts: ["provider setup not observed for this worktree group"],
+        missingFacts: [],
       }),
     ],
     workspace: WORKSPACE,
   },
   {
+    // B2 — the memory worktree copies in; the contract coupler binds (code === memory).
     name: "engine-boot-2-memory-contract",
     processes: [
       engineProcess({
@@ -287,70 +315,58 @@ const bootStages: EngineRoomScenario[] = [
         setupState: undefined,
         completedPhases: [],
         providers: [],
-        edges: edges({ cgc: "planned", grepai: "planned" }),
-        summary: "Memory ledger maps the base commit; contract written.",
-        missingFacts: ["provider setup not observed for this worktree group"],
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
+        summary: "Memory ledger maps the base commit; contract written — the coupler binds.",
+        missingFacts: [],
       }),
     ],
     workspace: WORKSPACE,
   },
   {
-    name: "engine-boot-3-cgc-seeding",
+    // B3 — provider runtime deploys: the engines materialise dim and the clone conduits begin
+    // (cloned from main, not re-indexed). Engines `configured` (dim outline, drained charge).
+    name: "engine-boot-3-providers-dim",
     processes: [
       engineProcess({
         ...bootBase,
         phase: "provider-setup",
         health: "running",
         setupState: "running",
-        currentPhase: "codegraphcontext-code seed",
+        currentPhase: "provider runtime deploy",
+        heartbeatAgeSeconds: 1,
+        completedPhases: [],
+        providers: [boot("code", "configured"), boot("memory", "configured")],
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "running" }),
+        summary: "Provider runtime deploying — the engines materialise dim, cloned from the official line.",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // B4 — seed / clone: both engines charge (the center-out boot-fill) while the clone conduits run.
+    name: "engine-boot-4-seeding",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "provider-setup",
+        health: "running",
+        setupState: "running",
+        currentPhase: "codegraphcontext-code seed · grepai-memory clone",
         heartbeatAgeSeconds: 2,
         completedPhases: [],
-        providers: [boot("code", "indexing")],
-        edges: edges({ cgc: "running", grepai: "planned" }),
-        summary: "Provider runtime booting — CGC seeding from the source bundle.",
-        nextAction: "continue_work",
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    name: "engine-boot-4-grepai-cloning",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "provider-setup",
-        health: "running",
-        setupState: "running",
-        currentPhase: "grepai-memory clone",
-        heartbeatAgeSeconds: 3,
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        providers: [boot("code"), boot("memory", "indexing")],
-        edges: edges({ cgc: "complete", grepai: "running" }),
-        summary: "CGC seeded; GrepAI cloning the memory database.",
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    name: "engine-boot-5-watchers",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "provider-setup",
-        health: "running",
-        setupState: "running",
-        currentPhase: "grepai-memory watcher start",
-        heartbeatAgeSeconds: 1,
-        completedPhases: ["codegraphcontext-code seed: ok", "grepai-memory clone: ok"],
         providers: [boot("code", "indexing"), boot("memory", "indexing")],
-        edges: edges({}),
-        summary: "Seeds complete; watchers igniting after stable filesystem prep.",
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "running" }),
+        summary: "Provider runtime booting — CGC seeds and GrepAI clones; the engines charge cyan.",
+        missingFacts: [],
       }),
     ],
     workspace: WORKSPACE,
   },
   {
-    name: "engine-boot-6-nominal",
+    // B5 — powered: the engines went green and settle nominal; the clone conduits are gone. The
+    // idle constellation (= the default engineProcess: all observed, providers nominal, edges complete).
+    name: "engine-boot-5-nominal",
     processes: [engineProcess({ ...bootBase })],
     workspace: WORKSPACE,
   },
@@ -573,17 +589,51 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         integrationStatus: "completed",
         integrationStrategy: "ff-only",
         cleanup: "pending",
-        // landed already — the strip settles done, then the enclosure de-materialises (H4 teardown)
+        // D5 de-materialise: the work has LANDED (the strip is done), so the WORKTREE side detaches — its
+        // branches go `planned` (fading out) and the provider runtime powers down (no boot nodes), while
+        // the official line (main) stays solid and the remote dock holds until the row is removed (D6).
+        codeWorktree: ref({ branch: "ar/boot-audio", path: "(detaching)", exists: false, factState: "planned" }),
+        memoryWorktree: ref({ branch: "ar/boot-audio", path: "(detaching)", exists: false, factState: "planned" }),
         landing: [
           landingRef("origin-feat", "origin/feat-…", "merged"),
           landingRef("pr", "PR #128", "merged"),
           landingRef("origin-main", "origin/main", "tip", "observed", "0a1b2c3"),
           landingRef("origin-mem-main", "origin/mem-main", "pushed"),
         ],
-        providers: [boot("code"), boot("memory")],
+        providers: [],
         actions: [{ action: "cleanup", enabled: true }],
-        summary: "Integrated; provider runtime teardown + worktree removal pending.",
+        summary: "Landed; the provider runtime powers down and the worktree detaches (de-materialise).",
         nextAction: "request_cleanup_decision",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // D6 stack removed: the enclosure is gone. The worktree branches + providers are removed (missing),
+    // the landing arc has retired (no remote dock, no feat tier) — only the official line (main) + a dim
+    // historical contract chip remain. `cleanup` is `done`, so the row is retiring out of the stack list.
+    name: "engine-retired",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "cleanup-pending",
+        health: "nominal",
+        humanReviewStatus: "approved",
+        closeoutStatus: "completed",
+        integrationStatus: "completed",
+        integrationStrategy: "ff-only",
+        cleanup: "done",
+        codeWorktree: ref({ branch: "ar/boot-audio", path: "(removed)", exists: false, factState: "planned" }),
+        memoryWorktree: ref({ branch: "ar/boot-audio", path: "(removed)", exists: false, factState: "planned" }),
+        landing: [],
+        ledgerRows: [],
+        ledgerRowCount: 0,
+        providers: [],
+        actions: [],
+        summary: "Retired — worktree removed; only the official line (main) and the historical record remain.",
+        nextAction: "",
       }),
     ],
     workspace: WORKSPACE,
@@ -676,14 +726,15 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
     workspace: WORKSPACE,
   },
   {
-    // 5h T14b/T16 — replay onto a moved main, PR merged, memory carried over; cleanup pending.
+    // 5h T14b/T16 — replay onto a moved main, PR merged, memory carried over (D4). The enclosure is
+    // INTACT (integration-pending, not cleanup) — the de-materialise is the next beat (D5).
     name: "engine-landing-merged",
     processes: [
       engineProcess({
         id: "boot-audio",
         taskName: "boot-audio-polish",
         repoName: "agents-remember",
-        phase: "cleanup-pending",
+        phase: "integration-pending",
         health: "nominal",
         humanReviewStatus: "approved",
         closeoutStatus: "completed",

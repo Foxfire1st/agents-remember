@@ -598,6 +598,26 @@ export const sceneSvg = css({
   flex: "1",
   minHeight: "0",
   overflow: "visible",
+  // Build-up smoothness substrate (ported from podstage.html's global `#scene` transition): every
+  // persistent scene element eases its transform / opacity / colour as the projection advances frame
+  // to frame, so the worktree branch-copies slide in, the enclosure border + couplers fade up, the
+  // engines charge center-out and the conduits glide between states instead of popping. `stroke-
+  // dashoffset` is intentionally omitted (the conduit draw-on re-fires via a keyed remount, below).
+  // Under `data-effects="off"` this whole rule is frozen to instant — exactly the settled "After"
+  // state the render tests assert synchronously, so nothing here defers a node's mount or value.
+  "& g, & rect, & line, & path, & circle, & text": {
+    transition:
+      "transform 0.55s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.45s ease, fill 0.4s ease, stroke 0.4s ease",
+  },
+});
+
+// Landing-tail enter: a fade + lift for the conditionally-mounted landing elements (the remote/PR strip
+// chips, the closeout train, the landing lane flags) so they glide in instead of popping when the phase
+// advances. Stagger per element with an inline `animationDelay`. `backwards` holds the hidden start state
+// through the delay; under data-effects=off the animation is frozen, so the element shows at its natural
+// opacity synchronously (the render tests stay stable, no deferred mount).
+export const landingEnter = css({
+  animation: "landingIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards",
 });
 
 export const worldLabel = css({
@@ -673,16 +693,20 @@ export const engineReindexOut = css({
 });
 
 export const engineCharge = cva({
-  // transform-box/origin so the charge scaleY (chargeSweep keyframe) grows center-out, not bottom-up.
+  // The boot-fill: transform-box/origin so the charge scaleY grows CENTER-OUT (not bottom-up), and the
+  // scaleY level itself is the energy — drained (scaleY 0) when the engine is dim/materialising, full
+  // (scaleY 1) once it seeds and locks. The sceneSvg global transition eases the climb (configured →
+  // indexing) and the cyan → mint "went green" colour shift, and freezes both to instant under
+  // data-effects=off. GSAP (useEngineBootFill) layers the lock flash on `filter`, a separate property,
+  // so the two animation systems never write the same value.
   base: { transformBox: "fill-box", transformOrigin: "center" },
   variants: {
     runtimeState: {
-      nominal: { fill: "token(colors.mint)", opacity: "0.5" }, // active = a clear green fill ("on"), not a faint amber
-      configured: { fill: "token(colors.dormant)", opacity: "0" }, // inactive = empty (no fill)
-      // indexing/booting: a center-out charge sweep (frozen to a settled full charge under effects=off).
-      indexing: { fill: "token(colors.cyan)", opacity: "0.85", animation: "chargeSweep 1.5s ease-out infinite" },
-      down: { fill: "token(colors.alarm)", opacity: "0.5" },
-      unknown: { fill: "token(colors.dormant)", opacity: "0" },
+      nominal: { fill: "token(colors.mint)", opacity: "0.55", transform: "scaleY(1)" }, // healthy green, charged
+      configured: { fill: "token(colors.cyan)", opacity: "0", transform: "scaleY(0)" }, // materialised, drained (dim)
+      indexing: { fill: "token(colors.cyan)", opacity: "0.85", transform: "scaleY(1)" }, // charging cyan (boot-fill)
+      down: { fill: "token(colors.alarm)", opacity: "0.55", transform: "scaleY(1)" },
+      unknown: { fill: "token(colors.dormant)", opacity: "0", transform: "scaleY(0)" },
     },
   },
 });
@@ -896,8 +920,11 @@ export const flowConduit = cva({
     state: {
       nominal: { stroke: "token(colors.amber)", opacity: "0.8" },
       complete: { stroke: "token(colors.amber)", opacity: "0.6" },
-      // running (seed/clone): draws on (needs pathLength=100 on the path) then settles drawn.
-      running: { stroke: "token(colors.cyan)", strokeDasharray: "100 100", animation: "conduitDraw 0.6s cubic-bezier(.25,1,.4,1)" },
+      // running (seed/clone): GSAP draws it on (strokeDashoffset 100 → 0, re-firing on each activation)
+      // via useLayoutEffect in the Conduit component; the dash pattern is the full path length so the
+      // draw reads as a sweep. No CSS animation here — GSAP owns stroke-dashoffset so the two systems
+      // never write it at once, and under data-effects=off the path simply rests fully drawn (offset 0).
+      running: { stroke: "token(colors.cyan)", strokeDasharray: "100 100" },
       blocked: { stroke: "token(colors.alarm)" },
       failed: { stroke: "token(colors.alarm)" },
       stale: { stroke: "token(colors.alarm)", opacity: "0.55" },

@@ -131,6 +131,19 @@ export interface GalleryEntry {
   events?: ObserverEvent[];
 }
 
+// Wrap one engine-room scenario (its processes + workspace stack) into a full WorkspaceProjection — the
+// shared mapping behind both the GALLERY entries and the slice-5i scenario-player frames.
+export function engineRoomProjection(scenario: (typeof ENGINE_ROOM_SCENARIOS)[number]): WorkspaceProjection {
+  return project({
+    providers: scenario.workspace,
+    analytics: {
+      ...EMPTY_ANALYTICS,
+      engineProcesses: scenario.processes,
+      ledgers: [OFFICIAL_LEDGER], // the official coupler resolves its repo's ledger from analytics.ledgers
+    },
+  });
+}
+
 export const GALLERY: GalleryEntry[] = [
   {
     name: "calm",
@@ -433,14 +446,7 @@ export const GALLERY: GalleryEntry[] = [
   ...ENGINE_ROOM_SCENARIOS.filter((scenario) => !scenario.name.startsWith("engine-boot-")).map(
     (scenario) => ({
       name: scenario.name,
-      projection: project({
-        providers: scenario.workspace,
-        analytics: {
-          ...EMPTY_ANALYTICS,
-          engineProcesses: scenario.processes,
-          ledgers: [OFFICIAL_LEDGER], // the official coupler resolves its repo's ledger from analytics.ledgers
-        },
-      }),
+      projection: engineRoomProjection(scenario),
     }),
   ),
 ];
