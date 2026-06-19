@@ -461,11 +461,15 @@ export const GALLERY: GalleryEntry[] = [
     }),
   },
   { name: "empty", projection: project() },
-  ...ENGINE_ROOM_SCENARIOS.map((scenario) => ({
-    name: scenario.name,
-    projection: project({
-      providers: scenario.workspace,
-      analytics: { ...EMPTY_ANALYTICS, engineProcesses: scenario.processes },
+  // The boot-step frames are hidden from the bench strip (slice 5i's scenario player plays the build-up
+  // instead); the fixtures stay in ENGINE_ROOM_SCENARIOS for that reuse + the render tests.
+  ...ENGINE_ROOM_SCENARIOS.filter((scenario) => !scenario.name.startsWith("engine-boot-")).map(
+    (scenario) => ({
+      name: scenario.name,
+      projection: project({
+        providers: scenario.workspace,
+        analytics: { ...EMPTY_ANALYTICS, engineProcesses: scenario.processes },
+      }),
     }),
-  })),
+  ),
 ];

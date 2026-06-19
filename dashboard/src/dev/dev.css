@@ -54,6 +54,25 @@
   color: var(--amber);
   border-color: var(--amber);
 }
+.bench__picker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: oklch(0.7 0.02 250);
+}
+.bench__picker select {
+  font: inherit;
+  font-size: 0.7rem;
+  background: var(--bg);
+  color: var(--amber);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
 .reference {
   display: flex;
   flex-direction: column;

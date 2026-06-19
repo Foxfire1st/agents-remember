@@ -531,10 +531,5 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
     ],
     workspace: WORKSPACE,
   },
-  {
-    name: "engine-empty",
-    processes: [],
-    workspace: WORKSPACE,
-  },
   ...bootStages,
 ];
