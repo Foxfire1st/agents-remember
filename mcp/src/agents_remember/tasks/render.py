@@ -35,6 +35,8 @@ def render_markdown(doc: TaskDocument) -> str:
     parts += _section("Decision Log", _decision_lines(doc.decisions))
     parts += _section("Open Questions", _bullets(doc.openQuestions, empty="- None."))
     parts += _section("References", _bullets(doc.references))
+    for section in doc.sections:  # R4: freeform extra sections appended after the standard template
+        parts += _section(section.heading, section.body.split("\n"))
     return "\n".join(parts) + "\n"
 
 
@@ -79,14 +81,18 @@ def _subtask_lines(subtasks: list[SubTaskRef]) -> list[str]:
 
 
 def _header_lines(doc: TaskDocument) -> list[str]:
+    status = f"**Status:** {doc.status}"
+    if doc.statusNote:  # descriptive suffix beside the strict enum (R4)
+        status = f"{status} — {doc.statusNote}"
     lines = [
-        f"**Status:** {doc.status}",
+        status,
         f"**Repo:** {doc.repo}",
         f"**Type:** {doc.type}",
         f"**Created:** {doc.createdAt}",
     ]
     if doc.master:
         lines.append(f"**Master:** `{doc.master}`")
+    lines += [f"**{note.label}:** {note.value}" for note in doc.headerNotes]  # extra header lines (R4)
     return lines
 
 

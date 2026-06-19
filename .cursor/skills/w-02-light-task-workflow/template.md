@@ -110,7 +110,7 @@ Why this example is included: <reason>
 8. Treat the parent checkbox as the step outcome, and keep implementation substeps plus the verification check nested under it.
 9. Mark nested implementation substeps complete before the nested verification check, and mark the parent step complete only after all nested items are complete.
 10. Add or reorder checklist items when scope changes, then get approval again if the change is significant.
-11. Use the light-task status values: `planning`, `inProgress`, `Completed`.
+11. Use the light-task status values: `planning`, `inProgress`, `Completed`; a descriptive `statusNote` may follow as a human-readable suffix. A leaf doc may also carry `headerNotes` (extra `**Key:** value` header lines) and freeform `sections` (appended after References) for bespoke prose beyond the template — the escape hatch; the standard sections stay the backbone.
 12. Use `YYYY-MM-DDTHH:MM` anywhere the template records task-local dates or timestamps, including metadata, decision logs, progress notes, and review outcomes.
 13. Treat `## Decision Log` as append-only: preserve superseded entries and add later rows that override, reject, or clarify earlier decisions.
 14. Size the `## Design` section to the request per `tasks/AGENTS.md`; for a straightforward change, state that no design reasoning is needed rather than leaving the section blank.

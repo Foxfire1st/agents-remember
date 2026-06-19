@@ -69,6 +69,13 @@ class CodeExample(_Doc):
     snippet: str = ""
 
 
+class HeaderNote(_Doc):
+    """An extra header metadata line, rendered as ``**{label}:** {value}`` (R4)."""
+
+    label: str
+    value: str = ""
+
+
 class SubTaskRef(_Doc):
     """One slice in a master's series index; ``status`` drives the ✅/🔨/⬜ marker."""
 
@@ -101,10 +108,15 @@ class TaskDocument(_Doc):
     title: str
     kind: DocKind
     status: DocStatus = "planning"
+    # Descriptive status suffix appended after the strict enum, e.g.
+    # "**Status:** inProgress -- <description>" (R4); the enum stays the dashboard lever.
+    statusNote: str | None = None
     repo: str
     type: str = ""
     createdAt: str
     master: str | None = None
+    # Extra "**Key:** value" header lines beyond the standard block (e.g. Verified/Source); R4.
+    headerNotes: list[HeaderNote] = Field(default_factory=list)
     contractPath: str | None = None
     lifecycleId: str | None = None
     objective: str = ""
@@ -118,7 +130,8 @@ class TaskDocument(_Doc):
     decisions: list[Decision] = Field(default_factory=list)
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
-    # Master-only (kind == "master"): the series index + the ordered render plan.
+    # subTasks is the master series index (master-only). sections is the master's ordered
+    # render plan AND, since R4, freeform extra sections on a leaf doc (appended after the template).
     subTasks: list[SubTaskRef] = Field(default_factory=list)
     sections: list[Section] = Field(default_factory=list)
 
@@ -135,9 +148,13 @@ class TaskDocument(_Doc):
                     "a master document has no steps, codeExamples, codeExamplesNote, or lifecycleId"
                 )
         else:
-            if self.subTasks or self.sections:
+            if self.subTasks:
                 raise ValueError(
-                    f"a {self.kind} document has no subTasks or sections (master-only)"
+                    f"a {self.kind} document has no subTasks (master-only)"
+                )
+            if any(section.kind != "freeform" for section in self.sections):
+                raise ValueError(
+                    f"a {self.kind} document allows only freeform sections"
                 )
             if self.codeExamplesNote is not None and self.codeExamples:
                 raise ValueError(

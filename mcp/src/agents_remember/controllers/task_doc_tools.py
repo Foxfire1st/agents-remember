@@ -59,6 +59,7 @@ _MUTABLE_FIELDS = frozenset(
         "contractPath",
         "master",
         "codeExamplesNote",
+        "statusNote",
     }
 )
 
@@ -200,10 +201,10 @@ def _apply(
             raise TaskDocError("set_subtask requires a subtask object")
         _upsert_subtask(data, subtask)
     elif operation == "set_section":
-        if doc.kind != "master":
-            raise TaskDocError("set_section is only valid for a master document")
         if not section:
             raise TaskDocError("set_section requires a section object")
+        # A leaf doc may carry freeform sections (R4); the schema validator backstops the
+        # leaf "freeform only" rule, so there is no master-only gate here (unlike set_subtask).
         _upsert_section(data, section)
     elif operation == "append_decision":
         if not decision:

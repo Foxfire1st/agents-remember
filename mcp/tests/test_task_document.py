@@ -145,11 +145,26 @@ class SchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _master(lifecycleId="LC")
 
-    def test_non_master_forbids_subtasks_and_sections(self) -> None:
-        with self.assertRaises(ValidationError):
-            _doc(sections=[{"heading": "H"}])
+    def test_leaf_forbids_subtasks_and_non_freeform_sections(self) -> None:
+        # the master series index stays master-only
         with self.assertRaises(ValidationError):
             _doc(subTasks=[{"number": "1", "name": "x"}])
+        # a non-freeform section is master-only too
+        with self.assertRaises(ValidationError):
+            _doc(sections=[{"heading": "H", "kind": "subTasks"}])
+        # but a freeform section is a legal leaf extension (R4)
+        leaf = _doc(sections=[{"heading": "Status history"}])
+        self.assertEqual(leaf.sections[0].heading, "Status history")
+
+    def test_r4_extension_fields_round_trip(self) -> None:
+        doc = _doc(
+            statusNote="desc",
+            headerNotes=[{"label": "Verified", "value": "v"}],
+            sections=[{"heading": "H", "body": "b"}],
+        )
+        self.assertEqual(TaskDocument.model_validate(doc.model_dump(by_alias=True)), doc)
+        # statusNote is None-omitted when unset (like other optional scalars)
+        self.assertNotIn("statusNote", _doc().model_dump_json(by_alias=True, exclude_none=True))
 
     def test_master_forbids_code_examples_note(self) -> None:
         with self.assertRaises(ValidationError):
@@ -320,6 +335,54 @@ class RenderTests(unittest.TestCase):
         md = render_markdown(_doc(codeExamplesNote="Drafted at the plan gate."))
         self.assertIn("Drafted at the plan gate.", md)
         self.assertNotIn("No code examples are needed for this task.", md)
+
+    def test_status_note_and_header_notes_render(self) -> None:
+        md = render_markdown(
+            _doc(
+                statusNote="core JSON format landed",
+                headerNotes=[{"label": "Verified", "value": "2026-06-18 — 3 commits"}],
+            )
+        )
+        self.assertIn("**Status:** planning — core JSON format landed", md)
+        self.assertIn("**Verified:** 2026-06-18 — 3 commits", md)
+
+    def test_leaf_freeform_sections_render_after_references(self) -> None:
+        md = render_markdown(
+            _doc(references=["ref"], sections=[{"heading": "Status history", "body": "line a\nline b"}])
+        )
+        self.assertIn("## Status history", md)
+        self.assertIn("line a\nline b", md)
+        # the freeform extra comes after the standard References section
+        self.assertLess(md.index("## References"), md.index("## Status history"))
+
+    def test_real_subtask_extensions_round_trip_content_complete(self) -> None:
+        # Models this 03c sub-task's extensions (R4 acceptance): a descriptive status, extra
+        # header lines, and bespoke freeform sections beyond the bare template.
+        doc = _doc(
+            kind="subTask",
+            id="3C",
+            slug="03c_x",
+            master="task.md",
+            status="inProgress",
+            statusNote="core JSON format landed",
+            headerNotes=[
+                {"label": "Verified", "value": "2026-06-18 — 3 commits landed"},
+                {"label": "Reopened", "value": "2026-06-19 — pilot surfaced gaps"},
+            ],
+            objective="Make the task document JSON-primary.",
+            sections=[
+                {"heading": "Reopened", "body": "gaps the pilot surfaced"},
+                {"heading": "Status history", "body": "verbatim, pre-normalization"},
+            ],
+        )
+        md = render_markdown(doc)
+        self.assertIn("**Status:** inProgress — core JSON format landed", md)
+        self.assertIn("**Verified:** 2026-06-18 — 3 commits landed", md)
+        self.assertIn("**Reopened:** 2026-06-19 — pilot surfaced gaps", md)
+        self.assertIn("## Reopened", md)
+        self.assertIn("## Status history", md)
+        # the JSON round-trips losslessly
+        self.assertEqual(TaskDocument.model_validate(doc.model_dump(by_alias=True)), doc)
 
 
 class MasterRenderTests(unittest.TestCase):
@@ -521,6 +584,12 @@ class ControllerTests(unittest.TestCase):
         doc = read_task_doc(Path(str(updated["docPath"])))
         self.assertEqual(doc.codeExamplesNote, "Drafted at the plan gate.")
 
+    def test_set_field_status_note(self) -> None:
+        self._create()
+        updated = self._call("set_field", fields={"statusNote": "core JSON format landed"})
+        doc = read_task_doc(Path(str(updated["docPath"])))
+        self.assertEqual(doc.statusNote, "core JSON format landed")
+
     def test_set_step_inserts_then_updates_without_duplicating(self) -> None:
         self._create(steps=[{"id": "S1", "title": "One", "status": "pending"}])
         self._call(
@@ -681,7 +750,7 @@ class MasterControllerTests(unittest.TestCase):
         with self.assertRaises(TaskDocError):
             self._op("set_step", step={"id": "S1", "title": "x"})
 
-    def test_subtask_section_ops_reject_non_master(self) -> None:
+    def test_subtask_op_rejects_non_master_but_section_allows_freeform(self) -> None:
         task_doc_tool(
             self.cfg,
             repo_id="agents-remember",
@@ -692,15 +761,24 @@ class MasterControllerTests(unittest.TestCase):
                 "repo": "r", "createdAt": "2026-01-01T00:00",
             },
         )
+        # set_subtask stays master-only (the series index has no meaning on a leaf)
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg, repo_id="agents-remember", operation="set_subtask",
                 task_name="lite", subtask={"number": "1", "name": "x"},
             )
+        # set_section on a leaf adds a freeform extra section (R4)
+        result = task_doc_tool(
+            self.cfg, repo_id="agents-remember", operation="set_section",
+            task_name="lite", section={"heading": "Status history", "body": "old."},
+        )
+        doc = read_task_doc(Path(str(result["docPath"])))
+        self.assertEqual([s.heading for s in doc.sections], ["Status history"])
+        # a non-freeform section on a leaf is rejected (the validator backstop)
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg, repo_id="agents-remember", operation="set_section",
-                task_name="lite", section={"heading": "H"},
+                task_name="lite", section={"heading": "X", "kind": "subTasks"},
             )
 
     def test_master_op_argument_errors(self) -> None:
