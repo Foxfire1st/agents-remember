@@ -21,6 +21,8 @@ from .document import (
     SubTaskRef,
     TaskDocument,
     current_step,
+    series_done,
+    series_total,
     step_done,
     step_total,
 )
@@ -51,6 +53,8 @@ __all__ = [
     "markdown_path_for",
     "read_task_doc",
     "render_markdown",
+    "series_done",
+    "series_total",
     "step_done",
     "step_total",
     "write_task_doc",

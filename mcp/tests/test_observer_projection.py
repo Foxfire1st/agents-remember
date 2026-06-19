@@ -42,6 +42,7 @@ from agents_remember.observer.projection import (
     EngineProcessFacts,
     LedgerRefNode,
     ProviderNode,
+    SeriesNode,
     SetupProgressNode,
     SidecarStaleNode,
     TaskDocNode,
@@ -71,6 +72,7 @@ from agents_remember.observer.snapshots import (
     read_ledger,
     read_providers,
     read_route_coverage,
+    read_series_documents,
     read_setup_progress_nodes,
     read_setup_summaries,
     read_sidecar_staleness,
@@ -1380,6 +1382,103 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         )
         self.assertEqual(len(analytics.taskDocuments), 1)
         self.assertEqual(analytics.taskDocuments[0].lifecycleId, "LC1")
+
+    def test_read_series_documents_projects_master(self) -> None:
+        # The master is a checklist: each subtask is one checkbox; doneCount = declared
+        # Completed subtasks, totalCount = number of subtasks. The full render (sections +
+        # decisions) is carried so the dashboard is the reader.
+        root = self.coord / "tasks" / "repo-a" / "series-x"
+        master = TaskDocument.model_validate(
+            {
+                "id": "series-x",
+                "slug": "series-x",
+                "title": "Series X",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "repo-a",
+                "createdAt": "2026-01-01T00:00",
+                "subTasks": [
+                    {"number": "01", "name": "alpha", "status": "Completed"},
+                    {"number": "02", "name": "beta", "status": "Completed"},
+                    {"number": "03", "name": "gamma", "status": "inProgress"},
+                ],
+                "sections": [{"kind": "freeform", "heading": "Objective", "body": "the series"}],
+                "decisions": [{"at": "2026-01-01T00:00", "decision": "d", "rationale": "r"}],
+            }
+        )
+        write_task_doc(root, master)
+        nodes = read_series_documents(self.coord, now=FRESH)
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        self.assertEqual(node.seriesId, "series-x")
+        self.assertEqual((node.doneCount, node.totalCount), (2, 3))
+        self.assertEqual(
+            [(s.number, s.status) for s in node.subTasks],
+            [("01", "Completed"), ("02", "Completed"), ("03", "inProgress")],
+        )
+        self.assertEqual(node.sections[0].heading, "Objective")
+        self.assertEqual(node.decisions[0].decision, "d")
+
+    def test_read_series_documents_skips_leaf_docs(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # a leaf, not a master
+        self.assertEqual(read_series_documents(self.coord, now=FRESH), [])
+
+    def test_declared_subtask_status_is_authoritative_over_leaf_steps(self) -> None:
+        # A subtask marked Completed in the master counts as done even if its own leaf doc
+        # still has open steps -- series_done reads the declared status, never leaf steps.
+        write_task_doc(
+            self.coord / "tasks" / "repo-a" / "series-y",
+            TaskDocument.model_validate(
+                {
+                    "id": "series-y",
+                    "slug": "series-y",
+                    "title": "Series Y",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-01-01T00:00",
+                    "subTasks": [{"number": "01", "name": "alpha", "status": "Completed"}],
+                }
+            ),
+        )
+        # the slice's own leaf doc still has an open step
+        write_task_doc(
+            self.coord / "tasks" / "repo-a" / "slice-01",
+            self._doc(
+                slug="01_alpha",
+                kind="subTask",
+                lifecycleId="LC9",
+                steps=[{"id": "S1", "title": "x", "status": "inProgress"}],
+            ),
+        )
+        [node] = read_series_documents(self.coord, now=FRESH)
+        self.assertEqual((node.doneCount, node.totalCount), (1, 1))  # declared Completed wins
+
+    def test_read_series_documents_missing_tasks_dir_is_empty(self) -> None:
+        self.assertEqual(read_series_documents(self.coord / "nope", now=FRESH), [])
+
+    def test_build_analytics_includes_series(self) -> None:
+        node = SeriesNode(
+            seriesId="s",
+            repository="repo-a",
+            title="t",
+            status="planning",
+            docPath="p",
+            doneCount=1,
+            totalCount=2,
+        )
+        analytics = build_analytics(
+            drift_snapshots=[],
+            sidecar_staleness=[],
+            setup_summaries=[],
+            setup_progress=[],
+            route_coverage=[],
+            tool_reports=[],
+            ledgers=[],
+            series=[node],
+        )
+        self.assertEqual(len(analytics.series), 1)
+        self.assertEqual(analytics.series[0].seriesId, "s")
 
 
 def _action(actions: list, name: str):  # type: ignore[type-arg]

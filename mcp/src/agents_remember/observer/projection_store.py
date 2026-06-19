@@ -35,6 +35,7 @@ from agents_remember.observer.snapshots import (
     read_ledger,
     read_providers,
     read_route_coverage,
+    read_series_documents,
     read_setup_progress_nodes,
     read_setup_summaries,
     read_sidecar_staleness,
@@ -99,6 +100,7 @@ def project_and_write(
         tool_reports=read_tool_reports(coordination_root, now=moment),
         ledgers=ledgers,
         task_documents=read_task_documents(coordination_root, now=moment),
+        series=read_series_documents(coordination_root, now=moment),
         engine_process_facts=read_engine_process_facts(coordination_root),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
     )

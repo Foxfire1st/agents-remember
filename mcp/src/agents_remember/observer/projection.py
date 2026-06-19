@@ -378,6 +378,58 @@ class TaskDocNode(BaseModel):
     references: list[str] = Field(default_factory=list)
 
 
+class SeriesSubTaskNode(BaseModel):
+    """One subtask of a series master -- a single checkbox.
+
+    ``status`` is the lever: ``planning`` -> ⬜, ``inProgress`` -> 🔨, ``Completed`` -> ✅.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    number: str
+    name: str
+    file: str = ""
+    status: str
+    scope: str = ""
+
+
+class SeriesSectionNode(BaseModel):
+    """One ordered render section of a series master (freeform prose or a structured block)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    heading: str
+    body: str = ""
+
+
+class SeriesNode(BaseModel):
+    """A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).
+
+    The master is the series-aggregation entity: it carries no ``lifecycleId``
+    (schema-enforced), so the lifecycle-keyed :class:`TaskDocNode` reader never includes it
+    and a folder-keyed reader projects it here instead. The master is a checklist -- each
+    subtask is one checkbox and ``doneCount`` counts the *declared* ``Completed`` subtasks,
+    authoritative over a slice's own internal steps. Carries the full master render (subTasks
+    + sections + decisions) so the dashboard *is* the reader, symmetric to :class:`TaskDocNode`
+    for a leaf.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    seriesId: str
+    repository: str
+    title: str
+    status: str
+    subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
+    doneCount: int = 0
+    totalCount: int = 0
+    sections: list[SeriesSectionNode] = Field(default_factory=list)
+    decisions: list[TaskDecisionNode] = Field(default_factory=list)
+    docPath: str
+    ageSeconds: float | None = None
+
+
 class AttentionItem(BaseModel):
     """One thing that needs the human, decided by the reducer (note 06, slice 05).
 
@@ -600,6 +652,9 @@ class Analytics(BaseModel):
     # The enclosure-centered Engine Room process map (slice 5e): one node per worktree
     # enclosure, derived from contract + status guidance + provider boot + lifecycle.
     engineProcesses: list[EngineProcessNode] = Field(default_factory=list)
+    # The series/master surface (R1): one node per series master, keyed by its task FOLDER
+    # (masters carry no lifecycleId, so the lifecycle-keyed taskDocuments never include them).
+    series: list[SeriesNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):

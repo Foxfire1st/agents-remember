@@ -158,3 +158,18 @@ def current_step(doc: TaskDocument) -> str | None:
         if step.status != "done":
             return f"{step.id} — {step.title}"
     return None
+
+
+def series_total(doc: TaskDocument) -> int:
+    """A master's checkboxes are its subtasks: each ``SubTaskRef`` is one box."""
+    return len(doc.subTasks)
+
+
+def series_done(doc: TaskDocument) -> int:
+    """Checked boxes = subtasks whose *declared* status is ``Completed``.
+
+    The declared subtask status is the lever and is authoritative: a slice marked
+    ``Completed`` in the master counts as done even if its own leaf doc still has open
+    boxes. Never derived from a slice's internal steps.
+    """
+    return sum(1 for sub in doc.subTasks if sub.status == "Completed")

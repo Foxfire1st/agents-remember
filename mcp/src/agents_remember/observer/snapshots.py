@@ -36,6 +36,9 @@ from agents_remember.observer.projection import (
     LedgerRefNode,
     ProviderNode,
     RouteCoverageNode,
+    SeriesNode,
+    SeriesSectionNode,
+    SeriesSubTaskNode,
     SetupProgressNode,
     SetupSummaryNode,
     SidecarStaleNode,
@@ -53,6 +56,8 @@ from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
     TaskDocument,
     current_step,
+    series_done,
+    series_total,
     step_done,
     step_total,
 )
@@ -636,6 +641,63 @@ def read_task_documents(coordination_root: Path, *, now: datetime) -> list[TaskD
                 ],
                 openQuestions=list(doc.openQuestions),
                 references=list(doc.references),
+            )
+        )
+    return nodes
+
+
+def read_series_documents(coordination_root: Path, *, now: datetime) -> list[SeriesNode]:
+    """Series surface (R1): per-master series progress, keyed by the task FOLDER.
+
+    Reads each ``ar-task-document/v1`` JSON with ``kind == "master"`` under
+    ``tasks/<repo>/<task>/`` -- the disjoint counterpart of :func:`read_task_documents`.
+    Masters carry no ``lifecycleId`` (schema-enforced), so the lifecycle reader skips them
+    and this one selects them: a doc lands in exactly one reader. The master is a checklist
+    -- each subtask is one checkbox and ``doneCount`` counts the *declared* ``Completed``
+    subtasks, authoritative over a slice's own internal steps.
+    """
+    tasks_root = coordination_root / "tasks"
+    if not tasks_root.is_dir():
+        return []
+    nodes: list[SeriesNode] = []
+    for path in sorted(tasks_root.glob("*/*/*.json")):
+        payload = _read_json(path)
+        if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
+            continue
+        if payload.get("kind") != "master":
+            continue
+        try:
+            doc = TaskDocument.model_validate(payload)
+        except ValueError:
+            continue
+        nodes.append(
+            SeriesNode(
+                seriesId=path.parent.name,
+                repository=doc.repo,
+                title=doc.title,
+                status=doc.status,
+                subTasks=[
+                    SeriesSubTaskNode(
+                        number=sub.number,
+                        name=sub.name,
+                        file=sub.file,
+                        status=sub.status,
+                        scope=sub.scope,
+                    )
+                    for sub in doc.subTasks
+                ],
+                doneCount=series_done(doc),
+                totalCount=series_total(doc),
+                sections=[
+                    SeriesSectionNode(kind=section.kind, heading=section.heading, body=section.body)
+                    for section in doc.sections
+                ],
+                decisions=[
+                    TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
+                    for item in doc.decisions
+                ],
+                docPath=path.as_posix(),
+                ageSeconds=_file_age_seconds(path, now),
             )
         )
     return nodes
