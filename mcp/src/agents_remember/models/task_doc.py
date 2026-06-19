@@ -23,3 +23,8 @@ class TaskDocResponse(ToolResponse):
     renderedPath: str
     stepsDone: int = 0
     stepsTotal: int = 0
+    # dry-run / preview (R5): set only when dry_run=True; a real op leaves these at their defaults.
+    dryRun: bool = False
+    rendered: str | None = None
+    diff: str | None = None
+    wouldLose: bool = False

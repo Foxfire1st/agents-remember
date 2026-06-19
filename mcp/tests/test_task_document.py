@@ -590,6 +590,62 @@ class ControllerTests(unittest.TestCase):
         doc = read_task_doc(Path(str(updated["docPath"])))
         self.assertEqual(doc.statusNote, "core JSON format landed")
 
+    def test_dry_run_create_renders_without_writing(self) -> None:
+        result = task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="3c-x",
+            fields={
+                "id": "3C", "slug": "03c_x", "title": "Smoke", "kind": "subTask",
+                "repo": "agents-remember", "type": "Code", "createdAt": "2026-01-01T00:00",
+                "objective": "Preview me.",
+            },
+            dry_run=True,
+        )
+        self.assertTrue(result["dryRun"])
+        self.assertIn("Preview me.", str(result["rendered"]))
+        # nothing written: neither the json source nor the rendered md exists
+        self.assertFalse(Path(str(result["docPath"])).exists())
+        self.assertFalse(Path(str(result["renderedPath"])).exists())
+
+    def test_dry_run_does_not_mutate_existing_files(self) -> None:
+        created = self._create(objective="orig")
+        json_path = Path(str(created["docPath"]))
+        md_path = Path(str(created["renderedPath"]))
+        before_json = json_path.read_text(encoding="utf-8")
+        before_md = md_path.read_text(encoding="utf-8")
+        result = task_doc_tool(
+            self.cfg, repo_id="agents-remember", operation="set_field",
+            task_name="3c-x", slug="03c_x", fields={"objective": "changed"}, dry_run=True,
+        )
+        self.assertIn("changed", str(result["rendered"]))  # the would-be render reflects the edit
+        # …but disk is untouched
+        self.assertEqual(json_path.read_text(encoding="utf-8"), before_json)
+        self.assertEqual(md_path.read_text(encoding="utf-8"), before_md)
+
+    def test_dry_run_would_lose_flags_unmodeled_md_content(self) -> None:
+        created = self._create(objective="orig")
+        md_path = Path(str(created["renderedPath"]))
+        # a clean re-preview (no real change) matches disk exactly: no loss, empty diff
+        clean = task_doc_tool(
+            self.cfg, repo_id="agents-remember", operation="set_field",
+            task_name="3c-x", slug="03c_x", fields={"objective": "orig"}, dry_run=True,
+        )
+        self.assertFalse(clean["wouldLose"])
+        self.assertEqual(clean["diff"], "")
+        # a hand-authored line the JSON does not model → wouldLose true + the diff shows it dropped
+        md_path.write_text(
+            md_path.read_text(encoding="utf-8") + "\n## Bespoke hand note\nkeep me\n",
+            encoding="utf-8",
+        )
+        lossy = task_doc_tool(
+            self.cfg, repo_id="agents-remember", operation="set_field",
+            task_name="3c-x", slug="03c_x", fields={"objective": "orig"}, dry_run=True,
+        )
+        self.assertTrue(lossy["wouldLose"])
+        self.assertIn("keep me", str(lossy["diff"]))
+
     def test_set_step_inserts_then_updates_without_duplicating(self) -> None:
         self._create(steps=[{"id": "S1", "title": "One", "status": "pending"}])
         self._call(

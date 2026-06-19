@@ -23,6 +23,7 @@ def task_doc_payload(
     decision: dict[str, Any] | None = None,
     subtask: dict[str, Any] | None = None,
     section: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "task_doc",
@@ -38,5 +39,6 @@ def task_doc_payload(
             decision=decision,
             subtask=subtask,
             section=section,
+            dry_run=dry_run,
         ),
     )

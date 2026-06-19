@@ -796,6 +796,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         decision: dict[str, Any] | None = None,
         subtask: dict[str, Any] | None = None,
         section: dict[str, Any] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Author the JSON-primary task document (ar-task-document/v1) and re-render its
         markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
@@ -810,7 +811,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         step={id, title, status, parent?, note?}; 'set_subtask' (master) takes subtask={number, name,
         file?, status?, scope?}; 'set_section' (master) takes section={heading, kind?, body?};
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
-        scalar/list updates; 'set_status' takes fields.status."""
+        scalar/list updates; 'set_status' takes fields.status. dry_run=true builds + validates and
+        returns rendered/diff/wouldLose WITHOUT writing — the preview before adopting a hand .md."""
         return task_doc_payload(
             config,
             repo_id=repo_id,
@@ -823,6 +825,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             decision=decision,
             subtask=subtask,
             section=section,
+            dry_run=dry_run,
         )
 
     return server

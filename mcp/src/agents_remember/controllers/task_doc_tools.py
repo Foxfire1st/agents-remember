@@ -9,6 +9,7 @@ schema before it is written.
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from agents_remember.tasks import (
     json_path_for,
     markdown_path_for,
     read_task_doc,
+    render_markdown,
     step_done,
     step_total,
     write_task_doc,
@@ -81,6 +83,7 @@ def task_doc_tool(
     decision: dict[str, Any] | None = None,
     subtask: dict[str, Any] | None = None,
     section: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     if operation not in VALID_OPERATIONS:
         raise TaskDocError(
@@ -107,6 +110,8 @@ def task_doc_tool(
             section=section,
         )
 
+    if dry_run:
+        return _preview(operation, doc, task_root)
     json_path, markdown_path = write_task_doc(task_root, doc)
     return _result(operation, doc, json_path, markdown_path)
 
@@ -309,3 +314,34 @@ def _result(
         "stepsDone": step_done(doc),
         "stepsTotal": step_total(doc),
     }
+
+
+def _preview(operation: str, doc: TaskDocument, task_root: Path) -> dict[str, Any]:
+    """Render the would-be document without writing -- the dry-run safety preview.
+
+    Returns the same shape as a real op plus the rendered markdown, a unified diff against the
+    on-disk ``.md`` (if any), and ``wouldLose`` -- a non-blank on-disk line the render does not
+    reproduce (the signal that adopting this JSON would drop hand-authored content). ``renderedPath``
+    is where it *would* write; nothing is written.
+    """
+    rendered = render_markdown(doc)
+    markdown_path = markdown_path_for(task_root, doc)
+    existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
+    diff = "".join(
+        difflib.unified_diff(
+            existing.splitlines(keepends=True),
+            rendered.splitlines(keepends=True),
+            fromfile=f"{markdown_path.name} (on disk)",
+            tofile=f"{markdown_path.name} (rendered)",
+        )
+    )
+    rendered_lines = set(rendered.splitlines())
+    would_lose = any(
+        line.strip() and line not in rendered_lines for line in existing.splitlines()
+    )
+    result = _result(operation, doc, json_path_for(task_root, doc), markdown_path)
+    result["dryRun"] = True
+    result["rendered"] = rendered
+    result["diff"] = diff
+    result["wouldLose"] = would_lose
+    return result
