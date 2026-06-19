@@ -84,7 +84,7 @@ The file must include:
 2. requirements
 3. design sized to the request per `tasks/AGENTS.md`, or a note that no design reasoning is needed
 4. implementation steps with one checkbox per line and nested checkbox items indented by two spaces under the parent step
-5. proposed code examples for each distinct implementation change when code changes are in scope
+5. proposed code examples for each distinct implementation change when code changes are in scope; if examples are deferred to the plan gate, record that intent via `codeExamplesNote` so the render distinguishes deferred from none-needed
 6. decision log
 7. open questions
 8. references

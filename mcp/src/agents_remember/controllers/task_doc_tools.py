@@ -58,6 +58,7 @@ _MUTABLE_FIELDS = frozenset(
         "lifecycleId",
         "contractPath",
         "master",
+        "codeExamplesNote",
     }
 )
 

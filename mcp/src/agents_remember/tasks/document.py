@@ -112,6 +112,9 @@ class TaskDocument(_Doc):
     design: str | None = None
     steps: list[Step] = Field(default_factory=list)
     codeExamples: list[CodeExample] = Field(default_factory=list)
+    # Why code examples are absent (e.g. "Drafted at the plan gate.") -- distinguishes a
+    # planning slice that defers its examples from a task that genuinely needs none (R3).
+    codeExamplesNote: str | None = None
     decisions: list[Decision] = Field(default_factory=list)
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
@@ -122,14 +125,25 @@ class TaskDocument(_Doc):
     @model_validator(mode="after")
     def _check_kind_fields(self) -> Self:
         if self.kind == "master":
-            if self.steps or self.codeExamples or self.lifecycleId is not None:
+            if (
+                self.steps
+                or self.codeExamples
+                or self.codeExamplesNote is not None
+                or self.lifecycleId is not None
+            ):
                 raise ValueError(
-                    "a master document has no steps, codeExamples, or lifecycleId"
+                    "a master document has no steps, codeExamples, codeExamplesNote, or lifecycleId"
                 )
-        elif self.subTasks or self.sections:
-            raise ValueError(
-                f"a {self.kind} document has no subTasks or sections (master-only)"
-            )
+        else:
+            if self.subTasks or self.sections:
+                raise ValueError(
+                    f"a {self.kind} document has no subTasks or sections (master-only)"
+                )
+            if self.codeExamplesNote is not None and self.codeExamples:
+                raise ValueError(
+                    "codeExamplesNote explains why code examples are absent; "
+                    "it cannot be set alongside codeExamples"
+                )
         return self
 
 

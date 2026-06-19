@@ -38,7 +38,7 @@ Light-task artifacts use minute-precision timestamps in `YYYY-MM-DDTHH:MM` forma
 
 ## Task Document Format (JSON-Primary)
 
-The task document is **JSON-primary**: an `ar-task-document/v1` JSON file is the source of truth, and the `task.md` (or `<slug>.md` for a sub-task) is a deterministic **render** of it. Author and update it with the `task_doc` MCP tool — `create`, `set_status`, `set_step`, `append_decision`, `set_field` — which writes the JSON and re-renders the markdown on every write. Do not hand-edit a tool-managed `task.md`; edit through the tool and let it re-render. `template.md` and `master-template.md` document the **render spec** (the shape the renderer produces), not a separate hand-authored format.
+The task document is **JSON-primary**: an `ar-task-document/v1` JSON file is the source of truth, and the `task.md` (or `<slug>.md` for a sub-task) is a deterministic **render** of it. Author and update it with the `task_doc` MCP tool — `create`, `set_status`, `set_step`, `append_decision`, `set_field` — which writes the JSON and re-renders the markdown on every write. Do not hand-edit a tool-managed `task.md`; edit through the tool and let it re-render. `template.md` and `master-template.md` document the **render spec** (the shape the renderer produces), not a separate hand-authored format. When a planning slice defers its code examples to the plan gate, record that with `codeExamplesNote` (a `set_field` value, e.g. "Drafted at the plan gate.") so the rendered "Proposed Code Examples" section reads as *deferred* rather than as if none are needed.
 
 Because the JSON encodes step/substep status explicitly, a tool-managed document is legible on the dashboard — the observer projects it, keyed to the lifecycle via the contract's `lifecycle_id`, at step granularity. The same schema/tool serves a *lightweight* document for a chat build (a thin doc: title plus a few steps, so even a no-`task.md` session is legible) and a *full* one for a durable task; the difference is content completeness, not a separate format.
 
@@ -91,7 +91,7 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 5. Refreshed external-memory onboarding and ledger changes are committed before the `c-09-git-worktree-manager` skill starts worktrees.
 6. Implementation approval is separate from commit approval; worktree-backed closeout commits require a later explicit developer approval after a closeout preview.
 7. Implementation steps and substeps use checkbox state rather than freeform progress prose.
-8. Code-changing light tasks include code examples for each distinct implementation change.
+8. Code-changing light tasks include code examples for each distinct implementation change; a slice that intentionally defers its examples to the plan gate sets `codeExamplesNote` (e.g. "Drafted at the plan gate.") so the render distinguishes *deferred* from *none needed*.
 9. After approval, onboarding is updated through `c-05-create-or-update-onboarding-files` and the listed checks in the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` are run.
 10. Durable current-state findings discovered during implementation are routed through `c-05-create-or-update-onboarding-files` during that implementation cycle or, if consolidation is clearer, in the immediate closeout pass right after implementation.
 11. Significant mid-implementation changes update the task file before edits continue.

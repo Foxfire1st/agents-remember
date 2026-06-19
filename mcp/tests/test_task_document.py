@@ -151,6 +151,26 @@ class SchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _doc(subTasks=[{"number": "1", "name": "x"}])
 
+    def test_master_forbids_code_examples_note(self) -> None:
+        with self.assertRaises(ValidationError):
+            _master(codeExamplesNote="x")
+
+    def test_code_examples_note_requires_empty_examples(self) -> None:
+        # The note explains an absence; it cannot coexist with drafted examples.
+        with self.assertRaises(ValidationError):
+            _doc(
+                codeExamplesNote="Drafted at the plan gate.",
+                codeExamples=[{"id": "E1", "title": "t", "distinctChange": "c", "why": "w"}],
+            )
+
+    def test_code_examples_note_roundtrips_and_omits_when_none(self) -> None:
+        doc = _doc(codeExamplesNote="Drafted at the plan gate.")
+        self.assertEqual(TaskDocument.model_validate(doc.model_dump(by_alias=True)), doc)
+        # exclude_none keeps existing note-less JSON byte-identical (no codeExamplesNote key).
+        self.assertNotIn(
+            "codeExamplesNote", _doc().model_dump_json(by_alias=True, exclude_none=True)
+        )
+
 
 class RenderTests(unittest.TestCase):
     def test_golden_small_light_doc(self) -> None:
@@ -295,6 +315,11 @@ class RenderTests(unittest.TestCase):
             )
         )
         self.assertIn("```python\na = 1\n\nb = 2\n```", md)
+
+    def test_code_examples_note_renders_when_examples_empty(self) -> None:
+        md = render_markdown(_doc(codeExamplesNote="Drafted at the plan gate."))
+        self.assertIn("Drafted at the plan gate.", md)
+        self.assertNotIn("No code examples are needed for this task.", md)
 
 
 class MasterRenderTests(unittest.TestCase):
@@ -489,6 +514,12 @@ class ControllerTests(unittest.TestCase):
         updated = self._call("set_field", fields={"objective": "new", "bogus": "x"})
         self.assertEqual(updated["operation"], "task_doc.set_field")
         self.assertEqual(read_task_doc(Path(str(updated["docPath"]))).objective, "new")
+
+    def test_set_field_code_examples_note(self) -> None:
+        self._create()
+        updated = self._call("set_field", fields={"codeExamplesNote": "Drafted at the plan gate."})
+        doc = read_task_doc(Path(str(updated["docPath"])))
+        self.assertEqual(doc.codeExamplesNote, "Drafted at the plan gate.")
 
     def test_set_step_inserts_then_updates_without_duplicating(self) -> None:
         self._create(steps=[{"id": "S1", "title": "One", "status": "pending"}])

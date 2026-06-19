@@ -28,7 +28,10 @@ def render_markdown(doc: TaskDocument) -> str:
     parts += _section("Requirements", _bullets(doc.requirements))
     parts += _section("Design", [doc.design or "No design reasoning needed."])
     parts += _section("Implementation Steps", _step_lines(doc.steps))
-    parts += _section("Proposed Code Examples", _code_example_lines(doc.codeExamples))
+    parts += _section(
+        "Proposed Code Examples",
+        _code_example_lines(doc.codeExamples, doc.codeExamplesNote),
+    )
     parts += _section("Decision Log", _decision_lines(doc.decisions))
     parts += _section("Open Questions", _bullets(doc.openQuestions, empty="- None."))
     parts += _section("References", _bullets(doc.references))
@@ -125,9 +128,11 @@ def _step_lines(steps: list[Step]) -> list[str]:
     return _join_blocks(blocks)
 
 
-def _code_example_lines(examples: list[CodeExample]) -> list[str]:
+def _code_example_lines(examples: list[CodeExample], note: str | None = None) -> list[str]:
     if not examples:
-        return ["No code examples are needed for this task."]
+        # An explicit note (e.g. "Drafted at the plan gate.") says examples are deferred, not
+        # unneeded; with no note the section reads as genuinely needing none (R3).
+        return [note or "No code examples are needed for this task."]
     blocks: list[list[str]] = []
     for example in examples:
         block = [

@@ -103,7 +103,7 @@ Why this example is included: <reason>
 1. Keep the section structure even for small tasks.
 2. Use `c-08-ar-coordination-context-resolver` resolved context paths such as `<task-root>/`, `<onboarding-root>/`, `<docs_root>/`, `<tools_path>`, and `<sources_path>`.
 3. Store the light-task artifact as `<task-root>/<task-slug>/task.md`; if the task becomes worktree-backed, the `c-09-git-worktree-manager` skill stores `contract.md` beside it in the same wrapper folder.
-4. When code changes are in scope, include proposed code examples for each distinct implementation change.
+4. When code changes are in scope, include proposed code examples for each distinct implementation change. If a planning slice intentionally defers its examples to the plan gate, set `codeExamplesNote` (e.g. "Drafted at the plan gate.") so the rendered section says so instead of reading as if none are needed.
 5. For documentation-only or other non-code tasks, keep the section and state that no code examples are needed.
 6. Keep every checklist item on its own line.
 7. Indent nested checklist items by two spaces beneath their parent checkbox.
