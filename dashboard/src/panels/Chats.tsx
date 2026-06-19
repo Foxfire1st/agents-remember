@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { css } from "../../styled-system/css";
+import { sessionStore, useSessions } from "../data/sessions";
 import {
   bracketedPaste,
   fetchHarnesses,
@@ -9,7 +10,7 @@ import {
   type TerminalConnection,
 } from "../data/terminal";
 import { SessionComposer } from "./SessionComposer";
-import { SessionList, type OpenSession } from "./SessionList";
+import { SessionList } from "./SessionList";
 
 // xterm.js is heavy and probes the canvas on import, so the terminal is code-split and only pulled
 // in when a session is open (keeps it out of the cockpit's initial bundle + out of the jsdom module
@@ -20,9 +21,12 @@ const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: mo
 // server to spawn + own a session (a shell at the workspace root, slice 6e-2a) and then the xterm
 // terminal attaches over the 6d WebSocket — the dashboard owns the session it created. Per-harness
 // launch buttons (slice 6e-2b) sit beside ＋ Terminal — one per *detected* harness (Claude Code /
-// Codex / Pi.dev), launching that agent at the workspace root. Open sessions live in a left-rail
-// switcher (slice 6e-2c, `SessionList`); the context composer (slice 6e-3) injects text into the
-// active session's stdin.
+// Codex / Pi.dev). Open sessions live in a left-rail switcher (slice 6e-2c, `SessionList`); the
+// context composer (slice 6e-3) injects text into the active session's stdin. The session registry
+// lives in the `data/sessions` store (6e hardening). A live terminal survives two kinds of switch
+// without being re-created empty: a cockpit *view* switch (because `Cockpit` keeps <Chats> mounted,
+// hidden via CSS) and a *session-tab* switch (because every open session's terminal stays mounted
+// here, the inactive ones hidden via CSS — switching tabs only flips `display`, never unmounts).
 
 // Placeholder monograms (swap for real brand glyphs later) — distinct two-letter marks so Claude
 // Code and Codex don't both collapse to "C".
@@ -89,6 +93,15 @@ const terminalArea = css({
   minHeight: "0",
   gap: "0.4rem",
 });
+// One layer per open session. The active layer is shown (display:flex via inline style), the rest are
+// display:none but stay MOUNTED, so each xterm instance + its WebSocket survive a tab switch. Terminal
+// skips fitting a 0×0 hidden layer and re-fits via its ResizeObserver when the layer is shown again.
+const terminalLayer = css({
+  flexDirection: "column",
+  flex: "1",
+  minWidth: "0",
+  minHeight: "0",
+});
 const empty = css({
   display: "flex",
   flex: "1",
@@ -120,13 +133,14 @@ function HarnessIcon({ id }: { id: string }) {
 }
 
 export function Chats() {
-  const [sessions, setSessions] = useState<OpenSession[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [count, setCount] = useState(0);
+  // The session registry lives in the store (shared, testable state); <Chats> is kept mounted across
+  // view switches (hidden via CSS in `Cockpit`), so the live terminal + this connection ref persist.
+  const sessions = useSessions((state) => state.sessions);
+  const activeId = useSessions((state) => state.activeId);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
-  // The active session's live terminal connection (set by <Terminal onConnection>), so the context
-  // composer can inject into its stdin without re-rendering on every keystroke.
-  const activeConn = useRef<TerminalConnection | null>(null);
+  // Each mounted terminal reports its live connection here, keyed by session id; the composer injects
+  // into whichever one is active. A ref (not state) so a new connection never re-renders on keystroke.
+  const conns = useRef<Map<string, TerminalConnection>>(new Map());
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
   // only for detected ones. `[]` (no backend / failure) just leaves ＋ Terminal alone.
@@ -142,17 +156,9 @@ export function Chats() {
 
   const startSession = async (label: string, kind: "terminal" | "harness", harness?: string) => {
     const id = crypto.randomUUID();
-    const ordinal = count + 1;
-    setCount(ordinal);
     // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
     await openTerminalSession(id, kind, "", harness);
-    setSessions((prev) => [...prev, { id, label: `${label} ${ordinal}` }]);
-    setActiveId(id);
-  };
-
-  const closeSession = (id: string) => {
-    setSessions((prev) => prev.filter((session) => session.id !== id));
-    setActiveId((current) => (current === id ? null : current));
+    sessionStore.getState().add(label, id);
   };
 
   return (
@@ -187,24 +193,36 @@ export function Chats() {
             <SessionList
               sessions={sessions}
               activeId={activeId}
-              onSelect={(id) => setActiveId(id)}
-              onClose={closeSession}
+              onSelect={(id) => sessionStore.getState().setActive(id)}
+              onClose={(id) => sessionStore.getState().close(id)}
             />
           </aside>
         )}
         <div className={terminalArea}>
           {activeId ? (
             <>
-              <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
-                <Terminal
-                  key={activeId}
-                  sessionId={activeId}
-                  onConnection={(conn) => {
-                    activeConn.current = conn;
-                  }}
-                />
-              </Suspense>
-              <SessionComposer onSend={(text) => activeConn.current?.sendInput(bracketedPaste(text))} />
+              {sessions.map((session) => (
+                <div
+                  key={session.id}
+                  className={terminalLayer}
+                  style={{ display: session.id === activeId ? "flex" : "none" }}
+                  aria-hidden={session.id !== activeId}
+                  data-testid={`chats-terminal-layer-${session.id}`}
+                >
+                  <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
+                    <Terminal
+                      sessionId={session.id}
+                      onConnection={(conn) => {
+                        if (conn) conns.current.set(session.id, conn);
+                        else conns.current.delete(session.id);
+                      }}
+                    />
+                  </Suspense>
+                </div>
+              ))}
+              <SessionComposer
+                onSend={(text) => conns.current.get(activeId)?.sendInput(bracketedPaste(text))}
+              />
             </>
           ) : (
             <div className={empty}>

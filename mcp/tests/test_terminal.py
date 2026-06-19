@@ -219,6 +219,14 @@ class TerminalHostPtyTests(unittest.TestCase):
         rows, cols, _, _ = struct.unpack("HHHH", packed)
         self.assertEqual((rows, cols), (40, 120))
 
+    def test_spawn_seeds_default_winsize(self) -> None:
+        # A freshly opened PTY carries the seeded default (not 0x0) before any browser resize lands,
+        # so tmux never starts degenerate; the real size follows from the first resize.
+        session = self.host.open("io", cwd=self.tmp, command=["cat"])
+        packed = fcntl_ioctl_getwinsize(session.master_fd)
+        rows, cols, _, _ = struct.unpack("HHHH", packed)
+        self.assertEqual((rows, cols), (24, 80))
+
     @unittest.skipUnless(_HAS_TRUE, "needs `true` for an immediately-exiting child")
     def test_read_empty_after_child_exit(self) -> None:
         self.host.open("done", cwd=self.tmp, command=["true"])

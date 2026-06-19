@@ -79,6 +79,10 @@ export function connectTerminal(
   socket.binaryType = "arraybuffer";
 
   let ended = false;
+  // The latest requested winsize, replayed on open: the first fit() runs before the WS handshake
+  // completes, so its resize frame would be dropped (send requires OPEN) and the PTY/tmux would stay
+  // at the spawn-default size — the terminal renders small until something else triggers a resize.
+  let pendingResize: { cols: number; rows: number } | null = null;
   const end = () => {
     if (!ended) {
       ended = true;
@@ -101,9 +105,18 @@ export function connectTerminal(
     }
   };
 
+  // Flush the buffered size once the socket is OPEN so the PTY winsize syncs to the fitted xterm even
+  // though the first fit() fired mid-handshake (the resize race that left the terminal rendering small).
+  socket.onopen = () => {
+    if (pendingResize) send({ type: "resize", cols: pendingResize.cols, rows: pendingResize.rows });
+  };
+
   return {
     sendInput: (data) => send({ type: "stdin", data }),
-    sendResize: (cols, rows) => send({ type: "resize", cols, rows }),
+    sendResize: (cols, rows) => {
+      pendingResize = { cols, rows };
+      send({ type: "resize", cols, rows });
+    },
     dispose: () => {
       ended = true; // an intentional teardown must not echo `onExit` via the close handler
       socket.close();

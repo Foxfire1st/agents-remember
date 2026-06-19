@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SessionList, type OpenSession } from "./SessionList";
+import type { OpenSession } from "../data/sessions";
+import { SessionList } from "./SessionList";
 
 afterEach(cleanup);
 

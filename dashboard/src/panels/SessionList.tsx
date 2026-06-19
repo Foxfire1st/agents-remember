@@ -1,11 +1,7 @@
 import { Button, GridList, GridListItem } from "react-aria-components";
 
 import { css } from "../../styled-system/css";
-
-export interface OpenSession {
-  id: string;
-  label: string;
-}
+import type { OpenSession } from "../data/sessions";
 
 // The session switcher (slice 6e-2c): the open terminal/chat sessions as a left-rail list, replacing
 // the old horizontal tab strip. A React Aria GridList — not a ListBox — because each row carries a

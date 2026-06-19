@@ -153,6 +153,17 @@ const viewport = css({
   minHeight: "0",
   overflow: "hidden", // the viewport does not scroll — its panel scrolls on its own
 });
+// Chats is kept mounted across every view (hidden via display, never unmounted) so the xterm
+// instance, its scrollback buffer, and the live WebSocket survive a view switch — the cure for
+// "switching away throws the terminal away." Cheap: the heavy xterm chunk is lazy and loads once a
+// session opens, and re-entry is instant (no remount / re-init).
+const chatsLayer = css({
+  display: "flex",
+  flexDirection: "column",
+  flex: "1",
+  minHeight: "0",
+  minWidth: "0",
+});
 
 // Cockpit wires the live SSE streams, then renders the presentational shell. The shell is split
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
@@ -199,7 +210,16 @@ export function CockpitShell() {
           </motion.aside>
         )}
         <main className={cx(viewport, "viewport")} data-view={view}>
-          <ViewBody view={view} selectedId={selectedId} onOpen={open} />
+          {view !== "chats" && <ViewBody view={view} selectedId={selectedId} onOpen={open} />}
+          {/* Chats is never unmounted — only hidden — so the xterm buffer + live WebSocket survive a
+              view switch instead of being re-created empty. See `chatsLayer`. */}
+          <div
+            className={chatsLayer}
+            style={{ display: view === "chats" ? "flex" : "none" }}
+            aria-hidden={view !== "chats"}
+          >
+            <Chats />
+          </div>
         </main>
         {!fullBleed && (
           <motion.aside
@@ -235,8 +255,8 @@ function ViewBody({
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
-    case "chats":
-      return <Chats />;
+    // "chats" is intentionally not here — Chats is kept mounted in CockpitShell (hidden via CSS) so
+    // the live terminal survives a view switch; routing it through this switch would unmount it.
     case "operations":
     default:
       return <DetailPanel selectedId={selectedId} />;

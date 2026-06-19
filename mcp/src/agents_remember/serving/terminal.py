@@ -42,6 +42,10 @@ _READ_CHUNK = 65536
 _TERMINATE_TIMEOUT = 5.0
 """Seconds to reap a terminated child before giving up (the tmux *server* persists regardless)."""
 
+_DEFAULT_PTY_SIZE = (24, 80)
+"""Initial ``(rows, cols)`` seeded on a freshly opened PTY so tmux never starts at ``0x0`` before the
+first browser resize lands; the real size follows from :meth:`TerminalHost.resize` (``TIOCSWINSZ``)."""
+
 _TMUX_NAME_PREFIX = "ar"
 """Prefix for derived tmux session names, namespacing dashboard sessions on the tmux server."""
 
@@ -119,20 +123,34 @@ def _build_tmux_command(name: str, cwd: Path, harness: Sequence[str]) -> list[st
 def _spawn_pty(argv: Sequence[str], cwd: Path) -> PtyProcess:
     """Spawn ``argv`` in ``cwd`` on a fresh PTY; the master fd is left non-blocking.
 
-    The default :data:`Spawner`. ``start_new_session`` puts the child in its own session so the
-    PTY slave becomes its controlling terminal (tmux needs a tty); the master is set non-blocking
-    so :meth:`TerminalHost.read_nonblocking` never stalls the serving loop.
+    The default :data:`Spawner`. The child runs through :func:`os.login_tty`, which makes the PTY
+    slave its **controlling terminal** (``setsid`` + ``TIOCSCTTY`` + wires stdio): tmux opens
+    ``/dev/tty`` to read its size and handle ``SIGWINCH``, so without a controlling terminal it stays
+    stuck at 80x24 and ignores every resize. The master is left non-blocking so
+    :meth:`TerminalHost.read_nonblocking` never stalls the serving loop.
     """
     master_fd, slave_fd = pty.openpty()
+    with contextlib.suppress(OSError):
+        # Seed a sane winsize before the child execs so tmux doesn't default to 0x0; the browser's
+        # first resize (TerminalHost.resize) overrides it once the WebSocket is open.
+        rows, cols = _DEFAULT_PTY_SIZE
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     try:
         # argv is a fixed Sequence[str], never a shell string -- the B2 no-injection posture.
+        # The PTY slave is the child's explicit stdio (stdin/out/err) -- never the inherited MCP stdio
+        # pipe (the subprocess-hygiene guard, GitHub #49). os.login_tty then makes that slave the child's
+        # controlling terminal (setsid + TIOCSCTTY); without it tmux has no /dev/tty to size against and
+        # stays stuck at 80x24, ignoring every resize. pass_fds keeps slave_fd open past close_fds so
+        # login_tty can re-claim it. The preexec_fn body is async-signal-safe syscalls only
+        # (setsid/ioctl/dup2) and the spawn runs off the JSON-RPC threads, so PLW1509 is moot here.
         proc = subprocess.Popen(
             list(argv),
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
+            preexec_fn=lambda: os.login_tty(slave_fd),  # noqa: PLW1509 -- async-signal-safe; canonical PTY pattern
+            pass_fds=(slave_fd,),
             cwd=str(cwd),
-            start_new_session=True,
             close_fds=True,
         )
     except BaseException:

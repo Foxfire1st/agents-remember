@@ -18,6 +18,7 @@ class FakeSocket {
   closed = false;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: (() => void) | null = null;
+  onopen: (() => void) | null = null;
 
   constructor(public url: string) {}
 
@@ -36,6 +37,9 @@ class FakeSocket {
   }
   fireClose(): void {
     this.onclose?.();
+  }
+  fireOpen(): void {
+    this.onopen?.();
   }
 }
 
@@ -126,6 +130,19 @@ describe("connectTerminal", () => {
     socket.readyState = 0; // CONNECTING
     conn.sendInput("x");
     expect(socket.sent).toEqual([]);
+  });
+
+  it("flushes the latest resize once the socket opens (the handshake race)", () => {
+    const s = sink();
+    const { conn, socket } = connect(s);
+    socket.readyState = 0; // CONNECTING — the first fit() runs before the handshake completes
+    conn.sendResize(100, 30);
+    conn.sendResize(120, 40); // a later fit supersedes the earlier size
+    expect(socket.sent).toEqual([]); // both dropped while connecting
+    socket.readyState = 1; // OPEN
+    socket.fireOpen();
+    // Only the latest size is replayed, so the PTY winsize syncs to the final fitted xterm.
+    expect(socket.sent).toEqual([JSON.stringify({ type: "resize", cols: 120, rows: 40 })]);
   });
 
   it("ends the session once on an exit frame (close does not double-fire)", () => {

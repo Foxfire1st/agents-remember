@@ -73,7 +73,6 @@ export function Terminal({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(node);
-    fit.fit();
 
     const conn = connectTerminal(
       sessionId,
@@ -86,15 +85,29 @@ export function Terminal({
     onConnRef.current?.(conn);
 
     const dataSub = term.onData((data) => conn.sendInput(data));
-    const pushResize = () => {
+    // Fit to the host + keep the PTY winsize in lockstep (the one known Mode B2 risk). A single fit
+    // at mount sticks at the wrong size because the flex layout + the mono web font settle *after*
+    // this effect runs — so re-fit on the next frame and once `document.fonts` is ready, on top of
+    // the ResizeObserver that catches every later container change.
+    const refit = () => {
+      // Skip while the host is hidden (display:none on a view switch → 0×0): fitting to 0 would ship
+      // a degenerate winsize and collapse the running app's layout. The ResizeObserver re-fits on show.
+      if (!node.clientWidth || !node.clientHeight) return;
       fit.fit();
-      conn.sendResize(term.cols, term.rows); // the one known risk: keep the PTY winsize in lockstep
+      conn.sendResize(term.cols, term.rows);
     };
-    pushResize();
-    const observer = new ResizeObserver(pushResize);
+    refit();
+    let alive = true;
+    const raf = requestAnimationFrame(refit);
+    void document.fonts.ready.then(() => {
+      if (alive) refit();
+    });
+    const observer = new ResizeObserver(refit);
     observer.observe(node);
 
     return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
       onConnRef.current?.(null);
       observer.disconnect();
       dataSub.dispose();
