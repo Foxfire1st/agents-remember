@@ -308,7 +308,7 @@ export interface EngineProcessNode {
   retryArgs?: Record<string, unknown>;
   providers: ProviderBootNode[];
   edges: EngineProcessEdge[];
-  landing: LandingRefNode[]; // the successful-landing arc (slice 5h); empty until closeout/integration
+  landing?: LandingRefNode[]; // the successful-landing arc (slice 5h); absent in pre-5h/persisted projections, empty until closeout/integration
   actions: ActionAvailability[];
   nextAction?: string; // the lifecycle-guidance next operation (display/copy only until slice 06)
   summary: string;

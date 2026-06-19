@@ -75,6 +75,16 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
     expect(queryByTestId("closeout-train")).toBeNull();
     expect(queryByTestId("lane-landing-source")).toBeNull();
   });
+
+  it("renders without crashing when the projection node omits the landing arc (pre-5h/persisted data)", () => {
+    // A projection produced before the slice-5h `landing` field omits it entirely (not []); the
+    // canvas must degrade to no landing-source flag, never throw on `node.landing.find`.
+    const node = { ...nodeFrom("engine-landing-ffonly") };
+    delete (node as { landing?: unknown }).landing;
+    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={node} />);
+    expect(getByTestId("enclosure-canvas")).not.toBeNull();
+    expect(queryByTestId("lane-landing-source")).toBeNull();
+  });
 });
 
 describe("EnclosureCanvas — ledger coupler (5h coupler fix)", () => {

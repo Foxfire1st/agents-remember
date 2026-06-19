@@ -593,8 +593,8 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   // T14 — the official source line advances to its landing tip (read from the landing arc's source ref:
   // origin/main if the PR resolved it, else origin/<feat>). Only while a landing strategy is recorded.
   const landingSource =
-    node.landing.find((ref) => ref.kind === "origin-main") ??
-    node.landing.find((ref) => ref.kind === "origin-feat");
+    node.landing?.find((ref) => ref.kind === "origin-main") ??
+    node.landing?.find((ref) => ref.kind === "origin-feat");
   return (
     <svg
       className={sceneSvg}
