@@ -994,18 +994,42 @@ export const closeoutBeatLabel = css({ fill: "token(colors.mint)", fontSize: "9.
 // amber (observed, in-flight), `done` = mint (a landed tip/merge/push — colour parity with the
 // green-active engine + closeout-done palette). The fill/stroke transition is the only motion (a
 // projection state flip), frozen to the settled end-state under html[data-effects=off] (index.css).
+// The strip header + the wiring between chips. Chips are sized + typed as peers of the branch nodes so
+// they read at the same scale; the connectors give the landing chain a visible path (solid amber for the
+// code refs feat→PR→main, dashed for the code→memory carryover handoff — "memory after").
+export const remoteStripHeader = css({
+  fill: "token(colors.muted)",
+  fontSize: "12.5px",
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+});
+export const remoteConnector = css({
+  fill: "none",
+  stroke: "token(colors.amber)",
+  strokeWidth: "2",
+  opacity: "0.8",
+  strokeLinecap: "round",
+});
+export const remoteConnectorCarry = css({
+  fill: "none",
+  stroke: "token(colors.muted)",
+  strokeWidth: "2",
+  opacity: "0.6",
+  strokeDasharray: "5 5",
+  strokeLinecap: "round",
+});
 export const remoteChip = cva({
-  base: { strokeWidth: "1.1", transition: "fill 0.4s ease, stroke 0.4s ease" },
+  base: { strokeWidth: "1.4", transition: "fill 0.4s ease, stroke 0.4s ease" },
   variants: {
     tone: {
-      planned: { fill: "none", stroke: "token(colors.muted)", strokeDasharray: "3 4", opacity: "0.6" },
+      planned: { fill: "token(colors.bgPanel)", stroke: "token(colors.muted)", strokeDasharray: "4 5", opacity: "0.8" },
       live: { fill: "token(colors.bgPanel)", stroke: "token(colors.amber)" },
       done: { fill: "oklch(0.24 0.04 160)", stroke: "token(colors.mint)" },
     },
   },
 });
 export const remoteChipLabel = cva({
-  base: { fontSize: "10.5px", letterSpacing: "0.02em", fontWeight: "600" },
+  base: { fontSize: "15px", letterSpacing: "0.02em", fontWeight: "600" },
   variants: {
     tone: {
       planned: { fill: "token(colors.muted)" },
@@ -1015,7 +1039,7 @@ export const remoteChipLabel = cva({
   },
 });
 export const remoteChipState = cva({
-  base: { fontSize: "9px", letterSpacing: "0.02em" },
+  base: { fontSize: "12px", letterSpacing: "0.02em" },
   variants: {
     tone: {
       planned: { fill: "token(colors.muted)", fontStyle: "italic" },
@@ -1028,20 +1052,29 @@ export const remoteChipState = cva({
 // The PR badge — a distinct pill among the remote refs. open = amber outline (not yet merged);
 // merged = mint-filled "merged". Never animated as live until observed (honest-motion §4).
 export const prBadge = cva({
-  base: { strokeWidth: "1.3", transition: "fill 0.4s ease, stroke 0.4s ease" },
+  base: { strokeWidth: "1.5", transition: "fill 0.4s ease, stroke 0.4s ease" },
   variants: {
     state: {
-      open: { fill: "none", stroke: "token(colors.amber)" },
+      open: { fill: "token(colors.bgPanel)", stroke: "token(colors.amber)" },
       merged: { fill: "oklch(0.24 0.04 160)", stroke: "token(colors.mint)" },
     },
   },
 });
 export const prBadgeLabel = cva({
-  base: { fontSize: "9.5px", letterSpacing: "0.03em", fontWeight: "600" },
+  base: { fontSize: "14px", letterSpacing: "0.03em", fontWeight: "600" },
   variants: {
     state: {
       open: { fill: "token(colors.amber)" },
       merged: { fill: "token(colors.mint)" },
+    },
+  },
+});
+export const prBadgeSub = cva({
+  base: { fontSize: "12px", letterSpacing: "0.02em" },
+  variants: {
+    state: {
+      open: { fill: "token(colors.muted)" },
+      merged: { fill: "token(colors.mint)", opacity: "0.85" },
     },
   },
 });

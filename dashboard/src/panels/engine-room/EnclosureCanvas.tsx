@@ -59,12 +59,16 @@ import {
   officialWire,
   prBadge,
   prBadgeLabel,
+  prBadgeSub,
   reasonBadge,
   reasonDot,
   reasonText,
   remoteChip,
   remoteChipLabel,
   remoteChipState,
+  remoteConnector,
+  remoteConnectorCarry,
+  remoteStripHeader,
   sceneSvg,
   stopBar,
   stopText,
@@ -556,12 +560,12 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
 // PR → main; memory after: mem-main) regardless of feed order, so the governed sequence reads in a
 // single frozen frame: mem-main stays dashed/"planned" until the code PR merges, then settles done.
 const REMOTE_ORDER = ["origin-feat", "pr", "origin-main", "origin-mem-main"] as const;
-const REMOTE_X = 150;
-const REMOTE_Y = 62;
-const REMOTE_W = 116;
-const REMOTE_H = 34;
-const REMOTE_GAP = 14; // breathing room between chips
-const REMOTE_GROUP_GAP = 14; // extra gap before origin/mem-main — sets the memory landing (T16) apart from the code group (T15)
+const REMOTE_X = 250;
+const REMOTE_Y = 56;
+const REMOTE_W = 168; // chip width — a peer of the 180-wide branch nodes, so the label reads at the same scale
+const REMOTE_H = 46; // two comfortable text lines (label + state), not two cramped ones
+const REMOTE_GAP = 30; // breathing room + the connector run between chips
+const REMOTE_GROUP_GAP = 36; // extra gap before origin/mem-main — the code→memory carryover handoff (T16)
 // The strip is the SUCCESSFUL-LANDING arc — it shows only while an enclosure is actually retiring to the
 // official line (closeout → integration → cleanup), not for every live worktree the probe touched.
 const LANDING_PHASES = new Set(["closeout-pending", "integration-pending", "cleanup-pending"]);
@@ -573,16 +577,24 @@ function remoteTone(ref: LandingRefNode): RemoteTone {
   return "live";
 }
 
+// One short status word per chip — the colour already carries the tone, so the line stays terse and
+// always fits; the full ref + detail lives in the hover <title>.
+function remoteStateWord(ref: LandingRefNode): string {
+  if (ref.factState === "planned" || ref.state === "planned") return "planned";
+  return ref.state || "—";
+}
+
 function RemoteChip({ x, refNode }: { x: number; refNode: LandingRefNode }) {
   const tone = remoteTone(refNode);
   return (
     <g data-testid="remote-chip" data-kind={refNode.kind} data-tone={tone}>
-      <rect className={remoteChip({ tone })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={6} />
-      <text className={remoteChipLabel({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 14} textAnchor="middle">
-        {truncate(refNode.label, 16)}
+      <title>{`${refNode.label} · ${refNode.detail ?? refNode.state}`}</title>
+      <rect className={remoteChip({ tone })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={7} />
+      <text className={remoteChipLabel({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 20} textAnchor="middle">
+        {truncate(refNode.label, 18)}
       </text>
-      <text className={remoteChipState({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 26} textAnchor="middle">
-        {truncate(refNode.detail ?? refNode.state, 18)}
+      <text className={remoteChipState({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 37} textAnchor="middle">
+        {truncate(remoteStateWord(refNode), 18)}
       </text>
     </g>
   );
@@ -593,12 +605,13 @@ function PrBadge({ x, refNode }: { x: number; refNode: LandingRefNode }) {
   const sub = state === "merged" ? "merged" : refNode.state;
   return (
     <g data-testid="pr-badge" data-state={state}>
+      <title>{refNode.detail ? `${refNode.label} · ${sub} · ${refNode.detail}` : `${refNode.label} · ${sub}`}</title>
       <rect className={prBadge({ state })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={REMOTE_H / 2} />
-      <text className={prBadgeLabel({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 14} textAnchor="middle">
+      <text className={prBadgeLabel({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 20} textAnchor="middle">
         {truncate(refNode.label, 16)}
       </text>
-      <text className={prBadgeLabel({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 26} textAnchor="middle">
-        {refNode.detail ? `${sub} · ${truncate(refNode.detail, 13)}` : sub}
+      <text className={prBadgeSub({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 37} textAnchor="middle">
+        {truncate(sub, 18)}
       </text>
     </g>
   );
@@ -609,17 +622,36 @@ function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
     (ref): ref is LandingRefNode => Boolean(ref),
   );
   if (!ordered.length) return null;
+  const xOf = (i: number) =>
+    REMOTE_X + i * (REMOTE_W + REMOTE_GAP) + (ordered[i].kind === "origin-mem-main" ? REMOTE_GROUP_GAP : 0);
+  const midY = REMOTE_Y + REMOTE_H / 2;
+  // Centre the header in the clear gap between the OFFICIAL LINE / WORKTREE ENCLOSURE corner labels.
+  const headerX = (REMOTE_X + xOf(ordered.length - 1) + REMOTE_W) / 2;
   return (
     <g data-testid="remote-strip">
-      <text className={closeoutTrainLabel} x={REMOTE_X} y={REMOTE_Y - 12}>remote ▸ landing</text>
-      {ordered.map((ref, i) => {
-        const x = REMOTE_X + i * (REMOTE_W + REMOTE_GAP) + (ref.kind === "origin-mem-main" ? REMOTE_GROUP_GAP : 0);
-        return ref.kind === "pr" ? (
-          <PrBadge key={ref.kind} x={x} refNode={ref} />
+      <text className={remoteStripHeader} x={headerX} y={REMOTE_Y - 14} textAnchor="middle">
+        remote ▸ landing
+      </text>
+      {/* connectors under the chips: solid amber wires the code chain (feat→PR→main), dashed for the
+          code→memory carryover handoff into origin/mem-main */}
+      {ordered.slice(1).map((ref, i) => (
+        <line
+          key={`conn-${ref.kind}`}
+          data-testid="remote-connector"
+          className={ref.kind === "origin-mem-main" ? remoteConnectorCarry : remoteConnector}
+          x1={xOf(i) + REMOTE_W}
+          y1={midY}
+          x2={xOf(i + 1)}
+          y2={midY}
+        />
+      ))}
+      {ordered.map((ref, i) =>
+        ref.kind === "pr" ? (
+          <PrBadge key={ref.kind} x={xOf(i)} refNode={ref} />
         ) : (
-          <RemoteChip key={ref.kind} x={x} refNode={ref} />
-        );
-      })}
+          <RemoteChip key={ref.kind} x={xOf(i)} refNode={ref} />
+        ),
+      )}
     </g>
   );
 }
