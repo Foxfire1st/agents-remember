@@ -4,7 +4,7 @@ import { Terminal as XtermTerminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
 import { css } from "../../styled-system/css";
-import { connectTerminal, TerminalSocketContext } from "../data/terminal";
+import { connectTerminal, TerminalSocketContext, type TerminalConnection } from "../data/terminal";
 
 // The imperative xterm.js terminal (slice 6e): a render-not-scrape view of the 6d PTY stream.
 // xterm is a DOM/canvas emulator (it cannot mount under jsdom), so — like the topology canvas — it
@@ -44,9 +44,20 @@ function cursorShouldBlink(): boolean {
   return typeof document === "undefined" || document.documentElement.dataset.effects !== "off";
 }
 
-export function Terminal({ sessionId }: { sessionId: string }) {
+export function Terminal({
+  sessionId,
+  onConnection,
+}: {
+  sessionId: string;
+  onConnection?: (conn: TerminalConnection | null) => void;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const socketFactory = useContext(TerminalSocketContext);
+  // Hand the live connection up to the parent (Chats) so the context composer (6e-3) can inject into
+  // this session's stdin. Held in a ref so a changing callback identity never re-runs the effect
+  // (which would tear down + reconnect the terminal).
+  const onConnRef = useRef(onConnection);
+  onConnRef.current = onConnection;
 
   useEffect(() => {
     const node = hostRef.current;
@@ -72,6 +83,7 @@ export function Terminal({ sessionId }: { sessionId: string }) {
       },
       socketFactory ? { socketFactory } : {},
     );
+    onConnRef.current?.(conn);
 
     const dataSub = term.onData((data) => conn.sendInput(data));
     const pushResize = () => {
@@ -83,6 +95,7 @@ export function Terminal({ sessionId }: { sessionId: string }) {
     observer.observe(node);
 
     return () => {
+      onConnRef.current?.(null);
       observer.disconnect();
       dataSub.dispose();
       conn.dispose();

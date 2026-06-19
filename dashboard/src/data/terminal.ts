@@ -55,6 +55,15 @@ export function parseTerminalControl(text: string): "exit" | null {
 }
 
 /**
+ * Wrap text as a terminal **bracketed paste** (`ESC[200~ … ESC[201~`) so a TUI (Claude Code / Codex)
+ * treats injected context as one paste, not line-by-line typed input (slice 6e-3 context injection).
+ * Pure — unit-tested. Typed keystrokes (xterm `onData`) stay raw; only composer injection is wrapped.
+ */
+export function bracketedPaste(text: string): string {
+  return `\x1b[200~${text}\x1b[201~`;
+}
+
+/**
  * Open a WebSocket to the 6d bridge and pump it into `sink`. **Binary** frames are raw PTY bytes
  * (written verbatim — the VT stream xterm renders); a `{type:"exit"}` text frame or a socket close
  * ends the session exactly once. The returned handle emits the `{type:stdin|resize}` text frames

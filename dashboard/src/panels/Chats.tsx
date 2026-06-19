@@ -1,7 +1,14 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { css } from "../../styled-system/css";
-import { fetchHarnesses, openTerminalSession, type HarnessInfo } from "../data/terminal";
+import {
+  bracketedPaste,
+  fetchHarnesses,
+  openTerminalSession,
+  type HarnessInfo,
+  type TerminalConnection,
+} from "../data/terminal";
+import { SessionComposer } from "./SessionComposer";
 import { SessionList, type OpenSession } from "./SessionList";
 
 // xterm.js is heavy and probes the canvas on import, so the terminal is code-split and only pulled
@@ -14,7 +21,8 @@ const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: mo
 // terminal attaches over the 6d WebSocket — the dashboard owns the session it created. Per-harness
 // launch buttons (slice 6e-2b) sit beside ＋ Terminal — one per *detected* harness (Claude Code /
 // Codex / Pi.dev), launching that agent at the workspace root. Open sessions live in a left-rail
-// switcher (slice 6e-2c, `SessionList`); selecting one drives the terminal beside it.
+// switcher (slice 6e-2c, `SessionList`); the context composer (slice 6e-3) injects text into the
+// active session's stdin.
 
 // Placeholder monograms (swap for real brand glyphs later) — distinct two-letter marks so Claude
 // Code and Codex don't both collapse to "C".
@@ -73,7 +81,14 @@ const sidebar = css({
   borderRightColor: "grid",
   paddingRight: "0.4rem",
 });
-const terminalArea = css({ display: "flex", flex: "1", minWidth: "0", minHeight: "0" });
+const terminalArea = css({
+  display: "flex",
+  flexDirection: "column",
+  flex: "1",
+  minWidth: "0",
+  minHeight: "0",
+  gap: "0.4rem",
+});
 const empty = css({
   display: "flex",
   flex: "1",
@@ -109,6 +124,9 @@ export function Chats() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [count, setCount] = useState(0);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  // The active session's live terminal connection (set by <Terminal onConnection>), so the context
+  // composer can inject into its stdin without re-rendering on every keystroke.
+  const activeConn = useRef<TerminalConnection | null>(null);
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
   // only for detected ones. `[]` (no backend / failure) just leaves ＋ Terminal alone.
@@ -176,9 +194,18 @@ export function Chats() {
         )}
         <div className={terminalArea}>
           {activeId ? (
-            <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
-              <Terminal key={activeId} sessionId={activeId} />
-            </Suspense>
+            <>
+              <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
+                <Terminal
+                  key={activeId}
+                  sessionId={activeId}
+                  onConnection={(conn) => {
+                    activeConn.current = conn;
+                  }}
+                />
+              </Suspense>
+              <SessionComposer onSend={(text) => activeConn.current?.sendInput(bracketedPaste(text))} />
+            </>
           ) : (
             <div className={empty}>
               ＋ Terminal opens a shell the dashboard owns; harness buttons launch a supported agent —

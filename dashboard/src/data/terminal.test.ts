@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  bracketedPaste,
   connectTerminal,
   fetchHarnesses,
   openTerminalSession,
@@ -86,6 +87,15 @@ describe("parseTerminalControl", () => {
     expect(parseTerminalControl(JSON.stringify({ type: "other" }))).toBeNull();
     expect(parseTerminalControl("not json{")).toBeNull();
     expect(parseTerminalControl("[1,2]")).toBeNull();
+  });
+});
+
+describe("bracketedPaste", () => {
+  it("wraps text in the bracketed-paste markers so a TUI treats it as one paste", () => {
+    expect(bracketedPaste("hello")).toBe("\x1b[200~hello\x1b[201~");
+  });
+  it("preserves multi-line content verbatim between the markers", () => {
+    expect(bracketedPaste("a\nb")).toBe("\x1b[200~a\nb\x1b[201~");
   });
 });
 
