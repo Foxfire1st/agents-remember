@@ -153,22 +153,6 @@ def write_benchmark_mcp_registration(
     return mcp_settings_path, agents_config_path
 
 
-def default_cgc_seed_source_coordination_root(
-    benchmarks_root: Path, target_coordination_root: Path
-) -> Path | None:
-    candidates: list[Path] = [benchmarks_root.parent]
-
-    seen: set[Path] = set()
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved in seen or resolved == target_coordination_root.resolve():
-            continue
-        seen.add(resolved)
-        if (resolved / "providers" / "runners" / "codegraphcontext").is_dir():
-            return resolved
-    return None
-
-
 def benchmark_mcp_config(
     *,
     case: BenchmarkCase,
@@ -255,9 +239,6 @@ def prepare_configured_providers(
     provider_timeout: int,
     *,
     provider_ids: tuple[str, ...],
-    cgc_seed_source_coordination_root: Path | None,
-    cgc_seed_repo_id: str,
-    provider_seed_source_settings_path: Path | None = None,
 ) -> None:
     if not provider_ids:
         if dry_run:
@@ -280,24 +261,10 @@ def prepare_configured_providers(
             f"{coordination_root} with generated settings {settings_path}"
         )
     try:
-        cgc_seed = provider_setup.CgcSeedOptions()
-        if (
-            "codegraphcontext-code" in provider_ids
-            and cgc_seed_source_coordination_root is not None
-        ):
-            cgc_seed = provider_setup.CgcSeedOptions(
-                source_coordination_root=cgc_seed_source_coordination_root,
-                source_settings_path=provider_seed_source_settings_path,
-                repo_id=cgc_seed_repo_id,
-            )
-        grepai_seed = provider_setup.GrepaiSeedOptions()
-        if "grepai-memory" in provider_ids and cgc_seed_source_coordination_root is not None:
-            grepai_seed = provider_setup.GrepaiSeedOptions(
-                source_coordination_root=cgc_seed_source_coordination_root,
-                source_settings_path=provider_seed_source_settings_path,
-                project_id=cgc_seed_repo_id,
-                target_memory_root=memory_repo,
-            )
+        # Hermetic-cold: a benchmark indexes its own pinned fixture from scratch and never
+        # seeds from another coordination root. Seeding from the live workspace started the
+        # live backends as a clone source and cascaded a full re-embed across main + every
+        # worktree, so no seed options are wired here.
         payload = provider_setup.run_provider_setup(
             provider_setup.ProviderSetupRequest(
                 action="prepare",
@@ -305,8 +272,6 @@ def prepare_configured_providers(
                 settings_path=settings_path,
                 timeout=provider_timeout,
                 dry_run=dry_run,
-                cgc_seed=cgc_seed,
-                grepai_seed=grepai_seed,
             )
         )
     finally:

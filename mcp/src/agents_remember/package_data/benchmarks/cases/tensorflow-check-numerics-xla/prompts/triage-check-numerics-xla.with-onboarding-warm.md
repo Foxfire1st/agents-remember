@@ -28,9 +28,10 @@ complete the primary task in one final answer.
 
 Constraints:
 - Do not edit source files.
-- Do not run C-02 drift detection.
-- Do not run the C-08 resolver CLI.
 - Do not final-answer with only setup or memory-status notes.
+- Follow the active benchmark-local Agents Remember workflow from
+  `ar-coordination/AGENTS.md` normally, using the available MCP and provider
+  tools when that workflow calls for them.
 - Do read relevant benchmark-local onboarding files alongside the source files
   they describe.
 - Use the benchmark-local memory repo only; do not use any parent workspace

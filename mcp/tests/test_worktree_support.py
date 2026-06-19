@@ -2523,7 +2523,6 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             ) -> dict[str, object]:
                 captured["settings_path"] = request.settings_path
                 captured["settings"] = json.loads(request.settings_path.read_text(encoding="utf-8"))
-                captured["cgc_seed_repo_id"] = request.cgc_seed.repo_id
                 return {"ok": True}
 
             with mock.patch.object(
@@ -2539,8 +2538,6 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     dry_run=False,
                     provider_timeout=1,
                     provider_ids=("codegraphcontext-code",),
-                    cgc_seed_source_coordination_root=root / "source-coordination",
-                    cgc_seed_repo_id="repo-a",
                 )
 
             self.assertEqual(run_provider_setup.call_count, 1)
@@ -2553,14 +2550,11 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 "codegraphcontext-code",
                 settings["contextProviders"]["providers"],
             )
-            self.assertEqual(captured["cgc_seed_repo_id"], "repo-a")
 
-    def test_benchmark_provider_setup_seeds_grepai_from_source_provider(self) -> None:
+    def test_benchmark_provider_setup_is_hermetic_no_seed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             coordination_root = root / "ar-coordination"
-            source_coordination_root = root / "source-coordination"
-            source_settings_path = root / "source-provider-settings.json"
             source_repo = root / "repos" / "repo-a"
             memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
             source_repo.mkdir(parents=True)
@@ -2579,9 +2573,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 request: benchmark_runner.provider_setup.ProviderSetupRequest,
             ) -> dict[str, object]:
                 captured["grepai_seed_source"] = request.grepai_seed.source_coordination_root
-                captured["grepai_seed_source_settings"] = request.grepai_seed.source_settings_path
-                captured["grepai_seed_project"] = request.grepai_seed.project_id
-                captured["grepai_target_memory"] = request.grepai_seed.target_memory_root
+                captured["cgc_seed_source"] = request.cgc_seed.source_coordination_root
                 return {"ok": True}
 
             with mock.patch.object(
@@ -2596,16 +2588,12 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     memory_repo,
                     dry_run=False,
                     provider_timeout=1,
-                    provider_ids=("grepai-memory",),
-                    cgc_seed_source_coordination_root=source_coordination_root,
-                    cgc_seed_repo_id="repo-a",
-                    provider_seed_source_settings_path=source_settings_path,
+                    provider_ids=("grepai-memory", "codegraphcontext-code"),
                 )
 
-            self.assertEqual(captured["grepai_seed_source"], source_coordination_root)
-            self.assertEqual(captured["grepai_seed_source_settings"], source_settings_path)
-            self.assertEqual(captured["grepai_seed_project"], "repo-a")
-            self.assertEqual(captured["grepai_target_memory"], memory_repo)
+            # Hermetic-cold: the benchmark wires no seed source for either provider.
+            self.assertIsNone(captured["grepai_seed_source"])
+            self.assertIsNone(captured["cgc_seed_source"])
 
     def test_benchmark_prepare_writes_workspace_mcp_registration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2704,6 +2692,62 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
         )
         self.assertEqual(policy["sandbox"], "default")
         self.assertEqual(policy["sandboxArgument"], "omitted")
+
+    def test_codex_command_forwards_benchmark_mcp_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            codex_root = workspace / ".codex"
+            codex_root.mkdir(parents=True)
+            (codex_root / "config.toml").write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.agents_remember_benchmark]",
+                        'command = "/tmp/python"',
+                        'args = ["-m", "agents_remember.mcp", "--config", "/tmp/settings.json"]',
+                        "startup_timeout_sec = 120",
+                        "",
+                        "[mcp_servers.agents_remember_benchmark.env]",
+                        'PYTHONIOENCODING = "utf-8"',
+                        'PYTHONPATH = "/tmp/mcp/src"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
+            ):
+                command = benchmark_runner.codex_command(
+                    workspace,
+                    root / "final.md",
+                    codex_sandbox=benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
+                )
+
+        config_overrides = [
+            command[index + 1] for index, value in enumerate(command) if value == "-c"
+        ]
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.command="/tmp/python"',
+            config_overrides,
+        )
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.args=["-m","agents_remember.mcp","--config","/tmp/settings.json"]',
+            config_overrides,
+        )
+        self.assertIn(
+            "mcp_servers.agents_remember_benchmark.startup_timeout_sec=120",
+            config_overrides,
+        )
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.env.PYTHONIOENCODING="utf-8"',
+            config_overrides,
+        )
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.env.PYTHONPATH="/tmp/mcp/src"',
+            config_overrides,
+        )
 
     def test_codex_run_metadata_records_benchmark_host_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

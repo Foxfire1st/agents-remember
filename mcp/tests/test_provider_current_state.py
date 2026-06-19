@@ -229,6 +229,40 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertEqual(diagnostics["currentState"]["state"], "ready")
             self.assertNotIn("lastSetup", diagnostics["currentState"])
 
+    def test_provider_status_summarizes_structured_cgc_last_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            status = ready_status_payload(root)
+            cgc = next(
+                result for result in status["results"] if result["provider"] == "codegraphcontext"
+            )
+            cgc["results"][0]["lastRefresh"] = {
+                "returncode": 130,
+                "durationSeconds": 397.447,
+                "updatedAt": "2026-06-19T05:09:28Z",
+            }
+
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=status,
+            ):
+                packet = provider_status.provider_status_packet(config)
+
+            cgc_item = next(
+                item
+                for item in packet["providers"]["items"]
+                if item["id"] == "codegraphcontext-code"
+            )
+            watcher = cgc_item["watchers"][0]
+            self.assertEqual(
+                watcher["lastRefresh"],
+                "2026-06-19T05:09:28Z returncode=130 durationSeconds=397.447",
+            )
+
     def test_current_state_degrades_cgc_repo_with_empty_graph(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

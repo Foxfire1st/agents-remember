@@ -15,7 +15,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import provider_setup
+from agents_remember.providers.cgc import seed as cgc_seed
 from agents_remember.providers.context_common import to_container_path
+from agents_remember.providers.grepai import seed as grepai_seed
 from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.setup_progress import SetupProgress
 
@@ -848,6 +850,45 @@ class ProviderSetupTests(unittest.TestCase):
         self.assertEqual(captured["env"]["PYTHONUTF8"], "1")
         self.assertEqual(captured["env"]["PYTHONIOENCODING"], "utf-8")
         self.assertIs(captured["stdin"], provider_setup.subprocess.DEVNULL)
+
+
+class BenchmarkSeedGuardTests(unittest.TestCase):
+    """A benchmark-scoped provider target must never seed/clone (hermetic)."""
+
+    @staticmethod
+    def _benchmark_target_settings(provider_id: str) -> dict[str, object]:
+        return {
+            "contextProviders": {
+                "enabled": True,
+                "providers": {
+                    provider_id: {"enabled": True, "instance": {"scope": "benchmark"}},
+                },
+            }
+        }
+
+    def test_grepai_clone_refuses_benchmark_scoped_target(self) -> None:
+        args = argparse.Namespace(
+            grepai_seed_source_coordination_root=Path("/live/ar-coordination"),
+            coordination_root=Path("/bench/ar-coordination"),
+        )
+        result = grepai_seed._resolve_clone_context(
+            args, self._benchmark_target_settings("grepai-memory")
+        )
+        assert isinstance(result, dict)  # guard returns a skip mapping, not a clone context
+        self.assertTrue(result.get("skipped"))
+        self.assertIn("hermetic", result.get("reason", ""))
+
+    def test_cgc_seed_refuses_benchmark_scoped_target(self) -> None:
+        args = argparse.Namespace(
+            cgc_seed_source_coordination_root=Path("/live/ar-coordination"),
+            coordination_root=Path("/bench/ar-coordination"),
+        )
+        result = cgc_seed._resolve_seed_context(
+            args, self._benchmark_target_settings("codegraphcontext-code")
+        )
+        assert isinstance(result, dict)  # guard returns a skip mapping, not a seed context
+        self.assertTrue(result.get("skipped"))
+        self.assertIn("hermetic", result.get("reason", ""))
 
 
 if __name__ == "__main__":
