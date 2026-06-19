@@ -986,6 +986,66 @@ export const closeoutBeat = css({
 });
 export const closeoutBeatLabel = css({ fill: "token(colors.mint)", fontSize: "9.5px", letterSpacing: "0.02em" });
 
+// --- 5h H3: the remote/PR strip beyond the official line (T15 code PR+push, T16 carryover) --------
+// The upstream the official line reports into — origin/<feat>, the PR, origin/main, origin/mem-main —
+// read left→right in the governed order: code lands first (feat → PR → main), memory carries over
+// AFTER (mem-main). Each ref is a state chip honest to its factState: `planned` = dashed/muted
+// ("expected, not yet"; the PR is never shown live until observed — honest-motion §4), `live` = solid
+// amber (observed, in-flight), `done` = mint (a landed tip/merge/push — colour parity with the
+// green-active engine + closeout-done palette). The fill/stroke transition is the only motion (a
+// projection state flip), frozen to the settled end-state under html[data-effects=off] (index.css).
+export const remoteChip = cva({
+  base: { strokeWidth: "1.1", transition: "fill 0.4s ease, stroke 0.4s ease" },
+  variants: {
+    tone: {
+      planned: { fill: "none", stroke: "token(colors.muted)", strokeDasharray: "3 4", opacity: "0.6" },
+      live: { fill: "token(colors.bgPanel)", stroke: "token(colors.amber)" },
+      done: { fill: "oklch(0.24 0.04 160)", stroke: "token(colors.mint)" },
+    },
+  },
+});
+export const remoteChipLabel = cva({
+  base: { fontSize: "10.5px", letterSpacing: "0.02em", fontWeight: "600" },
+  variants: {
+    tone: {
+      planned: { fill: "token(colors.muted)" },
+      live: { fill: "token(colors.amber)" },
+      done: { fill: "token(colors.mint)" },
+    },
+  },
+});
+export const remoteChipState = cva({
+  base: { fontSize: "9px", letterSpacing: "0.02em" },
+  variants: {
+    tone: {
+      planned: { fill: "token(colors.muted)", fontStyle: "italic" },
+      live: { fill: "token(colors.muted)" },
+      done: { fill: "token(colors.mint)", opacity: "0.85" },
+    },
+  },
+});
+
+// The PR badge — a distinct pill among the remote refs. open = amber outline (not yet merged);
+// merged = mint-filled "merged". Never animated as live until observed (honest-motion §4).
+export const prBadge = cva({
+  base: { strokeWidth: "1.3", transition: "fill 0.4s ease, stroke 0.4s ease" },
+  variants: {
+    state: {
+      open: { fill: "none", stroke: "token(colors.amber)" },
+      merged: { fill: "oklch(0.24 0.04 160)", stroke: "token(colors.mint)" },
+    },
+  },
+});
+export const prBadgeLabel = cva({
+  base: { fontSize: "9.5px", letterSpacing: "0.03em", fontWeight: "600" },
+  variants: {
+    state: {
+      open: { fill: "token(colors.amber)" },
+      merged: { fill: "token(colors.mint)" },
+    },
+  },
+});
+
 // --- G6: atmospheric blueprint backdrop (the faint amber-tinted boomerang) ----
 // Mounts behind the scene, gated to effects-on (useShouldAnimate) so it is absent + lazy under
 // reduced-motion / data-effects=off. aria-hidden + pointer-events:none — pure atmosphere, never state.

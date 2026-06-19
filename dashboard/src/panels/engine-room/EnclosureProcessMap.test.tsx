@@ -87,6 +87,46 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
   });
 });
 
+describe("EnclosureCanvas — remote/PR strip (5h H3)", () => {
+  const memChip = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-testid="remote-chip"]')].find(
+      (chip) => chip.getAttribute("data-kind") === "origin-mem-main",
+    );
+
+  it("renders the remote strip with origin/main and a PR badge once a landing arc exists", () => {
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-landing-ffonly")} />);
+    expect(getByTestId("remote-strip").textContent).toContain("origin/main");
+    expect(getByTestId("pr-badge").textContent).toContain("PR #128");
+  });
+
+  it("keeps origin/mem-main planned while the PR is open, done once merged — the D3→D4 order", () => {
+    const ff = render(<EnclosureProcessMap node={nodeFrom("engine-landing-ffonly")} />);
+    expect(memChip(ff.container)?.getAttribute("data-tone")).toBe("planned");
+    cleanup();
+    const merged = render(<EnclosureProcessMap node={nodeFrom("engine-landing-merged")} />);
+    expect(memChip(merged.container)?.getAttribute("data-tone")).toBe("done");
+  });
+
+  it("flips the PR badge from open to merged on the projection state", () => {
+    const ff = render(<EnclosureProcessMap node={nodeFrom("engine-landing-ffonly")} />);
+    expect(ff.getByTestId("pr-badge").getAttribute("data-state")).toBe("open");
+    cleanup();
+    const merged = render(<EnclosureProcessMap node={nodeFrom("engine-landing-merged")} />);
+    expect(merged.getByTestId("pr-badge").getAttribute("data-state")).toBe("merged");
+  });
+
+  it("omits the remote strip for a plain enclosure and never throws when landing is absent", () => {
+    const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    expect(queryByTestId("remote-strip")).toBeNull();
+    cleanup();
+    const node = { ...nodeFrom("engine-landing-ffonly") };
+    delete (node as { landing?: unknown }).landing;
+    const second = render(<EnclosureProcessMap node={node} />);
+    expect(second.getByTestId("enclosure-canvas")).not.toBeNull();
+    expect(second.queryByTestId("remote-strip")).toBeNull();
+  });
+});
+
 describe("EnclosureCanvas — ledger coupler (5h coupler fix)", () => {
   it("labels the coupler with its code⇄memory commit pair, not the contract", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);

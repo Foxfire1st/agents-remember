@@ -13,6 +13,7 @@ import type {
   CommitRefNode,
   EngineProcessEdge,
   EngineProcessNode,
+  LandingRefNode,
   LedgerNode,
   LedgerRefNode,
   ProviderNode,
@@ -56,9 +57,14 @@ import {
   ledgerShowMore,
   ledgerTable,
   officialWire,
+  prBadge,
+  prBadgeLabel,
   reasonBadge,
   reasonDot,
   reasonText,
+  remoteChip,
+  remoteChipLabel,
+  remoteChipState,
   sceneSvg,
   stopBar,
   stopText,
@@ -545,6 +551,79 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
   );
 }
 
+// --- 5h H3: remote/PR strip beyond the official line (T15 code PR+push, T16 carryover) -----------
+// The upstream the official line reports into. Rendered in canonical D3→D4 order (code first: feat →
+// PR → main; memory after: mem-main) regardless of feed order, so the governed sequence reads in a
+// single frozen frame: mem-main stays dashed/"planned" until the code PR merges, then settles done.
+const REMOTE_ORDER = ["origin-feat", "pr", "origin-main", "origin-mem-main"] as const;
+const REMOTE_X = 150;
+const REMOTE_Y = 62;
+const REMOTE_W = 116;
+const REMOTE_H = 34;
+const REMOTE_GAP = 14; // breathing room between chips
+const REMOTE_GROUP_GAP = 14; // extra gap before origin/mem-main — sets the memory landing (T16) apart from the code group (T15)
+// The strip is the SUCCESSFUL-LANDING arc — it shows only while an enclosure is actually retiring to the
+// official line (closeout → integration → cleanup), not for every live worktree the probe touched.
+const LANDING_PHASES = new Set(["closeout-pending", "integration-pending", "cleanup-pending"]);
+type RemoteTone = "planned" | "live" | "done";
+
+function remoteTone(ref: LandingRefNode): RemoteTone {
+  if (ref.factState === "planned" || ref.state === "planned") return "planned";
+  if (ref.state === "tip" || ref.state === "merged" || ref.state === "pushed") return "done";
+  return "live";
+}
+
+function RemoteChip({ x, refNode }: { x: number; refNode: LandingRefNode }) {
+  const tone = remoteTone(refNode);
+  return (
+    <g data-testid="remote-chip" data-kind={refNode.kind} data-tone={tone}>
+      <rect className={remoteChip({ tone })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={6} />
+      <text className={remoteChipLabel({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 14} textAnchor="middle">
+        {truncate(refNode.label, 16)}
+      </text>
+      <text className={remoteChipState({ tone })} x={x + REMOTE_W / 2} y={REMOTE_Y + 26} textAnchor="middle">
+        {truncate(refNode.detail ?? refNode.state, 18)}
+      </text>
+    </g>
+  );
+}
+
+function PrBadge({ x, refNode }: { x: number; refNode: LandingRefNode }) {
+  const state = refNode.state === "merged" ? "merged" : "open";
+  const sub = state === "merged" ? "merged" : refNode.state;
+  return (
+    <g data-testid="pr-badge" data-state={state}>
+      <rect className={prBadge({ state })} x={x} y={REMOTE_Y} width={REMOTE_W} height={REMOTE_H} rx={REMOTE_H / 2} />
+      <text className={prBadgeLabel({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 14} textAnchor="middle">
+        {truncate(refNode.label, 16)}
+      </text>
+      <text className={prBadgeLabel({ state })} x={x + REMOTE_W / 2} y={REMOTE_Y + 26} textAnchor="middle">
+        {refNode.detail ? `${sub} · ${truncate(refNode.detail, 13)}` : sub}
+      </text>
+    </g>
+  );
+}
+
+function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
+  const ordered = REMOTE_ORDER.map((kind) => refs.find((ref) => ref.kind === kind)).filter(
+    (ref): ref is LandingRefNode => Boolean(ref),
+  );
+  if (!ordered.length) return null;
+  return (
+    <g data-testid="remote-strip">
+      <text className={closeoutTrainLabel} x={REMOTE_X} y={REMOTE_Y - 12}>remote ▸ landing</text>
+      {ordered.map((ref, i) => {
+        const x = REMOTE_X + i * (REMOTE_W + REMOTE_GAP) + (ref.kind === "origin-mem-main" ? REMOTE_GROUP_GAP : 0);
+        return ref.kind === "pr" ? (
+          <PrBadge key={ref.kind} x={x} refNode={ref} />
+        ) : (
+          <RemoteChip key={ref.kind} x={x} refNode={ref} />
+        );
+      })}
+    </g>
+  );
+}
+
 export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }: {
   node: EngineProcessNode;
   workspaceEngines?: ProviderNode[];
@@ -595,6 +674,12 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   const landingSource =
     node.landing?.find((ref) => ref.kind === "origin-main") ??
     node.landing?.find((ref) => ref.kind === "origin-feat");
+  // 5h H3 — show the landing strip only while the enclosure is actually retiring to the official line,
+  // and only the refs the probe could resolve: a `missing` ref (probe couldn't run, e.g. gh absent)
+  // carries no signal and is dropped, never rendered as an "unknown" chip.
+  const landingRefs = (node.landing ?? []).filter((ref) => ref.factState !== "missing");
+  const showLanding =
+    landingRefs.length > 0 && (LANDING_PHASES.has(node.phase) || Boolean(node.integrationStrategy));
   return (
     <svg
       className={sceneSvg}
@@ -664,7 +749,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       {node.phase === "abandoned" ? <LaneFlag x={300} y={560} w={180} h={26} label="contract · historical" tone="historical" testid="lane-historical" /> : null}
 
       {/* 5h H2 — the landing arc: the closeout train (T13) on closeout-pending, and the official source
-          line advancing to its landing tip (T14). The full remote/PR strip + carryover packet is H3. */}
+          line advancing to its landing tip (T14). */}
       {node.phase === "closeout-pending" ? <CloseoutTrain x={700} y={508} /> : null}
       {node.integrationStrategy && landingSource ? (
         <LaneFlag
@@ -677,6 +762,11 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           testid="lane-landing-source"
         />
       ) : null}
+
+      {/* 5h H3 — the remote/PR strip beyond the official line: T15 code PR+push (origin/feat → PR →
+          origin/main) then T16 carryover (origin/mem-main), in the governed code-first order. Shown only
+          while the enclosure is landing, with the unresolved (`missing`) probe refs dropped. */}
+      {showLanding ? <RemoteStrip refs={landingRefs} /> : null}
 
       {!hasMemory ? (
         <text className={svgNodeMeta} x={930} y={420} textAnchor="middle" data-testid="memory-lane-absent">
