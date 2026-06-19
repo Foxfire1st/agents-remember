@@ -571,7 +571,15 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         humanReviewStatus: "approved",
         closeoutStatus: "completed",
         integrationStatus: "completed",
+        integrationStrategy: "ff-only",
         cleanup: "pending",
+        // landed already — the strip settles done, then the enclosure de-materialises (H4 teardown)
+        landing: [
+          landingRef("origin-feat", "origin/feat-…", "merged"),
+          landingRef("pr", "PR #128", "merged"),
+          landingRef("origin-main", "origin/main", "tip", "observed", "0a1b2c3"),
+          landingRef("origin-mem-main", "origin/mem-main", "pushed"),
+        ],
         providers: [boot("code"), boot("memory")],
         actions: [{ action: "cleanup", enabled: true }],
         summary: "Integrated; provider runtime teardown + worktree removal pending.",

@@ -521,10 +521,15 @@ function LaneFlag({ x, y, w, h, label, tone, testid }: {
   x: number; y: number; w: number; h: number; label: string;
   tone: "ledger" | "historical"; testid: string;
 }) {
+  // truncate to the box (laneFlagText is 11px ≈ 6 units/char) so a long branch name never overflows;
+  // the full label is on hover.
   return (
     <g data-testid={testid}>
+      <title>{label}</title>
       <rect className={laneFlag({ tone })} x={x} y={y} width={w} height={h} rx={3} />
-      <text className={laneFlagText({ tone })} x={x + w / 2} y={y + h / 2 + 5} textAnchor="middle">{label}</text>
+      <text className={laneFlagText({ tone })} x={x + w / 2} y={y + h / 2 + 5} textAnchor="middle">
+        {truncate(label, Math.floor((w - 8) / 6.2))}
+      </text>
     </g>
   );
 }
@@ -703,15 +708,25 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   ];
   // T14 — the official source line advances to its landing tip (read from the landing arc's source ref:
   // origin/main if the PR resolved it, else origin/<feat>). Only while a landing strategy is recorded.
+  // only a *resolved* source advances the official line — a `missing` probe or an `unknown` tip (e.g. the
+  // feat branch was deleted after the PR merged on a completed enclosure) carries no signal and is dropped.
+  const resolvedRef = (ref: LandingRefNode) => ref.factState !== "missing" && ref.state !== "unknown";
   const landingSource =
-    node.landing?.find((ref) => ref.kind === "origin-main") ??
-    node.landing?.find((ref) => ref.kind === "origin-feat");
+    node.landing?.find((ref) => ref.kind === "origin-main" && resolvedRef(ref)) ??
+    node.landing?.find((ref) => ref.kind === "origin-feat" && resolvedRef(ref));
   // 5h H3 — show the landing strip only while the enclosure is actually retiring to the official line,
   // and only the refs the probe could resolve: a `missing` ref (probe couldn't run, e.g. gh absent)
   // carries no signal and is dropped, never rendered as an "unknown" chip.
   const landingRefs = (node.landing ?? []).filter((ref) => ref.factState !== "missing");
   const showLanding =
     landingRefs.length > 0 && (LANDING_PHASES.has(node.phase) || Boolean(node.integrationStrategy));
+  // 5h H4 — cleanup teardown: a retiring enclosure (abandon OR a landed cleanup) keeps the historical
+  // contract chip; on a successful cleanup the "back into main" seam reads the resolved origin-main tip.
+  const retiring = node.phase === "abandoned" || node.phase === "cleanup-pending";
+  const cleanupTip =
+    node.phase === "cleanup-pending"
+      ? node.landing?.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing")
+      : undefined;
   return (
     <svg
       className={sceneSvg}
@@ -778,7 +793,18 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       {/* Lane annotations (podstage.html #ledger / #hist): the worktree landing lane + a historical
           contract marker. Descriptive lane labels; the live status stays in the diagnostics panel. */}
       {hasMemory ? <LaneFlag x={730} y={476} w={140} h={24} label="ledger ▸ maps merge" tone="ledger" testid="lane-ledger" /> : null}
-      {node.phase === "abandoned" ? <LaneFlag x={300} y={560} w={180} h={26} label="contract · historical" tone="historical" testid="lane-historical" /> : null}
+      {retiring ? <LaneFlag x={300} y={560} w={180} h={26} label="contract · historical" tone="historical" testid="lane-historical" /> : null}
+      {cleanupTip ? (
+        <LaneFlag
+          x={300}
+          y={188}
+          w={196}
+          h={20}
+          label={`▸ back into ${cleanupTip.label} · ${cleanupTip.state}`}
+          tone="ledger"
+          testid="lane-back-into-main"
+        />
+      ) : null}
 
       {/* 5h H2 — the landing arc: the closeout train (T13) on closeout-pending, and the official source
           line advancing to its landing tip (T14). */}

@@ -7,6 +7,7 @@ import {
   abandonRecord,
   backdrop,
   backdropVideo,
+  cleanupRecord,
   dissolveShell,
   fleetingBanner,
   fleetingChoice,
@@ -59,6 +60,20 @@ function AbandonRecord({ node }: { node: EngineProcessNode }) {
   );
 }
 
+// 5h H4 — cleanup teardown: the SUCCESS counterpart. The worktree LANDED, so it de-materialises back
+// into the official line (the same `.dissolve`), but the record reads success — and names the `origin-main`
+// tip it rejoined (the "back into main" seam), never faked (dropped when the probe couldn't resolve it).
+function CleanupRecord({ node }: { node: EngineProcessNode }) {
+  const mainTip = node.landing?.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing");
+  return (
+    <div className={cleanupRecord} data-testid="cleanup-record">
+      <span>
+        ✓ Landed{mainTip ? ` → ${mainTip.label}` : ""} — {node.summary || "worktree retiring into the official line"}
+      </span>
+    </div>
+  );
+}
+
 // The Engine Room pod stage: the bird's-eye `EnclosureCanvas` (5g) inside the promote-in-place
 // shell. The map is keyed-stable by worktreeGroup upstream (S0), so a blocked fleeting node
 // solidifies in place into the contract-anchored enclosure (T4 morph, 5f S3) — never a teleport.
@@ -70,13 +85,17 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
   officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
-  // t18 — an abandoned enclosure renders as a dim, desaturated record (its static end-state).
+  // Teardown = the enclosure de-materialising (the `.dissolve` shell): t18 abandon (failure, no landing)
+  // and 5h H4 cleanup (success, landed → retiring back into the official line). Both dim + desaturate; the
+  // record + tone differ. data-abandoned is kept for the existing abandon test; data-teardown is the hook.
   const abandoned = node.phase === "abandoned";
+  const teardown = abandoned ? "abandon" : node.phase === "cleanup-pending" ? "cleanup" : null;
   return (
     <motion.div
       className={mapWrap}
       data-testid="process-map"
       data-abandoned={abandoned || undefined}
+      data-teardown={teardown ?? undefined}
       layout={animate}
       initial={animate ? { opacity: 0, scale: 0.985 } : false}
       animate={{ opacity: 1, scale: 1 }}
@@ -111,8 +130,9 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
             </motion.div>
           ) : null}
         </AnimatePresence>
-        {abandoned ? <AbandonRecord node={node} /> : null}
-        {abandoned ? (
+        {teardown === "abandon" ? <AbandonRecord node={node} /> : null}
+        {teardown === "cleanup" ? <CleanupRecord node={node} /> : null}
+        {teardown ? (
           <div className={dissolveShell} data-testid="dissolve">
             <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
           </div>

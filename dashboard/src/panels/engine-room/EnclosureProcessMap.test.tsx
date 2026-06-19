@@ -85,6 +85,37 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
     expect(getByTestId("enclosure-canvas")).not.toBeNull();
     expect(queryByTestId("lane-landing-source")).toBeNull();
   });
+
+  it("drops the landing-source flag when the source ref is unknown/missing (branch deleted post-merge)", () => {
+    // a completed enclosure whose feat branch was deleted after the PR merged → the probe returns
+    // state "unknown" / factState "missing"; the flag must NOT render a stale `▸ … · unknown`.
+    const base = nodeFrom("engine-landing-ffonly");
+    const node = {
+      ...base,
+      landing: base.landing?.map((ref) =>
+        ref.kind === "origin-main" || ref.kind === "origin-feat"
+          ? { ...ref, state: "unknown", factState: "missing" as const }
+          : ref,
+      ),
+    };
+    const { queryByTestId } = render(<EnclosureProcessMap node={node} />);
+    expect(queryByTestId("lane-landing-source")).toBeNull();
+  });
+
+  it("truncates a long landing-source branch name, full name on hover (no overflow)", () => {
+    const base = nodeFrom("engine-landing-ffonly");
+    const longName = "origin/feat/some-really-long-branch-name-that-would-overflow-the-box";
+    const node = {
+      ...base,
+      landing: base.landing?.map((ref) =>
+        ref.kind === "origin-main" ? { ...ref, label: longName, state: "tip" } : ref,
+      ),
+    };
+    const { getByTestId } = render(<EnclosureProcessMap node={node} />);
+    const flag = getByTestId("lane-landing-source");
+    expect(flag.querySelector("title")?.textContent).toContain(longName); // full label on hover
+    expect(flag.querySelector("text")?.textContent).toContain("…"); // visible text truncated
+  });
 });
 
 describe("EnclosureCanvas — remote/PR strip (5h H3)", () => {
@@ -275,6 +306,31 @@ describe("EnclosureCanvas — live + teardown (5g G5)", () => {
     expect(getByTestId("abandon-record").textContent).toContain("Abandoned");
     expect(queryByTestId("recovery-chips")).toBeNull();
     expect(queryByTestId("attention")).toBeNull();
+  });
+});
+
+describe("EnclosureCanvas — cleanup teardown (5h H4)", () => {
+  it("de-materialises a landed enclosure: success record + dissolve + historical chip (not abandon)", () => {
+    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cleanup-pending")} />);
+    expect(getByTestId("process-map").getAttribute("data-teardown")).toBe("cleanup");
+    expect(queryByTestId("dissolve")).not.toBeNull();
+    expect(getByTestId("cleanup-record").textContent).toContain("Landed");
+    expect(getByTestId("lane-historical").textContent).toContain("historical");
+    // success ≠ abandon: no abandon record, data-abandoned unset.
+    expect(queryByTestId("abandon-record")).toBeNull();
+    expect(getByTestId("process-map").getAttribute("data-abandoned")).toBeNull();
+  });
+
+  it("names the origin-main tip it rejoined (the back-into-main seam)", () => {
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cleanup-pending")} />);
+    expect(getByTestId("lane-back-into-main").textContent).toContain("origin/main");
+  });
+
+  it("keeps abandon distinct — data-teardown=abandon, abandon record, no cleanup record", () => {
+    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-abandoned")} />);
+    expect(getByTestId("process-map").getAttribute("data-teardown")).toBe("abandon");
+    expect(queryByTestId("cleanup-record")).toBeNull();
+    expect(getByTestId("abandon-record").textContent).toContain("Abandoned");
   });
 });
 

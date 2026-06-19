@@ -970,6 +970,20 @@ export const abandonRecord = css({
   letterSpacing: "0.04em",
 });
 
+// 5h H4 — cleanup teardown: the SUCCESS dissolve (landed, now retiring into the official line). Reuses
+// `dissolveShell` for the canvas, but the record reads success — solid mint, not abandon's dashed-dormant.
+export const cleanupRecord = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.4rem",
+  padding: "0.3rem 0.6rem",
+  border: "1px solid token(colors.mint)",
+  borderRadius: "3px",
+  color: "token(colors.mint)",
+  fontSize: "0.74rem",
+  letterSpacing: "0.04em",
+});
+
 // --- 5h H2: closeout train + landing integration --------------------------------
 // T13 closeout train — the known closeout order (code → onboarding → quality → memory → ledger) as a
 // derived 5-beat strip on closeout-pending (5f §9). Each beat group sweeps in via `closeoutSweep` (with
