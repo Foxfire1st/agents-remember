@@ -334,9 +334,6 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
             dry_run=False,
             provider_timeout=_provider_timeout(),
             provider_ids=("grepai-memory", "codegraphcontext-code"),
-            cgc_seed_source_coordination_root=coordination_root,
-            cgc_seed_repo_id=repo_id,
-            provider_seed_source_settings_path=source_settings_path,
         )
         benchmark_status = _watchers_status(benchmark_coordination, benchmark_settings_path)
         assert benchmark_status["enabled"] == {

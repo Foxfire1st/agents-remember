@@ -10,15 +10,14 @@ reasonable assumptions from the available source and memory evidence and
 complete the primary task in one final answer.
 
 Constraints:
-1. Do not final-answer with only the resolver or drift summary.
-2. Continue immediately to the primary task below.
-3. Mention the drift check only briefly as prerequisite status.
-4. Final-answer only after the primary task completion criteria are satisfied.
-5. Do not edit source files.
-
-Run control:
-The required C-08/C-02 onboarding drift gate is startup work only. Passing the
-drift check is not task completion.
+- Do not edit source files.
+- Follow the active benchmark-local Agents Remember workflow from
+  `ar-coordination/AGENTS.md` normally, using the available MCP tools when that
+  workflow calls for them.
+- Use the benchmark-local memory repo only; do not use any parent workspace
+  memory.
+- Do not final-answer with only setup, resolver, drift, or memory-status notes.
+  Complete the primary task below before giving the final answer.
 
 Ticket excerpt:
 A user reports that `tf.debugging.check_numerics` raises

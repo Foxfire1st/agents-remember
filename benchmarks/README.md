@@ -87,7 +87,7 @@ Each prompt has comparable variants:
 - `with-onboarding`: Codex works from `workspaces/<case-id>/with-memory/`, where `ar-coordination/` resolves to the cloned pinned external memory and `repos/<repo>/` contains the same pinned checkout.
 - `with-onboarding-warm`: when present, Codex starts from the same memory-enabled workspace but treats the benchmark-local memory as already validated, so it can test steady-state memory use without spending the run on startup resolver and drift gates.
 
-The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.codex/skills/agents-remember` and registers the benchmark-local MCP server through `.codex/config.toml`, so the harness loads the same skills and MCP surface that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.codex` tree. The runner copies that tree by default.
+The memory-enabled workspace also exposes the benchmark-local Agents Remember runtime through `.codex/skills/agents-remember` and writes the benchmark-local MCP server registration to `.codex/config.toml`. During `codex exec`, the runner forwards that registration as explicit `-c mcp_servers...` overrides so the child process gets the same MCP surface that `ar-coordination/AGENTS.md` references without relying on a parent workspace's `.codex` tree. The runner copies that tree by default.
 
 Each prompt defaults to three repetitions per variant. For each repetition, the selected variants are placed under the same dated run root and submitted together when the job count allows parallelism. The runner writes raw JSONL, stderr, final messages, metadata, and generated summaries under `user-runs/`.
 

@@ -24,7 +24,6 @@ from agents_remember.benchmarks.runner_modules.manifest import (
     manifest_relative_path,
 )
 from agents_remember.benchmarks.runner_modules.mcp_registration import (
-    default_cgc_seed_source_coordination_root,
     prepare_configured_providers,
     write_benchmark_mcp_registration,
 )
@@ -229,12 +228,6 @@ def prepare_case(
         dry_run,
         provider_timeout,
         provider_ids=provider_ids,
-        cgc_seed_source_coordination_root=default_cgc_seed_source_coordination_root(
-            benchmarks_root, coordination_root
-        ),
-        cgc_seed_repo_id=manifest_path_component(
-            repository["name"], f"{case.case_id}.repository.name"
-        ),
     )
 
     if dry_run:
