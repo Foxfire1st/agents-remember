@@ -51,6 +51,12 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
             "summary": "Worktree task lifecycle is complete and cleanup has already run.",
             **next_guidance("done"),
         }
+    if contract.cleanup == "abandoned":
+        return {
+            "phase": "abandoned",
+            "summary": "Worktree abandoned — provider stack reclaimed; no further action.",
+            **next_guidance("done"),
+        }
     if contract.integration_status == "blocked":
         return {
             "phase": "integration-blocked",

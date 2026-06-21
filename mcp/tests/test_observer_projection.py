@@ -1554,6 +1554,14 @@ class EngineProcessTests(unittest.TestCase):
         self.assertEqual(node.ledgerRows, [])
         self.assertEqual(node.ledgerRowCount, 0)
 
+    def test_disposed_worktrees_drop_from_engine_processes(self) -> None:
+        # 05l Gap B: a cleaned-up/abandoned worktree (runtime gone) drops from the active engine-room
+        # so the frontend animates the removal instead of rendering a phantom. cleanup-pending stays --
+        # the de-materialise beat still needs a live node to animate.
+        self.assertEqual(len(build_engine_processes([_facts(contract={"cleanup": "pending"})], [], [], [])), 1)
+        self.assertEqual(build_engine_processes([_facts(contract={"cleanup": "completed"})], [], [], []), [])
+        self.assertEqual(build_engine_processes([_facts(contract={"cleanup": "abandoned"})], [], [], []), [])
+
     def test_successful_bootstrap_is_observed_and_complete(self) -> None:
         facts = _facts(
             status={

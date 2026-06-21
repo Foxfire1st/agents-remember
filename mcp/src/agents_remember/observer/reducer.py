@@ -624,7 +624,7 @@ _SETUP_FAILED: frozenset[str] = frozenset({"failed", "failed-unchecked"})
 _SETUP_DONE: frozenset[str] = frozenset({"ok", "complete", "prepared"})
 _ROLE_ORDER: dict[str, int] = {"code": 0, "memory": 1}
 
-# The seven ``lifecycle_guidance`` phases -> the process-map phase vocabulary (slice 5e).
+# The ``lifecycle_guidance`` phases -> the process-map phase vocabulary (slice 5e; 05l adds ``abandoned``).
 _GUIDANCE_PHASE: dict[str, str] = {
     "worktree-started": "worktree-started",
     "closeout-pending": "closeout-pending",
@@ -633,7 +633,20 @@ _GUIDANCE_PHASE: dict[str, str] = {
     "integration-blocked": "integration-blocked",
     "cleanup-pending": "cleanup-pending",
     "cleanup-completed": "completed",
+    "abandoned": "abandoned",
 }
+
+
+def _is_disposed(fact: EngineProcessFacts) -> bool:
+    """A cleaned-up or abandoned worktree whose runtime is gone (05l Gap B).
+
+    ``cleanup`` reaching ``completed``/``abandoned`` means ``worktree_cleanup``/``worktree_abandon``
+    already removed the worktrees + reclaimed the provider stack, so the enclosure is disposed. Drop
+    it from the active engine-room set so the frontend (05k) animates the removal instead of
+    rendering a fully-active phantom. ``cleanup-pending`` (cleanup not yet run) is intentionally kept,
+    so the de-materialise beat still has a live node to animate.
+    """
+    return str(fact.contract.get("cleanup", "")) in {"completed", "abandoned"}
 
 
 def build_engine_processes(
@@ -670,6 +683,7 @@ def build_engine_processes(
             setup_by_group,
         )
         for fact in facts
+        if not _is_disposed(fact)
     ]
     contract_groups = {
         str(fact.contract.get("worktree_group", "")).rsplit("/", 1)[-1] for fact in facts

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from agents_remember.worktrees.modules.abandon import _abandon_blockers, _abandon_branch
+from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.modules.provider_teardown import (
     _reclaim_image,
     _reclaim_ownership,
@@ -205,6 +206,17 @@ class AbandonBlockerTests(unittest.TestCase):
         worktrees: dict[str, dict[str, object]] = {"code": {"removed": True}}
         branches: dict[str, dict[str, object]] = {"code": {"deleted": True}}
         self.assertEqual(_abandon_blockers(worktrees, branches), [])
+
+
+class AbandonLifecyclePhaseTests(unittest.TestCase):
+    """05l Gap A: an abandoned worktree must project the ``abandoned`` phase."""
+
+    def test_abandoned_cleanup_projects_abandoned_phase(self) -> None:
+        # Was falling through lifecycle_guidance to "worktree-started" (a fully-active phantom);
+        # the cleanup=="abandoned" branch surfaces "abandoned" so the teardown can render (05k).
+        guidance = lifecycle_guidance(cast(WorktreeContract, SimpleNamespace(cleanup="abandoned")))
+        self.assertEqual(guidance["phase"], "abandoned")
+        self.assertEqual(guidance["nextOperation"], "done")
 
 
 if __name__ == "__main__":
