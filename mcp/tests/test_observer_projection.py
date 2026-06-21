@@ -1562,6 +1562,27 @@ class EngineProcessTests(unittest.TestCase):
         self.assertEqual(build_engine_processes([_facts(contract={"cleanup": "completed"})], [], [], []), [])
         self.assertEqual(build_engine_processes([_facts(contract={"cleanup": "abandoned"})], [], [], []), [])
 
+    def test_carryover_done_at_surfaces_on_the_node(self) -> None:
+        # 05m: the dashboard reads the carryover milestone off the projected node (5k renders it).
+        node = build_engine_processes(
+            [
+                _facts(
+                    status={
+                        "code_worktree_exists": True,
+                        "carryoverDoneAt": "2026-06-21T09:00:00+02:00",
+                    }
+                )
+            ],
+            [],
+            [],
+            [],
+        )[0]
+        self.assertEqual(node.carryoverDoneAt, "2026-06-21T09:00:00+02:00")
+
+    def test_carryover_done_at_defaults_to_none(self) -> None:
+        node = build_engine_processes([_facts(status={"code_worktree_exists": True})], [], [], [])[0]
+        self.assertIsNone(node.carryoverDoneAt)
+
     def test_successful_bootstrap_is_observed_and_complete(self) -> None:
         facts = _facts(
             status={

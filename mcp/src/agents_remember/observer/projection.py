@@ -559,7 +559,7 @@ class EngineProcessNode(BaseModel):
     lifecycleId: str | None = None
     # preflight|code-worktree|memory-compatibility|contract-written|worktree-started|
     # provider-setup|sync-needed|commit-approval-pending|closeout-pending|integration-pending|
-    # integration-blocked|cleanup-pending|completed|abandoned|unknown
+    # integration-blocked|carryover-pending|cleanup-pending|completed|abandoned|unknown
     phase: str
     health: str  # nominal|running|blocked|failed|stale|skipped|unknown|complete
 
@@ -581,6 +581,9 @@ class EngineProcessNode(BaseModel):
         None  # ff-only | replay; None until the integration decision is recorded (5h)
     )
     cleanup: str
+    # The carryover milestone (05m): ISO time the parked memory was carried into official memory
+    # (read from the official ledger); None until carried. Display-only -- 5k renders the seam.
+    carryoverDoneAt: str | None = None
 
     # Provider boot: one setup-progress sequence per worktree group (slice 3b reused).
     setupState: str | None = None  # running|stale|failed|failed-unchecked|ok|complete|prepared
