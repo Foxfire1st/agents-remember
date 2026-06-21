@@ -47,8 +47,10 @@ from agents_remember.observer.projection import (
     TaskCodeExampleNode,
     TaskDecisionNode,
     TaskDocNode,
+    TaskSectionNode,
     TaskStepNode,
     TaskSubStepNode,
+    TaskSubTaskRefNode,
     ToolReportNode,
 )
 from agents_remember.observer.timeutil import age_seconds
@@ -483,76 +485,131 @@ def read_ledger(memory_root: Path) -> LedgerNode | None:
     )
 
 
-def read_task_documents(coordination_root: Path, *, now: datetime) -> list[TaskDocNode]:
-    """Surface 7 (slice 3c): per-lifecycle task-document progress.
+def read_task_documents(
+    coordination_root: Path, *, enclosures: list[EnclosureNode], now: datetime
+) -> list[TaskDocNode]:
+    """Surface 7 (slices 3c + 6g): per-lifecycle task-document progress, masters included.
 
     Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
-    source of truth, never the rendered markdown -- keyed by ``lifecycleId`` so the
-    dashboard can show what a lifecycle is doing. Documents with no lifecycle key
-    (not yet bound to a durable worktree), non-task JSON, and malformed files are
-    skipped.
+    source of truth, never the rendered markdown. A ``light``/``subTask`` doc keys on
+    its own ``lifecycleId``; a ``master`` carries none (schema), so it is *contract-paired*
+    to its series lifecycle -- it inherits the ``lifecycleId`` of the contract sitting in the
+    same task folder (slice 6g). Documents with no resolvable lifecycle (an unbound slice or
+    an orphan master), non-task JSON, and malformed files are skipped.
     """
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
         return []
+    # Contract-paired master binding: the enclosure already surfaces each contract's lifecycle_id,
+    # keyed here by the resolved task folder (the contract's parent) the master JSON shares. Resolved
+    # so cross-folder `../<task>/task.md` refs (slice 6g cross-master links) compare equal.
+    lifecycle_by_dir = {
+        Path(enclosure.enclosure).parent.resolve(): enclosure.lifecycleId
+        for enclosure in enclosures
+        if enclosure.lifecycleId
+    }
     nodes: list[TaskDocNode] = []
     for path in sorted(tasks_root.glob("*/*/*.json")):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
             continue
-        if not payload.get("lifecycleId"):
-            continue
         try:
             doc = TaskDocument.model_validate(payload)
         except ValueError:
             continue
-        nodes.append(
-            TaskDocNode(
-                lifecycleId=doc.lifecycleId or "",
-                repository=doc.repo,
-                title=doc.title,
-                status=doc.status,
-                kind=doc.kind,
-                stepsDone=step_done(doc),
-                stepsTotal=step_total(doc),
-                currentStep=current_step(doc),
-                docPath=path.as_posix(),
-                ageSeconds=_file_age_seconds(path, now),
-                steps=[
-                    TaskStepNode(
-                        id=step.id,
-                        title=step.title,
-                        status=step.status,
-                        substeps=[
-                            TaskSubStepNode(id=sub.id, title=sub.title, status=sub.status)
-                            for sub in step.substeps
-                        ],
-                    )
-                    for step in doc.steps
-                ],
-                objective=doc.objective,
-                requirements=list(doc.requirements),
-                design=doc.design,
-                codeExamples=[
-                    TaskCodeExampleNode(
-                        id=example.id,
-                        title=example.title,
-                        distinctChange=example.distinctChange,
-                        why=example.why,
-                        language=example.language,
-                        snippet=example.snippet,
-                    )
-                    for example in doc.codeExamples
-                ],
-                decisions=[
-                    TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
-                    for item in doc.decisions
-                ],
-                openQuestions=list(doc.openQuestions),
-                references=list(doc.references),
-            )
+        lifecycle_id = (
+            lifecycle_by_dir.get(path.parent.resolve()) if doc.kind == "master" else doc.lifecycleId
         )
+        if not lifecycle_id:  # an unpaired master, or a slice not yet bound to a durable worktree
+            continue
+        nodes.append(_task_doc_node(doc, lifecycle_id, path, lifecycle_by_dir, now))
     return nodes
+
+
+def _ref_lifecycle(
+    base_dir: Path, ref_file: str | None, lifecycle_by_dir: dict[Path, str]
+) -> str | None:
+    """A cross-folder ref (``../<task>/task.md``) resolves to that folder's contract-paired lifecycle;
+    a bare slug (a same-folder slice) or empty ref does not (slice 6g cross-master link)."""
+    if not ref_file or "/" not in ref_file:
+        return None
+    return lifecycle_by_dir.get((base_dir / ref_file).resolve().parent)
+
+
+def _task_doc_node(
+    doc: TaskDocument,
+    lifecycle_id: str,
+    path: Path,
+    lifecycle_by_dir: dict[Path, str],
+    now: datetime,
+) -> TaskDocNode:
+    """Project one task document, carrying the resolved lifecycle id and (for a master) its index.
+
+    Cross-master links resolve here: a subTask whose ``file`` points at another master, and the doc's
+    own ``master`` parent ref, each resolve to the linked lifecycle (None when same-series/in-folder).
+    """
+    base_dir = path.parent
+    parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
+    return TaskDocNode(
+        lifecycleId=lifecycle_id,
+        repository=doc.repo,
+        title=doc.title,
+        status=doc.status,
+        kind=doc.kind,
+        stepsDone=step_done(doc),
+        stepsTotal=step_total(doc),
+        currentStep=current_step(doc),
+        docPath=path.as_posix(),
+        ageSeconds=_file_age_seconds(path, now),
+        steps=[
+            TaskStepNode(
+                id=step.id,
+                title=step.title,
+                status=step.status,
+                substeps=[
+                    TaskSubStepNode(id=sub.id, title=sub.title, status=sub.status)
+                    for sub in step.substeps
+                ],
+            )
+            for step in doc.steps
+        ],
+        objective=doc.objective,
+        requirements=list(doc.requirements),
+        design=doc.design,
+        codeExamples=[
+            TaskCodeExampleNode(
+                id=example.id,
+                title=example.title,
+                distinctChange=example.distinctChange,
+                why=example.why,
+                language=example.language,
+                snippet=example.snippet,
+            )
+            for example in doc.codeExamples
+        ],
+        decisions=[
+            TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
+            for item in doc.decisions
+        ],
+        openQuestions=list(doc.openQuestions),
+        references=list(doc.references),
+        subTasks=[
+            TaskSubTaskRefNode(
+                number=ref.number,
+                name=ref.name,
+                file=ref.file,
+                status=ref.status,
+                scope=ref.scope,
+                linkedLifecycleId=_ref_lifecycle(base_dir, ref.file, lifecycle_by_dir),
+            )
+            for ref in doc.subTasks
+        ],
+        sections=[
+            TaskSectionNode(kind=section.kind, heading=section.heading, body=section.body)
+            for section in doc.sections
+        ],
+        masterLifecycleId=parent_lifecycle,
+    )
 
 
 # --- shared helpers ----------------------------------------------------------

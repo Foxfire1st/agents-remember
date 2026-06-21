@@ -24,6 +24,7 @@ function fakeSelection(text: string, anchor: Node, collapsed = false): Selection
     toString: () => text,
     getRangeAt: () =>
       ({ getBoundingClientRect: () => ({ left: 1, top: 2, width: 3, height: 4 }) }) as Range,
+    removeAllRanges: () => {},
   } as unknown as Selection;
 }
 
@@ -75,5 +76,42 @@ describe("useSelectionCapture", () => {
 
     getSelection.mockRestore();
     vi.useRealTimers();
+  });
+
+  it("dismisses on a mouse-up with no live selection (click elsewhere clears it)", () => {
+    vi.useFakeTimers();
+    const live = fakeSelection("a finding", nodeInside("<p>a finding</p>"));
+    const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(live);
+    const { result } = renderHook(() => useSelectionCapture());
+    act(() => {
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      vi.runAllTimers();
+    });
+    expect(result.current.selection?.text).toBe("a finding");
+
+    // The user clicks elsewhere → the live selection collapses → the next mouse-up must clear it
+    // (the old "only raise, never clear" handler left this to the popover and re-captured the range).
+    getSelection.mockReturnValue(fakeSelection("", nodeInside("<p>x</p>"), true));
+    act(() => {
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      vi.runAllTimers();
+    });
+    expect(result.current.selection).toBeNull();
+
+    getSelection.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("collapses the live DOM selection on clear (so the trailing mouse-up can't re-capture)", () => {
+    const removeAllRanges = vi.fn();
+    const live = {
+      ...fakeSelection("a finding", nodeInside("<p>a finding</p>")),
+      removeAllRanges,
+    } as unknown as Selection;
+    const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(live);
+    const { result } = renderHook(() => useSelectionCapture());
+    act(() => result.current.clear());
+    expect(removeAllRanges).toHaveBeenCalledTimes(1);
+    getSelection.mockRestore();
   });
 });

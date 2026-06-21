@@ -981,7 +981,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
             {"id": "S1", "title": "a", "status": "done"},
             {"id": "S2", "title": "b", "status": "inProgress"},
         ]))
-        nodes = read_task_documents(self.coord, now=FRESH)
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
         self.assertEqual(len(nodes), 1)
         self.assertEqual(
             (nodes[0].lifecycleId, nodes[0].stepsDone, nodes[0].stepsTotal, nodes[0].currentStep),
@@ -992,23 +992,67 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         root = self.coord / "tasks" / "repo-a" / "demo"
         write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # no lifecycleId
         (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
-        self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
+        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
 
-    def test_master_is_not_projected_as_a_lifecycle(self) -> None:
-        # A master spans the series, carries no lifecycleId (schema-enforced), and must
-        # never surface as a lifecycle node in the observer projection.
-        root = self.coord / "tasks" / "repo-a" / "series"
-        master = TaskDocument.model_validate({
+    def _master(self) -> TaskDocument:
+        return TaskDocument.model_validate({
             "id": "series", "slug": "series", "title": "Series", "kind": "master",
             "repo": "repo-a", "createdAt": "2026-01-01T00:00",
             "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
             "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
         })
-        write_task_doc(root, master)
-        self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
+
+    def test_master_without_a_contract_is_skipped(self) -> None:
+        # A master carries no lifecycleId (schema-enforced). With no sibling contract to pair it
+        # to a series lifecycle, it has no dashboard home and is skipped.
+        root = self.coord / "tasks" / "repo-a" / "series"
+        write_task_doc(root, self._master())
+        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+
+    def test_master_is_contract_paired_to_series_lifecycle(self) -> None:
+        # Slice 6g: a master inherits the lifecycleId of the contract in its task folder, and
+        # surfaces its series index (subTasks) + ordered render plan (sections).
+        root = self.coord / "tasks" / "repo-a" / "series"
+        write_task_doc(root, self._master())
+        enclosure = _enclosure(
+            enclosure=(root / "contract.md").as_posix(), lifecycleId="LC-SERIES"
+        )
+        nodes = read_task_documents(self.coord, enclosures=[enclosure], now=FRESH)
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        self.assertEqual((node.kind, node.lifecycleId), ("master", "LC-SERIES"))
+        self.assertEqual([ref.number for ref in node.subTasks], ["1"])
+        self.assertEqual([section.kind for section in node.sections], ["subTasks"])
+
+    def test_cross_master_links_resolve_to_lifecycles(self) -> None:
+        # Slice 6g: a parent master whose subTask `file` points at a child master resolves the child's
+        # lifecycle (the "→" jump); the child's `master` ref resolves the parent's (the breadcrumb).
+        parent_dir = self.coord / "tasks" / "repo-a" / "parent"
+        child_dir = self.coord / "tasks" / "repo-a" / "child"
+        write_task_doc(parent_dir, TaskDocument.model_validate({
+            "id": "p", "slug": "parent", "title": "Parent", "kind": "master", "repo": "repo-a",
+            "createdAt": "2026-01-01T00:00",
+            "subTasks": [{"number": "06", "name": "Child series", "file": "../child/task.md",
+                          "status": "inProgress"}],
+        }))
+        write_task_doc(child_dir, TaskDocument.model_validate({
+            "id": "c", "slug": "child", "title": "Child", "kind": "master", "repo": "repo-a",
+            "createdAt": "2026-01-01T00:00", "master": "../parent/task.md",
+            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+        }))
+        enclosures = [
+            _enclosure(enclosure=(parent_dir / "contract.md").as_posix(), lifecycleId="LC-PARENT"),
+            _enclosure(enclosure=(child_dir / "contract.md").as_posix(), lifecycleId="LC-CHILD"),
+        ]
+        nodes = read_task_documents(self.coord, enclosures=enclosures, now=FRESH)
+        parent = next(n for n in nodes if n.lifecycleId == "LC-PARENT")
+        child = next(n for n in nodes if n.lifecycleId == "LC-CHILD")
+        self.assertEqual(parent.subTasks[0].linkedLifecycleId, "LC-CHILD")
+        self.assertIsNone(parent.masterLifecycleId)
+        self.assertEqual(child.masterLifecycleId, "LC-PARENT")
 
     def test_missing_tasks_dir_is_empty(self) -> None:
-        self.assertEqual(read_task_documents(self.coord / "nope", now=FRESH), [])
+        self.assertEqual(read_task_documents(self.coord / "nope", enclosures=[], now=FRESH), [])
 
     def test_build_analytics_includes_task_documents(self) -> None:
         node = TaskDocNode(

@@ -336,6 +336,39 @@ class TaskCodeExampleNode(BaseModel):
     snippet: str = ""
 
 
+class TaskSubTaskRefNode(BaseModel):
+    """One slice in a master's series index -- the drill-in row (slice 6g).
+
+    Mirrors ``tasks.document.SubTaskRef``: ``status`` drives the index marker and ``file`` is the
+    drill-in match key (its stem resolves to the slice document's slug).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    number: str
+    name: str
+    file: str = ""
+    status: str
+    scope: str = ""
+    # When `file` points at another master (a parallel/external series), the contract-paired lifecycle
+    # it links to — the dashboard renders such a row as a "→" cross-series jump (slice 6g). Null for an
+    # in-series slice row.
+    linkedLifecycleId: str | None = None
+
+
+class TaskSectionNode(BaseModel):
+    """One ordered section of a master's render plan: freeform prose or a generated block (6g).
+
+    Mirrors ``tasks.document.Section`` so the master overview renders its bespoke sections in order.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    heading: str
+    body: str = ""
+
+
 class TaskDocNode(BaseModel):
     """A task document's progress, keyed by lifecycle (slice 3c, surface 7).
 
@@ -368,6 +401,14 @@ class TaskDocNode(BaseModel):
     decisions: list[TaskDecisionNode] = Field(default_factory=list)
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
+    # Master-only (kind == "master"): the series index + the ordered render plan. A master carries
+    # no lifecycleId of its own (schema) -- it is contract-paired to the series lifecycle by the
+    # reader (slice 6g). Empty for light/subTask docs.
+    subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
+    sections: list[TaskSectionNode] = Field(default_factory=list)
+    # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
+    # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
+    masterLifecycleId: str | None = None
 
 
 class AttentionItem(BaseModel):

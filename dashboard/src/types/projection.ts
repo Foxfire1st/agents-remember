@@ -176,6 +176,22 @@ export interface TaskCodeExampleNode {
   snippet: string;
 }
 
+// Master-only (kind === "master"): the series index row + an ordered render-plan section (slice 6g).
+export interface TaskSubTaskRefNode {
+  number: string;
+  name: string;
+  file: string; // drill-in match key: its stem resolves to the slice doc's slug
+  status: string;
+  scope: string;
+  linkedLifecycleId?: string; // set when `file` points at another master → a "→" cross-series jump
+}
+
+export interface TaskSectionNode {
+  kind: string; // "freeform" | "subTasks" | "sharedDecisions"
+  heading: string;
+  body: string;
+}
+
 export interface TaskDocNode {
   lifecycleId: string;
   repository: string;
@@ -195,6 +211,9 @@ export interface TaskDocNode {
   decisions: TaskDecisionNode[];
   openQuestions: string[];
   references: string[];
+  subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
+  sections: TaskSectionNode[]; // master-only; empty for light/subTask
+  masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
 }
 
 export interface AttentionItem {

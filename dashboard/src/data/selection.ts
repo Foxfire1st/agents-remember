@@ -45,14 +45,20 @@ export function useSelectionCapture(): { selection: SelectionContext | null; cle
     const onMouseUp = (event: MouseEvent) => {
       const target = event.target as Element | null;
       if (target?.closest?.("[data-highlight-composer]")) return;
-      // Defer one tick so the browser finalizes the selection after the mouse-up settles.
-      window.setTimeout(() => {
-        const captured = readSelection(window.getSelection());
-        if (captured) setSelection(captured);
-      }, 0);
+      // Defer one tick so the browser finalizes (or collapses) the selection after the mouse-up
+      // settles, then *mirror* it: a real selection raises the composer, an empty one (a click
+      // elsewhere) dismisses it. Capturing only-when-present would let this same handler re-raise a
+      // selection a dismiss just cleared — the "click-outside takes several tries" bug.
+      window.setTimeout(() => setSelection(readSelection(window.getSelection())), 0);
     };
     document.addEventListener("mouseup", onMouseUp);
     return () => document.removeEventListener("mouseup", onMouseUp);
   }, []);
-  return { selection, clear: useCallback(() => setSelection(null), []) };
+  const clear = useCallback(() => {
+    setSelection(null);
+    // Collapse the live DOM selection too: otherwise the trailing mouse-up re-reads the still-present
+    // range and re-captures, undoing the dismiss (the multi-click / fast-click symptom).
+    window.getSelection()?.removeAllRanges();
+  }, []);
+  return { selection, clear };
 }

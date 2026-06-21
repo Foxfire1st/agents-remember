@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
 import { postGateDecision, type GateDecisionStatus } from "../data/actions";
 import { useDashboard } from "../data/store";
+import { Markdown } from "../grammar/Markdown";
 import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
 import { TokenGauge } from "../grammar/TokenGauge";
@@ -13,7 +14,9 @@ import type {
   TaskCodeExampleNode,
   TaskDecisionNode,
   TaskDocNode,
+  TaskSectionNode,
   TaskStepNode,
+  TaskSubTaskRefNode,
 } from "../types/projection";
 
 // The l-01 phase vocabulary, in order (mcp/.../lifecycle_state.py). The stepper marks phases before
@@ -122,6 +125,61 @@ const slice = css({
   borderLeftColor: "grid",
 });
 const sliceMeta = css({ color: "muted", fontSize: "0.72rem" });
+// 6g: a clickable sub-task row (drill-in) and the breadcrumb back from a slice to the series.
+const sliceButton = css({
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  width: "100%",
+  textAlign: "left",
+  font: "inherit",
+  fontSize: "0.78rem",
+  paddingInline: "0.4rem",
+  paddingBlock: "0.2rem",
+  background: "bg",
+  border: "0",
+  borderLeftWidth: "2px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "cyan",
+  color: "ink",
+  cursor: "pointer",
+  _hover: { background: "oklch(0.7 0.1 200 / 0.12)", borderLeftColor: "amber" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
+// 6g cross-master link: a row that jumps to a parallel/external series (amber "→"), distinct from
+// the cyan in-series drill rows so leaving the current series reads as a deliberate hop.
+const crossButton = css({
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  width: "100%",
+  textAlign: "left",
+  font: "inherit",
+  fontSize: "0.78rem",
+  paddingInline: "0.4rem",
+  paddingBlock: "0.2rem",
+  background: "bg",
+  border: "0",
+  borderLeftWidth: "2px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "amber",
+  color: "amber",
+  cursor: "pointer",
+  _hover: { background: "oklch(0.82 0.16 75 / 0.12)" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
+const crumb = css({
+  font: "inherit",
+  fontSize: "0.76rem",
+  color: "cyan",
+  background: "transparent",
+  border: "0",
+  padding: "0",
+  marginBottom: "0.5rem",
+  cursor: "pointer",
+  _hover: { textDecoration: "underline" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
 
 const spine = css({ margin: "0.6rem 0" });
 const spineHead = css({
@@ -211,7 +269,6 @@ const taskdocH = css({
   textTransform: "uppercase",
   color: "amber",
 });
-const taskdocP = css({ margin: "0", maxWidth: "78ch", fontSize: "0.86rem", lineHeight: "1.55" });
 const taskdocBullets = css({
   margin: "0",
   paddingLeft: "1.1rem",
@@ -255,11 +312,21 @@ const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
 // The selected lifecycle: phase stepper, the Gate Review drawer (slice 6c — POSTs a developer
 // decision to /api/actions, server-enforced at closeout) or the proto-gate ask banner fallback, the
 // task-document content (analytics.taskDocuments), the lifecycle → worktree → provider spine, and tokens.
-export function DetailPanel({ selectedId }: { selectedId: string | null }) {
+export function DetailPanel({
+  selectedId,
+  onOpenLifecycle,
+}: {
+  selectedId: string | null;
+  onOpenLifecycle?: (id: string) => void;
+}) {
+  const jump = onOpenLifecycle ?? (() => {});
   const lifecycle = useDashboard((s) => (selectedId ? s.lifecycles[selectedId] : undefined));
   const analytics = useDashboard((s) => s.analytics);
   const enclosures = useDashboard((s) => s.enclosures);
   const providers = useDashboard((s) => s.providers);
+  // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
+  const [openSlug, setOpenSlug] = useState<string | null>(null);
+  useEffect(() => setOpenSlug(null), [selectedId]); // switching lifecycles closes any open sub-task
   const docs = selectedId
     ? (analytics?.taskDocuments ?? []).filter((doc) => doc.lifecycleId === selectedId)
     : [];
@@ -283,8 +350,38 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
     ? Object.values(providers).filter((p) => p.scope === "worktree" && p.worktreeGroup === groupName)
     : [];
 
+  // Master / slices split + the drilled-into doc. The sticky head carries the title plus the back
+  // ("← series") or parent ("↑ parent series") up-link, so navigation stays put while the body scrolls.
+  const master = docs.find((doc) => doc.kind === "master");
+  const slices = docs.filter((doc) => doc.kind !== "master");
+  const openDoc = openSlug ? sliceForSlug(slices, openSlug) : undefined;
+  const head = (
+    <>
+      <h2>{lifecycle.id}</h2>
+      {openDoc ? (
+        <button
+          type="button"
+          className={crumb}
+          onClick={() => setOpenSlug(null)}
+          data-testid="series-breadcrumb"
+        >
+          ← {master ? master.title : "series"}
+        </button>
+      ) : master?.masterLifecycleId ? (
+        <button
+          type="button"
+          className={crumb}
+          onClick={() => jump(master.masterLifecycleId as string)}
+          data-testid="master-parent-link"
+        >
+          ↑ {master.masterLifecycleId}
+        </button>
+      ) : null}
+    </>
+  );
+
   return (
-    <Panel testid="detail-panel" title={lifecycle.id} className={sizing}>
+    <Panel testid="detail-panel" head={head} className={sizing}>
       <div className={where}>
         {lifecycle.fleeting
           ? "fleeting · no worktree"
@@ -314,7 +411,11 @@ export function DetailPanel({ selectedId }: { selectedId: string | null }) {
         </div>
       ) : null}
 
-      <TaskContent docs={docs} />
+      {openDoc ? (
+        <TaskReader doc={openDoc} />
+      ) : (
+        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} />
+      )}
 
       {enclosure ? (
         <div className={spine}>
@@ -387,27 +488,222 @@ function GateReview({ lifecycleId, gateNode }: { lifecycleId: string; gateNode: 
   );
 }
 
-function TaskContent({ docs }: { docs: TaskDocNode[] }) {
+// Drill-in match key (6g): a SubTaskRef.file / a slice's docPath basename, minus extension. A
+// master's index row resolves to the slice doc whose slug equals the ref's file stem.
+const stripExt = (name: string): string => name.replace(/\.(md|json)$/i, "");
+const sliceSlug = (doc: TaskDocNode): string => stripExt(doc.docPath.split("/").pop() ?? "");
+const sliceForSlug = (sliceDocs: TaskDocNode[], slug: string): TaskDocNode | undefined =>
+  sliceDocs.find((doc) => sliceSlug(doc) === slug);
+const sliceForRef = (
+  sliceDocs: TaskDocNode[],
+  ref: TaskSubTaskRefNode,
+): TaskDocNode | undefined =>
+  ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
+
+// The lifecycle's bound task documents (6g). A `master` (contract-paired, no lifecycleId of its
+// own) shows its overview + a clickable sub-task index; clicking a slice drills into its full
+// reader with a breadcrumb back. A master-less series lists clickable slices; a lone doc reads
+// directly. Sub-tasks never enter the sidebar — they are reached here, from the series.
+function TaskContent({
+  docs,
+  onOpen,
+  onJump,
+}: {
+  docs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+}) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this lifecycle.</p>;
   }
-  if (docs.length === 1) {
-    return <TaskReader doc={docs[0]} />;
+  const master = docs.find((doc) => doc.kind === "master");
+  const sliceDocs = docs.filter((doc) => doc.kind !== "master");
+  if (master) {
+    return <MasterOverview doc={master} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />;
   }
+  if (sliceDocs.length === 1) {
+    return <TaskReader doc={sliceDocs[0]} />;
+  }
+  return <SliceList sliceDocs={sliceDocs} onOpen={onOpen} />;
+}
+
+// The master overview: identity + objective, then its ordered render plan (`sections`). A
+// `subTasks` section renders the clickable index in place; `sharedDecisions` renders the decision
+// table. If no section drives the index but the master carries one, it is appended.
+function MasterOverview({
+  doc,
+  sliceDocs,
+  onOpen,
+  onJump,
+}: {
+  doc: TaskDocNode;
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+}) {
+  return (
+    <div className={taskdoc}>
+      <div className={taskdocHead}>
+        <span className={badge}>{doc.kind}</span>
+        <span className={taskdocTitle}>{doc.title}</span>
+        <span className={taskdocStatus}>{doc.status}</span>
+      </div>
+      {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
+          authored `subTasks` section still renders its own copy in place (MasterSection). */}
+      {doc.subTasks.length > 0 ? (
+        <Section title="Sub-tasks">
+          <SubTaskIndex refs={doc.subTasks} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />
+        </Section>
+      ) : null}
+      {doc.objective ? (
+        <Section title="Objective">
+          <Markdown>{doc.objective}</Markdown>
+        </Section>
+      ) : null}
+      {doc.sections.map((section) => (
+        <MasterSection
+          key={section.heading}
+          section={section}
+          doc={doc}
+          sliceDocs={sliceDocs}
+          onOpen={onOpen}
+          onJump={onJump}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MasterSection({
+  section,
+  doc,
+  sliceDocs,
+  onOpen,
+  onJump,
+}: {
+  section: TaskSectionNode;
+  doc: TaskDocNode;
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+}) {
+  return (
+    <Section title={section.heading}>
+      {section.body ? <Markdown>{section.body}</Markdown> : null}
+      {section.kind === "subTasks" ? (
+        <SubTaskIndex
+          refs={doc.subTasks}
+          sliceDocs={sliceDocs}
+          onOpen={onOpen}
+          onJump={onJump}
+          testidPrefix="subtask-mid"
+        />
+      ) : null}
+      {section.kind === "sharedDecisions" ? <DecisionList items={doc.decisions} /> : null}
+    </Section>
+  );
+}
+
+// The clickable series index: one row per master `SubTaskRef`. A row whose slice has been authored
+// as a task document opens its reader; an un-migrated slice shows as a static index row.
+function SubTaskIndex({
+  refs,
+  sliceDocs,
+  onOpen,
+  onJump,
+  testidPrefix = "subtask-open",
+}: {
+  refs: TaskSubTaskRefNode[];
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+  testidPrefix?: string;
+}) {
+  if (refs.length === 0) {
+    return <p className="muted">No sub-tasks indexed.</p>;
+  }
+  return (
+    <ul className={slices}>
+      {refs.map((ref) => {
+        const match = sliceForRef(sliceDocs, ref);
+        const label = `${ref.number} · ${ref.name}`;
+        const meta = (
+          <span className={sliceMeta}>
+            {match && match.stepsTotal > 0 ? `${match.stepsDone}/${match.stepsTotal} · ` : ""}
+            {ref.status}
+          </span>
+        );
+        // A row whose ref points at another master is a parallel/external series → jump lifecycles.
+        if (ref.linkedLifecycleId) {
+          return (
+            <li key={ref.number}>
+              <button
+                type="button"
+                className={crossButton}
+                onClick={() => onJump(ref.linkedLifecycleId as string)}
+                data-testid={`${testidPrefix}-link-${ref.number}`}
+                title={`open the ${ref.linkedLifecycleId} series`}
+              >
+                <span>→ {label}</span>
+                {meta}
+              </button>
+            </li>
+          );
+        }
+        return (
+          <li key={ref.number}>
+            {match ? (
+              <button
+                type="button"
+                className={sliceButton}
+                onClick={() => onOpen(sliceSlug(match))}
+                data-testid={`${testidPrefix}-${ref.number}`}
+              >
+                <span>{label}</span>
+                {meta}
+              </button>
+            ) : (
+              <div className={slice} title="not authored as a task document yet">
+                <span>{label}</span>
+                {meta}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// Fallback for a series with no master yet: the slice list, now clickable into each reader.
+function SliceList({
+  sliceDocs,
+  onOpen,
+}: {
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+}) {
   return (
     <div className={series}>
       <div className={taskHead}>
-        <span className={badge}>series</span> {docs.length} task slices
+        <span className={badge}>series</span> {sliceDocs.length} task slices
       </div>
       <ul className={slices}>
-        {[...docs]
+        {[...sliceDocs]
           .sort((a, b) => a.title.localeCompare(b.title))
           .map((doc) => (
-            <li key={doc.docPath} className={slice}>
-              <span>{doc.title}</span>
-              <span className={sliceMeta}>
-                {doc.stepsDone}/{doc.stepsTotal} · {doc.status}
-              </span>
+            <li key={doc.docPath}>
+              <button
+                type="button"
+                className={sliceButton}
+                onClick={() => onOpen(sliceSlug(doc))}
+                data-testid={`slice-open-${sliceSlug(doc)}`}
+              >
+                <span>{doc.title}</span>
+                <span className={sliceMeta}>
+                  {doc.stepsDone}/{doc.stepsTotal} · {doc.status}
+                </span>
+              </button>
             </li>
           ))}
       </ul>
@@ -454,7 +750,7 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
       </div>
       {doc.objective ? (
         <Section title="Objective">
-          <p className={taskdocP}>{doc.objective}</p>
+          <Markdown>{doc.objective}</Markdown>
         </Section>
       ) : null}
       {doc.requirements.length > 0 ? (
@@ -464,7 +760,7 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
       ) : null}
       {doc.design ? (
         <Section title="Design">
-          <p className={taskdocP}>{doc.design}</p>
+          <Markdown>{doc.design}</Markdown>
         </Section>
       ) : null}
       {doc.steps.length > 0 ? (
@@ -511,7 +807,9 @@ function Bullets({ items }: { items: string[] }) {
   return (
     <ul className={taskdocBullets}>
       {items.map((item) => (
-        <li key={item}>{item}</li>
+        <li key={item}>
+          <Markdown inline>{item}</Markdown>
+        </li>
       ))}
     </ul>
   );
@@ -555,9 +853,11 @@ function DecisionList({ items }: { items: TaskDecisionNode[] }) {
     <ul className={taskdocDecisions}>
       {items.map((item) => (
         <li key={`${item.at}:${item.decision}`}>
-          <div className={taskdocDecision}>{item.decision}</div>
+          <div className={taskdocDecision}>
+            <Markdown inline>{item.decision}</Markdown>
+          </div>
           <div className={taskdocDecisionMeta}>
-            {item.at} — {item.rationale}
+            {item.at} — <Markdown inline>{item.rationale}</Markdown>
           </div>
         </li>
       ))}

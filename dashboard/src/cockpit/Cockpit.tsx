@@ -264,7 +264,7 @@ function ViewBody({
     // the live terminal survives a view switch; routing it through this switch would unmount it.
     case "operations":
     default:
-      return <DetailPanel selectedId={selectedId} />;
+      return <DetailPanel selectedId={selectedId} onOpenLifecycle={onOpen} />;
   }
 }
 
