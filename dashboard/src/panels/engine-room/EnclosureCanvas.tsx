@@ -538,22 +538,21 @@ function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: strin
       <path
         className={flowConduit({ state: conduitState(edge.state) })}
         d={d}
-        pathLength={100}
-        // GSAP draws this on when it goes running (data-draw='on'); the running flowConduit dash is the full
-        // path length, so the strokeDashoffset 100 → 0 reads as a sweep from source to target.
+        // GSAP DrawSVG draws this on when it goes running (data-draw='on') — 05n; the running conduit has no
+        // CSS dash (solid), so DrawSVG owns the stroke reveal. No pathLength: DrawSVG measures real length.
         data-draw={edge.state === "running" ? "on" : undefined}
         // arrow tip only on an ACTION (running flow); a nominal/static line is just a connection
         markerEnd={edge.state === "running" ? "url(#er-chev)" : undefined}
       >
         <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}{bent ? " — replay (around parallel work)" : ""}</title>
       </path>
-      {edge.state === "running" ? (
+      {edge.state === "running" && animate ? (
         <circle
           className={flowPacket}
           r={4}
           data-testid="conduit-packet"
           data-fx="packet"
-          style={{ offsetPath: `path('${d}')` }}
+          data-path={d}
         />
       ) : null}
     </motion.g>
@@ -831,10 +830,10 @@ function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
 // pushes DOWN to origin/mem-main. Each fades in with the dock; the GSAP draw-on lives in LandingFlow.
 function LandingFlow({ d, show, kind }: { d: string; show: boolean; kind: string }) {
   const animate = useShouldAnimate();
-  // GSAP draws the flow on (strokeDashoffset 100 → 0) when it resolves, selected via [data-draw='on'] in
-  // useEngineTimeline; Motion owns the opacity (a flow's visibility is purely `show`). GSAP owns stroke-
-  // dashoffset alone, so it never fights Motion (which owns opacity). Under !animate the path rests fully
-  // drawn at the rendered opacity. No landingEnter: `show` flipping true is what eases it in.
+  // GSAP DrawSVG draws the flow on (05n) when it resolves, selected via [data-draw='on'] in
+  // useEngineTimeline; Motion owns the opacity (a flow's visibility is purely `show`). GSAP owns the stroke
+  // geometry, so it never fights Motion (which owns opacity). Under !animate the path rests solid (drawn)
+  // at the rendered opacity. No landingEnter: `show` flipping true is what eases it in.
   return (
     <motion.path
       data-testid="landing-flow"
@@ -842,7 +841,6 @@ function LandingFlow({ d, show, kind }: { d: string; show: boolean; kind: string
       data-draw={show ? "on" : undefined}
       className={flowConduit({ state: "running" })}
       d={d}
-      pathLength={100}
       markerEnd={show ? "url(#er-chev)" : undefined}
       initial={animate ? { opacity: show ? 1 : 0 } : false}
       animate={{ opacity: show ? 1 : 0 }}

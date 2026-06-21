@@ -904,23 +904,25 @@ export const flowConduit = cva({
     state: {
       nominal: { stroke: "token(colors.amber)", opacity: "0.8" },
       complete: { stroke: "token(colors.amber)", opacity: "0.6" },
-      // running (seed/clone): GSAP draws it on (strokeDashoffset 100 → 0, re-firing on each activation)
-      // via useLayoutEffect in the Conduit component; the dash pattern is the full path length so the
-      // draw reads as a sweep. No CSS animation here — GSAP owns stroke-dashoffset so the two systems
-      // never write it at once, and under data-effects=off the path simply rests fully drawn (offset 0).
-      running: { stroke: "token(colors.cyan)", strokeDasharray: "100 100" },
+      // running (seed/clone): solid cyan. GSAP DrawSVG draws it on once per activation (05n) via
+      // useEngineTimeline — DrawSVG owns the stroke-dasharray/offset, so the recipe carries NO dash here
+      // (a CSS dash would fight DrawSVG, and pathLength is gone — DrawSVG measures the real length). Under
+      // data-effects=off no tween runs and the path simply rests solid (= fully drawn).
+      running: { stroke: "token(colors.cyan)" },
       blocked: { stroke: "token(colors.alarm)" },
       failed: { stroke: "token(colors.alarm)" },
       stale: { stroke: "token(colors.alarm)", opacity: "0.55" },
       skipped: { stroke: "token(colors.grid)", opacity: "0.4" },
-      planned: { stroke: "token(colors.muted)", strokeDasharray: "3 5", opacity: "0.5" },
+      // 05n — real-unit dash (was "3 5" normalized to pathLength 100, now removed). Tuned on the bench.
+      planned: { stroke: "token(colors.muted)", strokeDasharray: "9 7", opacity: "0.5" },
       unknown: { stroke: "token(colors.dormant)", opacity: "0.4" },
     },
   },
 });
 
-// The travelling flow packet — a cyan energy dot that runs along a seeding/cloning conduit (its
-// offset-path is set per-conduit in EnclosureCanvas). Hidden under effects=off (see index.css freeze).
+// The travelling flow packet — a cyan energy dot that rides a seeding/cloning conduit via GSAP MotionPath
+// (05n — the conduit path string is on the packet's data-path; replaces CSS offset-path). The packet only
+// renders while animate, so under effects=off / reduced-motion there is no static dot.
 export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95" });
 
 // --- failure overlays (5g G3) ------------------------------------------------

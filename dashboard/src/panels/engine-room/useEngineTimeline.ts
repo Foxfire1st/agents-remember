@@ -1,7 +1,9 @@
-// 05k — the engine-room canvas motion substrate (05f §8). GSAP owns the orchestrated, GSAP-native parts:
-// the one-shot `strokeDashoffset` draw-ons (conduit clone arcs + landing flows), staged per phase, and the
-// repeating fx that used to be CSS @keyframes (engine fault flicker, reindex pulse, warp-core surge,
-// attention breath, terminal-STOP flash, the travelling flow packet). Motion owns opacity/transform/charge
+// 05k/05n — the engine-room canvas motion substrate (05f §8). GSAP owns the orchestrated, GSAP-native
+// parts: the DrawSVG draw-ons (conduit clone arcs + landing flows), drawn once per lane (05n — a
+// `data-drawn` guard stops them re-sweeping on each beat step), the MotionPath travelling flow packet
+// (05n — rides its conduit's `data-path`, replacing CSS offset-path), and the repeating fx that used to be
+// CSS @keyframes (engine fault flicker, reindex pulse, warp-core surge, attention breath, terminal-STOP
+// flash). Motion owns opacity/transform/charge
 // + enter/exit (in EnclosureCanvas); CSS is static. One `gsap.context` per enclosure, scoped to the SVG
 // root, selecting elements by `data-draw` / `data-fx` attributes — so the component renders the structure
 // and this hook animates it. Everything is gated by `useShouldAnimate`: under `data-effects=off` /
@@ -10,9 +12,13 @@
 
 import { useLayoutEffect } from "react";
 import gsap from "gsap";
+import { DrawSVGPlugin } from "gsap/DrawSVGPlugin";
+import { MotionPathPlugin } from "gsap/MotionPathPlugin";
 
 import { useShouldAnimate } from "./useShouldAnimate";
 import type { EngineProcessNode } from "../../types/projection";
+
+gsap.registerPlugin(DrawSVGPlugin, MotionPathPlugin);
 
 export type PhaseStage = "power-up" | "closeout" | "integrate" | "teardown" | "idle";
 
@@ -91,15 +97,20 @@ function buildFx(q: gsap.utils.SelectorFunc): void {
   const stop = q("[data-fx='stop']"); // terminal STOP — a brief flash ×3, then steady (repeat:5 = 3 on-beats)
   if (stop.length) gsap.fromTo(stop, { opacity: 0.35 }, { opacity: 1, duration: 0.25, repeat: 5, yoyo: true, ease: "steps(1)" });
 
-  const packet = q("[data-fx='packet']"); // travelling flow packet — runs the offset-path of its conduit
-  if (packet.length) gsap.fromTo(packet, { attr: { offsetDistance: "0%" } }, { attr: { offsetDistance: "100%" }, duration: 1.4, repeat: -1, ease: "none" });
+  // travelling flow packet — rides its conduit via MotionPath (the path string is on data-path; 05n,
+  // replacing CSS offset-path). GSAP owns the packet transform; the dot only exists while animate.
+  q("[data-fx='packet']").forEach((dot) => {
+    const path = dot.getAttribute("data-path");
+    if (path) gsap.to(dot, { duration: 1.4, repeat: -1, ease: "none", motionPath: { path, alignOrigin: [0.5, 0.5] } });
+  });
 }
 
-// The orchestrated draw-on timeline + the fx loops, as one gsap.context per enclosure. The draw-ons sweep
-// the active lanes (strokeDashoffset 100 → 0) staged in DOM order — GSAP owns stroke-dashoffset alone, so
-// it never fights Motion (which owns opacity/transform). Re-runs (revert → rebuild) when the phase, the
-// worktree group, or the active draw/fx set changes. Under !animate: nothing runs; the rendered end-state
-// stands (paths rest fully drawn at offset 0, fx elements at their CSS end-state).
+// The orchestrated draw-on timeline + the fx loops, as one gsap.context per enclosure. DrawSVG draws each
+// active lane once (05n — the `data-drawn` guard skips lanes already drawn, so a beat step never re-sweeps
+// a drawn arc); MotionPath rides the packet. GSAP owns the stroke geometry + the packet transform; Motion
+// owns node opacity/transform. Re-runs (revert → rebuild) when the phase, the worktree group, or the
+// active draw/fx set changes. Under !animate: nothing runs; the rendered end-state stands (running
+// conduits rest solid = drawn, the packet is not rendered, fx elements at their CSS end-state).
 export function useEngineTimeline(
   rootRef: React.RefObject<SVGSVGElement | null>,
   node: EngineProcessNode,
@@ -111,8 +122,16 @@ export function useEngineTimeline(
     if (!root || !animate) return;
     const q = gsap.utils.selector(root);
     const ctx = gsap.context(() => {
-      const drawn = q("[data-draw='on']");
-      if (drawn.length) gsap.fromTo(drawn, { strokeDashoffset: 100 }, { strokeDashoffset: 0, ...DRAW, stagger: 0.1 });
+      // 05n — draw each lane ONCE. Clear the stamp on lanes that left `on` (so a real re-activation
+      // re-draws), then DrawSVG-draw only the unstamped running lanes. revert (next rebuild) drops
+      // DrawSVG's inline dash, leaving the running conduit at its solid CSS rest = drawn; the `data-drawn`
+      // attribute survives revert, so a still-`on` lane is skipped and never re-sweeps.
+      q("[data-draw]").forEach((el) => { if (el.getAttribute("data-draw") !== "on") el.removeAttribute("data-drawn"); });
+      const fresh = q("[data-draw='on']").filter((el) => !el.getAttribute("data-drawn"));
+      if (fresh.length) {
+        gsap.from(fresh, { drawSVG: 0, ...DRAW, stagger: 0.1 });
+        fresh.forEach((el) => { el.setAttribute("data-drawn", "1"); });
+      }
       buildFx(q);
     }, root);
     return () => ctx.revert();
