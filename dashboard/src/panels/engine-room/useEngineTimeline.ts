@@ -70,8 +70,8 @@ const DRAW = { duration: 0.6, ease: "power2.out" } as const;
 // driven here by GSAP so CSS stays static. Alarm flickers stay ≤3 flashes/s (WCAG 2.3.1 — the master
 // invariant). `gsap.context` (the caller's) reverts every tween + restores inline state on teardown.
 function buildFx(q: gsap.utils.SelectorFunc): void {
-  const fault = q("[data-fx='fault']"); // engine down → red flicker (≤3/s), isolated to that engine
-  if (fault.length) gsap.fromTo(fault, { opacity: 1 }, { opacity: 0.3, duration: 0.34, repeat: -1, yoyo: true, ease: "steps(1)" });
+  const fault = q("[data-fx='fault']"); // 5o — a down engine breathes its red frame GENTLY (~1.7s sine), never a strobe
+  if (fault.length) gsap.fromTo(fault, { opacity: 0.5 }, { opacity: 0.95, duration: 1.7, repeat: -1, yoyo: true, ease: "sine.inOut" });
 
   const reindex = q("[data-fx='reindex']"); // seedFallback → amber center-out pulse (a fallback, not a fault)
   if (reindex.length)
@@ -121,16 +121,45 @@ export function useEngineTimeline(
     const root = rootRef.current;
     if (!root || !animate) return;
     const q = gsap.utils.selector(root);
+
+    // RETRACT — tail-to-tip erase on departing lanes (05n). ctx.revert() from the PREVIOUS cycle
+    // already ran (it's the cleanup) and stripped DrawSVG's inline dash, so departing lanes are back
+    // at their CSS solid rest. Animate them to drawSVG "100% 100%" (visible segment = nothing) then
+    // clearProps so the lane settles back at its CSS end-state. Stamp cleared immediately so a fast
+    // re-activation picks them up as `fresh` and draws correctly (no stale stamp blocking the re-draw).
+    const toRetract = q("[data-drawn]").filter((el) => el.getAttribute("data-draw") !== "on");
+    if (toRetract.length) {
+      toRetract.forEach((el) => el.removeAttribute("data-drawn"));
+      // Lock the stroke at cyan before the retract tween so it stays cyan throughout the erase —
+      // the CSS class has already changed (running→complete = amber) by the time this runs, so without
+      // this set the retract would play in amber instead of the expected cyan.
+      gsap.set(toRetract, { stroke: "oklch(0.85 0.13 200)", filter: "drop-shadow(0 0 3px oklch(0.85 0.13 200))" });
+      gsap.to(toRetract, {
+        drawSVG: "100% 100%",
+        duration: 0.45,
+        ease: "power2.in",
+        overwrite: true,
+        onComplete: () =>
+          toRetract.forEach((el) => gsap.set(el, { clearProps: "strokeDashoffset,strokeDasharray,stroke,filter" })),
+      });
+    }
+
     const ctx = gsap.context(() => {
-      // 05n — draw each lane ONCE. Clear the stamp on lanes that left `on` (so a real re-activation
-      // re-draws), then DrawSVG-draw only the unstamped running lanes. revert (next rebuild) drops
-      // DrawSVG's inline dash, leaving the running conduit at its solid CSS rest = drawn; the `data-drawn`
-      // attribute survives revert, so a still-`on` lane is skipped and never re-sweeps.
-      q("[data-draw]").forEach((el) => { if (el.getAttribute("data-draw") !== "on") el.removeAttribute("data-drawn"); });
+      // 05n — draw each lane ONCE per activation. Stamps survive ctx.revert() (DOM attribute, not inline
+      // style), so a still-`on` lane is skipped across beat steps and never re-sweeps. Retract (above)
+      // cleared stamps on departing lanes before this context runs.
       const fresh = q("[data-draw='on']").filter((el) => !el.getAttribute("data-drawn"));
       if (fresh.length) {
-        gsap.from(fresh, { drawSVG: 0, ...DRAW, stagger: 0.1 });
-        fresh.forEach((el) => { el.setAttribute("data-drawn", "1"); });
+        // 5o — stamp on COMPLETE, not immediately. StrictMode double-invokes this effect (run → revert →
+        // run); stamping eagerly made run-1 stamp, the revert kill the draw, and run-2 skip (already
+        // stamped) — draw-on never animated. Stamping on complete lets the surviving mount actually draw.
+        gsap.from(fresh, {
+          drawSVG: 0,
+          ...DRAW,
+          stagger: 0.1,
+          overwrite: true,
+          onComplete: () => fresh.forEach((el) => el.setAttribute("data-drawn", "1")),
+        });
       }
       buildFx(q);
     }, root);

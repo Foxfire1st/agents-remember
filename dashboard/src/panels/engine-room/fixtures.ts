@@ -194,6 +194,19 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       state: states.integration,
       label: "integrate ff-only → source",
     });
+    // Memory mirrors code: the memory worktree integrates back into the feat SOURCE (memory) too, before the
+    // carryover (feat → main mem). Only with external memory, and skipped when blocked so the all-or-nothing
+    // integration conflict keeps a single code-lane STOP (no second gate on the memory lane).
+    if (external && states.integration !== "blocked") {
+      out.push({
+        id: "integration-mem",
+        fromNode: "memory-worktree",
+        toNode: "memory-source",
+        kind: "integration-mem",
+        state: states.integration,
+        label: "integrate ff-only → source (memory)",
+      });
+    }
   }
   return out;
 }

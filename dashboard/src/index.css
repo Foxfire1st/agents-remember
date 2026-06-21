@@ -87,8 +87,11 @@
 
 /* Engine Room pod-stage CANVAS motion is GSAP (useEngineTimeline) + Motion (EnclosureCanvas), never CSS
    (05f §8) — the former canvas @keyframes (chargeSweep, conduitDraw, pktRun, attnBreath, stopFlash,
-   closeoutSweep, warpSurgeUp/Down, landingIn) are removed. `flicker` (CRT) + `pulse` (app-wide alarm,
-   still used by the rail / cockpit / topology) stay above; the determinism freeze below still applies. */
+   closeoutSweep, warpSurgeUp/Down, landingIn) are removed. The indexing→nominal engine "powerup" is a
+   Motion opacity pulse (the charge rect's fill is owned by the engineCharge class, so the cyan→mint step
+   is an instant class flip, not an animation) — there is no `powerup` CSS keyframe anymore, so the canvas
+   carries no animation carve-out. `flicker` (CRT) + `pulse` (app-wide alarm, still used by the rail /
+   cockpit / topology) stay above; the determinism freeze below still applies. */
 
 
 

@@ -647,15 +647,24 @@ export const svgNodeMeta = css({ fill: "token(colors.muted)", fontSize: "11px" }
 // Podracer engine gauge — outer column coloured by runtime; the charge fill shows the settled
 // (nominal) energy level. The center-out boot-fill GROWTH is G2 (this is the static end-state).
 export const engineGaugeOut = cva({
-  base: { fill: "token(colors.bg)", strokeWidth: "1.5", opacity: "0.95" },
+  // 5o — constant GOLD bezel (the body charge + petals carry runtime state, not the frame); the bezel glows
+  // amber. FAULT is the one exception that re-colours the frame red so a down engine is unmistakable. Matches
+  // the engine-room visual-language spec (docs/design/engine-room).
+  base: {
+    fill: "token(colors.bg)",
+    stroke: "token(colors.amber)",
+    strokeWidth: "2",
+    opacity: "0.95",
+    filter: "drop-shadow(0 0 3px token(colors.amber))",
+  },
   variants: {
     runtimeState: {
-      nominal: { stroke: "token(colors.mint)" }, // active = green
-      configured: { stroke: "token(colors.dormant)", opacity: "0.6" }, // inactive = empty/off
-      indexing: { stroke: "token(colors.cyan)" },
-      // down = FAULT → GSAP flicker (≤3/s via data-fx='fault'; distinct from the STEADY blocked gate).
-      down: { stroke: "token(colors.alarm)" },
-      unknown: { stroke: "token(colors.dormant)", strokeDasharray: "4 3", opacity: "0.6" },
+      nominal: {}, // gold bezel
+      configured: { opacity: "0.5", filter: "none" }, // materialised but drained: dim bezel, no glow
+      indexing: {}, // gold bezel (the cyan body shows it's charging)
+      // down = FAULT → frame goes red + a GENTLE breathe (data-fx='fault', ~1.7s sine; never a strobe).
+      down: { stroke: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
+      unknown: { strokeDasharray: "4 3", opacity: "0.55", filter: "none" },
     },
   },
 });
@@ -685,10 +694,11 @@ export const engineCharge = cva({
   base: { transformBox: "fill-box", transformOrigin: "center" },
   variants: {
     runtimeState: {
-      nominal: { fill: "token(colors.mint)" }, // healthy green, charged
-      configured: { fill: "token(colors.cyan)" }, // materialised, drained (dim)
-      indexing: { fill: "token(colors.cyan)" }, // charging cyan (boot-fill)
-      down: { fill: "token(colors.alarm)" },
+      // 5o glow pass — the charged body glows its state colour so the engine reads as powered, not flat.
+      nominal: { fill: "token(colors.mint)", filter: "drop-shadow(0 0 4px token(colors.mint))" }, // healthy green
+      configured: { fill: "token(colors.cyan)" }, // materialised, drained (dim) — no glow
+      indexing: { fill: "token(colors.cyan)", filter: "drop-shadow(0 0 4px token(colors.cyan))" }, // charging cyan
+      down: { fill: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
       unknown: { fill: "token(colors.dormant)" },
     },
   },
@@ -775,6 +785,7 @@ export const warpCouplerBar = css({
   strokeWidth: "9",
   strokeLinecap: "round",
   opacity: "0.95",
+  filter: "drop-shadow(0 0 2px token(colors.amber))", // 5o glow pass — structural 2px (spec importance scale)
 });
 export const warpCouplerNode = css({
   fill: "token(colors.amber)",
@@ -908,7 +919,9 @@ export const flowConduit = cva({
       // useEngineTimeline — DrawSVG owns the stroke-dasharray/offset, so the recipe carries NO dash here
       // (a CSS dash would fight DrawSVG, and pathLength is gone — DrawSVG measures the real length). Under
       // data-effects=off no tween runs and the path simply rests solid (= fully drawn).
-      running: { stroke: "token(colors.cyan)" },
+      // 5o glow pass — the active flow glows its state colour (spec: 3px on the running line). The packet
+      // carries the brighter 5px (flowPacket). Settled/planned lanes stay glow-less (a connection, not an action).
+      running: { stroke: "token(colors.cyan)", filter: "drop-shadow(0 0 3px token(colors.cyan))" },
       blocked: { stroke: "token(colors.alarm)" },
       failed: { stroke: "token(colors.alarm)" },
       stale: { stroke: "token(colors.alarm)", opacity: "0.55" },
@@ -923,14 +936,14 @@ export const flowConduit = cva({
 // The travelling flow packet — a cyan energy dot that rides a seeding/cloning conduit via GSAP MotionPath
 // (05n — the conduit path string is on the packet's data-path; replaces CSS offset-path). The packet only
 // renders while animate, so under effects=off / reduced-motion there is no static dot.
-export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95" });
+export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95", filter: "drop-shadow(0 0 5px token(colors.cyan))" });
 
 // --- failure overlays (5g G3) ------------------------------------------------
 // blocked = STEADY red gate over the blocked lane (a human choice required) — never the fault flicker
 // (that's the engine, G4). Every blocked/fault raises the alarm-parity attention badge. A local reason
 // badge (cyan-dot pointer + pill) states WHY at the lane; recovery chips offer the next action. All
 // driven off node.health / edge.state / missingFacts / nextAction — colour-as-state, no inferred chrome.
-export const gateBar = css({ fill: "token(colors.alarm)", opacity: "0.92" });
+export const gateBar = css({ fill: "token(colors.alarm)", opacity: "0.92", filter: "drop-shadow(0 0 7px token(colors.alarm))" });
 // Alarm-parity attention badge. GSAP (data-fx='breath') drives the gentle breathing; static at rest.
 export const attnBadge = css({
   fill: "oklch(0.26 0.09 25)",
@@ -985,6 +998,14 @@ export const abandonRecord = css({
 // 5h H4 — cleanup teardown: the SUCCESS dissolve (landed, now retiring into the official line). Reuses
 // `dissolveShell` for the canvas, but the record reads success — solid mint, not abandon's dashed-dormant.
 export const cleanupRecord = css({
+  // 5k F6 — overlay the canvas top instead of sitting in the column flow (which pushed the whole canvas
+  // DOWN when the banner popped in). Absolute within the relative `stageContent`; a panel background keeps
+  // it readable over the scene.
+  position: "absolute",
+  top: "0",
+  left: "0",
+  right: "0",
+  zIndex: "3",
   display: "flex",
   alignItems: "center",
   gap: "0.4rem",
@@ -992,6 +1013,7 @@ export const cleanupRecord = css({
   border: "1px solid token(colors.mint)",
   borderRadius: "3px",
   color: "token(colors.mint)",
+  backgroundColor: "token(colors.bgPanel)",
   fontSize: "0.74rem",
   letterSpacing: "0.04em",
 });
@@ -1001,7 +1023,9 @@ export const cleanupRecord = css({
 // derived 5-beat strip on closeout-pending (5f §9). Each beat group sweeps in via `closeoutSweep` (with
 // a per-beat animation-delay set inline in the canvas); the global effects=off freeze settles it to the
 // all-done strip. mint = the settled/done look (colour parity with the green=active engine palette, G5).
-export const closeoutTrainLabel = css({ fill: "token(colors.muted)", fontSize: "9px", letterSpacing: "0.08em" });
+// Bare caption over the textured backdrop (no chip plate), so it needs real contrast: `ink` (not the
+// dim `muted`) at 10px reads cleanly while the neutral-vs-mint tone keeps it a caption for the green beats.
+export const closeoutTrainLabel = css({ fill: "token(colors.ink)", fontSize: "10px", letterSpacing: "0.06em" });
 export const closeoutRail = css({ stroke: "token(colors.mint)", strokeWidth: "1.4", opacity: "0.35", strokeDasharray: "2 4" });
 export const closeoutBeat = css({
   fill: "oklch(0.24 0.04 160)",

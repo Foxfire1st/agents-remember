@@ -250,8 +250,8 @@ describe("EnclosureCanvas — conduit wiring polish (5h cleanup)", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-sync-needed")} />);
     const sync = container.querySelector('[data-kind="sync"] path')?.getAttribute("d");
     const add = container.querySelector('[data-kind="worktree-add"] path')?.getAttribute("d");
-    expect(sync).toBe("M480 281 L 698 281");
-    expect(add).toBe("M480 281 L 698 281"); // collinear: same y on both ends, so they read as one centred line
+    expect(sync).toBe("M455 281 L 735 281"); // main right edge → worktree left edge (COL_MAIN_CX+90 → COL_WT_CX-100)
+    expect(add).toBe("M455 281 L 735 281"); // collinear: same y on both ends, so they read as one centred line
   });
 
   it("fans six engine petals with mirrored flanks (symmetric across the gauge centre)", () => {

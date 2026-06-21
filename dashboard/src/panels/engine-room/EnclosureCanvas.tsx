@@ -6,7 +6,7 @@
 // prototype's viewBox (0 0 1200 660). State always comes from the model (factState / runtimeState /
 // edge.state), never a class name alone — so the truth stays in the projection, not the render.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog, Popover } from "react-aria-components";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -132,29 +132,39 @@ function CanopyFrame() {
 
 // --- geometry (ported 1:1 from podstage.html) --------------------------------
 const NODE_H = 62;
+// The three middle columns are anchored on these centres (viewBox 1200 wide). They are evenly spaced so
+// the gap zones either side of feat breathe equally (~72px edge-to-edge), and main/worktree are pulled
+// apart symmetrically about the stage centre (~600). Every dependent coordinate below — node x, couplers,
+// remote chips, conduit/edge geometry, the engine→node wires, the landing-flow paths, and the enclosure
+// border — is derived from or aligned to these three centres, so a future re-space is a small, local edit.
+// POS.x is the LEFT edge (centre = x + w/2); the remote chips + couplers sit ON these centres.
+const COL_MAIN_CX = 365; // official-line · main column (left of the middle three)
+const COL_FEAT_CX = 595; // feat ▸ source column (the landing-only middle tier, in the main↔worktree gap)
+const COL_WT_CX = 835; // worktree code/memory column (right of the middle three)
 const POS = {
-  codeSource: { x: 300, y: 250, w: 180 }, // = mockup m-code (the OFFICIAL LINE = main, left)
-  memorySource: { x: 300, y: 372, w: 180 },
-  codeWorktree: { x: 700, y: 250, w: 200 }, // = mockup w-code (worktree, right)
-  memoryWorktree: { x: 700, y: 372, w: 200 },
+  codeSource: { x: COL_MAIN_CX - 90, y: 250, w: 180 }, // = mockup m-code (the OFFICIAL LINE = main, left)
+  memorySource: { x: COL_MAIN_CX - 90, y: 372, w: 180 },
+  codeWorktree: { x: COL_WT_CX - 100, y: 250, w: 200 }, // = mockup w-code (worktree, right)
+  memoryWorktree: { x: COL_WT_CX - 100, y: 372, w: 200 },
   // The feat/fix source branch — the THIRD tier the worktree was actually branched off (5f §7.4). It
   // lives in the GAP between main and the worktree and is shown only during landing (mockup feat-code /
-  // feat-mem, x512 w136), so the closeout reads main → feat → worktree, never main = feat.
-  featCode: { x: 512, y: 250, w: 136 },
-  featMemory: { x: 512, y: 372, w: 136 },
+  // feat-mem, w136), so the closeout reads main → feat → worktree, never main = feat.
+  featCode: { x: COL_FEAT_CX - 68, y: 250, w: 136 },
+  featMemory: { x: COL_FEAT_CX - 68, y: 372, w: 136 },
 } as const;
 const ENGINE = {
   cgc: { x: 1057, y: 102 }, grepai: { x: 1057, y: 452 }, // worktree (enclosure) engines, right world
   mcgc: { x: 81, y: 102 }, mgrep: { x: 81, y: 452 }, // official-line (workspace) engines, left world
   w: 54, h: 96,
 } as const;
-const COUPLER_X = 800; // worktree code↔memory coupler
-const OFFICIAL_COUPLER_X = 390; // official-line code↔memory coupler (podstage cpl-main)
+const COUPLER_X = COL_WT_CX; // worktree code↔memory coupler — on the worktree column centre
+const OFFICIAL_COUPLER_X = COL_MAIN_CX; // official-line code↔memory coupler (podstage cpl-main) — on the main centre
 
 // Flow-conduit endpoints by edge kind, anchored to node/engine edges so a line never crosses a box.
 const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
-  "worktree-add": [480, 281, 698, 281],
-  "ledger-map": [480, 403, 698, 403],
+  // main right edge (COL_MAIN_CX+90) → worktree left edge (COL_WT_CX-100): the intake lanes spanning the gap.
+  "worktree-add": [COL_MAIN_CX + 90, 281, COL_WT_CX - 100, 281],
+  "ledger-map": [COL_MAIN_CX + 90, 403, COL_WT_CX - 100, 403],
   // Provider CLONE arrows (5f §7.2 "cloned-from, not re-indexed"): the worktree engines are SEEDED BY
   // CLONING the official-line engines — a fast copy of the index / vector DB — NOT rebuilt from the
   // worktree code. So the seed/clone flow runs official-provider -> worktree-provider, sweeping across
@@ -166,11 +176,13 @@ const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   // sync shares the code intake lane's CENTRELINE with worktree-add (same source→worktree channel,
   // a later phase of it) — collinear, not stacked 8px below, so the blocked sync reads as one
   // centred line on the lane rather than a confusing off-centre double.
-  sync: [480, 281, 698, 281],
+  sync: [COL_MAIN_CX + 90, 281, COL_WT_CX - 100, 281],
   // integration = the worktree's closeout commits returning to the feat/fix SOURCE branch in the gap
-  // (the mockup's D2 int-code: worktree → feat, M700 281 L 648 281); t14c STOPs it. The push flow then
-  // carries feat → origin/feat.
-  integration: [700, 281, 650, 281],
+  // (the mockup's D2 int-code: worktree → feat); t14c STOPs it. The push flow then carries feat → origin/feat.
+  integration: [COL_WT_CX - 100, 281, COL_FEAT_CX + 68, 281],
+  // integration-mem mirrors it on the memory lane (y=403): the memory worktree's commits return to the feat
+  // SOURCE (memory) before the carryover (feat → main mem). Same worktree→feat direction as the code lane.
+  "integration-mem": [COL_WT_CX - 100, 403, COL_FEAT_CX + 68, 403],
 };
 
 // The build-up "branch-copy": a worktree node is born from its official-line node, rising from nothing
@@ -246,19 +258,20 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false 
   );
 }
 
-// The charge rect's animated end-state (Motion owns scaleY + opacity; the engineCharge recipe owns the
-// static fill as colour-as-state). The boot-fill grows CENTER-OUT (scaleY 0→1) off the rect's transform-
-// box: fill-box + transform-origin: center; cyan (indexing) → mint (nominal) is the "went green" fill flip.
+// Spec colour values (panda.config.ts tokens, mirrored from the design spec HTML).
+// The charge rect's animated end-state. Motion owns ONLY scaleY + opacity — fill is intentionally
+// absent so Motion never writes a fill inline style. CSS class (engineCharge CVA) owns fill color for
+// every state. This prevents Motion's oklch inline fill from blocking CSS class color changes on
+// subsequent scenario cycles (Motion 12 cannot interpolate oklch; a stale inline fill overrides CSS).
 function chargeMotion(runtime: RuntimeState): { scaleY: number; opacity: number } {
   switch (runtime) {
     case "nominal":
-      return { scaleY: 1, opacity: 0.55 }; // charged, healthy green
     case "indexing":
-      return { scaleY: 1, opacity: 0.85 }; // charging cyan (boot-fill grown)
+      return { scaleY: 1, opacity: runtime === "indexing" ? 0.85 : 0.55 };
     case "down":
       return { scaleY: 1, opacity: 0.55 };
     default:
-      return { scaleY: 0, opacity: 0 }; // configured / unknown: materialised but drained (dim)
+      return { scaleY: 0, opacity: 0 }; // configured/unknown: drained (invisible)
   }
 }
 
@@ -271,6 +284,29 @@ function EngineGauge({ at, label, runtime, reindex, present = true }: {
 }) {
   const animate = useShouldAnimate();
   const state = reindex ? "reindex" : runtime;
+  // Boot flash: one-shot, fires when this engine crosses indexing→nominal. It only flags the Motion
+  // opacity pulse on the charge rect (below) — fill is owned by the CSS class, never by the flash —
+  // so the flash can never strand the fill colour. `booting` persists across re-renders (a parent
+  // re-render must not cut it short); it is cleared by the rect's Motion onAnimationComplete, with the
+  // timer below as a guaranteed backstop.
+  const prevRuntime = useRef(runtime);
+  const [booting, setBooting] = useState(false);
+  useEffect(() => {
+    const prev = prevRuntime.current;
+    prevRuntime.current = runtime;
+    if (prev !== "nominal" && runtime === "nominal" && animate) {
+      setBooting(true);
+    }
+  }, [runtime, animate]);
+  // Backstop teardown: drop booting shortly after the pulse's run even if onAnimationComplete is missed.
+  // Keyed on `booting` alone — frame advances never clear this timer, so the flash always ends, on every
+  // cycle. Belt-and-suspenders: a stuck flag is already harmless (fill stays class-owned), this keeps
+  // the opacity honest too.
+  useEffect(() => {
+    if (!booting) return;
+    const timer = window.setTimeout(() => setBooting(false), 1000);
+    return () => window.clearTimeout(timer);
+  }, [booting]);
   // `present` is the build-up gate: a worktree engine only materialises once the provider runtime deploys
   // (B3); until then it is faded out (the left-world engines are always present). Motion owns this opacity
   // (the SVG `transform` position attribute is untouched); on power-down the same gate eases it back out.
@@ -307,8 +343,24 @@ function EngineGauge({ at, label, runtime, reindex, present = true }: {
           height={ENGINE.h - 4}
           rx={3}
           initial={animate ? { scaleY: 0, opacity: 0 } : false}
-          animate={chargeMotion(runtime)}
-          transition={{ duration: animate ? 0.6 : 0, ease: [0.4, 0, 0.2, 1] }}
+          // Fill is ALWAYS owned by the engineCharge class (cyan `indexing` → mint `nominal`), so it is
+          // correct on every scenario cycle and can never get stuck. Motion owns ONLY scaleY (the
+          // center-out boot-fill) + opacity. The indexing→nominal "powerup" is a one-shot Motion opacity
+          // pulse (0.85 → 1 → 0.55): a brightness surge as the engine goes green, NOT a fill animation —
+          // the instant cyan→mint comes from the class flip (Motion 12 cannot interpolate oklch fill). A
+          // CSS @keyframes can't live here: Motion's per-frame scaleY style writes restart it every frame
+          // so it never completes, and its `forwards` fill-lock then permanently overrode the class —
+          // that was the "second cycle stays green / never goes cyan" bug. booting only shapes the pulse;
+          // if it ever fails to reset, the rect just holds the pulse's final 0.55 (already the nominal
+          // rest opacity) with class-correct fill, so nothing breaks.
+          animate={booting ? { scaleY: 1, opacity: [0.85, 1, 0.55] } : chargeMotion(runtime)}
+          transition={
+            booting
+              ? { duration: animate ? 0.7 : 0, times: [0, 0.35, 1], ease: "easeOut" }
+              : { duration: animate ? 0.6 : 0, ease: [0.4, 0, 0.2, 1] }
+          }
+          // Motion's own lifecycle callback (reliable, unlike the native animationend) ends the flash.
+          onAnimationComplete={() => setBooting(false)}
         />
       )}
       {[14, 26, 38, 50, 62, 74, 86].map((y) => (
@@ -498,7 +550,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   );
 }
 
-function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: string }) {
+function Conduit({ edge, strategy, retiring = false }: { edge: EngineProcessEdge; strategy?: string; retiring?: boolean }) {
   // The conduit draw-on (strokeDashoffset 100 → 0) is owned by the GSAP timeline (useEngineTimeline),
   // which selects every running lane via [data-draw='on'] and staggers them (05f §8). Motion owns this
   // group's opacity; CSS is static. A planned → running cycle re-runs the hook (its signature folds in the
@@ -508,32 +560,39 @@ function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: strin
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
-  // T14b — a `replay` integration bends the landing return lane around the parallel work that moved the
-  // official line (vs the straight `ff-only` fast-forward). Same draw-on/packet idiom, a different path.
-  const bent = edge.kind === "integration" && strategy === "replay";
+  // 5k F7 — the integration return lane (worktree closeout commits → feat/source branch in the gap) is a
+  // plain straight connection like every other settled lane. `replay` (commits rebased onto a moved main)
+  // vs a clean `ff-only` is NOT encodable as a line shape: a bent/bowed return lane read as an unexplained
+  // triangle, never "around parallel work". The replay fact is recorded as data-strategy (for a future text
+  // chip / glyph in the panel) but the path itself stays straight.
+  const isReplay = (edge.kind === "integration" || edge.kind === "integration-mem") && strategy === "replay";
   // The provider-clone arrows sweep across the whole stage from the official engine to the worktree
   // engine — CGC bows OVER the top, GrepAI UNDER the bottom (the "copies + rewrites index" / "clones
   // vector DB" beat). Transient: shown only while running, gone at idle (see the opacity below).
   const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
   const dip = edge.kind === "grepai-clone" ? 104 : -116; // GrepAI bows down; CGC bows up
-  const d = bent
-    ? `M${x1} ${y1} C ${x1 - 60} ${y1 - 54}, ${x2 + 60} ${y1 - 54}, ${x2} ${y2}`
-    : cloneArc
-      ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
-      : `M${x1} ${y1} L ${x2} ${y2}`;
-  const opacity = cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1;
+  const d = cloneArc
+    ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
+    : `M${x1} ${y1} L ${x2} ${y2}`;
+  // 5k F5 — at cleanup the worktree side de-materialises; fade every worktree conduit to 0 so the yellow
+  // connector lines retract with the enclosure instead of dangling to the disposed nodes (the official line
+  // keeps its own `officialWire` conduits, which are not in `node.edges`).
+  const opacity = retiring ? 0 : cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1;
   return (
     <motion.g
       data-testid="conduit"
       data-kind={edge.kind}
       data-state={edge.state}
-      data-strategy={bent ? "replay" : undefined}
+      data-strategy={isReplay ? "replay" : undefined}
       // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
       // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
       // (instant under !animate, where it mounts at the end-state).
+      // 5o RETRACT VISIBILITY — clone arcs fade their GROUP to 0 when done; delay that fade so the GSAP
+      // tail-to-tip retract (0.45s) completes before the group turns transparent (mirrors spec's 0.32s
+      // opacity delay on .flow-g.off: retract runs first, then opacity clears).
       initial={animate ? { opacity } : false}
       animate={{ opacity }}
-      transition={{ duration: animate ? 0.45 : 0 }}
+      transition={{ duration: animate ? 0.45 : 0, delay: animate && cloneArc && opacity === 0 ? 0.45 : 0 }}
     >
       <path
         className={flowConduit({ state: conduitState(edge.state) })}
@@ -544,7 +603,7 @@ function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: strin
         // arrow tip only on an ACTION (running flow); a nominal/static line is just a connection
         markerEnd={edge.state === "running" ? "url(#er-chev)" : undefined}
       >
-        <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}{bent ? " — replay (around parallel work)" : ""}</title>
+        <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}{isReplay ? " — replay (rebased onto moved main)" : ""}</title>
       </path>
       {edge.state === "running" && animate ? (
         <circle
@@ -723,11 +782,11 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
 const RBOX_W = 148; // = mockup r-box width
 const RBOX_H = 36;
 const REMOTE_POS: Record<string, { x: number; y: number }> = {
-  "origin-main": { x: 344, y: 66 }, // = mockup r-main: top, above main (merges into it)
-  "origin-feat": { x: 512, y: 66 }, // = mockup r-branch: top, above feat (just pushed)
-  "origin-mem-main": { x: 344, y: 522 }, // = mockup r-memmain: mirrored to the bottom
+  "origin-main": { x: COL_MAIN_CX - RBOX_W / 2, y: 66 }, // top, centred above the main column (merges into it)
+  "origin-feat": { x: COL_FEAT_CX - RBOX_W / 2, y: 66 }, // top, centred above the feat column (just pushed)
+  "origin-mem-main": { x: COL_MAIN_CX - RBOX_W / 2, y: 522 }, // mirrored to the bottom, under the main column
 };
-const PR_CX = 502; // centre of the gap between origin/main (right edge 492) and origin/feat (left edge 512)
+const PR_CX = (COL_MAIN_CX + COL_FEAT_CX) / 2; // centre of the gap between origin/main and origin/feat
 // The dock is the SUCCESSFUL-LANDING arc — it shows only while an enclosure is actually retiring to the
 // official line (closeout → integration → cleanup), not for every live worktree the probe touched.
 const LANDING_PHASES = new Set(["closeout-pending", "integration-pending", "cleanup-pending"]);
@@ -824,47 +883,67 @@ function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
   );
 }
 
-// The directional landing flows wiring the dock to the branch nodes (copied from the mockup's p-push /
-// p-pull / p-push-mem). They make the code land RIGHT → LEFT visible: the official-line code node pushes
-// UP to origin/feat, the merged origin/main pulls DOWN onto the official line, and the memory node
-// pushes DOWN to origin/mem-main. Each fades in with the dock; the GSAP draw-on lives in LandingFlow.
-function LandingFlow({ d, show, kind }: { d: string; show: boolean; kind: string }) {
+// The directional landing flows wiring the dock to the branch nodes. 5k F4 — these speak the cyan = ACTIVE /
+// amber = SETTLED language: at most ONE flow is cyan at a time (the current transaction: push → pull →
+// carryover), with the chevron + a travelling MotionPath dot; the moment its step completes the flow drops
+// to a plain amber line (no chevron, no dot); steps not yet reached are hidden. The active flow advances by
+// the landing[] ref states (origin-feat pushed → pr merged → origin-mem-main pushed) so panel + canvas agree.
+type FlowState = "active" | "settled" | "hidden";
+
+function LandingFlow({ d, state, kind }: { d: string; state: FlowState; kind: string }) {
   const animate = useShouldAnimate();
-  // GSAP DrawSVG draws the flow on (05n) when it resolves, selected via [data-draw='on'] in
-  // useEngineTimeline; Motion owns the opacity (a flow's visibility is purely `show`). GSAP owns the stroke
-  // geometry, so it never fights Motion (which owns opacity). Under !animate the path rests solid (drawn)
-  // at the rendered opacity. No landingEnter: `show` flipping true is what eases it in.
+  const active = state === "active";
+  const visible = state !== "hidden";
+  // Motion owns the opacity (visible vs hidden). The active flow is cyan `running` (GSAP DrawSVG draws it on
+  // via [data-draw='on'] + a travelling [data-fx='packet'] dot); a settled flow is a plain amber `nominal`
+  // line — no chevron, no dot. Under !animate it rests at this end-state.
   return (
-    <motion.path
+    <motion.g
       data-testid="landing-flow"
       data-kind={kind}
-      data-draw={show ? "on" : undefined}
-      className={flowConduit({ state: "running" })}
-      d={d}
-      markerEnd={show ? "url(#er-chev)" : undefined}
-      initial={animate ? { opacity: show ? 1 : 0 } : false}
-      animate={{ opacity: show ? 1 : 0 }}
+      data-flow-state={state}
+      initial={animate ? { opacity: visible ? 1 : 0 } : false}
+      animate={{ opacity: visible ? 1 : 0 }}
       transition={{ duration: animate ? 0.45 : 0 }}
-    />
+    >
+      <path
+        className={flowConduit({ state: active ? "running" : "nominal" })}
+        d={d}
+        data-draw={active ? "on" : undefined}
+        markerEnd={active ? "url(#er-chev)" : undefined}
+      />
+      {active ? <circle className={flowPacket} r={4} data-testid="landing-packet" data-fx="packet" data-path={d} /> : null}
+    </motion.g>
   );
 }
 
-function LandingFlows({ refs }: { refs: LandingRefNode[] }) {
-  const resolved = (kind: string) => {
-    const ref = refs.find((r) => r.kind === kind);
-    return ref ? ref.factState !== "planned" && ref.state !== "planned" : false;
+// Which single flow is the ACTIVE transaction, by the landing[] ref progression: push (feat→origin/feat) is
+// active while pushing / PR-open; once the PR merges it settles and pull (origin/main→main) is active; once
+// memory carries over (origin-mem-main pushed) pull settles and the carryover flows are active.
+function landingFlowState(refs: LandingRefNode[], kind: string): FlowState {
+  const ref = (k: string) => refs.find((r) => r.kind === k);
+  const resolved = (k: string) => {
+    const r = ref(k);
+    return r ? r.factState !== "planned" && r.state !== "planned" : false;
   };
+  const prMerged = ref("pr")?.state === "merged";
+  const memPushed = ref("origin-mem-main")?.state === "pushed";
+  if (kind === "push") return !resolved("origin-feat") ? "hidden" : prMerged ? "settled" : "active";
+  if (kind === "pull") return !prMerged ? "hidden" : memPushed ? "settled" : "active";
+  return memPushed ? "active" : "hidden"; // carry + push-mem: the carryover frontier
+}
+
+function LandingFlows({ refs }: { refs: LandingRefNode[] }) {
   return (
     <g data-testid="landing-flows" aria-hidden="true">
-      {/* flow paths copied verbatim from the mockup (p-push-code / p-pull-code / p-carry-mem / p-push-mem) */}
-      {/* push: the feat/fix source pushes UP to origin/feat */}
-      <LandingFlow kind="push" show={resolved("origin-feat")} d="M580 250 L 586 100" />
-      {/* pull: merged origin/main pulls DOWN onto local main (the official line advances) */}
-      <LandingFlow kind="pull" show={resolved("origin-main")} d="M418 100 L 432 250" />
-      {/* carry: the feat memory carries over LEFT into local main memory (T16) */}
-      <LandingFlow kind="carry" show={resolved("origin-mem-main")} d="M512 403 L 480 403" />
-      {/* push-mem: local main memory pushes DOWN to origin/mem-main (mirrored to the bottom) */}
-      <LandingFlow kind="push-mem" show={resolved("origin-mem-main")} d="M390 434 L 418 524" />
+      {/* push: the feat/fix source pushes UP to origin/feat (both on the feat column centre → vertical) */}
+      <LandingFlow kind="push" state={landingFlowState(refs, "push")} d={`M${COL_FEAT_CX} 250 L ${COL_FEAT_CX} 100`} />
+      {/* pull: merged origin/main pulls DOWN onto local main (both on the main column centre → vertical) */}
+      <LandingFlow kind="pull" state={landingFlowState(refs, "pull")} d={`M${COL_MAIN_CX} 100 L ${COL_MAIN_CX} 250`} />
+      {/* carry: the feat memory carries over LEFT into local main memory (T16): feat left edge → main right edge */}
+      <LandingFlow kind="carry" state={landingFlowState(refs, "carry")} d={`M${COL_FEAT_CX - 68} 403 L ${COL_MAIN_CX + 90} 403`} />
+      {/* push-mem: local main memory pushes DOWN to origin/mem-main (both on the main centre → vertical) */}
+      <LandingFlow kind="push-mem" state={landingFlowState(refs, "push-mem")} d={`M${COL_MAIN_CX} 434 L ${COL_MAIN_CX} 524`} />
     </g>
   );
 }
@@ -882,6 +961,18 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   useEngineTimeline(rootRef, node);
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
+  // 5o PREDICTIVE BOOT — the clone arrow draws toward the worktree engine for ~0.6s; the engine should
+  // start filling at the same moment the arrow begins drawing, not after the data says "indexing". When
+  // cgc-seed / grepai-clone is running and the engine is still configured (not yet self-reported), treat
+  // it as indexing so the fill animates in sync with the arrow and arrives when the arrow does.
+  const cgcSeedRunning = node.edges.some((e) => e.kind === "cgc-seed" && e.state === "running");
+  const grepaiCloneRunning = node.edges.some((e) => e.kind === "grepai-clone" && e.state === "running");
+  const codeRuntimePredicted = runtimeState(
+    cgcSeedRunning && (code?.runtimeState === "configured" || !code?.runtimeState) ? "indexing" : code?.runtimeState
+  );
+  const memoryRuntimePredicted = runtimeState(
+    grepaiCloneRunning && (memory?.runtimeState === "configured" || !memory?.runtimeState) ? "indexing" : memory?.runtimeState
+  );
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
   // Build-up materialisation gates (the honesty axis): the enclosure shell + the worktree coupler only
   // appear once the matching worktree ref is observed on disk; the worktree engines materialise when
@@ -965,9 +1056,12 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       {hasMemory ? (
         <motion.rect
           className={enclosureBorder}
-          x={674}
+          // left edge tracks the worktree column (26px of inner padding before the code/memory nodes), so the
+          // dashed boundary sits in the main↔worktree gap just right of feat; right edge stays at 1148 (it
+          // wraps the right-world engines, which don't move).
+          x={COL_WT_CX - 126}
           y={76}
-          width={474}
+          width={1148 - (COL_WT_CX - 126)}
           height={506}
           rx={18}
           // the enclosure shell only exists once the code worktree materialises (B1); at main-only B0 it is
@@ -980,7 +1074,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
         />
       ) : null}
 
-      {node.edges.map((edge) => <Conduit key={edge.id} edge={edge} strategy={node.integrationStrategy} />)}
+      {node.edges.map((edge) => <Conduit key={edge.id} edge={edge} strategy={node.integrationStrategy} retiring={retiring} />)}
 
       {/* THREE-TIER (5f §7.4, copied 1-to-1 from the mockup): the OFFICIAL LINE is MAIN (the protected
           branch) — ALWAYS, in the build-up and the landing — and the worktree forks from it on the right.
@@ -1014,8 +1108,8 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
 
       {/* Official-line (left world): the workspace engines + their wiring + the official code↔memory
           coupler, ported from podstage.html (m-cgc / m-grep / w-m-* / cpl-main). Real providers. */}
-      {officialCode ? <line className={officialWire} x1={135} y1={198} x2={300} y2={281} data-testid="official-wire" /> : null}
-      {officialMemory && hasMemory ? <line className={officialWire} x1={135} y1={452} x2={300} y2={403} data-testid="official-wire" /> : null}
+      {officialCode ? <line className={officialWire} x1={135} y1={198} x2={COL_MAIN_CX - 90} y2={281} data-testid="official-wire" /> : null}
+      {officialMemory && hasMemory ? <line className={officialWire} x1={135} y1={452} x2={COL_MAIN_CX - 90} y2={403} data-testid="official-wire" /> : null}
       {officialCode ? <EngineGauge at={ENGINE.mcgc} label="CGC" runtime={runtimeState(engineState(officialCode))} /> : null}
       {officialMemory ? <EngineGauge at={ENGINE.mgrep} label="GrepAI" runtime={runtimeState(engineState(officialMemory))} /> : null}
       {hasMemory ? (
@@ -1038,7 +1132,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
         className={worktreeWire}
         x1={1057}
         y1={198}
-        x2={900}
+        x2={COL_WT_CX + 100}
         y2={281}
         data-testid="worktree-wire"
         initial={animate ? { opacity: code ? 0.8 : 0 } : false}
@@ -1050,7 +1144,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           className={worktreeWire}
           x1={1057}
           y1={452}
-          x2={900}
+          x2={COL_WT_CX + 100}
           y2={403}
           data-testid="worktree-wire"
           initial={animate ? { opacity: memory ? 0.8 : 0 } : false}
@@ -1061,7 +1155,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       <EngineGauge
         at={ENGINE.cgc}
         label="CGC"
-        runtime={runtimeState(code?.runtimeState)}
+        runtime={codeRuntimePredicted}
         reindex={node.seedFallback}
         present={!!code}
       />
@@ -1069,7 +1163,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
         <EngineGauge
           at={ENGINE.grepai}
           label="GrepAI"
-          runtime={runtimeState(memory?.runtimeState)}
+          runtime={memoryRuntimePredicted}
           present={!!memory}
         />
       ) : null}
@@ -1128,7 +1222,11 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
             exit={animate ? { opacity: 0, y: 8 } : { opacity: 0 }}
             transition={{ duration: animate ? 0.4 : 0 }}
           >
-            <CloseoutTrain x={700} y={508} />
+            {/* Bottom-aligned breadcrumb: the beats sit on y=600 — the same baseline as the bottom gate/
+                recovery chips (RecoveryChips, also y=600) — so the strip reads as one bottom row rather than
+                floating mid-stage. x=260 keeps it left of centre and clear of the left engine (right edge 135)
+                and the gate chips (start x=690); the darker lower backdrop keeps the caption legible. */}
+            <CloseoutTrain x={260} y={600} />
           </motion.g>
         ) : null}
       </AnimatePresence>
@@ -1141,7 +1239,11 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           <motion.g
             key="landing-dock"
             initial={animate ? { opacity: 0 } : false}
-            animate={{ opacity: 1 }}
+            // 5k F1 — retract the whole landing tier (origin chips + the push/pull/carry/push-mem flows) as
+            // the enclosure de-materialises: when `retiring` (cleanup-pending), fade the dock to 0 in sync
+            // with the engines (parent opacity multiplies through the children) so the tier powers down with
+            // them, instead of staying lit then hard-unmounting at the next beat.
+            animate={{ opacity: retiring ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: animate ? 0.4 : 0 }}
           >

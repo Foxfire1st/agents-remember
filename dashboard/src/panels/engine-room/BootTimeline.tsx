@@ -76,12 +76,57 @@ function bootSteps(node: EngineProcessNode): Step[] {
   return steps;
 }
 
+// 5k F2/F4 — during the landing/teardown arc the right panel shows a DISPOSE sequence, not the boot checklist
+// reverting items to "pending" (which read backwards).
+const DISPOSE_PHASES = new Set([
+  "closeout-pending",
+  "integration-pending",
+  "carryover-pending",
+  "cleanup-pending",
+  "abandoned",
+]);
+
+// The single ACTIVE dispose step (the frontier), read from the SAME landing[] ref progression the canvas
+// flows use (origin-feat pushed → pr merged → origin-mem-main pushed) — so the panel's "running" row and the
+// canvas's cyan flow always agree. Index into the step list below. carryoverDoneAt isn't on the TS projection
+// yet (a deferred 5k-render item), so the carryover step reads the origin-mem-main ref.
+function disposeFrontier(node: EngineProcessNode): number {
+  const ref = (k: string) => node.landing?.find((r) => r.kind === k);
+  const resolved = (k: string) => {
+    const r = ref(k);
+    return r ? r.factState !== "planned" && r.state !== "planned" : false;
+  };
+  if (node.phase === "abandoned") return 6; // retire
+  if (node.phase === "cleanup-pending") return 5; // cleanup · de-materialise
+  if (ref("origin-mem-main")?.state === "pushed") return 4; // carryover (active)
+  if (ref("pr")?.state === "merged") return 3; // pull
+  if (resolved("origin-feat")) return 2; // PR (open)
+  if (node.phase === "integration-pending") return 1; // push
+  return 0; // closeout
+}
+
+function teardownSteps(node: EngineProcessNode): Step[] {
+  const f = disposeFrontier(node);
+  const at = (i: number): StepState => (f > i ? "complete" : f === i ? "running" : "pending");
+  return [
+    { label: "Closeout · code → ledger", state: at(0) },
+    { label: "Push → origin/feat", state: at(1) },
+    { label: "PR · merge", state: at(2) },
+    { label: "Pull → main", state: at(3) },
+    { label: "Carryover → mem-main", state: at(4) },
+    { label: "Cleanup · de-materialise", state: at(5) },
+    { label: "Retire branches", state: at(6) },
+  ];
+}
+
 export function BootTimeline({ node }: { node: EngineProcessNode }) {
+  const disposing = DISPOSE_PHASES.has(node.phase);
+  const steps = disposing ? teardownSteps(node) : bootSteps(node);
   return (
-    <div className={timeline} data-testid="boot-timeline">
-      <span className={sectionLabel}>Boot sequence</span>
+    <div className={timeline} data-testid="boot-timeline" data-mode={disposing ? "teardown" : "boot"}>
+      <span className={sectionLabel}>{disposing ? "Tear-down sequence" : "Boot sequence"}</span>
       <ol className={css({ display: "grid", gap: "0.2rem", margin: "0", padding: "0", listStyle: "none" })}>
-        {bootSteps(node).map((step) => (
+        {steps.map((step) => (
           <li key={step.label} className={timelineStep({ state: step.state })} data-state={step.state}>
             <span className={timelineMark({ state: step.state })} aria-hidden="true" />
             <span>{step.label}</span>

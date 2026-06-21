@@ -97,7 +97,7 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
       data-abandoned={abandoned || undefined}
       data-teardown={teardown ?? undefined}
       layout={animate}
-      initial={animate ? { opacity: 0, scale: 0.985 } : false}
+      initial={false}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
     >

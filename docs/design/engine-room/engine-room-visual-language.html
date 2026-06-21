@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine-Room Visual Language — Primitives Library</title>
+<style>
+  :root{
+    --bg:oklch(0.15 0.02 250);
+    --bg2:oklch(0.18 0.02 250);
+    --panel:oklch(0.21 0.025 250);
+    --stage:oklch(0.17 0.02 250);
+    --ink:oklch(0.93 0.03 90);
+    --muted:oklch(0.74 0.03 250);
+    --faint:oklch(0.55 0.02 250);
+    --hair:oklch(0.32 0.02 250);
+    --amber:oklch(0.82 0.16 75);   /* SETTLED relationship / nominal */
+    --cyan:oklch(0.85 0.13 200);   /* ACTIVE step / in-flight */
+    --mint:oklch(0.88 0.16 165);   /* FRESH / boot-success / landed */
+    --alarm:oklch(0.63 0.24 25);   /* FAULT / BLOCKED */
+    --dormant:oklch(0.50 0.07 25); /* DORMANT / pruned / off */
+    --boxfill:oklch(0.22 0.03 250);
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.6 var(--mono);
+    background-image:radial-gradient(120% 90% at 50% 0%, oklch(0.19 0.03 250) 0%, var(--bg) 60%);
+    background-attachment:fixed;
+  }
+  a{color:var(--cyan);text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px 120px}
+  header.top{padding:48px 0 24px;border-bottom:1px solid var(--hair);margin-bottom:8px}
+  header.top h1{margin:0 0 6px;font-size:22px;letter-spacing:.06em;color:var(--amber);text-transform:uppercase;font-weight:600}
+  header.top .sub{color:var(--muted);font-size:13px;max-width:74ch}
+  header.top .meta{margin-top:14px;color:var(--faint);font-size:12px;display:flex;gap:18px;flex-wrap:wrap}
+  /* sticky section nav */
+  nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in oklch,var(--bg) 86%,transparent);
+    backdrop-filter:blur(6px);border-bottom:1px solid var(--hair);padding:10px 0;margin:0 0 28px;
+    display:flex;gap:6px 14px;flex-wrap:wrap;font-size:11.5px;letter-spacing:.04em}
+  nav.toc a{color:var(--muted)}
+  nav.toc a:hover{color:var(--cyan)}
+  section{margin:44px 0;scroll-margin-top:60px}
+  h2{font-size:15px;letter-spacing:.07em;text-transform:uppercase;color:var(--amber);
+    border-left:2px solid var(--amber);padding-left:10px;margin:0 0 6px}
+  h2 .n{color:var(--faint);margin-right:8px;font-weight:400}
+  .lede{color:var(--muted);max-width:80ch;margin:0 0 20px}
+  /* primitive cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+  .stage{position:relative;background:
+      radial-gradient(120% 100% at 50% 35%, oklch(0.2 0.03 250) 0%, var(--stage) 75%);
+    border-bottom:1px solid var(--hair)}
+  .stage svg{display:block;width:100%;height:auto}
+  /* the global ease — every demo primitive crossfades, nothing hard-cuts */
+  .stage svg g,.stage svg line,.stage svg rect,.stage svg path,.stage svg circle,.stage svg text{
+    transition:transform .6s cubic-bezier(.4,0,.2,1),opacity .5s ease,
+      stroke .45s ease,fill .45s ease,stroke-dashoffset .7s cubic-bezier(.4,0,.2,1);}
+  .card .meta{padding:13px 15px 16px}
+  .card h3{margin:0 0 3px;font-size:13.5px;color:var(--ink);letter-spacing:.02em}
+  .card .sem{color:var(--muted);font-size:12px;margin:0 0 10px}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0}
+  .chip{font-size:10.5px;color:var(--muted);background:var(--bg2);border:1px solid var(--hair);
+    border-radius:4px;padding:2px 6px;letter-spacing:.02em}
+  .chip b{color:var(--ink);font-weight:600}
+  .swatchdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .replay{position:absolute;top:8px;right:8px;font:11px var(--mono);color:var(--muted);
+    background:color-mix(in oklch,var(--bg) 70%,transparent);border:1px solid var(--hair);
+    border-radius:5px;padding:3px 8px;cursor:pointer;letter-spacing:.03em}
+  .replay:hover{color:var(--cyan);border-color:var(--cyan)}
+  .tag{position:absolute;top:8px;left:10px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  /* colour swatch grid */
+  .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+  .sw{background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:12px 14px}
+  .sw .bar{height:34px;border-radius:5px;margin-bottom:9px}
+  .sw .nm{font-size:12.5px;color:var(--ink)}
+  .sw .role{font-size:11px;color:var(--muted);margin:2px 0 4px}
+  .sw code{font-size:10.5px;color:var(--faint)}
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--hair);vertical-align:top}
+  th{color:var(--amber);font-weight:600;letter-spacing:.03em;font-size:11px;text-transform:uppercase}
+  td code{color:var(--cyan);font-size:11.5px}
+  td .k{color:var(--mint)}
+  .note{background:var(--bg2);border:1px solid var(--hair);border-left:2px solid var(--cyan);
+    border-radius:6px;padding:12px 15px;margin:16px 0;color:var(--muted);font-size:12.5px;max-width:84ch}
+  .note b{color:var(--ink)}
+  .doctrine{border-left-color:var(--amber)}
+  .warnrule{border-left-color:var(--alarm)}
+  hr.div{border:0;border-top:1px solid var(--hair);margin:40px 0}
+  footer{color:var(--faint);font-size:11.5px;border-top:1px solid var(--hair);padding-top:18px;margin-top:50px}
+  /* ---- ENGINE-ROOM PRIMITIVE STYLES (mirrors podstage.html, the OD prototype) ---- */
+  /* lines */
+  .wire{fill:none;stroke:var(--amber);stroke-width:2;opacity:.8}                 /* settled relationship */
+  .planned{fill:none;stroke:var(--hair);stroke-width:2;opacity:.7;stroke-dasharray:9 7}
+  .blocked{fill:none;stroke:var(--alarm);stroke-width:2.4;opacity:.92}           /* steady, not flicker */
+  /* active flow: drawn on, held, retracted */
+  .flowpath{fill:none;stroke:var(--cyan);stroke-width:2.4;opacity:0;
+    stroke-dasharray:100 100;stroke-dashoffset:100;filter:drop-shadow(0 0 3px var(--cyan));}
+  .flow-g.on .flowpath{opacity:.9;stroke-dashoffset:0;
+    transition:stroke-dashoffset .55s cubic-bezier(.25,1,.4,1),opacity .2s ease}
+  .flow-g.off .flowpath{opacity:0;stroke-dashoffset:-100;
+    transition:stroke-dashoffset .5s cubic-bezier(.5,0,.7,1),opacity .25s ease .32s}
+  .pkt{fill:var(--cyan);opacity:0;filter:drop-shadow(0 0 5px var(--cyan))}
+  .flow-g.on .pkt{opacity:1;animation:run 1.4s linear infinite}
+  @keyframes run{0%{offset-distance:0%}100%{offset-distance:100%}}
+  /* nodes */
+  .node .box{fill:var(--boxfill);stroke:var(--amber);stroke-width:1.5}
+  .node .t1{fill:var(--muted);font-size:8px;letter-spacing:.06em;text-transform:uppercase}
+  .node .t2{fill:var(--ink);font-size:11px;font-weight:600}
+  .node.derived .box{stroke:var(--cyan);stroke-dasharray:5 4}
+  .node.derived .t2{fill:var(--cyan)}
+  .node.fresh .box{stroke:var(--mint);filter:drop-shadow(0 0 4px var(--mint))}
+  .node.fresh .t2{fill:var(--mint)}
+  .node.pruned .box{stroke:var(--dormant);fill:oklch(0.18 0.02 25)}
+  .node.pruned .t1,.node.pruned .t2{fill:var(--dormant)}
+  /* engines — rich glyph (dense fins + side nubs + fill), mirrors the dashboard engine.
+     CHARGE FILLS FROM THE MIDDLE OUTWARD (scaleY from centre) to full turquoise; then flashes up and DIMS
+     TO GREEN. A healthy engine rests GREEN (nominal) — never amber (amber = settled relationships). */
+  /* CONSTANT GOLD BEZEL (developer call); the body (e-charge, center-out) + the fanned flank PETALS carry
+     the runtime colour. Fins / spine / scanlines are constant structure. 1:1 with the dashboard EngineGauge. */
+  .prov .e-bg{fill:oklch(0.15 0.02 250)}                                       /* dark gauge background */
+  .prov .e-frame{fill:none;stroke:var(--amber);stroke-width:2.2;filter:drop-shadow(0 0 3px var(--amber))}  /* gold bezel */
+  .prov .e-fin{stroke:oklch(0.15 0.02 250);stroke-width:2;opacity:.85}         /* dark dividers (bg) — the ONLY lines the engine owns */
+  .prov .e-spine{stroke:var(--amber);stroke-width:.8;opacity:.28}              /* faint centre spine */
+  .prov .e-petal{stroke:var(--mint);stroke-width:1.4;stroke-linecap:round;opacity:0}  /* fanned flank petals, state-coloured */
+  .prov .e-charge{fill:var(--cyan);transform-box:fill-box;transform-origin:center;transform:scaleY(0);opacity:0;
+    transition:transform 1s cubic-bezier(.22,1,.36,1),fill .4s ease,opacity .4s ease}
+  /* charge fills from the MIDDLE outward to full turquoise */
+  .prov.booting .e-charge{fill:var(--cyan);transform:scaleY(1);opacity:.85}
+  .prov.booting .e-petal{stroke:var(--cyan);opacity:.6}
+  /* flash up, then DIM to green (powerup lands on green, NOT amber) */
+  .prov.green .e-charge{transform:scaleY(1);animation:powerup 1.15s ease forwards}
+  .prov.green .e-petal{stroke:var(--mint);opacity:.6}
+  /* ready / nominal = STEADY GREEN */
+  .prov.ready .e-charge{fill:var(--mint);transform:scaleY(1);opacity:.55}
+  .prov.ready .e-petal{stroke:var(--mint);opacity:.6}
+  /* fault = red body + gentle red halo breathe (gold bezel stays) */
+  .prov.fault{animation:faultglow 1.7s ease-in-out infinite}
+  .prov.fault .e-charge{fill:var(--alarm);transform:scaleY(1);opacity:.5}
+  .prov.fault .e-petal{stroke:var(--alarm);opacity:.65}
+  /* reindex = amber body gentle pulse */
+  .prov.reindex .e-charge{fill:var(--amber);transform:scaleY(1);animation:reindexpulse 1.6s ease-in-out infinite}
+  .prov.reindex .e-petal{stroke:var(--amber);opacity:.55}
+  /* power-up: full turquoise charge → flash up (bright mint) → dim to green. NOT amber. */
+  @keyframes powerup{0%{fill:var(--cyan);opacity:.85}30%{fill:var(--mint);opacity:1}100%{fill:var(--mint);opacity:.55}}
+  /* fault = a gentle red halo breathing around the whole gauge (the gold bezel stays gold) */
+  @keyframes faultglow{0%,100%{filter:drop-shadow(0 0 2px var(--alarm))}50%{filter:drop-shadow(0 0 9px var(--alarm))}}
+  @keyframes reindexpulse{0%,100%{opacity:.22}50%{opacity:.6}}
+  /* coupler / warp-core — the memory.md ledger link (dashboard version: bar + chain-link + surge,
+     binds via opacity .3→1; NOT the mockup's scaleY clamp + ladder rungs + square node) */
+  .coupler-g{opacity:.3;transition:opacity .45s ease}
+  .coupler-g.bound{opacity:1}
+  .coupler{stroke:var(--amber);stroke-width:9;stroke-linecap:round;opacity:.95;filter:drop-shadow(0 0 2px var(--amber))}
+  .cpl-link{fill:none;stroke:var(--amber);stroke-width:1.6}                    /* chain-link: two interlocking rings */
+  .cpl-surge{stroke:oklch(0.95 0.1 90);stroke-width:7;stroke-linecap:round;opacity:0;filter:drop-shadow(0 0 5px var(--amber))}
+  .coupler-g.bound .cpl-surge.up{animation:warpup 1.6s cubic-bezier(.4,0,.5,1) infinite}
+  .coupler-g.bound .cpl-surge.down{animation:warpdown 1.6s cubic-bezier(.4,0,.5,1) infinite}
+  @keyframes warpup{0%{opacity:0;transform:translateY(0)}18%{opacity:.95}100%{opacity:0;transform:translateY(-22px)}}
+  @keyframes warpdown{0%{opacity:0;transform:translateY(0)}18%{opacity:.95}100%{opacity:0;transform:translateY(22px)}}
+  /* despawn */
+  .dissolve{transform-box:fill-box;transform-origin:center}
+  .dissolve.gone{opacity:0;transform:scale(.94);transition:opacity .6s ease,transform .6s ease}
+  /* glow ladder */
+  .glowrow{display:flex;align-items:center;gap:0;justify-content:space-around;padding:6px 0}
+  text{font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>Engine-Room Visual Language</h1>
+  <div class="sub">The primitives library for the Agents&nbsp;Remember dashboard engine room — every visual
+    element type with a live, animated example, the semantic it carries, and the exact parameters. Open this file
+    in a browser. Point at a primitive by name when requesting a change.</div>
+  <div class="meta">
+    <span>Status: <b style="color:var(--amber)">living spec</b></span>
+    <span>Source of truth for: motion, colour, glow, spacing</span>
+    <span>Companion prototype: <a href="./podstage.html">podstage.html</a></span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#doctrine">0 · How to read this</a>
+  <a href="#colour">1 · State colours</a>
+  <a href="#lines">2 · Lines</a>
+  <a href="#nodes">3 · Nodes</a>
+  <a href="#glow">4 · Glow scale</a>
+  <a href="#packet">5 · Packet &amp; chevron</a>
+  <a href="#engines">6 · Engines</a>
+  <a href="#coupler">7 · Coupler</a>
+  <a href="#choreo">8 · Choreography</a>
+  <a href="#despawn">9 · Despawn</a>
+  <a href="#timing">10 · Timing</a>
+  <a href="#impl">11 · Implementation</a>
+</nav>
+
+<!-- 0 -->
+<section id="doctrine">
+  <h2><span class="n">0</span>How to read this</h2>
+  <p class="lede">The engine room renders the git-lifecycle of a worktree as a podracer cockpit: two provider
+    engines per side (CGC, GrepAI), an official-line workspace and a worktree enclosure, branch/commit nodes,
+    conduits between them, and a code&#8596;memory coupler. State is carried by <b>colour and motion</b>, never by
+    chrome — the same geometry means different things in different colours.</p>
+
+  <div class="note"><b>The one rule that keeps getting lost:</b> &nbsp;<span style="color:var(--cyan)">cyan = the
+    ACTIVE step</span> (the single transaction happening <i>now</i> — it grows in, holds with a travelling dot,
+    then retracts). <span style="color:var(--amber)">amber = a SETTLED relationship</span> (done; a plain static
+    line that retracts only when the relationship is terminated). <span style="color:var(--mint)">mint = just
+    changed / landed / booted</span>. <span style="color:var(--alarm)">red = fault or blocked</span>.
+    A line is cyan <i>only while its step is active</i>; the moment it completes it drops to a plain amber line.
+    Dots and arrow-tips ride <i>only</i> the active cyan flow. One exception to "amber = at rest":
+    <b>engines</b> rest <span style="color:var(--mint)">green</span> (online/healthy), never amber — amber is for
+    settled <i>relationships</i>, green is a healthy <i>engine</i>.</div>
+
+  <div class="note doctrine"><b>Motion doctrine.</b> This spec is written in <b>CSS</b> so it opens anywhere and
+    stays readable in a future session. <b>The dashboard itself does not animate in CSS</b> — per the engine-room
+    motion doctrine it uses <b>GSAP timelines</b> (DrawSVG, MotionPath) + <b>Motion</b> (AnimatePresence / layoutId),
+    with CSS for static styling only. Each primitive below lists the value (ease, duration, colour, glow) that
+    transfers verbatim; §11 maps the CSS technique here to the GSAP/Motion API in the React code.</p></div>
+
+  <div class="note doctrine"><b>Reduced motion.</b> Every animated primitive must freeze to its end-state under
+    <code>prefers-reduced-motion: reduce</code> (GSAP <code>matchMedia</code>) — drawn lines rest fully drawn,
+    packets hide, surges stop. Motion is never required to read state; colour alone is sufficient.</div>
+</section>
+
+<!-- 1 -->
+<section id="colour">
+  <h2><span class="n">1</span>State colours</h2>
+  <p class="lede">Five state colours plus two neutrals. Every recolour crossfades over <code>.45s ease</code>
+    (the global ease on <code>stroke</code>/<code>fill</code>). Values are OKLCH — copy them verbatim.</p>
+  <div class="swatches">
+    <div class="sw"><div class="bar" style="background:var(--amber)"></div><div class="nm">Amber — settled</div><div class="role">A done <i>relationship</i> at rest — structural wires, couplers. <b>Not engines</b> (those rest green).</div><code>oklch(0.82 0.16 75)</code></div>
+    <div class="sw"><div class="bar" style="background:var(--cyan)"></div><div class="nm">Cyan — active</div><div class="role">The step happening now. Conduits, packets, charging engines.</div><code>oklch(0.85 0.13 200)</code></div>
+    <div class="sw"><div class="bar" style="background:var(--mint)"></div><div class="nm">Mint / green — fresh &amp; healthy</div><div class="role">A just-changed node (transient highlight) <i>or</i> a healthy/ready engine (steady). Engines rest here.</div><code>oklch(0.88 0.16 165)</code></div>
+    <div class="sw"><div class="bar" style="background:var(--alarm)"></div><div class="nm">Red — fault / blocked</div><div class="role">A fault (flickers) or a gate/block (steady).</div><code>oklch(0.63 0.24 25)</code></div>
+    <div class="sw"><div class="bar" style="background:var(--dormant)"></div><div class="nm">Dormant — off / pruned</div><div class="role">Retired branch, powered-down engine.</div><code>oklch(0.50 0.07 25)</code></div>
+    <div class="sw"><div class="bar" style="background:var(--ink)"></div><div class="nm">Ink — text</div><div class="role">Primary warm-white label text.</div><code>oklch(0.93 0.03 90)</code></div>
+    <div class="sw"><div class="bar" style="background:var(--muted)"></div><div class="nm">Muted — caption</div><div class="role">Secondary labels. Min contrast 4.5:1 (see §10).</div><code>oklch(0.74 0.03 250)</code></div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="lines">
+  <h2><span class="n">2</span>Lines &amp; conduits</h2>
+  <p class="lede">Four line types. They are not interchangeable: the colour and whether it moves <i>is</i> the
+    meaning. Only the active flow is animated; everything else is a static wire.</p>
+  <div class="grid">
+
+    <div class="card">
+      <div class="stage"><span class="tag">active flow</span><button class="replay" data-replay>⟲ replay</button>
+        <svg viewBox="0 0 320 150">
+          <defs><marker id="chev1" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+            <path d="M0 0 L5 3 L0 6" fill="none" stroke="context-stroke" stroke-width="1.4"/></marker></defs>
+          <g class="flow-g" data-loop="flow">
+            <path class="flowpath" pathLength="100" d="M44 75 L 276 75" marker-end="url(#chev1)"/>
+            <circle class="pkt" r="4.5" style="offset-path:path('M44 75 L 276 75')"/>
+          </g>
+        </svg></div>
+      <div class="meta">
+        <h3>Active flow</h3>
+        <p class="sem">The one transaction happening now. Grows source&#8594;tip, <b>holds</b> while a glowing dot
+          travels, then retracts tip-first. Exactly one is "on" at a time.</p>
+        <div class="chips">
+          <span class="chip"><span class="swatchdot" style="background:var(--cyan)"></span><b>cyan</b></span>
+          <span class="chip">draw-in <b>.55s</b> · <span style="color:var(--cyan)">(.25,1,.4,1)</span></span>
+          <span class="chip">retract <b>.5s</b> · <span style="color:var(--cyan)">(.5,0,.7,1)</span></span>
+          <span class="chip">dot <b>1.4s</b> linear</span>
+          <span class="chip">glow line <b>3px</b> · dot <b>5px</b></span>
+          <span class="chip">width <b>2.4</b> · arrow-tip yes</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">settled wire</span>
+        <svg viewBox="0 0 320 150"><line class="wire" x1="44" y1="75" x2="276" y2="75"/></svg></div>
+      <div class="meta">
+        <h3>Settled wire</h3>
+        <p class="sem">A relationship that is done and at rest. Static, no dot, no arrow-tip. It only animates
+          once — retracting — when the relationship is terminated (§9).</p>
+        <div class="chips">
+          <span class="chip"><span class="swatchdot" style="background:var(--amber)"></span><b>amber</b></span>
+          <span class="chip">width <b>2</b></span>
+          <span class="chip">opacity <b>.8</b></span>
+          <span class="chip">no glow · no tip · no dot</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">planned</span>
+        <svg viewBox="0 0 320 150"><line class="planned" x1="44" y1="75" x2="276" y2="75"/></svg></div>
+      <div class="meta">
+        <h3>Planned / not-yet</h3>
+        <p class="sem">A relationship that will exist but is not on disk yet. Dim and dashed. Fades up to a
+          settled wire (or a cyan flow) when it materialises.</p>
+        <div class="chips">
+          <span class="chip"><span class="swatchdot" style="background:var(--hair)"></span>dim</span>
+          <span class="chip">dash <b>9 7</b></span>
+          <span class="chip">opacity <b>.55&#8211;.7</b></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">blocked</span>
+        <svg viewBox="0 0 320 150"><line class="blocked" x1="44" y1="75" x2="276" y2="75"/>
+          <text x="160" y="62" text-anchor="middle" fill="var(--alarm)" font-size="9" letter-spacing=".1em">GATED</text></svg></div>
+      <div class="meta">
+        <h3>Blocked</h3>
+        <p class="sem">A relationship held by a gate. <b>Steady</b> red — never flicker. (Flicker means a fault,
+          §6 — keep "you must choose" visually distinct from "something broke".)</p>
+        <div class="chips">
+          <span class="chip"><span class="swatchdot" style="background:var(--alarm)"></span><b>red</b></span>
+          <span class="chip">steady (no anim)</span>
+          <span class="chip">width <b>2.4</b></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="nodes">
+  <h2><span class="n">3</span>Nodes &amp; boxes</h2>
+  <p class="lede">A node is a commit/branch box. Emphasis is event-driven — a box highlights when its <i>state
+    changes</i>, never as a perpetual pulse. The fresh state is the eye-grabber: mint stroke + 4px glow + the
+    hash text recolours.</p>
+  <div class="grid">
+
+    <div class="card">
+      <div class="stage"><span class="tag">default</span>
+        <svg viewBox="0 0 320 150"><g class="node"><rect class="box" x="90" y="52" width="140" height="46" rx="8"/>
+          <text class="t1" x="160" y="72" text-anchor="middle">official line · main</text>
+          <text class="t2" x="160" y="88" text-anchor="middle">main @08e9221a</text></g></svg></div>
+      <div class="meta"><h3>Default node</h3><p class="sem">A node at rest. Amber 1.5px stroke.</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--amber)"></span>amber 1.5</span><span class="chip">fill <b>oklch(.22 .03 250)</b></span></div></div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">derived</span>
+        <svg viewBox="0 0 320 150"><g class="node derived"><rect class="box" x="90" y="52" width="140" height="46" rx="8"/>
+          <text class="t1" x="160" y="72" text-anchor="middle">code worktree</text>
+          <text class="t2" x="160" y="88" text-anchor="middle">ar/boot-audio</text></g></svg></div>
+      <div class="meta"><h3>Derived / provisional</h3><p class="sem">Just born from its parent — projected, not yet
+        confirmed on disk. Dashed cyan outline.</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--cyan)"></span>cyan</span><span class="chip">dash <b>5 4</b></span></div></div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">fresh — loops</span><button class="replay" data-replay>⟲ replay</button>
+        <svg viewBox="0 0 320 150"><g class="node" data-loop="fresh"><rect class="box" x="90" y="52" width="140" height="46" rx="8"/>
+          <text class="t1" x="160" y="72" text-anchor="middle">official line · main</text>
+          <text class="t2" x="160" y="88" text-anchor="middle">main @a1b2c9 &#9650;</text></g></svg></div>
+      <div class="meta"><h3>Fresh / landed</h3><p class="sem">Just changed or landed. Mint stroke + glow, hash text
+        recolours mint, a <b>&#9650;</b> appended — doubly legible. Eased in by the global transition, then it
+        relaxes back to default.</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--mint)"></span>mint</span><span class="chip">glow <b>4px</b></span><span class="chip">on state-change only</span></div></div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">pruned</span>
+        <svg viewBox="0 0 320 150"><g class="node pruned"><rect class="box" x="90" y="52" width="140" height="46" rx="8"/>
+          <text class="t1" x="160" y="72" text-anchor="middle">retired</text>
+          <text class="t2" x="160" y="88" text-anchor="middle">ar/boot-audio</text></g></svg></div>
+      <div class="meta"><h3>Pruned / retired</h3><p class="sem">Disposed. Desaturated dormant stroke and text,
+        darker fill. Retracts away (§9) rather than lingering.</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--dormant)"></span>dormant</span></div></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="glow">
+  <h2><span class="n">4</span>Glow scale</h2>
+  <p class="lede">Glow is <code>filter:drop-shadow</code> only (GPU-cheap, colour-tintable) — never an SVG filter
+    graph. Blur radius scales with importance, and the glow colour always equals the element's state colour, so
+    glow doubles as a state signal.</p>
+  <div class="card" style="max-width:none">
+    <div class="stage">
+      <svg viewBox="0 0 640 110"><g class="glowrow-svg">
+        <g><circle cx="80"  cy="46" r="7" fill="var(--amber)" style="filter:drop-shadow(0 0 2px var(--amber))"/><text x="80"  y="84" text-anchor="middle" fill="var(--muted)" font-size="10">2px</text><text x="80"  y="98" text-anchor="middle" fill="var(--faint)" font-size="9">structural</text></g>
+        <g><circle cx="210" cy="46" r="7" fill="var(--cyan)"  style="filter:drop-shadow(0 0 4px var(--cyan))"/><text x="210" y="84" text-anchor="middle" fill="var(--muted)" font-size="10">3&#8211;4px</text><text x="210" y="98" text-anchor="middle" fill="var(--faint)" font-size="9">active line / node</text></g>
+        <g><circle cx="340" cy="46" r="7" fill="var(--cyan)"  style="filter:drop-shadow(0 0 5px var(--cyan))"/><text x="340" y="84" text-anchor="middle" fill="var(--muted)" font-size="10">5px</text><text x="340" y="98" text-anchor="middle" fill="var(--faint)" font-size="9">packet / power-up</text></g>
+        <g><circle cx="470" cy="46" r="7" fill="var(--mint)"  style="filter:drop-shadow(0 0 5px var(--mint))"/><text x="470" y="84" text-anchor="middle" fill="var(--muted)" font-size="10">5px</text><text x="470" y="98" text-anchor="middle" fill="var(--faint)" font-size="9">fresh / landed</text></g>
+        <g><circle cx="585" cy="46" r="7" fill="var(--alarm)" style="filter:drop-shadow(0 0 7px var(--alarm))"/><text x="585" y="84" text-anchor="middle" fill="var(--muted)" font-size="10">7px</text><text x="585" y="98" text-anchor="middle" fill="var(--faint)" font-size="9">alarm gate</text></g>
+      </g></svg></div>
+    <div class="meta"><div class="chips">
+      <span class="chip">structural bar <b>2px</b></span>
+      <span class="chip">active line / node <b>3&#8211;4px</b></span>
+      <span class="chip">packet / power-up <b>5px</b></span>
+      <span class="chip">alarm gate <b>7px</b></span>
+      <span class="chip">colour = state colour</span>
+    </div></div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="packet">
+  <h2><span class="n">5</span>Packet &amp; chevron</h2>
+  <p class="lede">The travelling packet is what the eye locks onto — one per active flow, riding the path via
+    <code>offset-path</code>. The chevron tip uses <code>stroke="context-stroke"</code> so it inherits the path's
+    live colour for free (cyan&#8594;amber&#8594;red).</p>
+  <div class="grid">
+    <div class="card">
+      <div class="stage"><span class="tag">packet — continuous</span>
+        <svg viewBox="0 0 320 150">
+          <path class="wire" pathLength="100" d="M40 110 C 120 20, 200 20, 280 110" style="opacity:.35"/>
+          <circle r="4.5" fill="var(--cyan)" style="filter:drop-shadow(0 0 5px var(--cyan));offset-path:path('M40 110 C 120 20, 200 20, 280 110');animation:run 1.4s linear infinite"/>
+        </svg></div>
+      <div class="meta"><h3>Packet</h3><p class="sem">A directed energy capsule. Rides only the active flow.</p>
+        <div class="chips"><span class="chip">r <b>4.5</b></span><span class="chip">glow <b>5px</b></span><span class="chip"><b>1.4s</b> linear loop</span><span class="chip">one per flow</span></div></div>
+    </div>
+    <div class="card">
+      <div class="stage"><span class="tag">chevron</span>
+        <svg viewBox="0 0 320 150">
+          <defs><marker id="chev2" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto">
+            <path d="M0 0 L5 3 L0 6" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>
+          <line x1="50" y1="55" x2="250" y2="55" stroke="var(--cyan)" stroke-width="2.4" marker-end="url(#chev2)"/>
+          <line x1="50" y1="95" x2="250" y2="95" stroke="var(--alarm)" stroke-width="2.4" marker-end="url(#chev2)"/>
+        </svg></div>
+      <div class="meta"><h3>Chevron tip</h3><p class="sem">Marks direction on an <i>active</i> flow only. Inherits
+        the line's colour via <code>context-stroke</code> — a refused flow gets a red tip for free.</p>
+        <div class="chips"><span class="chip">context-stroke</span><span class="chip">active flows only</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="engines">
+  <h2><span class="n">6</span>Engines</h2>
+  <p class="lede">A provider engine (CGC / GrepAI). A <b>constant gold bezel</b> frames it; the <b>body</b> (fills
+    from the <b>middle outward</b> to full turquoise, then <b>flashes up and dims to green</b>) and the
+    <b>fanned flank petals</b> carry the runtime colour. A healthy engine rests <b>green</b> — not amber, not a
+    bottom-up fill. Faults <b>pulse gently</b>; a re-index pulses amber.</p>
+  <div class="grid">
+
+    <div class="card">
+      <div class="stage"><span class="tag">boot — loops</span><button class="replay" data-replay>⟲ replay</button>
+        <svg viewBox="0 0 320 150"><g class="prov" data-loop="boot" transform="translate(128,22)">
+          <rect class="e-bg" x="0" y="0" width="56" height="96" rx="5"/>
+          <rect class="e-charge" x="2" y="2" width="52" height="92" rx="3"/>
+          <line class="e-fin" x1="0" y1="14" x2="56" y2="14"/><line class="e-fin" x1="0" y1="26" x2="56" y2="26"/>
+          <line class="e-fin" x1="0" y1="38" x2="56" y2="38"/><line class="e-fin" x1="0" y1="50" x2="56" y2="50"/>
+          <line class="e-fin" x1="0" y1="62" x2="56" y2="62"/><line class="e-fin" x1="0" y1="74" x2="56" y2="74"/>
+          <line class="e-fin" x1="0" y1="86" x2="56" y2="86"/>
+          <line class="e-spine" x1="28" y1="4" x2="28" y2="92"/>
+          <line class="e-petal" x1="-8" y1="26" x2="-2" y2="22"/><line class="e-petal" x1="-8" y1="48" x2="-2" y2="48"/><line class="e-petal" x1="-8" y1="70" x2="-2" y2="74"/>
+          <line class="e-petal" x1="58" y1="22" x2="64" y2="26"/><line class="e-petal" x1="58" y1="48" x2="64" y2="48"/><line class="e-petal" x1="58" y1="74" x2="64" y2="70"/>
+          <rect class="e-frame" x="0" y="0" width="56" height="96" rx="5"/></g></svg></div>
+      <div class="meta"><h3>Boot &#8594; ready</h3><p class="sem">Dormant &#8594; charge fills from the
+        <b>middle outward</b> (<code>scaleY</code> from centre) to full turquoise &#8594; <b>flashes up</b> &#8594;
+        dims over to <b>green</b>. No amber.</p>
+        <div class="chips"><span class="chip">fill center-out <b>1s</b></span><span class="chip">flash &amp; dim <b>1.15s</b></span><span class="chip">rests <span style="color:var(--mint)">green</span></span></div></div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">ready / nominal</span>
+        <svg viewBox="0 0 320 150"><g class="prov ready" transform="translate(128,22)">
+          <rect class="e-bg" x="0" y="0" width="56" height="96" rx="5"/>
+          <rect class="e-charge" x="2" y="2" width="52" height="92" rx="3"/>
+          <line class="e-fin" x1="0" y1="14" x2="56" y2="14"/><line class="e-fin" x1="0" y1="26" x2="56" y2="26"/>
+          <line class="e-fin" x1="0" y1="38" x2="56" y2="38"/><line class="e-fin" x1="0" y1="50" x2="56" y2="50"/>
+          <line class="e-fin" x1="0" y1="62" x2="56" y2="62"/><line class="e-fin" x1="0" y1="74" x2="56" y2="74"/>
+          <line class="e-fin" x1="0" y1="86" x2="56" y2="86"/>
+          <line class="e-spine" x1="28" y1="4" x2="28" y2="92"/>
+          <line class="e-petal" x1="-8" y1="26" x2="-2" y2="22"/><line class="e-petal" x1="-8" y1="48" x2="-2" y2="48"/><line class="e-petal" x1="-8" y1="70" x2="-2" y2="74"/>
+          <line class="e-petal" x1="58" y1="22" x2="64" y2="26"/><line class="e-petal" x1="58" y1="48" x2="64" y2="48"/><line class="e-petal" x1="58" y1="74" x2="64" y2="70"/>
+          <rect class="e-frame" x="0" y="0" width="56" height="96" rx="5"/></g></svg></div>
+      <div class="meta"><h3>Ready / nominal</h3><p class="sem">The resting healthy state — steady green, full charge.
+        This is where a booted engine <b>stays</b> (like the dashboard CGC / GrepAI at rest).</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--mint)"></span>green steady</span><span class="chip">no pulse</span></div></div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">fault — gentle pulse</span>
+        <svg viewBox="0 0 320 150"><g class="prov fault" transform="translate(128,22)">
+          <rect class="e-bg" x="0" y="0" width="56" height="96" rx="5"/>
+          <rect class="e-charge" x="2" y="2" width="52" height="92" rx="3"/>
+          <line class="e-fin" x1="0" y1="14" x2="56" y2="14"/><line class="e-fin" x1="0" y1="26" x2="56" y2="26"/>
+          <line class="e-fin" x1="0" y1="38" x2="56" y2="38"/><line class="e-fin" x1="0" y1="50" x2="56" y2="50"/>
+          <line class="e-fin" x1="0" y1="62" x2="56" y2="62"/><line class="e-fin" x1="0" y1="74" x2="56" y2="74"/>
+          <line class="e-fin" x1="0" y1="86" x2="56" y2="86"/>
+          <line class="e-spine" x1="28" y1="4" x2="28" y2="92"/>
+          <line class="e-petal" x1="-8" y1="26" x2="-2" y2="22"/><line class="e-petal" x1="-8" y1="48" x2="-2" y2="48"/><line class="e-petal" x1="-8" y1="70" x2="-2" y2="74"/>
+          <line class="e-petal" x1="58" y1="22" x2="64" y2="26"/><line class="e-petal" x1="58" y1="48" x2="64" y2="48"/><line class="e-petal" x1="58" y1="74" x2="64" y2="70"/>
+          <rect class="e-frame" x="0" y="0" width="56" height="96" rx="5"/></g></svg></div>
+      <div class="meta"><h3>Fault</h3><p class="sem">Backend unreachable / crash-loop. Whole-silhouette red
+        <b>gentle breathe</b> (~1.7s ease-in-out) — never a harsh strobe. Still clearly distinct from a steady block.</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--alarm)"></span>red</span><span class="chip">breathe <b>1.7s</b> ease-in-out</span></div></div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">reindex — gentle pulse</span>
+        <svg viewBox="0 0 320 150"><g class="prov reindex" transform="translate(128,22)">
+          <rect class="e-bg" x="0" y="0" width="56" height="96" rx="5"/>
+          <rect class="e-charge" x="2" y="2" width="52" height="92" rx="3"/>
+          <line class="e-fin" x1="0" y1="14" x2="56" y2="14"/><line class="e-fin" x1="0" y1="26" x2="56" y2="26"/>
+          <line class="e-fin" x1="0" y1="38" x2="56" y2="38"/><line class="e-fin" x1="0" y1="50" x2="56" y2="50"/>
+          <line class="e-fin" x1="0" y1="62" x2="56" y2="62"/><line class="e-fin" x1="0" y1="74" x2="56" y2="74"/>
+          <line class="e-fin" x1="0" y1="86" x2="56" y2="86"/>
+          <line class="e-spine" x1="28" y1="4" x2="28" y2="92"/>
+          <line class="e-petal" x1="-8" y1="26" x2="-2" y2="22"/><line class="e-petal" x1="-8" y1="48" x2="-2" y2="48"/><line class="e-petal" x1="-8" y1="70" x2="-2" y2="74"/>
+          <line class="e-petal" x1="58" y1="22" x2="64" y2="26"/><line class="e-petal" x1="58" y1="48" x2="64" y2="48"/><line class="e-petal" x1="58" y1="74" x2="64" y2="70"/>
+          <rect class="e-frame" x="0" y="0" width="56" height="96" rx="5"/></g></svg></div>
+      <div class="meta"><h3>Re-indexing</h3><p class="sem">Recovery work in progress. Amber <b>gentle pulse</b>
+        (breathing) — work is happening, nothing is broken.</p>
+        <div class="chips"><span class="chip"><span class="swatchdot" style="background:var(--amber)"></span>amber</span><span class="chip">breathe <b>1.6s</b> ease-in-out</span></div></div>
+    </div>
+
+  </div>
+  <div class="note"><b>Scanlines are not the engine.</b> The fine horizontal grain over the live engines is a
+    <b>global CRT scanline overlay</b> riding above the whole canvas (cockpit atmosphere) — the engine glyph owns
+    only the 7 thick dividers, never baked-in scanlines. The overlay
+    <span style="display:inline-block;width:74px;height:16px;vertical-align:middle;border-radius:3px;border:1px solid var(--hair);background:repeating-linear-gradient(0deg, oklch(0.08 0.02 250) 0 1.5px, transparent 1.5px 4px), var(--mint)"></span>
+    is <code>repeating-linear-gradient(0deg, scan 0 1.5px, transparent 1.5px 4px)</code> at low opacity, applied
+    canvas-wide above every glyph — not per-element.</div>
+</section>
+
+<!-- 7 -->
+<section id="coupler">
+  <h2><span class="n">7</span>Coupler / warp-core</h2>
+  <p class="lede">The code&#8596;memory coupler is the <b>memory.md ledger link</b> — it binds this side's code
+    commit to its memory commit. A thick amber bar with a <b>chain-link glyph</b> (two interlocking rings) at its
+    core; when bound it brightens (opacity .3&#8594;1) and pumps a bidirectional white <b>energy surge</b> from the
+    link. The dashboard's chain-link is the better version over the mockup's plain bar + ladder + square node.
+    (A bare line/arc in this gap is what produced the "mystery triangle".)</p>
+  <div class="grid">
+    <div class="card">
+      <div class="stage"><span class="tag">bound — loops</span><button class="replay" data-replay>⟲ replay</button>
+        <svg viewBox="0 0 320 170"><g class="coupler-g" data-loop="bind" transform="translate(160,35)">
+          <line class="coupler" x1="0" y1="20" x2="0" y2="80"/>
+          <line class="cpl-surge up"   x1="0" y1="46" x2="0" y2="54"/>
+          <line class="cpl-surge down" x1="0" y1="46" x2="0" y2="54"/>
+          <g class="cpl-link"><ellipse cx="0" cy="47" rx="5" ry="4"/><ellipse cx="0" cy="53" rx="5" ry="4"/></g>
+        </g>
+        <text x="160" y="142" text-anchor="middle" fill="var(--amber)" font-size="10" letter-spacing=".04em">08e9221a &#8646; d60a0511</text></svg></div>
+      <div class="meta"><h3>Coupler (bound)</h3><p class="sem">Binds code (top) and memory (bottom) — the ledger row.
+        9px amber bar with the chain-link core; when bound it brightens and a near-white surge splits up &amp; down
+        from the link. (The ribbing you see live is the global scanline overlay, not the bar.)</p>
+        <div class="chips"><span class="chip">bar <b>9px</b> amber round</span><span class="chip">chain-link <b>2 rings</b></span><span class="chip">surge <b>1.6s</b> bi-dir</span><span class="chip">bind opacity .3&#8594;1</span></div></div>
+    </div>
+    <div class="card">
+      <div class="stage"><span class="tag">unbound</span>
+        <svg viewBox="0 0 320 170"><g class="coupler-g" transform="translate(160,35)">
+          <line class="coupler" x1="0" y1="20" x2="0" y2="80"/>
+          <g class="cpl-link"><ellipse cx="0" cy="47" rx="5" ry="4"/><ellipse cx="0" cy="53" rx="5" ry="4"/></g>
+        </g>
+        <text x="160" y="142" text-anchor="middle" fill="var(--faint)" font-size="10">unbound · dim</text></svg></div>
+      <div class="meta"><h3>Coupler (unbound)</h3><p class="sem">Present but not bound — the bar + link dim to
+        opacity .3, no surge. (Fully absent before the worktree materialises = opacity 0.)</p>
+        <div class="chips"><span class="chip">opacity <b>.3</b></span><span class="chip">no surge</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section id="choreo">
+  <h2><span class="n">8</span>Choreography — the eye-leading principle</h2>
+  <p class="lede">The single biggest "leads the eye" device: within one phase, paired elements are <b>staggered
+    300&#8211;650ms</b> — draw the conduit, <i>then</i> light its target box, <i>then</i> the next conduit. Never
+    light two things at once. The result is exactly one focal point moving through the scene.</p>
+  <div class="card" style="max-width:none">
+    <div class="stage"><span class="tag">staggered phase — loops</span><button class="replay" data-replay>⟲ replay</button>
+      <svg viewBox="0 0 640 170" id="choreo-svg">
+        <defs><marker id="chev3" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+          <path d="M0 0 L5 3 L0 6" fill="none" stroke="context-stroke" stroke-width="1.4"/></marker></defs>
+        <!-- box A -->
+        <g class="node" id="ch-boxA"><rect class="box" x="40" y="60" width="120" height="44" rx="8"/>
+          <text class="t2" x="100" y="87" text-anchor="middle">main</text></g>
+        <!-- flow A->B -->
+        <g class="flow-g" id="ch-flowA"><path class="flowpath" pathLength="100" d="M164 82 L 256 82" marker-end="url(#chev3)"/>
+          <circle class="pkt" r="4.5" style="offset-path:path('M164 82 L 256 82')"/></g>
+        <!-- box B -->
+        <g class="node" id="ch-boxB"><rect class="box" x="260" y="60" width="120" height="44" rx="8"/>
+          <text class="t2" x="320" y="87" text-anchor="middle">feat</text></g>
+        <!-- flow B->C -->
+        <g class="flow-g" id="ch-flowB"><path class="flowpath" pathLength="100" d="M384 82 L 476 82" marker-end="url(#chev3)"/>
+          <circle class="pkt" r="4.5" style="offset-path:path('M384 82 L 476 82')"/></g>
+        <!-- box C -->
+        <g class="node" id="ch-boxC"><rect class="box" x="480" y="60" width="120" height="44" rx="8"/>
+          <text class="t2" x="540" y="87" text-anchor="middle">worktree</text></g>
+      </svg></div>
+    <div class="meta"><div class="chips">
+      <span class="chip">flow A draws <b>t=0</b></span>
+      <span class="chip">box B fresh <b>+550ms</b></span>
+      <span class="chip">flow B draws <b>+1100ms</b></span>
+      <span class="chip">box C fresh <b>+1650ms</b></span>
+      <span class="chip">one focal point at a time</span>
+    </div></div>
+  </div>
+</section>
+
+<!-- 9 -->
+<section id="despawn">
+  <h2><span class="n">9</span>Retract &amp; despawn</h2>
+  <p class="lede">Things leave as deliberately as they arrive — they never blink out. A terminated relationship
+    <b>retracts</b> (the active flow's reverse, §2); a disposed node <b>dissolves</b> (fade + slight scale-down).
+    At teardown the whole worktree side de-materialises as one coordinated power-down: engines &#8594; nodes &#8594;
+    border &#8594; landing tier, nothing lingers.</p>
+  <div class="grid">
+    <div class="card">
+      <div class="stage"><span class="tag">node dissolve — loops</span><button class="replay" data-replay>⟲ replay</button>
+        <svg viewBox="0 0 320 150"><g class="node dissolve" data-loop="dissolve"><rect class="box" x="90" y="52" width="140" height="46" rx="8"/>
+          <text class="t1" x="160" y="72" text-anchor="middle">memory worktree</text>
+          <text class="t2" x="160" y="88" text-anchor="middle">ar/boot-audio</text></g></svg></div>
+      <div class="meta"><h3>Dissolve</h3><p class="sem">Disposed node fades and scales to .94. Never a hard pop.</p>
+        <div class="chips"><span class="chip">opacity+scale <b>.6s</b> ease</span><span class="chip">scale &#8594; <b>.94</b></span></div></div>
+    </div>
+    <div class="card">
+      <div class="stage"><span class="tag">line retract — loops</span><button class="replay" data-replay>⟲ replay</button>
+        <svg viewBox="0 0 320 150"><g class="flow-g" data-loop="flow" data-hold="1400">
+          <path class="flowpath" pathLength="100" d="M44 75 L 276 75" style="stroke:var(--amber);filter:drop-shadow(0 0 2px var(--amber))"/></g></svg></div>
+      <div class="meta"><h3>Relationship retract</h3><p class="sem">When a settled relationship is terminated the
+        wire retracts (source&#8594;tip) instead of dangling. Same dashoffset mechanic as the active flow, in amber,
+        no dot.</p>
+        <div class="chips"><span class="chip">retract <b>.5s</b> · (.5,0,.7,1)</span><span class="chip">no dangling lines</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 -->
+<section id="timing">
+  <h2><span class="n">10</span>Timing &amp; easing reference</h2>
+  <p class="lede">Pacing is cinematic, not snappy: entrances <b>decelerate</b> (arrive softly), exits
+    <b>accelerate</b> (leave quickly), ambient loops run ~1.4&#8211;1.6s under the discrete beats so the scene is
+    never frozen. Copy these verbatim.</p>
+  <table>
+    <thead><tr><th>Effect</th><th>Duration</th><th>Easing</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>global crossfade (opacity)</td><td><code>.5s</code></td><td><code>ease</code></td><td>nothing hard-cuts</td></tr>
+      <tr><td>global recolour (stroke/fill)</td><td><code>.45s</code></td><td><code>ease</code></td><td>state change = crossfade</td></tr>
+      <tr><td>flow draw-IN</td><td><code>.55s</code></td><td><code>cubic-bezier(.25,1,.4,1)</code></td><td>decelerate — "arrives"</td></tr>
+      <tr><td>flow retract-OUT</td><td><code>.5s</code></td><td><code>cubic-bezier(.5,0,.7,1)</code></td><td>accelerate; +.32s opacity delay so it finishes drawing before fading</td></tr>
+      <tr><td>packet travel</td><td><code>1.4s</code></td><td><code>linear</code> &#8734;</td><td>one per active flow</td></tr>
+      <tr><td>engine charge climb</td><td><code>1s</code></td><td><code>cubic-bezier(.22,1,.36,1)</code></td><td>scaleY bottom-up</td></tr>
+      <tr><td>power-up colour sweep</td><td><code>1.15s</code></td><td><code>ease</code></td><td>cyan&#8594;mint&#8594;amber</td></tr>
+      <tr><td>coupler bind (scaleY)</td><td><code>.5s</code></td><td><code>cubic-bezier(.3,1,.4,1)</code></td><td>gentle overshoot — clamps</td></tr>
+      <tr><td>warp surge (bi-dir)</td><td><code>1.6s</code></td><td><code>cubic-bezier(.4,0,.5,1)</code> &#8734;</td><td>ambient "alive"</td></tr>
+      <tr><td>re-index pulse</td><td><code>1.5s</code></td><td><code>ease-out</code> &#8734;</td><td>breathing</td></tr>
+      <tr><td>fault flicker</td><td><code>.34s</code></td><td><code>steps(1)</code> &#8734;</td><td>hard strobe, cap &#8804;3/s</td></tr>
+      <tr><td>node dissolve</td><td><code>.6s</code></td><td><code>ease</code></td><td>scale &#8594; .94</td></tr>
+      <tr><td>phase beat dwell</td><td><code>~1900ms</code></td><td>—</td><td>per-beat overridable</td></tr>
+      <tr><td>intra-phase stagger</td><td><code>300&#8211;650ms</code></td><td>—</td><td>between paired elements</td></tr>
+    </tbody>
+  </table>
+  <div class="note warnrule"><b>Caption legibility rule.</b> Functional text must clear <b>WCAG AA</b> — body
+    &#8805;4.5:1, large/bold &#8805;3:1 — against the canvas background (<code>oklch(0.15 0.02 250)</code>).
+    Muted captions sitting directly on the dark canvas (e.g. a "closeout order" label) must use at least
+    <code>--muted oklch(0.74 0.03 250)</code> (&#8776;6:1), never a dimmer token. Faint blueprint <i>decals</i>
+    are decoration, not text to read; keep them clearly below the legibility floor so they never compete with
+    real labels.</div>
+</section>
+
+<!-- 11 -->
+<section id="impl">
+  <h2><span class="n">11</span>Implementation mapping</h2>
+  <p class="lede">This spec animates in CSS for portability. The dashboard implements the same primitives with
+    <b>GSAP + Motion</b> (CSS static-only). Same values; different driver.</p>
+  <table>
+    <thead><tr><th>Primitive</th><th>Spec (CSS here)</th><th>Dashboard (GSAP / Motion)</th></tr></thead>
+    <tbody>
+      <tr><td>flow draw-in / retract</td><td><code>stroke-dashoffset</code> 100&#8594;0 / 0&#8594;&minus;100 transition</td><td><span class="k">GSAP DrawSVGPlugin</span> on a timeline, same eases</td></tr>
+      <tr><td>packet</td><td><code>offset-path</code> + <code>@keyframes offset-distance</code></td><td><span class="k">GSAP MotionPathPlugin</span> (<code>data-path</code>)</td></tr>
+      <tr><td>intra-phase stagger</td><td><code>setTimeout</code> ladder</td><td><span class="k">GSAP timeline</span> position params / <code>stagger</code></td></tr>
+      <tr><td>opacity enter / exit</td><td>global <code>opacity</code> transition</td><td><span class="k">Motion</span> <code>AnimatePresence</code> + <code>animate</code></td></tr>
+      <tr><td>node fresh / state recolour</td><td>class swap + global <code>.45s</code> ease</td><td><span class="k">Motion</span> <code>animate</code> stroke/filter, or layout state</td></tr>
+      <tr><td>glow</td><td>static <code>filter:drop-shadow</code></td><td>static Panda style; <i>ramp</i> via Motion/GSAP</td></tr>
+      <tr><td>coupler bind / surge</td><td><code>scaleY</code> transition + <code>@keyframes</code></td><td><span class="k">GSAP</span> timeline (<code>repeat:-1</code> for surge)</td></tr>
+      <tr><td>reduced motion</td><td>(omit / freeze)</td><td><span class="k">GSAP matchMedia</span> &#8594; end-state</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>Where the code lives:</b> conduits + nodes + coupler in
+    <code>dashboard/src/panels/engine-room/EnclosureCanvas.tsx</code>; the GSAP timeline in
+    <code>useEngineTimeline.ts</code>; tokens + recipes in <code>engineRoomStyles.ts</code>; the boot/teardown
+    panel in <code>BootTimeline.tsx</code>. The prototype this spec distils is
+    <a href="./podstage.html">podstage.html</a> (copied beside this file).</div>
+</section>
+
+<footer>
+  Engine-Room Visual Language · living spec · keep this file, the dashboard, and the onboarding in sync.
+  When a primitive changes, change it here first, then mirror it in the React engine room.
+</footer>
+
+</div>
+
+<script>
+  // The dashboard uses GSAP/Motion; this spec drives its own demos with tiny vanilla loops so it stays a
+  // dependency-free, openable-anywhere reference.
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function loopFlow(g){
+    const hold = parseInt(g.dataset.hold || '2600', 10);
+    let t=[]; const clear=()=>{t.forEach(clearTimeout);t=[];};
+    const run=()=>{ clear();
+      g.classList.remove('off'); void g.getBoundingClientRect(); g.classList.add('on');
+      if(reduce) return;                                  // frozen drawn-on under reduced motion
+      t.push(setTimeout(()=>{ g.classList.remove('on'); g.classList.add('off');
+        t.push(setTimeout(()=>{ g.classList.remove('off');
+          t.push(setTimeout(run, 600)); }, 900)); }, hold));
+    };
+    g._run=run; run();
+  }
+  function loopFresh(n){
+    let t=[]; const run=()=>{ t.forEach(clearTimeout); t=[];
+      n.classList.add('fresh');
+      if(reduce) return;
+      t.push(setTimeout(()=>{ n.classList.remove('fresh'); t.push(setTimeout(run,1900)); },2200)); };
+    n._run=run; run();
+  }
+  function loopBind(c){
+    let t=[]; const run=()=>{ t.forEach(clearTimeout); t=[];
+      c.classList.add('bound');
+      if(reduce) return;
+      t.push(setTimeout(()=>{ c.classList.remove('bound'); t.push(setTimeout(run,1500)); },3200)); };
+    c._run=run; run();
+  }
+  function loopBoot(e){
+    let t=[]; const set=cls=>{ e.classList.remove('booting','green','ready'); if(cls)e.classList.add(cls); };
+    const run=()=>{ t.forEach(clearTimeout); t=[];
+      set('booting');
+      if(reduce){ set('ready'); return; }
+      t.push(setTimeout(()=>set('green'),1100));   // flash mint
+      t.push(setTimeout(()=>set('ready'),2300));    // settle to STEADY GREEN (engines do NOT go amber)
+      t.push(setTimeout(()=>{ set(null); t.push(setTimeout(run,900)); },4400)); };
+    e._run=run; run();
+  }
+  function loopDissolve(n){
+    let t=[]; const run=()=>{ t.forEach(clearTimeout); t=[];
+      n.classList.remove('gone'); void n.getBoundingClientRect();
+      if(reduce) return;
+      t.push(setTimeout(()=>{ n.classList.add('gone');
+        t.push(setTimeout(run,1500)); },1600)); };
+    n._run=run; run();
+  }
+  function loopChoreo(svg){
+    const fA=svg.querySelector('#ch-flowA'), fB=svg.querySelector('#ch-flowB');
+    const bB=svg.querySelector('#ch-boxB'), bC=svg.querySelector('#ch-boxC');
+    let t=[]; const on=g=>{g.classList.remove('off');void g.getBoundingClientRect();g.classList.add('on');};
+    const off=g=>{g.classList.remove('on');g.classList.add('off');};
+    const run=()=>{ t.forEach(clearTimeout); t=[];
+      [fA,fB].forEach(g=>{g.classList.remove('on','off');}); [bB,bC].forEach(b=>b.classList.remove('fresh'));
+      on(fA);
+      if(reduce){ on(fB); bB.classList.add('fresh'); bC.classList.add('fresh'); return; }
+      t.push(setTimeout(()=>bB.classList.add('fresh'),550));
+      t.push(setTimeout(()=>on(fB),1100));
+      t.push(setTimeout(()=>bC.classList.add('fresh'),1650));
+      t.push(setTimeout(()=>{ off(fA); off(fB); },2700));
+      t.push(setTimeout(()=>{ bB.classList.remove('fresh'); bC.classList.remove('fresh'); },3100));
+      t.push(setTimeout(run,3900)); };
+    svg._run=run; run();
+  }
+
+  document.querySelectorAll('[data-loop=flow]').forEach(loopFlow);
+  document.querySelectorAll('[data-loop=fresh]').forEach(loopFresh);
+  document.querySelectorAll('[data-loop=bind]').forEach(loopBind);
+  document.querySelectorAll('[data-loop=boot]').forEach(loopBoot);
+  document.querySelectorAll('[data-loop=dissolve]').forEach(loopDissolve);
+  const choreo = document.getElementById('choreo-svg'); if(choreo) loopChoreo(choreo);
+
+  // replay buttons re-trigger the nearest demo's loop
+  document.querySelectorAll('[data-replay]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const stage = btn.closest('.stage');
+      const host = stage.querySelector('[data-loop], #choreo-svg');
+      if(host && host._run) host._run();
+    });
+  });
+</script>
+</body>
+</html>

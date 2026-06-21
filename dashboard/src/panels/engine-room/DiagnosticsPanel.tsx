@@ -37,13 +37,19 @@ function CommitRow({ label, refNode }: { label: string; refNode: CommitRefNode }
 }
 
 export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
-  const setupLine = [
-    node.setupState,
-    node.heartbeatAgeSeconds !== undefined ? `heartbeat ${fmtWait(node.heartbeatAgeSeconds)}` : undefined,
-    node.currentPhase,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // 5k F3 — during the power-down (cleanup-pending / abandon) the providers are being torn down, so the
+  // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale) provider
+  // lines. Derived from `phase` on the frontend (the live runtime is pre-05m, so it sends no power-down signal).
+  const poweringDown = node.phase === "cleanup-pending" || node.phase === "abandoned";
+  const setupLine = poweringDown
+    ? ["powering down", node.currentPhase].filter(Boolean).join(" · ")
+    : [
+        node.setupState,
+        node.heartbeatAgeSeconds !== undefined ? `heartbeat ${fmtWait(node.heartbeatAgeSeconds)}` : undefined,
+        node.currentPhase,
+      ]
+        .filter(Boolean)
+        .join(" · ");
   return (
     <div className={diagPanel} data-testid="diagnostics">
       <span className={sectionLabel}>Diagnostics</span>
@@ -77,8 +83,8 @@ export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
       {node.completedPhases.length > 0 || node.failedPhases.length > 0 ? (
         <ul className={phaseLineList}>
           {node.completedPhases.map((line) => (
-            <li key={line} className={css({ color: "mint" })}>
-              ✓ {line}
+            <li key={line} className={css({ color: poweringDown ? "muted" : "mint" })}>
+              {poweringDown ? "◦" : "✓"} {line}
             </li>
           ))}
           {node.failedPhases.map((line) => (
