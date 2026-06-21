@@ -755,5 +755,36 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
     ],
     workspace: WORKSPACE,
   },
+  {
+    // 5k D3 — code lands: feat pushed → PR merged → origin/main advanced → local main pulls. The CODE has
+    // landed but the MEMORY carryover is the NEXT beat (D4), so origin-mem-main is still `planned` here.
+    // Splits the previously-collapsed D2·D3 frame: D2 (`engine-landing-ffonly`) is the integrate/push/PR-open
+    // beat; this is the merge beat; D4 (`engine-landing-merged`) is the memory carryover.
+    name: "engine-landing-pushed",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "integration-pending",
+        health: "nominal",
+        humanReviewStatus: "approved",
+        closeoutStatus: "completed",
+        integrationStatus: "completed",
+        integrationStrategy: "ff-only",
+        cleanup: "pending",
+        edges: edges({ integration: "complete" }),
+        landing: [
+          landingRef("origin-feat", "origin/feat-…", "pushed", "observed", "a1b2c3d4"),
+          landingRef("pr", "PR #128", "merged", "observed", "merged into main"),
+          landingRef("origin-main", "origin/main", "tip", "observed", "advanced"),
+          landingRef("origin-mem-main", "origin/mem-main", "planned", "planned", "after carryover"),
+        ],
+        summary: "Code landed — PR merged, origin/main advanced; memory carryover next.",
+        nextAction: "request_integration_decision",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
   ...bootStages,
 ];

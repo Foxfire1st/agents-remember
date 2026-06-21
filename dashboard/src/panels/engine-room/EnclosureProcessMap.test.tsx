@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import gsap from "gsap";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineProcessNode, ProviderNode } from "../../types/projection";
 import { EnclosureProcessMap } from "./EnclosureProcessMap";
@@ -48,6 +49,25 @@ describe("EnclosureProcessMap — fleeting promote-in-place (5f S2)", () => {
     expect(queryByTestId("fleeting-banner")).toBeNull();
     expect(queryByTestId("process-map")).not.toBeNull();
     expect(queryByTestId("enclosure-canvas")).not.toBeNull();
+  });
+});
+
+describe("EnclosureCanvas — GSAP gate (05f §8.4 — no ticker under effects=off)", () => {
+  it("builds no GSAP context under data-effects=off (deterministic — no live ticker)", () => {
+    const spy = vi.spyOn(gsap, "context");
+    // the canvas wires useEngineTimeline unconditionally; under effects=off the gate must skip it so the
+    // Playwright/vitest snapshots stay deterministic (the rendered end-state stands, no GSAP tween/ticker).
+    render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} workspaceEngines={WORKSPACE_ENGINES} />);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("wires the GSAP context when effects are on (proves the gate, not a vacuous assert)", () => {
+    document.documentElement.removeAttribute("data-effects");
+    const spy = vi.spyOn(gsap, "context");
+    render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} workspaceEngines={WORKSPACE_ENGINES} />);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
 

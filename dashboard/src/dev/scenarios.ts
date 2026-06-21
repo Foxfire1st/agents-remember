@@ -52,7 +52,8 @@ const tearDown: Scenario = {
   frames: [
     erFrame("engine-boot-5-nominal", "D0 · idle / working enclosure — the whole constellation, at rest"),
     erFrame("engine-landing-closeout", "D1 · closeout (gated) — code → onboarding → quality → memory → ledger"),
-    erFrame("engine-landing-ffonly", "D2·D3 · integrate ff-only → code lands (worktree → feat → origin/feat → PR → origin/main)"),
+    erFrame("engine-landing-ffonly", "D2 · integrate — worktree → feat/fix source (push feat → origin/feat, PR open)"),
+    erFrame("engine-landing-pushed", "D3 · code lands — PR merged → origin/main advances → local main pulls"),
     erFrame("engine-landing-merged", "D4 · memory carryover — feat → local mem-main, then push → origin/mem-main"),
     erFrame("engine-cleanup-pending", "D5 · de-materialise — providers power down, the worktree detaches, the border collapses", 2200),
     erFrame("engine-retired", "D6 · stack removed — only the main constellation remains (+ a dim historical contract chip)"),

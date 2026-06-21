@@ -6,11 +6,11 @@
 // prototype's viewBox (0 0 1200 660). State always comes from the model (factState / runtimeState /
 // edge.state), never a class name alone — so the truth stays in the projection, not the render.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog, Popover } from "react-aria-components";
 import { AnimatePresence, motion } from "motion/react";
-import gsap from "gsap";
 
+import { useEngineTimeline } from "./useEngineTimeline";
 import { useShouldAnimate } from "./useShouldAnimate";
 import type {
   CommitRefNode,
@@ -27,7 +27,6 @@ import {
   attnText,
   canopyStroke,
   closeoutBeat,
-  closeoutBeatG,
   closeoutBeatLabel,
   closeoutRail,
   closeoutTrainLabel,
@@ -43,7 +42,6 @@ import {
   flowConduit,
   flowPacket,
   gateBar,
-  landingEnter,
   laneFlag,
   laneFlagText,
   ledgerButton,
@@ -80,10 +78,10 @@ import {
   svgNodeMeta,
   svgNodeTitle,
   warpCouplerBar,
-  warpCouplerG,
   warpCouplerLabel,
   warpLinkGlyph,
   warpSurge,
+  worktreeWire,
   worldLabel,
 } from "./engineRoomStyles";
 
@@ -208,6 +206,7 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false 
   landingIn?: boolean;
   detaching?: boolean;
 }) {
+  const animate = useShouldAnimate();
   const enter = branchEnter(refNode.factState);
   // a DETACHING worktree (cleanup de-materialise) drifts OUT to the right as it fades — not in from main
   // (which is the build-up branch-copy direction). Same fade; only the slide direction flips.
@@ -218,14 +217,20 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false 
   const maxChars = Math.max(8, Math.floor((pos.w - 20) / 7.4));
   const flags = `${refNode.dirty ? " · dirty" : ""}${refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""}`;
   const full = `${label}: ${branch}${refNode.commit ? ` @ ${refNode.commit}` : ""}${flags}`;
+  // Motion owns the materialise/de-materialise (opacity + slide) + the landing-tier mount fade+lift (05f
+  // §8); GSAP/CSS never touch this group. A detaching worktree node drifts out on a slight delay so the
+  // de-materialise reads engines → nodes → border. Under !animate it mounts at the end-state (initial=false),
+  // so the count/presence tests stay synchronous; `landingIn` enters from above; `exit` lets a feat-tier
+  // node leave (inside AnimatePresence) instead of blinking.
+  const detachDelay = animate && detaching && enter.opacity === 0 ? 0.4 : 0;
   return (
-    <g
+    <motion.g
       data-testid="branch-node"
       data-fact={refNode.factState}
-      // `landingIn` fades + lifts the node in on mount (the feat/fix tier that appears at landing), so it
-      // doesn't pop. Frozen under data-effects=off (the count/presence tests stay synchronous).
-      className={landingIn ? landingEnter : undefined}
-      style={{ opacity: enter.opacity, transform: dx ? `translateX(${dx}px)` : undefined }}
+      initial={animate ? { opacity: landingIn ? 0 : enter.opacity, x: dx, y: landingIn ? -7 : 0 } : false}
+      animate={{ opacity: enter.opacity, x: dx, y: 0 }}
+      exit={animate ? { opacity: 0, y: -7 } : { opacity: 0 }}
+      transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1], delay: detachDelay }}
     >
       <title>{full}</title>
       <rect className={svgNodeBox({ factState: refNode.factState })} x={pos.x} y={pos.y} width={pos.w} height={NODE_H} rx={8} />
@@ -237,8 +242,24 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false 
           {flags}
         </text>
       ) : null}
-    </g>
+    </motion.g>
   );
+}
+
+// The charge rect's animated end-state (Motion owns scaleY + opacity; the engineCharge recipe owns the
+// static fill as colour-as-state). The boot-fill grows CENTER-OUT (scaleY 0→1) off the rect's transform-
+// box: fill-box + transform-origin: center; cyan (indexing) → mint (nominal) is the "went green" fill flip.
+function chargeMotion(runtime: RuntimeState): { scaleY: number; opacity: number } {
+  switch (runtime) {
+    case "nominal":
+      return { scaleY: 1, opacity: 0.55 }; // charged, healthy green
+    case "indexing":
+      return { scaleY: 1, opacity: 0.85 }; // charging cyan (boot-fill grown)
+    case "down":
+      return { scaleY: 1, opacity: 0.55 };
+    default:
+      return { scaleY: 0, opacity: 0 }; // configured / unknown: materialised but drained (dim)
+  }
 }
 
 function EngineGauge({ at, label, runtime, reindex, present = true }: {
@@ -248,28 +269,48 @@ function EngineGauge({ at, label, runtime, reindex, present = true }: {
   reindex?: boolean;
   present?: boolean;
 }) {
+  const animate = useShouldAnimate();
   const state = reindex ? "reindex" : runtime;
-  // `present` is the build-up gate: a worktree engine only materialises once the provider runtime
-  // deploys (B3). Until then it is faded out (the left-world engines are always present). The opacity
-  // tween rides the sceneSvg transition; the SVG `transform` position attribute is untouched.
+  // `present` is the build-up gate: a worktree engine only materialises once the provider runtime deploys
+  // (B3); until then it is faded out (the left-world engines are always present). Motion owns this opacity
+  // (the SVG `transform` position attribute is untouched); on power-down the same gate eases it back out.
+  // A `down` engine raises the GSAP fault flicker via data-fx='fault' (≤3/s), isolated to this engine; a
+  // reindexing engine pulses amber via data-fx='reindex'. Under !animate both rest at the rendered state.
   return (
-    <g
+    <motion.g
       transform={`translate(${at.x},${at.y})`}
       data-testid="engine-gauge"
       data-runtime={state}
       role="img"
       aria-label={`${label} engine ${state}`}
-      style={{ opacity: present ? 1 : 0 }}
+      initial={animate ? { opacity: present ? 1 : 0 } : false}
+      animate={{ opacity: present ? 1 : 0 }}
+      transition={{ duration: animate ? 0.45 : 0 }}
     >
-      <rect className={reindex ? engineReindexOut : engineGaugeOut({ runtimeState: runtime })} x={0} y={0} width={ENGINE.w} height={ENGINE.h} rx={5} />
       <rect
-        className={reindex ? engineReindexCharge : engineCharge({ runtimeState: runtime })}
-        x={2}
-        y={2}
-        width={ENGINE.w - 4}
-        height={ENGINE.h - 4}
-        rx={3}
+        className={reindex ? engineReindexOut : engineGaugeOut({ runtimeState: runtime })}
+        data-fx={!reindex && runtime === "down" ? "fault" : undefined}
+        x={0}
+        y={0}
+        width={ENGINE.w}
+        height={ENGINE.h}
+        rx={5}
       />
+      {reindex ? (
+        <rect className={engineReindexCharge} data-fx="reindex" x={2} y={2} width={ENGINE.w - 4} height={ENGINE.h - 4} rx={3} />
+      ) : (
+        <motion.rect
+          className={engineCharge({ runtimeState: runtime })}
+          x={2}
+          y={2}
+          width={ENGINE.w - 4}
+          height={ENGINE.h - 4}
+          rx={3}
+          initial={animate ? { scaleY: 0, opacity: 0 } : false}
+          animate={chargeMotion(runtime)}
+          transition={{ duration: animate ? 0.6 : 0, ease: [0.4, 0, 0.2, 1] }}
+        />
+      )}
       {[14, 26, 38, 50, 62, 74, 86].map((y) => (
         <line className={engineDiv} key={y} x1={0} y1={y} x2={ENGINE.w} y2={y} />
       ))}
@@ -283,7 +324,7 @@ function EngineGauge({ at, label, runtime, reindex, present = true }: {
         <line className={enginePetal({ runtimeState: runtime })} key={i} x1={x1} y1={y1} x2={x2} y2={y2} />
       ))}
       <text className={engineGaugeLabel} x={ENGINE.w / 2} y={ENGINE.h + 18} textAnchor="middle">{label}</text>
-    </g>
+    </motion.g>
   );
 }
 
@@ -375,6 +416,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   currentCode?: string;
   visible?: boolean;
 }) {
+  const animate = useShouldAnimate();
   const cy = 342;
   const triggerRef = useRef<SVGRectElement>(null);
   // the popover anchors to this invisible point HIGH in the scene (SVG coords → scales with the canvas),
@@ -384,21 +426,26 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   const [open, setOpen] = useState(false);
   const ledgerRows = rows ?? [];
   const hasLedger = ledgerRows.length > 0; // a ledger-backed coupler opens its memory.md lookup table
+  // Motion owns the coupler group's opacity: the bound dim (1 vs 0.3) AND the build-up `visible` gate (the
+  // worktree coupler only appears once the memory worktree materialises) — one owner, no double-drive with
+  // CSS. The warp-core surge bands are GSAP (data-fx='surge' + data-dir), driven by useEngineTimeline.
+  const couplerOpacity = visible ? (bound ? 1 : 0.3) : 0;
   return (
     <>
-      <g
-        className={warpCouplerG({ bound })}
+      <motion.g
         data-testid={testid}
         data-bound={bound}
-        style={{ opacity: visible ? undefined : 0 }}
+        initial={animate ? { opacity: couplerOpacity } : false}
+        animate={{ opacity: couplerOpacity }}
+        transition={{ duration: animate ? 0.45 : 0 }}
       >
         <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
         {/* invisible high anchor for the popover (upper position) — see anchorRef note above */}
         <rect ref={anchorRef} x={x + 90} y={58} width={1} height={1} fill="none" pointerEvents="none" aria-hidden="true" />
         {bound ? (
           <>
-            <line className={warpSurge({ dir: "up" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
-            <line className={warpSurge({ dir: "down" })} data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+            <line className={warpSurge} data-fx="surge" data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+            <line className={warpSurge} data-fx="surge" data-dir="down" data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
           </>
         ) : null}
         {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
@@ -436,7 +483,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
         ) : label ? (
           <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text>
         ) : null}
-      </g>
+      </motion.g>
       {/* anchored to the high anchorRef (not the coupler) so it sits in its old upper position and grows
           DOWNWARD as it expands; shouldFlip=false keeps it from flipping up when the tall window meets the
           viewport edge (the inner scroll covers it) */}
@@ -452,22 +499,12 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
 }
 
 function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: string }) {
-  // Hooks run before the (kind-stable) early return so the hook order is constant per edge instance.
-  const pathRef = useRef<SVGPathElement>(null);
+  // The conduit draw-on (strokeDashoffset 100 → 0) is owned by the GSAP timeline (useEngineTimeline),
+  // which selects every running lane via [data-draw='on'] and staggers them (05f §8). Motion owns this
+  // group's opacity; CSS is static. A planned → running cycle re-runs the hook (its signature folds in the
+  // running edges) so the lane re-draws, while Motion fades it in. Under !animate nothing runs and the path
+  // rests fully drawn (offset 0, the rendered end-state) — the presence tests stay synchronous.
   const animate = useShouldAnimate();
-  // GSAP owns the conduit draw-on (5f §8): when a lane goes `running` (a seed/clone in flight) it draws
-  // from source to target (strokeDashoffset 100 → 0) — the "cloned from main" sweep. Keyed on edge.state
-  // so a planned → running cycle re-draws each time. stroke-dashoffset is excluded from the sceneSvg
-  // transition, so GSAP owns it alone; under data-effects=off this never runs and the path rests drawn.
-  useLayoutEffect(() => {
-    const path = pathRef.current;
-    if (!path || !animate || edge.state !== "running") return;
-    const ctx = gsap.context(() => {
-      gsap.fromTo(path, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.6, ease: "power2.out" });
-    });
-    return () => ctx.revert();
-  }, [edge.state, animate]);
-
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
@@ -484,22 +521,27 @@ function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: strin
     : cloneArc
       ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
       : `M${x1} ${y1} L ${x2} ${y2}`;
+  const opacity = cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1;
   return (
-    <g
+    <motion.g
       data-testid="conduit"
       data-kind={edge.kind}
       data-state={edge.state}
       data-strategy={bent ? "replay" : undefined}
-      // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while
-      // the clone is running (gone at idle); every other lane fades in as it activates. The sceneSvg
-      // transition eases the opacity (frozen instant under data-effects=off).
-      style={{ opacity: cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1 }}
+      // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
+      // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
+      // (instant under !animate, where it mounts at the end-state).
+      initial={animate ? { opacity } : false}
+      animate={{ opacity }}
+      transition={{ duration: animate ? 0.45 : 0 }}
     >
       <path
-        ref={pathRef}
         className={flowConduit({ state: conduitState(edge.state) })}
         d={d}
         pathLength={100}
+        // GSAP draws this on when it goes running (data-draw='on'); the running flowConduit dash is the full
+        // path length, so the strokeDashoffset 100 → 0 reads as a sweep from source to target.
+        data-draw={edge.state === "running" ? "on" : undefined}
         // arrow tip only on an ACTION (running flow); a nominal/static line is just a connection
         markerEnd={edge.state === "running" ? "url(#er-chev)" : undefined}
       >
@@ -510,10 +552,11 @@ function Conduit({ edge, strategy }: { edge: EngineProcessEdge; strategy?: strin
           className={flowPacket}
           r={4}
           data-testid="conduit-packet"
-          style={{ offsetPath: `path('${d}')`, animation: "pktRun 1.4s linear infinite" }}
+          data-fx="packet"
+          style={{ offsetPath: `path('${d}')` }}
         />
       ) : null}
-    </g>
+    </motion.g>
   );
 }
 
@@ -554,7 +597,7 @@ function Gate({ edge }: { edge: EngineProcessEdge }) {
 function Attention() {
   return (
     <g data-testid="attention">
-      <rect className={attnBadge} x={958} y={10} width={172} height={24} rx={5} />
+      <rect className={attnBadge} data-fx="breath" x={958} y={10} width={172} height={24} rx={5} />
       <text className={attnText} x={1044} y={26} textAnchor="middle">⚠ ATTENTION</text>
     </g>
   );
@@ -605,7 +648,7 @@ function TerminalStop({ edge }: { edge: EngineProcessEdge }) {
   const cy = (y1 + y2) / 2;
   return (
     <g data-testid="terminal-stop" data-kind={edge.kind}>
-      <rect className={stopBar} x={cx - 64} y={cy - 13} width={128} height={26} rx={4} />
+      <rect className={stopBar} data-fx="stop" x={cx - 64} y={cy - 13} width={128} height={26} rx={4} />
       <text className={stopText} x={cx} y={cy + 4} textAnchor="middle">⛔ STOP · CONFLICT</text>
     </g>
   );
@@ -616,22 +659,25 @@ function LaneFlag({ x, y, w, h, label, tone, testid, visible = true, enter = fal
   x: number; y: number; w: number; h: number; label: string;
   tone: "ledger" | "historical"; testid: string; visible?: boolean; enter?: boolean;
 }) {
-  // truncate to the box (laneFlagText is 11px ≈ 6 units/char) so a long branch name never overflows;
-  // the full label is on hover. `visible` lets a lane annotation fade with its enclosure during the
-  // build-up (it stays in the DOM for the presence tests; the sceneSvg transition eases the opacity).
-  // `enter` adds the landing-tail fade+lift for a flag that only mounts when the enclosure starts to land.
+  // truncate to the box (laneFlagText is 11px ≈ 6 units/char) so a long branch name never overflows; the
+  // full label is on hover. `visible` lets a lane annotation fade with its enclosure during the build-up (it
+  // stays in the DOM for the presence tests; Motion eases the opacity). `enter` adds the landing-tail
+  // fade+lift for a flag that only mounts when the enclosure starts to land. Under !animate it mounts at the
+  // end-state (initial=false), synchronously.
+  const animate = useShouldAnimate();
   return (
-    <g
+    <motion.g
       data-testid={testid}
-      className={enter ? landingEnter : undefined}
-      style={{ opacity: visible ? undefined : 0 }}
+      initial={animate ? { opacity: enter ? 0 : visible ? 1 : 0, y: enter ? -7 : 0 } : false}
+      animate={{ opacity: visible ? 1 : 0, y: 0 }}
+      transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1] }}
     >
       <title>{label}</title>
       <rect className={laneFlag({ tone })} x={x} y={y} width={w} height={h} rx={3} />
       <text className={laneFlagText({ tone })} x={x + w / 2} y={y + h / 2 + 5} textAnchor="middle">
         {truncate(label, Math.floor((w - 8) / 6.2))}
       </text>
-    </g>
+    </motion.g>
   );
 }
 
@@ -641,6 +687,7 @@ function LaneFlag({ x, y, w, h, label, tone, testid, visible = true, enter = fal
 // the derived order is observability, not live status (which stays in the diagnostics panel).
 const CLOSEOUT_BEATS = ["code", "onboard", "quality", "memory", "ledger"] as const;
 function CloseoutTrain({ x, y }: { x: number; y: number }) {
+  const animate = useShouldAnimate();
   const bw = 60;
   const gap = 8;
   const railEnd = x + CLOSEOUT_BEATS.length * (bw + gap) - gap;
@@ -650,11 +697,18 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
       <line className={closeoutRail} x1={x} y1={y + 11} x2={railEnd} y2={y + 11} />
       {CLOSEOUT_BEATS.map((beat, i) => {
         const bx = x + i * (bw + gap);
+        // Motion staggers each beat in (was the CSS closeoutSweep + inline animationDelay). Under !animate
+        // initial=false → all 5 beats mount at rest synchronously, so the 5-rect presence test stays sync.
         return (
-          <g key={beat} className={closeoutBeatG} style={{ animationDelay: `${i * 0.28}s` }}>
+          <motion.g
+            key={beat}
+            initial={animate ? { opacity: 0 } : false}
+            animate={{ opacity: 1 }}
+            transition={{ duration: animate ? 0.45 : 0, delay: animate ? i * 0.28 : 0, ease: "easeOut" }}
+          >
             <rect className={closeoutBeat} x={bx} y={y} width={bw} height={22} rx={4} />
             <text className={closeoutBeatLabel} x={bx + bw / 2} y={y + 15} textAnchor="middle">{beat}</text>
-          </g>
+          </motion.g>
         );
       })}
     </g>
@@ -694,11 +748,20 @@ function remoteStateWord(ref: LandingRefNode): string {
 }
 
 function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
+  const animate = useShouldAnimate();
   const pos = REMOTE_POS[refNode.kind];
   if (!pos) return null;
   const tone = remoteTone(refNode);
   return (
-    <g data-testid="remote-chip" data-kind={refNode.kind} data-tone={tone} className={landingEnter}>
+    <motion.g
+      data-testid="remote-chip"
+      data-kind={refNode.kind}
+      data-tone={tone}
+      initial={animate ? { opacity: 0, y: -7 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      exit={animate ? { opacity: 0, y: -7 } : { opacity: 0 }}
+      transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1] }}
+    >
       <title>{`${refNode.label} · ${refNode.detail ?? refNode.state}`}</title>
       <rect className={remoteChip({ tone })} x={pos.x} y={pos.y} width={RBOX_W} height={RBOX_H} rx={7} />
       <text className={remoteChipLabel({ tone })} x={pos.x + RBOX_W / 2} y={pos.y + 18} textAnchor="middle">
@@ -707,7 +770,7 @@ function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
       <text className={remoteChipState({ tone })} x={pos.x + RBOX_W / 2} y={pos.y + 33} textAnchor="middle">
         {truncate(remoteStateWord(refNode), 18)}
       </text>
-    </g>
+    </motion.g>
   );
 }
 
@@ -715,18 +778,26 @@ function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
 // origin/main (the merge direction: origin/feat merges into origin/main), with the PR id + state on a
 // line beneath the dock. (prBadge's stroke carries the open=amber / merged=mint colour onto the arrow.)
 function PrBadge({ refNode }: { refNode: LandingRefNode }) {
+  const animate = useShouldAnimate();
   const state = refNode.state === "merged" ? "merged" : "open";
   const sub = state === "merged" ? "merged" : refNode.state;
   const top = REMOTE_POS["origin-main"].y;
   const cy = top + RBOX_H / 2;
   return (
-    <g data-testid="pr-badge" data-state={state} className={landingEnter}>
+    <motion.g
+      data-testid="pr-badge"
+      data-state={state}
+      initial={animate ? { opacity: 0, y: -7 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      exit={animate ? { opacity: 0, y: -7 } : { opacity: 0 }}
+      transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1] }}
+    >
       <title>{refNode.detail ? `${refNode.label} · ${sub} · ${refNode.detail}` : `${refNode.label} · ${sub}`}</title>
       <line className={prBadge({ state })} x1={PR_CX + 11} y1={cy} x2={PR_CX - 9} y2={cy} strokeWidth={2.6} markerEnd="url(#er-chev)" />
       <text className={prBadgeLabel({ state })} x={PR_CX} y={top + RBOX_H + 15} textAnchor="middle">
         {truncate(refNode.label, 14)} · {sub}
       </text>
-    </g>
+    </motion.g>
   );
 }
 
@@ -759,29 +830,23 @@ function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
 // UP to origin/feat, the merged origin/main pulls DOWN onto the official line, and the memory node
 // pushes DOWN to origin/mem-main. Each fades in with the dock; the GSAP draw-on lives in LandingFlow.
 function LandingFlow({ d, show, kind }: { d: string; show: boolean; kind: string }) {
-  const pathRef = useRef<SVGPathElement>(null);
   const animate = useShouldAnimate();
-  useLayoutEffect(() => {
-    const path = pathRef.current;
-    if (!path || !animate || !show) return;
-    const ctx = gsap.context(() => {
-      gsap.fromTo(path, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.7, ease: "power2.out" });
-    });
-    return () => ctx.revert();
-  }, [show, animate]);
+  // GSAP draws the flow on (strokeDashoffset 100 → 0) when it resolves, selected via [data-draw='on'] in
+  // useEngineTimeline; Motion owns the opacity (a flow's visibility is purely `show`). GSAP owns stroke-
+  // dashoffset alone, so it never fights Motion (which owns opacity). Under !animate the path rests fully
+  // drawn at the rendered opacity. No landingEnter: `show` flipping true is what eases it in.
   return (
-    <path
-      ref={pathRef}
+    <motion.path
       data-testid="landing-flow"
       data-kind={kind}
-      // NO landingEnter here: a flow's visibility is purely `show`. With landingEnter, a NOT-yet-active
-      // flow would fade in to opacity 1 then snap back to the inline opacity 0 — a phantom flash. The
-      // sceneSvg opacity transition eases it in when `show` flips true; GSAP then draws it on.
+      data-draw={show ? "on" : undefined}
       className={flowConduit({ state: "running" })}
       d={d}
       pathLength={100}
       markerEnd={show ? "url(#er-chev)" : undefined}
-      style={{ opacity: show ? 1 : 0 }}
+      initial={animate ? { opacity: show ? 1 : 0 } : false}
+      animate={{ opacity: show ? 1 : 0 }}
+      transition={{ duration: animate ? 0.45 : 0 }}
     />
   );
 }
@@ -812,6 +877,11 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
+  // GSAP owns the strokeDashoffset draw-ons ([data-draw='on']) + the repeating fx ([data-fx=…]) as one
+  // gsap.context scoped to this <svg> root; Motion (below) owns opacity/transform/scaleY/fill + enter/exit;
+  // CSS is static (05f §8). The hook self-gates on useShouldAnimate (no context, no ticker, under effects=off).
+  const rootRef = useRef<SVGSVGElement>(null);
+  useEngineTimeline(rootRef, node);
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
@@ -875,6 +945,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       : undefined;
   return (
     <svg
+      ref={rootRef}
       className={sceneSvg}
       viewBox="0 0 1200 660"
       preserveAspectRatio="xMidYMid meet"
@@ -894,16 +965,20 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       <text className={worldLabel} x={55} y={40}>Official line · workspace</text>
       <text className={worldLabel} x={930} y={40}>Worktree enclosure</text>
       {hasMemory ? (
-        <rect
+        <motion.rect
           className={enclosureBorder}
           x={674}
           y={76}
           width={474}
           height={506}
           rx={18}
-          // the enclosure shell only exists once the code worktree materialises (B1); at main-only B0 it
-          // is faded out, so the build-up draws the border in as the first worktree copies in from main.
-          style={{ opacity: codeWtMaterialised ? undefined : 0 }}
+          // the enclosure shell only exists once the code worktree materialises (B1); at main-only B0 it is
+          // faded out, so the build-up draws the border in FIRST. On teardown it collapses LAST (after the
+          // engines power down + nodes drift), via the delay. Motion owns the opacity; under !animate it
+          // mounts at the end-state (0.5 = the dashed-amber resting border).
+          initial={animate ? { opacity: codeWtMaterialised ? 0.5 : 0 } : false}
+          animate={{ opacity: codeWtMaterialised ? 0.5 : 0 }}
+          transition={{ duration: animate ? 0.45 : 0, delay: animate ? (codeWtMaterialised ? 0 : 0.3) : 0 }}
         />
       ) : null}
 
@@ -918,14 +993,22 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       {hasMemory && node.memorySource ? (
         <BranchNode pos={POS.memorySource} label="Official line · main" refNode={mainRef(node.memorySource)} />
       ) : null}
-      {showLanding ? (
-        <>
-          <BranchNode pos={POS.featCode} label="feat ▸ source" refNode={node.codeSource} landingIn />
-          {hasMemory && node.memorySource ? (
-            <BranchNode pos={POS.featMemory} label="feat ▸ source" refNode={node.memorySource} landingIn />
-          ) : null}
-        </>
-      ) : null}
+      <AnimatePresence>
+        {showLanding ? (
+          <motion.g
+            key="feat-tier"
+            initial={animate ? { opacity: 0 } : false}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: animate ? 0.4 : 0 }}
+          >
+            <BranchNode pos={POS.featCode} label="feat ▸ source" refNode={node.codeSource} landingIn />
+            {hasMemory && node.memorySource ? (
+              <BranchNode pos={POS.featMemory} label="feat ▸ source" refNode={node.memorySource} landingIn />
+            ) : null}
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
       <BranchNode pos={POS.codeWorktree} label="Code worktree" refNode={node.codeWorktree} detaching={retiring} />
       {hasMemory && node.memoryWorktree ? (
         <BranchNode pos={POS.memoryWorktree} label="Memory worktree" refNode={node.memoryWorktree} detaching={retiring} />
@@ -953,24 +1036,28 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           its own branch. This is the PERSISTENT structural link — present once the engine materialises,
           and it stays at idle — distinct from the transient clone arrows that copy the index across from
           the official engines (which vanish when the clone completes). */}
-      <line
-        className={officialWire}
+      <motion.line
+        className={worktreeWire}
         x1={1057}
         y1={198}
         x2={900}
         y2={281}
         data-testid="worktree-wire"
-        style={{ opacity: code ? undefined : 0 }}
+        initial={animate ? { opacity: code ? 0.8 : 0 } : false}
+        animate={{ opacity: code ? 0.8 : 0 }}
+        transition={{ duration: animate ? 0.45 : 0, delay: animate ? (code ? 0 : 0.2) : 0 }}
       />
       {hasMemory ? (
-        <line
-          className={officialWire}
+        <motion.line
+          className={worktreeWire}
           x1={1057}
           y1={452}
           x2={900}
           y2={403}
           data-testid="worktree-wire"
-          style={{ opacity: memory ? undefined : 0 }}
+          initial={animate ? { opacity: memory ? 0.8 : 0 } : false}
+          animate={{ opacity: memory ? 0.8 : 0 }}
+          transition={{ duration: animate ? 0.45 : 0, delay: animate ? (memory ? 0 : 0.2) : 0 }}
         />
       ) : null}
       <EngineGauge
@@ -1051,12 +1138,20 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           at the top (origin/feat ▸ PR ▸ origin/main, reading right→left), the memory remote mirrored to
           the bottom, wired to the branch nodes by the directional landing flows (push ↑ / pull ↓ /
           push-mem ↓). Shown only while the enclosure is landing, with `missing` probe refs dropped. */}
-      {showLanding ? (
-        <>
-          <LandingFlows refs={landingRefs} />
-          <RemoteStrip refs={landingRefs} />
-        </>
-      ) : null}
+      <AnimatePresence>
+        {showLanding ? (
+          <motion.g
+            key="landing-dock"
+            initial={animate ? { opacity: 0 } : false}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: animate ? 0.4 : 0 }}
+          >
+            <LandingFlows refs={landingRefs} />
+            <RemoteStrip refs={landingRefs} />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
 
       {!hasMemory ? (
         <text className={svgNodeMeta} x={930} y={420} textAnchor="middle" data-testid="memory-lane-absent">

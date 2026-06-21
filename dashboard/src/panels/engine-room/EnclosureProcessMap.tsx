@@ -136,9 +136,15 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
             de-materialises the WORKTREE side — main stays bright. That fade lives inside the canvas
             (the worktree refs go `planned`), so cleanup does NOT wrap in the full-dim dissolve shell. */}
         {teardown === "abandon" ? (
-          <div className={dissolveShell} data-testid="dissolve">
+          <motion.div
+            className={dissolveShell}
+            data-testid="dissolve"
+            initial={animate ? { opacity: 1, filter: "grayscale(0)" } : false}
+            animate={{ opacity: 0.4, filter: "grayscale(0.75)" }}
+            transition={{ duration: animate ? 0.6 : 0, ease: "easeOut" }}
+          >
             <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
-          </div>
+          </motion.div>
         ) : (
           <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
         )}

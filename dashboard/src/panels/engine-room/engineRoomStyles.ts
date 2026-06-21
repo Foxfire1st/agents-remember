@@ -592,32 +592,16 @@ export const actionRow = css({
 // no keyframes here yet; the boot/failure motion (draw-on, center-out fill, gates) lands in G2+.
 // Colour still carries state (note 08): one recipe per semantic axis, driven off the model.
 
+// Static layout only (05f §8): all canvas motion is GSAP (useEngineTimeline) + Motion (EnclosureCanvas),
+// never CSS. The old global `& g,& rect,…{ transition }` substrate (ported from podstage.html's #scene
+// trick) is removed — CSS cannot stage a sequence or animate an unmounting node, which is exactly what
+// broke the tear-down de-materialise + the conditional landing apparatus.
 export const sceneSvg = css({
   display: "block",
   width: "100%",
   flex: "1",
   minHeight: "0",
   overflow: "visible",
-  // Build-up smoothness substrate (ported from podstage.html's global `#scene` transition): every
-  // persistent scene element eases its transform / opacity / colour as the projection advances frame
-  // to frame, so the worktree branch-copies slide in, the enclosure border + couplers fade up, the
-  // engines charge center-out and the conduits glide between states instead of popping. `stroke-
-  // dashoffset` is intentionally omitted (the conduit draw-on re-fires via a keyed remount, below).
-  // Under `data-effects="off"` this whole rule is frozen to instant — exactly the settled "After"
-  // state the render tests assert synchronously, so nothing here defers a node's mount or value.
-  "& g, & rect, & line, & path, & circle, & text": {
-    transition:
-      "transform 0.55s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.45s ease, fill 0.4s ease, stroke 0.4s ease",
-  },
-});
-
-// Landing-tail enter: a fade + lift for the conditionally-mounted landing elements (the remote/PR strip
-// chips, the closeout train, the landing lane flags) so they glide in instead of popping when the phase
-// advances. Stagger per element with an inline `animationDelay`. `backwards` holds the hidden start state
-// through the delay; under data-effects=off the animation is frozen, so the element shows at its natural
-// opacity synchronously (the render tests stay stable, no deferred mount).
-export const landingEnter = css({
-  animation: "landingIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards",
 });
 
 export const worldLabel = css({
@@ -627,13 +611,14 @@ export const worldLabel = css({
   textTransform: "uppercase",
 });
 
+// The dashed worktree-enclosure border. Motion (EnclosureCanvas) owns its opacity — 0.5 at rest, 0 while
+// the shell hasn't materialised / has collapsed — so the build-up draws it in and the teardown collapses it.
 export const enclosureBorder = css({
   fill: "none",
   stroke: "token(colors.amber)",
   strokeWidth: "1.8",
   strokeDasharray: "9 7",
   strokeLinecap: "round",
-  opacity: "0.5",
 });
 
 // Branch node (official / worktree, code / memory) — fact-state honesty carried by the stroke.
@@ -668,20 +653,20 @@ export const engineGaugeOut = cva({
       nominal: { stroke: "token(colors.mint)" }, // active = green
       configured: { stroke: "token(colors.dormant)", opacity: "0.6" }, // inactive = empty/off
       indexing: { stroke: "token(colors.cyan)" },
-      // down = FAULT → flicker (≤3/s, distinct from the STEADY blocked gate). Isolated to this engine.
-      down: { stroke: "token(colors.alarm)", animation: "pulse 0.5s steps(1) infinite" },
+      // down = FAULT → GSAP flicker (≤3/s via data-fx='fault'; distinct from the STEADY blocked gate).
+      down: { stroke: "token(colors.alarm)" },
       unknown: { stroke: "token(colors.dormant)", strokeDasharray: "4 3", opacity: "0.6" },
     },
   },
 });
 
-// Reindex reroute (t9c, seedFallback) — an AMBER center-out pulse (a fallback, NOT the red fault).
+// Reindex reroute (t9c, seedFallback) — an AMBER center-out pulse (a fallback, NOT the red fault). GSAP
+// (data-fx='reindex') drives the scaleY/opacity pulse; under !animate it rests at this charged amber bar.
 export const engineReindexCharge = css({
   fill: "token(colors.amber)",
   opacity: "0.85",
   transformBox: "fill-box",
   transformOrigin: "center",
-  animation: "chargeSweep 1.5s ease-out infinite",
 });
 
 // The reindex OUTER stays amber (warning) so a rerouting engine reads amber-on-amber, not green-nominal.
@@ -692,21 +677,19 @@ export const engineReindexOut = css({
   opacity: "0.95",
 });
 
+// The boot-fill charge rect. transform-box/origin make the scaleY grow CENTER-OUT (not bottom-up); the
+// recipe carries only the static FILL as colour-as-state (cyan charging → mint "went green" → amber/alarm).
+// Motion (EnclosureCanvas chargeMotion) owns the animated scaleY (the boot-fill growth) + opacity, so CSS
+// and Motion never write the same property. Under !animate the rect mounts at the runtime end-state.
 export const engineCharge = cva({
-  // The boot-fill: transform-box/origin so the charge scaleY grows CENTER-OUT (not bottom-up), and the
-  // scaleY level itself is the energy — drained (scaleY 0) when the engine is dim/materialising, full
-  // (scaleY 1) once it seeds and locks. The sceneSvg global transition eases the climb (configured →
-  // indexing) and the cyan → mint "went green" colour shift, and freezes both to instant under
-  // data-effects=off. GSAP (useEngineBootFill) layers the lock flash on `filter`, a separate property,
-  // so the two animation systems never write the same value.
   base: { transformBox: "fill-box", transformOrigin: "center" },
   variants: {
     runtimeState: {
-      nominal: { fill: "token(colors.mint)", opacity: "0.55", transform: "scaleY(1)" }, // healthy green, charged
-      configured: { fill: "token(colors.cyan)", opacity: "0", transform: "scaleY(0)" }, // materialised, drained (dim)
-      indexing: { fill: "token(colors.cyan)", opacity: "0.85", transform: "scaleY(1)" }, // charging cyan (boot-fill)
-      down: { fill: "token(colors.alarm)", opacity: "0.55", transform: "scaleY(1)" },
-      unknown: { fill: "token(colors.dormant)", opacity: "0", transform: "scaleY(0)" },
+      nominal: { fill: "token(colors.mint)" }, // healthy green, charged
+      configured: { fill: "token(colors.cyan)" }, // materialised, drained (dim)
+      indexing: { fill: "token(colors.cyan)" }, // charging cyan (boot-fill)
+      down: { fill: "token(colors.alarm)" },
+      unknown: { fill: "token(colors.dormant)" },
     },
   },
 });
@@ -746,6 +729,18 @@ export const officialWire = css({
   strokeLinecap: "round",
 });
 
+// The worktree engine→branch wiring (mirror of officialWire) — but Motion (EnclosureCanvas) owns its
+// opacity: it fades in when the engine materialises (B3) and out when the engine powers down (D5). So this
+// variant carries NO opacity — a className `opacity` shadows Motion's animated value under initial=false
+// (the inline animated value and the class fight, and the class wins on a static frame), which is exactly
+// what left the wires dangling on the worktree side when no engine was present.
+export const worktreeWire = css({
+  fill: "none",
+  stroke: "token(colors.amber)",
+  strokeWidth: "2",
+  strokeLinecap: "round",
+});
+
 // Canopy housing (podstage.html .canopy): the decorative HUD frame — a double bevel rim, the four L
 // corner brackets, and the edge ticks. Pure amber line-art at the stage edges; the group's stroke is
 // inherited by its children, while per-element strokeWidth/opacity are set inline. Carries no state.
@@ -773,11 +768,8 @@ export const laneFlagText = cva({
   },
 });
 
-// Warp coupler — the contract binding code===memory in the worktree (bound when external memory).
-export const warpCouplerG = cva({
-  base: {},
-  variants: { bound: { true: { opacity: "1" }, false: { opacity: "0.3" } } },
-});
+// Warp coupler — the contract binding code===memory in the worktree (bound when external memory). Motion
+// (EnclosureCanvas) owns the coupler group's opacity (the bound dim + the build-up `visible` gate).
 export const warpCouplerBar = css({
   stroke: "token(colors.amber)",
   strokeWidth: "9",
@@ -794,22 +786,15 @@ export const warpCouplerLabel = css({ fill: "token(colors.amber)", fontSize: "11
 // The ledger-coupler link icon (5h coupler fix) — a drawn chain-link glyph (two interlocking rings,
 // amber line-art) replacing the contract node; reads as 🔗 but in the blueprint ink + can carry state.
 export const warpLinkGlyph = css({ fill: "none", stroke: "token(colors.amber)", strokeWidth: "1.6" });
-// Warp-core surge: two hot bands born at the link, splitting up + down (only when bound). The keyframes
-// live in index.css (freezable); hidden under effects=off (no settled state). Ported from podstage.html.
-export const warpSurge = cva({
-  base: {
-    stroke: "oklch(0.95 0.1 90)",
-    strokeWidth: "7",
-    strokeLinecap: "round",
-    opacity: "0",
-    filter: "drop-shadow(0 0 5px token(colors.amber))",
-  },
-  variants: {
-    dir: {
-      up: { animation: "warpSurgeUp 1.6s cubic-bezier(.4,0,.5,1) infinite" },
-      down: { animation: "warpSurgeDown 1.6s cubic-bezier(.4,0,.5,1) infinite" },
-    },
-  },
+// Warp-core surge: two hot bands born at the link, splitting up + down (only when bound). GSAP
+// (data-fx='surge' + data-dir) drives them; opacity 0 at rest so under !animate they're invisible (no
+// settled state, like the flow packet). Ported from podstage.html.
+export const warpSurge = css({
+  stroke: "oklch(0.95 0.1 90)",
+  strokeWidth: "7",
+  strokeLinecap: "round",
+  opacity: "0",
+  filter: "drop-shadow(0 0 5px token(colors.amber))",
 });
 
 // 5h ledger popover — clicking a coupler's link glyph opens the memory.md lookup table (code⇄memory
@@ -823,7 +808,6 @@ export const ledgerButton = css({
   stroke: "token(colors.amber)",
   strokeWidth: "1",
   cursor: "pointer",
-  transition: "fill 0.12s ease",
   _hover: { fill: "oklch(0.3 0.04 250 / 0.85)" },
   _focusVisible: { outline: "none", stroke: "token(colors.cyan)", strokeWidth: "1.6" },
 });
@@ -945,11 +929,11 @@ export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95" });
 // badge (cyan-dot pointer + pill) states WHY at the lane; recovery chips offer the next action. All
 // driven off node.health / edge.state / missingFacts / nextAction — colour-as-state, no inferred chrome.
 export const gateBar = css({ fill: "token(colors.alarm)", opacity: "0.92" });
+// Alarm-parity attention badge. GSAP (data-fx='breath') drives the gentle breathing; static at rest.
 export const attnBadge = css({
   fill: "oklch(0.26 0.09 25)",
   stroke: "token(colors.alarm)",
   strokeWidth: "1.3",
-  animation: "attnBreath 1.3s ease-in-out infinite",
 });
 export const attnText = css({ fill: "oklch(0.93 0.08 25)", fontSize: "11px", letterSpacing: "0.12em", fontWeight: "600" });
 export const reasonBadge = css({ fill: "oklch(0.2 0.05 25)", stroke: "token(colors.alarm)", strokeWidth: "1.1" });
@@ -961,11 +945,11 @@ export const svgChipText = css({ fill: "token(colors.amber)", fontSize: "10.5px"
 // --- live + teardown overlays (5g G5) ----------------------------------------
 // t14c — terminal integration conflict: a STOP (flash 3× → steady), visually heavier than the
 // recoverable Gate. Source stays put (all-or-nothing); paired with NO recovery chips (human-only).
+// t14c terminal STOP. GSAP (data-fx='stop') flashes it ×3 then steady; static at rest under !animate.
 export const stopBar = css({
   fill: "token(colors.alarm)",
   stroke: "oklch(0.96 0.05 25)",
   strokeWidth: "1.2",
-  animation: "stopFlash 0.5s steps(1) 3",
 });
 export const stopText = css({
   fill: "token(colors.bg)",
@@ -976,14 +960,13 @@ export const stopText = css({
 
 // t18 — abandon: the enclosure (canvas) dissolves to a dim, desaturated ghost while the record
 // banner above it stays legible. A flex passthrough so the svg keeps its flex:1 sizing.
+// t18 abandon: the enclosure (canvas) dissolves to a dim, desaturated ghost. Motion (EnclosureProcessMap)
+// owns the opacity + grayscale fade; this recipe is the layout passthrough only (keeps the svg's flex:1).
 export const dissolveShell = css({
   display: "flex",
   flexDirection: "column",
   flex: "1",
   minHeight: "0",
-  opacity: "0.4",
-  filter: "grayscale(0.75)",
-  transition: "opacity 0.6s ease, filter 0.6s ease",
 });
 export const abandonRecord = css({
   display: "flex",
@@ -1018,7 +1001,6 @@ export const cleanupRecord = css({
 // all-done strip. mint = the settled/done look (colour parity with the green=active engine palette, G5).
 export const closeoutTrainLabel = css({ fill: "token(colors.muted)", fontSize: "9px", letterSpacing: "0.08em" });
 export const closeoutRail = css({ stroke: "token(colors.mint)", strokeWidth: "1.4", opacity: "0.35", strokeDasharray: "2 4" });
-export const closeoutBeatG = css({ animation: "closeoutSweep 0.45s ease-out backwards" });
 export const closeoutBeat = css({
   fill: "oklch(0.24 0.04 160)",
   stroke: "token(colors.mint)",
@@ -1060,7 +1042,7 @@ export const remoteConnectorCarry = css({
   strokeLinecap: "round",
 });
 export const remoteChip = cva({
-  base: { strokeWidth: "1.4", transition: "fill 0.4s ease, stroke 0.4s ease" },
+  base: { strokeWidth: "1.4" },
   variants: {
     tone: {
       planned: { fill: "token(colors.bgPanel)", stroke: "token(colors.muted)", strokeDasharray: "4 5", opacity: "0.8" },
@@ -1093,7 +1075,7 @@ export const remoteChipState = cva({
 // The PR badge — a distinct pill among the remote refs. open = amber outline (not yet merged);
 // merged = mint-filled "merged". Never animated as live until observed (honest-motion §4).
 export const prBadge = cva({
-  base: { strokeWidth: "1.5", transition: "fill 0.4s ease, stroke 0.4s ease" },
+  base: { strokeWidth: "1.5" },
   variants: {
     state: {
       open: { fill: "token(colors.bgPanel)", stroke: "token(colors.amber)" },

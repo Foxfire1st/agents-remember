@@ -85,123 +85,16 @@
   }
 }
 
-/* Engine Room pod-stage motion (5g G2): the podracer engine charge grows center-out (the charge rect
-   sets transform-box: fill-box + transform-origin: center). Global keyframe, frozen by effects=off below
-   so the static end-state (a settled, fully-grown charge) is what screenshots / visual assertions see. */
-@keyframes chargeSweep {
-  0% {
-    transform: scaleY(0.06);
-    opacity: 0.95;
-  }
-  65% {
-    transform: scaleY(1);
-    opacity: 0.5;
-  }
-  100% {
-    transform: scaleY(1);
-    opacity: 0;
-  }
-}
+/* Engine Room pod-stage CANVAS motion is GSAP (useEngineTimeline) + Motion (EnclosureCanvas), never CSS
+   (05f §8) — the former canvas @keyframes (chargeSweep, conduitDraw, pktRun, attnBreath, stopFlash,
+   closeoutSweep, warpSurgeUp/Down, landingIn) are removed. `flicker` (CRT) + `pulse` (app-wide alarm,
+   still used by the rail / cockpit / topology) stay above; the determinism freeze below still applies. */
 
-/* Conduit draw-on (stroke-dashoffset, needs pathLength=100 on the path) + the travelling flow packet
-   (offset-distance) — only on a running/seeding conduit. Frozen by effects=off → drawn, no packet. */
-@keyframes conduitDraw {
-  from {
-    stroke-dashoffset: 100;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-@keyframes pktRun {
-  from {
-    offset-distance: 0%;
-  }
-  to {
-    offset-distance: 100%;
-  }
-}
 
-/* Attention badge — gentle alarm-parity breathing (NOT the sharp `pulse` fault flicker); a blocked/fault
-   state raises it (5g G3). Frozen by effects=off → static. */
-@keyframes attnBreath {
-  0%,
-  100% {
-    opacity: 0.78;
-  }
-  50% {
-    opacity: 1;
-  }
-}
 
-/* t14c — terminal integration conflict: a brief flash (3×) then a steady STOP. Frozen by effects=off. */
-@keyframes stopFlash {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
 
-/* T13 closeout train (5h H2): the known closeout order plays as a derived left-to-right sweep on
-   closeout-pending (5f §9 — deriving the fixed order is allowed). Per-beat animation-delay is set
-   inline; frozen by effects=off → the settled all-done strip (every beat at rest opacity). */
-@keyframes closeoutSweep {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 0.95;
-  }
-}
 
-/* Warp-core surge (5h coupler fix): a hot band born at the ledger coupler, splitting up + down,
-   repeating — the ledger link is live (ported from podstage.html `.cpl-surge`). Frozen by effects=off
-   → hidden (no settled state, like the flow packet). */
-@keyframes warpSurgeUp {
-  0% {
-    opacity: 0;
-    transform: translateY(0);
-  }
-  18% {
-    opacity: 0.95;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-24px);
-  }
-}
-@keyframes warpSurgeDown {
-  0% {
-    opacity: 0;
-    transform: translateY(0);
-  }
-  18% {
-    opacity: 0.95;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-}
 
-/* Landing-tail enter (5i): the conditionally-mounted landing elements — the remote/PR strip chips,
-   the closeout train, the landing lane flags — would otherwise POP in when the phase advances. This
-   fades + lifts them in on mount (staggered per chip via animation-delay), so the landing reads as
-   smoothly as the build-up. `backwards` holds the hidden start state through the delay. Frozen by
-   effects=off (the rule below) → the element shows at its natural opacity, synchronously, for tests. */
-@keyframes landingIn {
-  from {
-    opacity: 0;
-    transform: translateY(-7px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +

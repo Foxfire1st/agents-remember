@@ -11,7 +11,9 @@ import { SCENARIOS } from "./scenarios";
 // animation so Playwright assertions on the settled end-state stay deterministic.
 export function Bench() {
   const params = new URLSearchParams(window.location.search);
-  const wanted = params.get("scenario") ?? params.get("state");
+  // `?scenario=happy-build` is the legacy deep link; it aliases to the build-up timeline (5k).
+  const raw = params.get("scenario") ?? params.get("state");
+  const wanted = raw === "happy-build" ? "build-up" : raw;
   const [scenario, setScenario] = useState(
     () => SCENARIOS.find((entry) => entry.name === wanted) ?? SCENARIOS[0],
   );
