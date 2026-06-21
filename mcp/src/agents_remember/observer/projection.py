@@ -533,6 +533,9 @@ class LandingRefNode(BaseModel):
     state: str  # behind | tip | open | merged | pushed | planned | unknown
     factState: str = "planned"  # observed | derived | planned | missing
     detail: str | None = None
+    # gh's own milestone timestamp for the PR ref -- mergedAt once merged, else createdAt (slice 5l
+    # P2). ISO-8601 string; None for branch refs and PRs gh could not time. Display-only (05k).
+    at: str | None = None
 
 
 class EngineProcessNode(BaseModel):

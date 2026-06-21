@@ -11,6 +11,12 @@ Honesty (slice 5h; 5f sec 2): a ref we could not observe is reported ``planned``
 yet) or ``missing`` (the probe could not run), never invented. Branch tips come from
 ``git ls-remote`` (reliable); PR state from a best-effort ``gh`` shell-out -- the package's first --
 which degrades to ``missing`` when ``gh`` is absent or unauthed.
+
+Slice 5l P2 hardens the probe to *follow* a real remote landing: ``origin/main`` (the protected
+target) is now probed directly via ``ls-remote`` -- visible across the whole landing window, not
+only inferred from a PR's base once gh resolves one -- and the PR ref carries gh's own open/merge
+timestamps. The dashboard re-probes every projector tick (~1s), so these reads drive the live arc;
+no milestone hook is needed for cadence.
 """
 
 from __future__ import annotations
@@ -73,11 +79,51 @@ def _remote_branch(repo: Path, branch: str) -> tuple[str, str | None]:
     return ("observed", line.split()[0])
 
 
+def _default_branch(repo: Path) -> str:
+    """origin's default branch (e.g. ``main``) via the remote HEAD symref; ``"main"`` on any failure.
+
+    Used to name the protected target when no PR has resolved a base yet, so ``origin/main`` is
+    observable from the start of the landing window (slice 5l P2). ``ls-remote`` queries the remote
+    directly, so no ``fetch`` is needed and a stale local tracking ref can never mislead it.
+    """
+    if not repo.exists():
+        return "main"
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-c",
+                f"safe.directory={repo.as_posix()}",
+                "ls-remote",
+                "--symref",
+                "origin",
+                "HEAD",
+            ],
+            cwd=repo,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "main"
+    if result.returncode != 0:
+        return "main"
+    for line in result.stdout.splitlines():
+        if line.startswith("ref:") and "HEAD" in line:
+            # "ref: refs/heads/main\tHEAD" -> "main"
+            return line.split()[1].rsplit("/", 1)[-1] or "main"
+    return "main"
+
+
 def _pr_for(repo: Path, head: str) -> dict[str, str] | None:
     """Best-effort PR lookup via ``gh`` for the branch ``head``.
 
     ``None`` -> gh is absent/unauthed/errored (caller renders ``missing``); ``{}`` -> gh ran and
-    there is no PR yet (caller renders ``planned``); otherwise the PR's number/state/url/base.
+    there is no PR yet (caller renders ``planned``); otherwise the PR's number/state/url/base plus
+    gh's own ``createdAt``/``mergedAt`` timestamps (slice 5l P2) so the open->merged transition
+    carries its timing.
     """
     if not head or not repo.exists():
         return None
@@ -92,7 +138,7 @@ def _pr_for(repo: Path, head: str) -> dict[str, str] | None:
                 "--state",
                 "all",
                 "--json",
-                "number,state,url,baseRefName",
+                "number,state,url,baseRefName,createdAt,mergedAt",
                 "--limit",
                 "1",
             ],
@@ -119,6 +165,9 @@ def _pr_for(repo: Path, head: str) -> dict[str, str] | None:
         "state": str(row.get("state", "")).lower(),
         "url": str(row.get("url", "")),
         "base": str(row.get("baseRefName", "")),
+        # gh returns JSON null for mergedAt on an open PR -> coerce to "" (not "None").
+        "createdAt": str(row.get("createdAt") or ""),
+        "mergedAt": str(row.get("mergedAt") or ""),
     }
 
 
@@ -133,8 +182,35 @@ def _branch_ref(kind: str, branch: str, fact: str, sha: str | None) -> dict[str,
     }
 
 
+def _main_ref(repo: Path, pr: dict[str, str] | None) -> dict[str, object]:
+    """The protected target ``origin/<base>``, probed directly (slice 5l P2).
+
+    Visible across the whole landing window -- not only after ``gh`` resolves a PR base -- so the
+    dashboard can show the line a worktree is landing into before any PR exists, even when ``gh`` is
+    unavailable (the probe is ``ls-remote``, independent of gh). ``state`` tracks whether *this* work
+    has landed (the PR merged), not merely whether ``origin/main`` exists, so a pre-merge target
+    reads honestly as ``planned`` rather than a misleading ``tip``/done; the current main tip rides
+    along in ``detail``.
+    """
+    base = (pr or {}).get("base") or _default_branch(repo)
+    fact, sha = _remote_branch(repo, base)
+    if pr and pr.get("state") == "merged":
+        state = "merged"
+    elif fact == "observed":
+        state = "planned"
+    else:
+        state = "unknown"
+    return {
+        "kind": "origin-main",
+        "label": f"origin/{base}",
+        "state": state,
+        "factState": fact,
+        "detail": sha[:10] if sha else None,
+    }
+
+
 def _pr_ref(pr: dict[str, str] | None) -> list[dict[str, object]]:
-    """Render the PR (and, when gh resolved it, its base ``origin-main``) from a best-effort lookup."""
+    """Render the PR participant from a best-effort lookup (origin-main is now its own direct probe)."""
     if pr is None:
         return [
             {
@@ -156,34 +232,28 @@ def _pr_ref(pr: dict[str, str] | None) -> list[dict[str, object]]:
             }
         ]
     number = pr.get("number") or ""
-    refs: list[dict[str, object]] = [
+    merged = pr.get("state") == "merged"
+    # gh's own milestone time: when it merged, else when it opened (slice 5l P2).
+    at = (pr.get("mergedAt") or "") if merged else (pr.get("createdAt") or "")
+    return [
         {
             "kind": "pr",
             "label": f"PR #{number}" if number else "PR",
             "state": pr.get("state") or "open",
             "factState": "observed",
             "detail": pr.get("url") or None,
+            "at": at or None,
         }
     ]
-    base = pr.get("base") or ""
-    if base:
-        refs.append(
-            {
-                "kind": "origin-main",
-                "label": f"origin/{base}",
-                "state": "merged" if pr.get("state") == "merged" else "tip",
-                "factState": "observed",
-                "detail": None,
-            }
-        )
-    return refs
 
 
 def landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
-    """Observe the successful-landing arc (slice 5h), best-effort.
+    """Observe the successful-landing arc (slice 5h; hardened 5l P2), best-effort.
 
     ``None`` -> no landing key in the status payload (the node defaults to an empty ``landing``).
-    Otherwise one dict per remote/PR participant, each carrying an honest ``factState``.
+    Otherwise one dict per remote/PR participant, each carrying an honest ``factState``. Probed
+    fresh every projector tick while the landing window is active, so the dashboard follows the live
+    push -> PR open -> PR merge arc without a milestone hook.
     """
     if not _landing_active(contract):
         return None
@@ -202,5 +272,8 @@ def landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
             _branch_ref("origin-mem-main", mem, *_remote_branch(contract.memory_repo_path, mem))
         )
 
-    refs.extend(_pr_ref(_pr_for(contract.code_repo_path, contract.code_source_branch)))
+    # The PR drives both its own ref and the protected target's merged state, so look it up once.
+    pr = _pr_for(contract.code_repo_path, contract.code_source_branch)
+    refs.append(_main_ref(contract.code_repo_path, pr))
+    refs.extend(_pr_ref(pr))
     return refs
