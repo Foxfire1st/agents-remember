@@ -22,6 +22,7 @@ import type {
   ProviderNode,
 } from "../../types/projection";
 import { engineState } from "../../data/selectors";
+import { cx } from "../../../styled-system/css";
 import {
   attnBadge,
   attnText,
@@ -42,6 +43,7 @@ import {
   flowConduit,
   flowPacket,
   gateBar,
+  ghostedLane,
   laneFlag,
   laneFlagText,
   ledgerButton,
@@ -68,6 +70,7 @@ import {
   remoteChipLabel,
   remoteChipState,
   remoteStripHeader,
+  scanRing,
   sceneSvg,
   stopBar,
   stopText,
@@ -550,7 +553,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   );
 }
 
-function Conduit({ edge, strategy, retiring = false }: { edge: EngineProcessEdge; strategy?: string; retiring?: boolean }) {
+function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: EngineProcessEdge; strategy?: string; retiring?: boolean; ghosted?: boolean }) {
   // The conduit draw-on (strokeDashoffset 100 → 0) is owned by the GSAP timeline (useEngineTimeline),
   // which selects every running lane via [data-draw='on'] and staggers them (05f §8). Motion owns this
   // group's opacity; CSS is static. A planned → running cycle re-runs the hook (its signature folds in the
@@ -584,6 +587,7 @@ function Conduit({ edge, strategy, retiring = false }: { edge: EngineProcessEdge
       data-kind={edge.kind}
       data-state={edge.state}
       data-strategy={isReplay ? "replay" : undefined}
+      data-ghosted={ghosted || undefined}
       // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
       // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
       // (instant under !animate, where it mounts at the end-state).
@@ -595,7 +599,9 @@ function Conduit({ edge, strategy, retiring = false }: { edge: EngineProcessEdge
       transition={{ duration: animate ? 0.45 : 0, delay: animate && cloneArc && opacity === 0 ? 0.45 : 0 }}
     >
       <path
-        className={flowConduit({ state: conduitState(edge.state) })}
+        // 05o — a gated memory lane is GHOSTED (dim + desaturate) on the inner <path>, NOT the motion.g, so
+        // the ghost never fights Motion's group opacity (a className opacity loses on a static frame).
+        className={cx(flowConduit({ state: conduitState(edge.state) }), ghosted && ghostedLane)}
         d={d}
         // GSAP DrawSVG draws this on when it goes running (data-draw='on') — 05n; the running conduit has no
         // CSS dash (solid), so DrawSVG owns the stroke reveal. No pathLength: DrawSVG measures real length.
@@ -982,6 +988,15 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
     node.codeWorktree.factState === "observed" || node.codeWorktree.factState === "derived";
   const memWtMaterialised =
     node.memoryWorktree?.factState === "observed" || node.memoryWorktree?.factState === "derived";
+  // 05o T3B — the ledger-verify primitives, both read off the projection (never a class alone). `checking`:
+  // the memory side is being verified (ledger-map running) before the gate decides, while the memory worktree
+  // is not yet on disk → the cyan scan ring sweeps the lane. `memGated`: the memory lane is held (no ledger
+  // map / a missing memory repo) → it ghosts (dim + desaturate) while the code lane stays solid.
+  const checking =
+    node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "running") && !memWtMaterialised;
+  const memGated =
+    node.memoryWorktree?.factState === "missing" ||
+    node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "blocked");
   // Official-line (workspace) engines — the real shared CGC/GrepAI feeding the official line (left
   // world); runtime derived like the OfficialStrip so the two surfaces always agree.
   const officialCode = workspaceEngines.find((engine) => engine.role === "code");
@@ -1074,7 +1089,21 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
         />
       ) : null}
 
-      {node.edges.map((edge) => <Conduit key={edge.id} edge={edge} strategy={node.integrationStrategy} retiring={retiring} />)}
+      {node.edges.map((edge) => (
+        <Conduit
+          key={edge.id}
+          edge={edge}
+          strategy={node.integrationStrategy}
+          retiring={retiring}
+          ghosted={memGated && edge.kind === "ledger-map"}
+        />
+      ))}
+      {/* 05o — the pre-block verify sweep: a cyan ring on the ledger-map (memory) lane midpoint while it is
+          being checked (ledger-map running, memory not yet on disk). GSAP (data-fx='scan') drives the
+          expand-fade; rendered only while animate, so under effects=off it is absent (no frozen ring). */}
+      {checking && animate ? (
+        <circle className={scanRing} data-fx="scan" data-testid="scan-ring" cx={COL_FEAT_CX} cy={403} r={6} />
+      ) : null}
 
       {/* THREE-TIER (5f §7.4, copied 1-to-1 from the mockup): the OFFICIAL LINE is MAIN (the protected
           branch) — ALWAYS, in the build-up and the landing — and the worktree forks from it on the right.

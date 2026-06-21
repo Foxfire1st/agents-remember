@@ -81,6 +81,14 @@ function buildFx(q: gsap.utils.SelectorFunc): void {
       { scaleY: 1, opacity: 0.9, duration: 1.5, repeat: -1, ease: "power1.out" },
     );
 
+  const scan = q("[data-fx='scan']"); // 05o — pre-block verify sweep: a cyan ring expands + fades on the checked lane (transient)
+  if (scan.length)
+    gsap.fromTo(
+      scan,
+      { attr: { r: 6 }, opacity: 0.9 },
+      { attr: { r: 52 }, opacity: 0, duration: 1.2, repeat: -1, ease: "power1.out" },
+    );
+
   const surge = q("[data-fx='surge']"); // warp-core surge: two hot bands born at the link, splitting out
   surge.forEach((band, i) => {
     const dir = band.getAttribute("data-dir") === "down" ? 1 : -1;

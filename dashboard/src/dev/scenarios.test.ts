@@ -36,6 +36,36 @@ describe("scenario player model (5i)", () => {
     }
   });
 
+  it("authors the T3B memory-block arc (verify → block → reconcile → clone), one enclosure throughout", () => {
+    const memoryBlock = SCENARIOS.find((scenario) => scenario.name === "memory-block");
+    expect(memoryBlock).toBeTruthy();
+    const captions = memoryBlock!.frames.map((frame) => frame.caption).join(" | ");
+    expect(captions).toMatch(/verif/i); // verify / verifies / verifying
+    expect(captions).toMatch(/block/i);
+    expect(captions).toMatch(/reconcile/i);
+    // a blocked beat must actually drive a blocked engine process (not just a caption)
+    const healths = memoryBlock!.frames.flatMap((frame) =>
+      frame.projection.analytics.engineProcesses.map((node) => node.health),
+    );
+    expect(healths).toContain("blocked");
+    // the recover must run the provider seed/clone beats (the cross-stage copy arrows) — not teleport to
+    // nominal. At least one frame drives a running cgc-seed / grepai-clone edge (matches the mockup M5/M6).
+    const hasCloneBeat = memoryBlock!.frames.some((frame) =>
+      frame.projection.analytics.engineProcesses.some((node) =>
+        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
+      ),
+    );
+    expect(hasCloneBeat).toBe(true);
+    // one enclosure throughout — every frame drives the SAME worktree group (so the recover animates,
+    // not remounts)
+    const groups = new Set(
+      memoryBlock!.frames.flatMap((frame) =>
+        frame.projection.analytics.engineProcesses.map((node) => node.worktreeGroup),
+      ),
+    );
+    expect(groups.size).toBe(1);
+  });
+
   it("folds the old gallery states in as single-frame resting scenarios (no coverage lost)", () => {
     const resting = SCENARIOS.find((scenario) => scenario.name === "engine-cleanup-pending");
     expect(resting?.frames).toHaveLength(1);

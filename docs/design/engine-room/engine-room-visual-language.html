@@ -122,28 +122,28 @@
   /* CONSTANT GOLD BEZEL (developer call); the body (e-charge, center-out) + the fanned flank PETALS carry
      the runtime colour. Fins / spine / scanlines are constant structure. 1:1 with the dashboard EngineGauge. */
   .prov .e-bg{fill:oklch(0.15 0.02 250)}                                       /* dark gauge background */
-  .prov .e-frame{fill:none;stroke:var(--amber);stroke-width:2.2;filter:drop-shadow(0 0 3px var(--amber))}  /* gold bezel */
+  .prov .e-frame{fill:none;stroke:var(--amber);stroke-width:2.2}               /* flat gold bezel — no glow (the body fill carries state, §4) */
   .prov .e-fin{stroke:oklch(0.15 0.02 250);stroke-width:2;opacity:.85}         /* dark dividers (bg) — the ONLY lines the engine owns */
   .prov .e-spine{stroke:var(--amber);stroke-width:.8;opacity:.28}              /* faint centre spine */
-  .prov .e-petal{stroke:var(--mint);stroke-width:1.4;stroke-linecap:round;opacity:0}  /* fanned flank petals, state-coloured */
+  .prov .e-petal{stroke:var(--amber);stroke-width:1.4;stroke-linecap:round;opacity:0}  /* fanned flank petals — constant gold, like the spine (presence varies by state, colour does not) */
   .prov .e-charge{fill:var(--cyan);transform-box:fill-box;transform-origin:center;transform:scaleY(0);opacity:0;
     transition:transform 1s cubic-bezier(.22,1,.36,1),fill .4s ease,opacity .4s ease}
   /* charge fills from the MIDDLE outward to full turquoise */
   .prov.booting .e-charge{fill:var(--cyan);transform:scaleY(1);opacity:.85}
-  .prov.booting .e-petal{stroke:var(--cyan);opacity:.6}
+  .prov.booting .e-petal{opacity:.6}
   /* flash up, then DIM to green (powerup lands on green, NOT amber) */
   .prov.green .e-charge{transform:scaleY(1);animation:powerup 1.15s ease forwards}
-  .prov.green .e-petal{stroke:var(--mint);opacity:.6}
+  .prov.green .e-petal{opacity:.6}
   /* ready / nominal = STEADY GREEN */
   .prov.ready .e-charge{fill:var(--mint);transform:scaleY(1);opacity:.55}
-  .prov.ready .e-petal{stroke:var(--mint);opacity:.6}
+  .prov.ready .e-petal{opacity:.6}
   /* fault = red body + gentle red halo breathe (gold bezel stays) */
   .prov.fault{animation:faultglow 1.7s ease-in-out infinite}
   .prov.fault .e-charge{fill:var(--alarm);transform:scaleY(1);opacity:.5}
-  .prov.fault .e-petal{stroke:var(--alarm);opacity:.65}
+  .prov.fault .e-petal{opacity:.65}
   /* reindex = amber body gentle pulse */
   .prov.reindex .e-charge{fill:var(--amber);transform:scaleY(1);animation:reindexpulse 1.6s ease-in-out infinite}
-  .prov.reindex .e-petal{stroke:var(--amber);opacity:.55}
+  .prov.reindex .e-petal{opacity:.55}
   /* power-up: full turquoise charge → flash up (bright mint) → dim to green. NOT amber. */
   @keyframes powerup{0%{fill:var(--cyan);opacity:.85}30%{fill:var(--mint);opacity:1}100%{fill:var(--mint);opacity:.55}}
   /* fault = a gentle red halo breathing around the whole gauge (the gold bezel stays gold) */
@@ -163,6 +163,13 @@
   /* despawn */
   .dissolve{transform-box:fill-box;transform-origin:center}
   .dissolve.gone{opacity:0;transform:scale(.94);transition:opacity .6s ease,transform .6s ease}
+  /* failure modes (§10) */
+  /* scan ring — the pre-block verify sweep: a cyan ring expands + fades on the lane being checked. Transient. */
+  .scan{fill:none;stroke:var(--cyan);stroke-width:2;opacity:0;filter:drop-shadow(0 0 4px var(--cyan));
+    transform-box:fill-box;transform-origin:center;animation:scansweep 1.2s ease-out infinite}
+  @keyframes scansweep{0%{transform:scale(.3);opacity:.95}70%{opacity:.3}100%{transform:scale(3.2);opacity:0}}
+  /* ghosted lane — one lane held under a gate while its sibling proceeds; dimmed + desaturated, real not planned */
+  .ghost{opacity:.32;filter:grayscale(.45)}
   /* glow ladder */
   .glowrow{display:flex;align-items:center;gap:0;justify-content:space-around;padding:6px 0}
   text{font-family:var(--mono)}
@@ -194,8 +201,9 @@
   <a href="#coupler">7 · Coupler</a>
   <a href="#choreo">8 · Choreography</a>
   <a href="#despawn">9 · Despawn</a>
-  <a href="#timing">10 · Timing</a>
-  <a href="#impl">11 · Implementation</a>
+  <a href="#failure">10 · Failure modes</a>
+  <a href="#timing">11 · Timing</a>
+  <a href="#impl">12 · Implementation</a>
 </nav>
 
 <!-- 0 -->
@@ -435,10 +443,12 @@
 <!-- 6 -->
 <section id="engines">
   <h2><span class="n">6</span>Engines</h2>
-  <p class="lede">A provider engine (CGC / GrepAI). A <b>constant gold bezel</b> frames it; the <b>body</b> (fills
-    from the <b>middle outward</b> to full turquoise, then <b>flashes up and dims to green</b>) and the
-    <b>fanned flank petals</b> carry the runtime colour. A healthy engine rests <b>green</b> — not amber, not a
-    bottom-up fill. Faults <b>pulse gently</b>; a re-index pulses amber.</p>
+  <p class="lede">A provider engine (CGC / GrepAI). A <b>constant gold bezel</b> frames it — <b>flat, no glow</b>
+    (the glow scale, §4, is reserved for the active body + the fault halo, never the frame). The <b>body</b> (fills
+    from the <b>middle outward</b> to full turquoise, then <b>flashes up and dims to green</b>) carries the runtime
+    colour; the <b>spine</b> and the <b>fanned flank petals</b> are <b>constant gold</b> structural line-art (only
+    their presence varies — an off engine fans no petals). A healthy engine rests <b>green</b> — not amber, not a
+    bottom-up fill. Faults <b>pulse gently</b> (a red body + halo); a re-index pulses amber.</p>
   <div class="grid">
 
     <div class="card">
@@ -626,8 +636,72 @@
 </section>
 
 <!-- 10 -->
+<section id="failure">
+  <h2><span class="n">10</span>Failure modes</h2>
+  <p class="lede">When the lifecycle can't just proceed it <b>blocks, gates, and recovers</b> — or terminates.
+    The prototype (<a href="./podstage.html">podstage.html</a>) ships eight such scenes; this section pins the
+    shared primitives they draw with, added as each mode lands in the dashboard. Doctrine throughout: a
+    <b>block is steady</b> (a choice you must make — steady red, §2) while a <b>fault flickers</b> (something
+    broke — §6); the two must never look alike. Most modes are <b>recoverable</b> (verify &#8594; block &#8594;
+    gate &#8594; recover &#8594; settle); a few are terminal (the integration-conflict STOP) or dissolve away
+    (abandon, §9).</p>
+  <div class="note"><b>Mode 1 — memory / ledger block (T3b).</b> The first recoverable mode lands the two
+    primitives below. After the code lane is real, the ledger gate verifies the memory side; on a dirty /
+    no-ledger-map / missing memory repo the <b>memory lane is gated while the code lane stays solid</b>, then
+    <code>reconciliation</code> clears it and the memory worktree materialises + the coupler binds (§7). The
+    block itself reuses the steady gate (§2 Blocked) + the attention badge + recovery chips; the net-new pieces
+    are the <b>scan ring</b> and the <b>ghosted lane</b>.</div>
+  <div class="grid">
+
+    <div class="card">
+      <div class="stage"><span class="tag">scan ring — loops</span>
+        <svg viewBox="0 0 320 150">
+          <line class="planned" x1="44" y1="75" x2="276" y2="75"/>
+          <circle class="scan" cx="160" cy="75" r="14"/>
+        </svg></div>
+      <div class="meta">
+        <h3>Scan ring · preflight verify</h3>
+        <p class="sem">Before a gate decides — a ledger-map check, a stale-base preflight, a provider-config
+          probe — a cyan ring expands and fades on the lane being checked. Transient: it plays while the check
+          runs and is gone the instant it resolves (pass &#8594; the lane proceeds; fail &#8594; the gate drops,
+          §2). Cyan because a check <i>is</i> the active step.</p>
+        <div class="chips">
+          <span class="chip"><span class="swatchdot" style="background:var(--cyan)"></span><b>cyan</b></span>
+          <span class="chip">expand+fade <b>~1.2s</b> ease-out</span>
+          <span class="chip">glow <b>4px</b></span>
+          <span class="chip">transient · freezes (reduced-motion)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stage"><span class="tag">ghosted lane</span>
+        <svg viewBox="0 0 320 150">
+          <text x="44" y="42" fill="var(--muted)" font-size="8" letter-spacing=".06em">CODE · proceeds</text>
+          <line class="wire" x1="44" y1="54" x2="276" y2="54"/>
+          <g class="ghost"><line class="blocked" x1="44" y1="100" x2="276" y2="100"/></g>
+          <text x="160" y="120" text-anchor="middle" fill="var(--alarm)" font-size="9" letter-spacing=".1em">GATED · memory</text>
+        </svg></div>
+      <div class="meta">
+        <h3>Ghosted lane · one lane held</h3>
+        <p class="sem">When one lane is gated while its sibling proceeds, the held lane <b>dims + desaturates</b>
+          so "this side is blocked, that side is fine" reads at a glance (e.g. the memory/ledger block: the code
+          lane stays a solid wire, the memory lane ghosts under a steady gate). Distinct from <i>planned</i>
+          (dashed grey, §2): a ghosted lane is <b>real but held</b>, not not-yet.</p>
+        <div class="chips">
+          <span class="chip">opacity <b>.32</b></span>
+          <span class="chip">grayscale <b>.45</b></span>
+          <span class="chip">pairs with the steady gate (§2 Blocked)</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- 11 -->
 <section id="timing">
-  <h2><span class="n">10</span>Timing &amp; easing reference</h2>
+  <h2><span class="n">11</span>Timing &amp; easing reference</h2>
   <p class="lede">Pacing is cinematic, not snappy: entrances <b>decelerate</b> (arrive softly), exits
     <b>accelerate</b> (leave quickly), ambient loops run ~1.4&#8211;1.6s under the discrete beats so the scene is
     never frozen. Copy these verbatim.</p>
@@ -658,9 +732,9 @@
     real labels.</div>
 </section>
 
-<!-- 11 -->
+<!-- 12 -->
 <section id="impl">
-  <h2><span class="n">11</span>Implementation mapping</h2>
+  <h2><span class="n">12</span>Implementation mapping</h2>
   <p class="lede">This spec animates in CSS for portability. The dashboard implements the same primitives with
     <b>GSAP + Motion</b> (CSS static-only). Same values; different driver.</p>
   <table>
@@ -673,6 +747,8 @@
       <tr><td>node fresh / state recolour</td><td>class swap + global <code>.45s</code> ease</td><td><span class="k">Motion</span> <code>animate</code> stroke/filter, or layout state</td></tr>
       <tr><td>glow</td><td>static <code>filter:drop-shadow</code></td><td>static Panda style; <i>ramp</i> via Motion/GSAP</td></tr>
       <tr><td>coupler bind / surge</td><td><code>scaleY</code> transition + <code>@keyframes</code></td><td><span class="k">GSAP</span> timeline (<code>repeat:-1</code> for surge)</td></tr>
+      <tr><td>scan ring (preflight)</td><td><code>@keyframes</code> scale+opacity, infinite</td><td><span class="k">GSAP</span> <code>fromTo</code> r/opacity, <code>repeat:-1</code> (<code>data-fx='scan'</code>)</td></tr>
+      <tr><td>ghosted lane</td><td><code>opacity</code> + <code>grayscale()</code> on the held lane</td><td><span class="k">Panda</span> <code>ghostedLane</code> class, projection-driven (static, no anim)</td></tr>
       <tr><td>reduced motion</td><td>(omit / freeze)</td><td><span class="k">GSAP matchMedia</span> &#8594; end-state</td></tr>
     </tbody>
   </table>

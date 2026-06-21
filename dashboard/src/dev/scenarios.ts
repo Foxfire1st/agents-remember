@@ -72,6 +72,26 @@ const seedFault: Scenario = {
   ],
 };
 
+// 05o T3B — the memory/ledger block: the first recoverable failure mode, mirroring the prototype's T3b M0→M7
+// (verify → block → gate → reconcile → provider clone → settle), the pattern 5 of the 8 modes share. One
+// boot-demo enclosure throughout, so the recover animates the same enclosure (gate lifts, ghost clears,
+// memory materialises) instead of remounting. The recover does NOT teleport to nominal: after the ledger
+// maps it runs the provider seed/clone beats (B3/B4 — the cross-stage copy arrows sweep, engines charge
+// cyan), exactly as the mockup's M5/M6, before settling — so the recovered engines boot honestly on-screen.
+const memoryBlock: Scenario = {
+  name: "memory-block",
+  label: "Memory block · ledger gate → reconcile (T3B)",
+  frames: [
+    erFrame("engine-boot-1-code-worktree", "M1 · code worktree is real; the ledger gate verifies the memory side next"),
+    erFrame("engine-boot-memory-verify", "M2 · ledger-map scan — checking the memory mapping (code lane solid)"),
+    erFrame("engine-boot-memory-blocked", "M3 · BLOCK — no ledger map: the memory lane gates + ghosts; the code lane stays solid", 2400),
+    erFrame("engine-boot-2-memory-contract", "M4 · reconcile — the ledger maps; the gate lifts, the ghost clears, memory materialises"),
+    erFrame("engine-boot-3-providers-dim", "M5 · provider runtime — the engines materialise dim, clone arrows begin"),
+    erFrame("engine-boot-4-seeding", "M6 · seed / clone — CGC seeds over the top, GrepAI clones under the bottom; engines charge cyan"),
+    erFrame("engine-boot-5-nominal", "M7 · running — recovered after the memory block; settled nominal, coupler bound"),
+  ],
+};
+
 // The old static gallery states fold in as single-frame "resting" scenarios — no coverage lost, and each
 // stays reachable by name (so `?scenario=` / `?state=` and the existing screenshot tooling keep working).
 const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
@@ -81,4 +101,4 @@ const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
 }));
 
 // Timelines first (build-up · tear-down · the failure mode), then the folded-in resting frames.
-export const SCENARIOS: Scenario[] = [buildUp, tearDown, seedFault, ...restingScenarios];
+export const SCENARIOS: Scenario[] = [buildUp, tearDown, seedFault, memoryBlock, ...restingScenarios];

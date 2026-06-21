@@ -647,24 +647,23 @@ export const svgNodeMeta = css({ fill: "token(colors.muted)", fontSize: "11px" }
 // Podracer engine gauge — outer column coloured by runtime; the charge fill shows the settled
 // (nominal) energy level. The center-out boot-fill GROWTH is G2 (this is the static end-state).
 export const engineGaugeOut = cva({
-  // 5o — constant GOLD bezel (the body charge + petals carry runtime state, not the frame); the bezel glows
-  // amber. FAULT is the one exception that re-colours the frame red so a down engine is unmistakable. Matches
-  // the engine-room visual-language spec (docs/design/engine-room).
+  // 5o/05o — constant GOLD bezel, FLAT (no glow): the body charge carries runtime state, not the frame, so the
+  // gold frame stays a quiet structural outline. FAULT is the one exception that re-colours the frame red (+ a
+  // red glow) so a down engine is unmistakable. Matches the engine-room visual-language spec (docs/design/engine-room).
   base: {
     fill: "token(colors.bg)",
     stroke: "token(colors.amber)",
     strokeWidth: "2",
     opacity: "0.95",
-    filter: "drop-shadow(0 0 3px token(colors.amber))",
   },
   variants: {
     runtimeState: {
       nominal: {}, // gold bezel
-      configured: { opacity: "0.5", filter: "none" }, // materialised but drained: dim bezel, no glow
+      configured: { opacity: "0.5" }, // materialised but drained: dim bezel
       indexing: {}, // gold bezel (the cyan body shows it's charging)
-      // down = FAULT → frame goes red + a GENTLE breathe (data-fx='fault', ~1.7s sine; never a strobe).
+      // down = FAULT → frame goes red + a red glow + a GENTLE breathe (data-fx='fault', ~1.7s sine; never a strobe).
       down: { stroke: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
-      unknown: { strokeDasharray: "4 3", opacity: "0.55", filter: "none" },
+      unknown: { strokeDasharray: "4 3", opacity: "0.55" },
     },
   },
 });
@@ -717,14 +716,17 @@ export const engineGaugeLabel = css({
 // spine is constant; the petals follow the engine's runtime colour so they stay state-honest.
 export const engineSpine = css({ stroke: "token(colors.amber)", strokeWidth: "0.8", opacity: "0.28" });
 export const enginePetal = cva({
-  base: { strokeWidth: "1.4", strokeLinecap: "round" },
+  // 05o — petals are now constant GOLD line-art, matching the always-amber `engineSpine`: they read the engine
+  // as a podracer, they do not carry runtime state (the body charge + bezel do). Only PRESENCE varies by state
+  // (an off/unknown engine fans no petals), so the colour is amber throughout and opacity is the state axis.
+  base: { strokeWidth: "1.4", strokeLinecap: "round", stroke: "token(colors.amber)" },
   variants: {
     runtimeState: {
-      nominal: { stroke: "token(colors.mint)", opacity: "0.6" },
-      configured: { stroke: "token(colors.dormant)", opacity: "0" }, // off → no petals
-      indexing: { stroke: "token(colors.cyan)", opacity: "0.6" },
-      down: { stroke: "token(colors.alarm)", opacity: "0.6" },
-      unknown: { stroke: "token(colors.dormant)", opacity: "0" },
+      nominal: { opacity: "0.6" },
+      configured: { opacity: "0" }, // off → no petals
+      indexing: { opacity: "0.6" },
+      down: { opacity: "0.6" },
+      unknown: { opacity: "0" },
     },
   },
 });
@@ -937,6 +939,28 @@ export const flowConduit = cva({
 // (05n — the conduit path string is on the packet's data-path; replaces CSS offset-path). The packet only
 // renders while animate, so under effects=off / reduced-motion there is no static dot.
 export const flowPacket = css({ fill: "token(colors.cyan)", opacity: "0.95", filter: "drop-shadow(0 0 5px token(colors.cyan))" });
+
+// --- failure-mode primitives (05o §10) ---------------------------------------
+// Scan ring — the pre-block verify sweep (a ledger-map check / stale-base preflight / provider probe): a
+// cyan ring expands + fades on the lane being checked, cyan because a check IS the active step. Transient,
+// like the flow packet — no settled state (opacity 0 at rest); GSAP (data-fx='scan') drives the r/opacity
+// expand-fade, and the <circle> is only rendered while animate, so under effects=off / reduced-motion it
+// is absent (no frozen ring noise). Matches the engine-room visual-language spec §10 (docs/design).
+export const scanRing = css({
+  fill: "none",
+  stroke: "token(colors.cyan)",
+  strokeWidth: "2",
+  opacity: "0",
+  filter: "drop-shadow(0 0 4px token(colors.cyan))",
+});
+
+// Ghosted lane — one lane held under a gate while its sibling proceeds: the held lane dims + desaturates so
+// "this side is blocked, that side is fine" reads at a glance (the memory/ledger block — code stays a solid
+// wire, the memory lane ghosts under a steady gate). Distinct from `planned` (dashed grey): a ghosted lane
+// is REAL but HELD, not not-yet. Projection-driven (applied off the blocked memory edge) and STATIC (no
+// animation); it lives on the inner conduit <path>, NOT the Motion group, so it never fights Motion's
+// group opacity (a className opacity on a Motion element loses on a static frame — see worktreeWire).
+export const ghostedLane = css({ opacity: "0.32", filter: "grayscale(0.45)" });
 
 // --- failure overlays (5g G3) ------------------------------------------------
 // blocked = STEADY red gate over the blocked lane (a human choice required) — never the fault flicker

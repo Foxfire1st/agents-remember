@@ -385,6 +385,60 @@ const bootStages: EngineRoomScenario[] = [
   },
 ];
 
+// --- T3B (05o) memory-block arc -----------------------------------------------
+// The verify → block beats as ONE boot-demo enclosure (the recover/settle beats reuse the boot frames),
+// so the whole arc is the SAME enclosure and the recover animates a prop diff, not a remount. Named
+// `engine-boot-*` so the bench GALLERY hides them (scenario-player frames, like the other boot steps).
+const memoryBlockStages: EngineRoomScenario[] = [
+  {
+    // verify — the code worktree is real; the ledger gate is checking the memory side (ledger-map running)
+    // and the memory worktree is not yet on disk → the cyan scan ring sweeps the lane. Code lane solid.
+    name: "engine-boot-memory-verify",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "code-worktree",
+        health: "running",
+        memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        setupState: undefined,
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "complete", ledger: "running", cgc: "planned", grepai: "planned" }),
+        summary: "Ledger-verify — checking the memory mapping for the selected base commit.",
+        nextAction: "continue_work",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // block — no ledger map for the base commit: the memory lane is GATED (steady red) + GHOSTED while the
+    // code lane stays solid; `reconciliation` is the recovery. Same boot-demo enclosure as verify/recover.
+    name: "engine-boot-memory-blocked",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "worktree-started",
+        health: "blocked",
+        memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, path: "(not created)", exists: false, factState: "missing" }),
+        setupState: undefined,
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "complete", ledger: "blocked", cgc: "planned", grepai: "planned" }),
+        ledgerRows: [],
+        ledgerRowCount: 0,
+        summary: "External memory blocked: no ledger mapping for the selected base commit — reconcile to map it.",
+        nextAction: "reconciliation",
+        missingFacts: [
+          "memory worktree not present on disk",
+          "no ledger mapping for the selected code base commit",
+        ],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+];
+
 // --- discrete state scenarios (05e §11) --------------------------------------
 
 export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
@@ -800,4 +854,5 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
     workspace: WORKSPACE,
   },
   ...bootStages,
+  ...memoryBlockStages,
 ];

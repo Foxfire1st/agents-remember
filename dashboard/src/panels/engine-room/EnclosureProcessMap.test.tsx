@@ -294,6 +294,35 @@ describe("EnclosureCanvas — live + teardown (5g G5)", () => {
   });
 });
 
+describe("EnclosureCanvas — T3B failure primitives (05o: scan ring + ghosted lane)", () => {
+  it("ghosts the gated memory (ledger-map) lane while the code lane stays solid (steady gate, not a fault)", () => {
+    const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-boot-memory-blocked")} />);
+    // the held memory lane ghosts; the code intake lane does not.
+    const ledger = container.querySelector('[data-testid="conduit"][data-kind="ledger-map"]');
+    const codeAdd = container.querySelector('[data-testid="conduit"][data-kind="worktree-add"]');
+    expect(ledger?.getAttribute("data-ghosted")).toBe("true");
+    expect(codeAdd?.getAttribute("data-ghosted")).toBeNull();
+    // it is a recoverable BLOCK: a steady gate + attention + reconciliation chip, never the terminal STOP.
+    expect(queryByTestId("gate")).not.toBeNull();
+    expect(queryByTestId("terminal-stop")).toBeNull();
+    expect(queryByTestId("attention")).not.toBeNull();
+    expect(screen.getByTestId("recovery-chips").textContent).toContain("reconciliation");
+  });
+
+  it("sweeps the cyan scan ring while the memory lane is being verified — only when effects are on", () => {
+    // under effects=off the transient ring is absent (no frozen ring noise), like the flow packet.
+    const off = render(<EnclosureProcessMap node={nodeFrom("engine-boot-memory-verify")} />);
+    expect(off.queryByTestId("scan-ring")).toBeNull();
+    cleanup();
+    // effects on → the ring renders on the lane under check (ledger-map running, memory not yet on disk).
+    document.documentElement.removeAttribute("data-effects");
+    const on = render(<EnclosureProcessMap node={nodeFrom("engine-boot-memory-verify")} />);
+    const ring = on.queryByTestId("scan-ring");
+    expect(ring).not.toBeNull();
+    expect(ring?.getAttribute("data-fx")).toBe("scan");
+  });
+});
+
 describe("EnclosureCanvas — cleanup teardown (5h H4)", () => {
   it("de-materialises a landed enclosure: success record + historical chip, no full-dim (not abandon)", () => {
     const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cleanup-pending")} />);
