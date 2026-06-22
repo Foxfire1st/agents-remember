@@ -61,7 +61,14 @@ function fxSignature(node: EngineProcessNode): string {
     .map((provider) => `${provider.role}:${provider.runtimeState}`)
     .sort()
     .join(",");
-  return [node.phase, draws, landing, engines, node.seedFallback ? "reindex" : "", node.memoryMode].join("|");
+  // 05o — a refused/failed/stale seed-or-integration lane drives the one-shot refused-conduit flash. It is
+  // NOT a `running` lane (so `draws` misses it); fold it in so the flash re-arms when the refuse beat lands.
+  const refused = node.edges
+    .filter((edge) => edge.state === "refused" || edge.state === "failed" || edge.state === "stale")
+    .map((edge) => `${edge.kind}:${edge.state}`)
+    .sort()
+    .join(",");
+  return [node.phase, draws, landing, engines, refused, node.seedFallback ? "reindex" : "", node.memoryMode].join("|");
 }
 
 const DRAW = { duration: 0.6, ease: "power2.out" } as const;
@@ -104,6 +111,22 @@ function buildFx(q: gsap.utils.SelectorFunc): void {
 
   const stop = q("[data-fx='stop']"); // terminal STOP — a brief flash ×3, then steady (repeat:5 = 3 on-beats)
   if (stop.length) gsap.fromTo(stop, { opacity: 0.35 }, { opacity: 1, duration: 0.25, repeat: 5, yoyo: true, ease: "steps(1)" });
+
+  // 05o refused-conduit flash (T9B red / T9C amber / T14C red) — a ONE-SHOT colour flash (repeat:0, NOT a
+  // loop): cyan → white spark → the polarity colour → fade to 0 (the lane is refused/gone). Mirrors podstage
+  // @keyframes `refused`/`refusedred` (.9s ease forwards; 12% spark / 26% recolour / 70% hold / 100% fade).
+  // A single ~0.9s flash is well under WCAG 2.3.1's 3/s. Polarity is read off the element's data-polarity so
+  // one tween serves both red (fault/conflict) and amber (reroute).
+  q("[data-fx='refuse']").forEach((lane) => {
+    const red = lane.getAttribute("data-polarity") === "red";
+    const hot = red ? "oklch(0.66 0.2 25)" : "oklch(0.8 0.14 85)"; // alarm vs amber (oklch — GSAP-safe)
+    gsap
+      .timeline()
+      .fromTo(lane, { opacity: 0.9, stroke: "oklch(0.85 0.13 200)" }, { opacity: 1, stroke: "oklch(0.98 0.04 200)", duration: 0.11, ease: "none" })
+      .to(lane, { stroke: hot, duration: 0.13, ease: "none" }) // recolour to the polarity
+      .to(lane, { opacity: 1, duration: 0.4 }) // hold the recoloured flash
+      .to(lane, { opacity: 0, duration: 0.27, ease: "power1.in" }); // fade out — the STOP/gate carries on
+  });
 
   // travelling flow packet — rides its conduit via MotionPath (the path string is on data-path; 05n,
   // replacing CSS offset-path). GSAP owns the packet transform; the dot only exists while animate.

@@ -257,9 +257,13 @@ export interface EngineProcessEdge {
   fromNode: string;
   toNode: string;
   kind: string; // worktree-add | ledger-map | cgc-seed | grepai-clone | sync | …
-  state: string; // nominal | running | blocked | failed | stale | skipped | complete | planned | unknown
+  state: string; // nominal | running | blocked | failed | stale | skipped | complete | planned | refused | unknown
   label: string;
   detail?: string;
+  // 05o — refused-conduit flash polarity (T9B/T9C/T14C): amber = a reroute/fallback (CGC seed → reindex),
+  // red = a fault/conflict (GrepAI seed fault, integration conflict). Carried only on a `refused`-state edge
+  // (the explicit reroute). A `failed`/`stale` seed/integration edge derives its polarity in the renderer.
+  refusedPolarity?: "amber" | "red";
 }
 
 // One remote/PR participant in the successful-landing arc (slice 5h). `factState` is the honesty

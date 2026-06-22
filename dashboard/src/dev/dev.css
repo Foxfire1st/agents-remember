@@ -79,7 +79,10 @@
   flex-direction: column;
   align-items: center;
   gap: 0.35rem;
-  min-width: 32rem;
+  /* FIXED width (not min-width) so a long caption can no longer widen the fixed-position container and
+     shift the centred controls row beneath it; the caption truncates with an ellipsis instead. */
+  box-sizing: border-box;
+  width: 40rem;
   max-width: 92vw;
   padding: 0.45rem 0.7rem;
   background: oklch(0.16 0.02 250 / 0.92);
@@ -91,6 +94,11 @@
   letter-spacing: 0.04em;
   color: var(--amber);
   text-align: center;
+  /* one line, ellipsis on overflow — keeps the player a constant size across scenarios/beats */
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .player__controls {
   display: flex;

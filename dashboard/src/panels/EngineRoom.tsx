@@ -143,6 +143,9 @@ export function EngineRoom() {
   const analytics = useDashboard((state) => state.analytics);
   const providers = useDashboard((state) => state.providers);
   const lifecycles = useDashboard((state) => state.lifecycles);
+  // store generation — bumped by reset() (dev-bench scenario switch). Keying the canvas by it forces a clean
+  // remount across a switch so a previous mode's exiting overlay can't orphan; constant (0) in production.
+  const gen = useDashboard((state) => state.gen);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
   const model = buildEngineRoomModel(
@@ -180,6 +183,7 @@ export function EngineRoom() {
           />
           <div className={roomStage} data-testid="pod-stage">
             <EnclosureProcessMap
+              key={gen}
               node={selected.node}
               workspaceEngines={model.workspaceEngines}
               officialLedger={officialLedger}

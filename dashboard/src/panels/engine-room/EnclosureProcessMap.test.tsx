@@ -470,3 +470,154 @@ describe("EnclosureCanvas — ledger popover columns (5h Tier 2)", () => {
     expect(cells?.[6].textContent).toBe("");
   });
 });
+
+describe("EnclosureCanvas — T9B/T9C refused-conduit flash (shared red/amber primitive)", () => {
+  it("renders the RED refused-conduit flash on the failed grepai-clone seed lane (and the engine fault co-fires)", () => {
+    document.documentElement.removeAttribute("data-effects"); // effects ON — the one-shot flash renders
+    const { getAllByTestId, getByTestId } = render(
+      <EnclosureProcessMap node={nodeFrom("engine-boot-seed-fault")} workspaceEngines={WORKSPACE_ENGINES} />,
+    );
+    const refused = getAllByTestId("refused-conduit");
+    expect(refused.length).toBe(1); // only the failed grepai-clone lane flashes
+    expect(refused[0].getAttribute("data-polarity")).toBe("red"); // failed edge.state → red fault polarity
+    expect(refused[0].getAttribute("data-fx")).toBe("refuse");
+    expect(refused[0].getAttribute("data-kind")).toBe("grepai-clone");
+    // the GrepAI (memory) engine is down → it raises the red fault flicker (data-fx='fault'), CGC unaffected.
+    const faulting = getByTestId("enclosure-canvas").querySelectorAll("[data-fx='fault']");
+    expect(faulting.length).toBe(1);
+  });
+
+  it("renders NO refused-conduit flash on a clean seeding frame (the flash is fault/reroute-only)", () => {
+    document.documentElement.removeAttribute("data-effects");
+    const { queryByTestId } = render(
+      <EnclosureProcessMap node={nodeFrom("engine-boot-4-seeding")} workspaceEngines={WORKSPACE_ENGINES} />,
+    );
+    expect(queryByTestId("refused-conduit")).toBeNull();
+  });
+
+  it("flashes the cgc-seed conduit AMBER (refused) and reindexes CGC in place — a soft reroute, no gate/STOP", () => {
+    document.documentElement.removeAttribute("data-effects"); // effects ON so the transient flash renders
+    const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cgc-seed-refused")} />);
+    const seed = container.querySelector('[data-testid="conduit"][data-kind="cgc-seed"]');
+    expect(seed?.getAttribute("data-state")).toBe("refused");
+    expect(seed?.getAttribute("data-refused-polarity")).toBe("amber");
+    const flash = container.querySelector('[data-fx="refuse"]');
+    expect(flash).not.toBeNull();
+    expect(flash?.getAttribute("data-polarity")).toBe("amber");
+    // a SOFT reroute — no steady gate, no terminal STOP, no attention
+    expect(queryByTestId("gate")).toBeNull();
+    expect(queryByTestId("terminal-stop")).toBeNull();
+    expect(queryByTestId("attention")).toBeNull();
+    // the CGC engine reindexes in place (amber center-out pulse), driven by node.seedFallback
+    expect(container.querySelector('[data-fx="reindex"]')).not.toBeNull();
+  });
+});
+
+describe("EnclosureCanvas — T7B provider-plan block (05o: scan-at-engine + gate beside the provider engine, engines unlit)", () => {
+  it("renders the provider gate BESIDE the engine (NOT on the code node, NOT the big red fleeting box) and keeps the engines unlit", () => {
+    const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-blocked")} />);
+    // a T7B block does NOT fall into the fleeting box (that is T1B/stale-base) — it bars the provider runtime
+    expect(queryByTestId("fleeting-enclosure")).toBeNull();
+    expect(queryByTestId("provider-block")).not.toBeNull();
+    // the engines stayed unlit — the dropout halo marks the held engine slots
+    expect(queryByTestId("engine-dropout")).not.toBeNull();
+    // a steady gate + the alarm-parity attention badge
+    const gate = queryByTestId("gate");
+    expect(gate).not.toBeNull();
+    // 05o dev fix: the alarm bar is a VERTICAL bar attached to the LEFT side of the worktree provider engine
+    // (x≈1045, the engine is at 1057), NOT a horizontal bar across it and NOT on the code worktree node (which
+    // would put the bar at x≈771). Guards the geometry regression — x beside the engine + taller than wide.
+    const gx = Number(gate?.getAttribute("x"));
+    expect(gx).toBeGreaterThan(960);
+    expect(Number(gate?.getAttribute("height"))).toBeGreaterThan(Number(gate?.getAttribute("width")));
+    expect(queryByTestId("attention")).not.toBeNull();
+    // the recovery choices lead with retry-setup / disabled-memory (RecoveryChips caps at the first 3, so the
+    // 4th 'abandon' action is not rendered on canvas — retry + disabled are the visible provider-plan choices)
+    const chips = container.querySelector('[data-testid="recovery-chips"]')?.textContent ?? "";
+    expect(chips).toMatch(/retry/i);
+    expect(chips).toMatch(/disabled/i);
+  });
+
+  it("sweeps the cyan scan ring AT the worktree engine (cx=1084) during the provider-plan verify — effects on", () => {
+    const off = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-verify")} />);
+    expect(off.queryByTestId("scan-ring")).toBeNull();
+    cleanup();
+    document.documentElement.removeAttribute("data-effects");
+    const on = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-verify")} />);
+    const ring = on.queryByTestId("scan-ring");
+    expect(ring).not.toBeNull();
+    expect(ring?.getAttribute("data-fx")).toBe("scan");
+    expect(ring?.getAttribute("cx")).toBe("1084"); // ENGINE.cgc.x(1057) + ENGINE.w/2(27) — the worktree CGC engine
+    expect(ring?.getAttribute("cy")).toBe("150");
+  });
+});
+
+describe("EnclosureCanvas — live memory-sync block (T12B)", () => {
+  it("shows the soft “moved” badge when origin/mem-main advanced (notification, before the gate)", () => {
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-sync-moved")} />);
+    expect(getByTestId("moved-badge").textContent).toContain("moved");
+  });
+
+  it("gates + ghosts the memory lane only while the code lane stays solid, and offers merge/skip recovery", () => {
+    const { getByTestId, container } = render(<EnclosureProcessMap node={nodeFrom("engine-sync-memory-blocked")} />);
+    expect(getByTestId("node-block")).not.toBeNull();
+    const ledger = [...container.querySelectorAll('[data-testid="conduit"]')].find(
+      (c) => c.getAttribute("data-kind") === "ledger-map",
+    );
+    const codeLane = [...container.querySelectorAll('[data-testid="conduit"]')].find(
+      (c) => c.getAttribute("data-kind") === "worktree-add",
+    );
+    expect(ledger?.getAttribute("data-ghosted")).toBe("true");
+    expect(codeLane?.getAttribute("data-ghosted")).toBeNull();
+    expect(getByTestId("recovery-chips").textContent).toMatch(/merge/i);
+  });
+
+  it("clears the gate + moved badge on recover (the memory worktree fast-forwarded)", () => {
+    const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-sync-recovered")} />);
+    expect(queryByTestId("node-block")).toBeNull();
+    expect(queryByTestId("moved-badge")).toBeNull();
+  });
+});
+
+describe("EnclosureCanvas — integration conflict (T14C · terminal)", () => {
+  it("renders the steady terminal STOP (not the recoverable Gate) and NO recovery chips for the conflict", () => {
+    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-integration-conflict")} />);
+    const stop = getByTestId("terminal-stop");
+    expect(stop.getAttribute("data-kind")).toBe("integration");
+    // the conflict words ride a banner (the ⛔ glyph carries the STOP semantics); the words are off the lane
+    // line so the red conduit no longer bisects them (05o legibility fix).
+    expect(stop.textContent).toMatch(/conflict/i);
+    expect(stop.textContent).toContain("⛔");
+    expect(queryByTestId("gate")).toBeNull(); // terminal STOP, never the recoverable Gate (no gate testid)
+    expect(queryByTestId("recovery-chips")).toBeNull(); // human-only — no recovery chips
+    expect(getByTestId("attention")).not.toBeNull();
+  });
+
+  it("renders the RED refused-conduit flash on the integration return-lane(s) for the transient CONFLICT beat", () => {
+    const { getAllByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-integration-conflict-flash")} />);
+    const flashes = getAllByTestId("refused-conduit");
+    expect(flashes.length).toBeGreaterThanOrEqual(1);
+    for (const f of flashes) {
+      expect(f.getAttribute("data-fx")).toBe("refuse");
+      expect(f.getAttribute("data-polarity")).toBe("red");
+      expect(["integration", "integration-mem"]).toContain(f.getAttribute("data-kind"));
+    }
+    expect(queryByTestId("terminal-stop")).toBeNull(); // the STOP only appears once the edge flips to blocked (C4)
+  });
+});
+
+describe("EnclosureProcessMap — continuous-identity abandon (T18)", () => {
+  it("the boot-demo abandon dissolves to a dim record, same as engine-abandoned", () => {
+    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-boot-abandoned")} />);
+    expect(getByTestId("dissolve")).not.toBeNull();
+    expect(getByTestId("process-map").getAttribute("data-abandoned")).toBe("true");
+    expect(getByTestId("process-map").getAttribute("data-teardown")).toBe("abandon");
+    expect(getByTestId("abandon-record").textContent).toContain("Abandoned");
+    // abandon is a decision, not a block/land: no recovery chips, no attention, no landing dock.
+    expect(queryByTestId("recovery-chips")).toBeNull();
+    expect(queryByTestId("attention")).toBeNull();
+    expect(queryByTestId("remote-strip")).toBeNull();
+    expect(queryByTestId("cleanup-record")).toBeNull();
+    expect(getByTestId("lane-historical").textContent).toContain("historical");
+  });
+});

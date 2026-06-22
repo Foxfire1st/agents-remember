@@ -132,6 +132,7 @@ function landingRef(
 interface EdgeStates {
   worktreeAdd?: string;
   cgc?: string;
+  cgcRefused?: "amber" | "red"; // 05o/T9C — the cgc-seed lane is REFUSED (state `refused` + this polarity)
   ledger?: string;
   grepai?: string;
   sync?: string;
@@ -153,8 +154,9 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       fromNode: "code-worktree",
       toNode: "cgc-engine",
       kind: "cgc-seed",
-      state: states.cgc ?? "complete",
+      state: states.cgcRefused ? "refused" : (states.cgc ?? "complete"),
       label: "CGC seed",
+      ...(states.cgcRefused ? { refusedPolarity: states.cgcRefused } : {}),
     },
   ];
   if (external) {
@@ -383,6 +385,35 @@ const bootStages: EngineRoomScenario[] = [
     processes: [engineProcess({ ...bootBase })],
     workspace: WORKSPACE,
   },
+  {
+    // T18 (X2/X3) — ABANDON: the live boot-demo enclosure DISSOLVES with no landing. Same boot-demo identity
+    // as engine-boot-5-nominal (the X0 idle frame), so the scenario player animates the dissolve as a PROP
+    // DIFF, not a remount. phase "abandoned" drives the Motion `dissolveShell` (fade + grayscale) + the
+    // AbandonRecord; inside the canvas `retiring` detaches the worktree nodes, fades every worktree conduit
+    // to 0, powers the engines off, and raises the historical LaneFlag. Providers go [] (engines drain/off),
+    // the worktree refs go `planned` (detaching out). TERMINAL — no recover tail, no landing[].
+    name: "engine-boot-abandoned",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "abandoned",
+        health: "skipped",
+        humanReviewStatus: "n/a",
+        closeoutStatus: "not-started",
+        integrationStatus: "not-started",
+        cleanup: "done",
+        codeWorktree: ref({ branch: `ar/${BOOT_ID}`, path: "(detaching)", exists: false, factState: "planned" }),
+        memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, path: "(detaching)", exists: false, factState: "planned" }),
+        landing: [],
+        providers: [],
+        edges: edges({}),
+        actions: [],
+        nextAction: "",
+        summary: "Worktree abandoned without integration — no landing; an abandoned record is kept.",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
 ];
 
 // --- T3B (05o) memory-block arc -----------------------------------------------
@@ -500,6 +531,192 @@ const staleBaseStages: EngineRoomScenario[] = [
   },
 ];
 
+// --- T7B (05o) provider-plan block arc ----------------------------------------
+// The provider PLAN (pre-contract runtime config) verify → block beats as ONE boot-demo enclosure. Both
+// worktrees materialise first (the recover reuses engine-boot-2..5), so the gate anchors ON the worktree
+// code/engine region (not a source lane) and the engines stay UNLIT. Mirrors podstage T7B P3/P4.
+const providerBlockStages: EngineRoomScenario[] = [
+  {
+    // P3 verify — both worktrees are real (observed); the provider runtime CONFIG is being checked
+    // (setupState 'running', no boot nodes yet) → the cyan scan ring sweeps AT the worktree engine. Engines
+    // not yet present. Contract not yet written (pre-contract). Same boot-demo enclosure as block/recover.
+    name: "engine-boot-provider-verify",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "contract-written",
+        health: "running",
+        setupState: "running",
+        currentPhase: "provider plan — checking runtime setup config",
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
+        summary: "Provider plan — checking the runtime setup config (pre-contract).",
+        nextAction: "continue_work",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // P4 BLOCK — provider runtime setup config missing: a steady gate drops on the worktree CODE node BEFORE
+    // the contract anchors and the engines NEVER light (providers: [] → unlit). setupState 'blocked' + the
+    // provider-plan missing fact is the T7B signal the renderer keys on (scan-at-engine + provider gate +
+    // engine-dropout halo, NOT the big red fleeting box). Recovery: retry setup / disabled-memory / abandon.
+    name: "engine-boot-provider-blocked",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "contract-written",
+        health: "blocked",
+        setupState: "blocked",
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
+        actions: [
+          { action: "retry setup", enabled: true },
+          { action: "disabled-memory", enabled: true },
+          { action: "abandon", enabled: true },
+        ],
+        nextAction: "retry_provider_setup",
+        summary: "Provider plan blocked — runtime setup config missing; contract not yet written.",
+        missingFacts: [
+          "start gated at provider plan — contract not yet written",
+          "provider runtime setup config missing",
+        ],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+];
+
+// --- T9B (05o) seed-fault arc -------------------------------------------------
+// The GrepAI seed FAULT → re-seed beats as ONE boot-demo enclosure (recover reuses the boot frames). The
+// FAULT beat is the red refused grepai-clone flash + the GrepAI engine down-flicker (CGC unaffected); the
+// RETRY beat re-seeds (grepai-clone running again). Mirrors podstage T9B S5/S6.
+const seedFaultStages: EngineRoomScenario[] = [
+  {
+    // S5 — FAULT · GrepAI: the grepai-clone conduit is REFUSED (state failed → red flash), the GrepAI
+    // (memory) engine is `down` (red flicker), CGC (code) stays indexing/charging (UNAFFECTED). Keyed on
+    // boot-demo (continuous identity). A real `failed` health + the retry nextAction raise the breathing
+    // attention + the retry chip.
+    name: "engine-boot-seed-fault",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "provider-setup",
+        health: "failed",
+        setupState: "failed",
+        currentPhase: "grepai-memory clone",
+        heartbeatAgeSeconds: 2,
+        completedPhases: ["codegraphcontext-code seed: ok"],
+        failedPhases: ["grepai-memory clone: failed (seed refused — stale heartbeat)"],
+        // CGC code engine still charging (indexing/booting), GrepAI memory engine down (fault flicker)
+        providers: [boot("code", "indexing"), boot("memory", "down")],
+        // grepai-clone FAILED → the red refused flash anchors on it; cgc-seed stays running (unaffected)
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "failed" }),
+        retryArgs: { repo_id: "agents-remember", task_name: "device-management", worktree_name: BOOT_ID, retry_provider_setup: true },
+        nextAction: "retry seed",
+        summary: "GrepAI seed failed — stale heartbeat; CGC is independent and healthy. Retry the seed.",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // S6 — RETRY: re-seed GrepAI; the grepai-clone conduit redraws (running again), the GrepAI engine
+    // returns to indexing (charges cyan), the fault/badge/chip clear. Same enclosure (prop diff).
+    name: "engine-boot-seed-retry",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "provider-setup",
+        health: "running",
+        setupState: "running",
+        currentPhase: "grepai-memory clone (retry)",
+        heartbeatAgeSeconds: 1,
+        completedPhases: ["codegraphcontext-code seed: ok"],
+        providers: [boot("code", "indexing"), boot("memory", "indexing")],
+        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "running" }),
+        summary: "Re-seeding GrepAI — the conduit redraws and the engine charges again.",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+];
+
+// --- T12B (05o) live memory-sync-block arc ------------------------------------
+// A live SYNC block on the MEMORY lane only: the worktree is real and working but origin/mem-main ADVANCED
+// (memorySource.behindSource > 0) while the worktree holds local memory commits — the memory lane gates +
+// ghosts while the CODE lane keeps advancing. Recover is merge-memory (fast-forward); the engines never go
+// down, so the recover is a ref/ff diff (no clone/seed beats). One `live-sync` enclosure throughout.
+const SYNC_ID = "live-sync";
+const syncBase = { id: SYNC_ID, taskName: "device-management", repoName: "agents-remember" } as const;
+const liveSyncStages: EngineRoomScenario[] = [
+  {
+    // Y1 — upstream memory moves: origin/mem-main is ahead (behindSource = 2) but NOT yet gated — the
+    // worktree is still `running` (a notification, the choice comes next). The soft cyan moved badge shows.
+    name: "engine-sync-moved",
+    processes: [
+      engineProcess({
+        ...syncBase,
+        phase: "sync-needed",
+        health: "running",
+        memorySource: ref({
+          branch: SOURCE_BRANCH,
+          commit: "d60a0511",
+          path: `/home/dev/Projects/ar-coordination/memory-repos/ar-agents-remember`,
+          behindSource: 2,
+        }),
+        summary: "origin/mem-main moved 2 commits ahead — a memory sync choice is required.",
+        nextAction: "worktree_sync",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // Y2 — BLOCKED · memory sync: the memory lane (ledger-map) gates STEADY + ghosts while the code lane
+    // stays solid (the code worktree keeps advancing). `health: blocked`; recovery = merge / skip. SAME
+    // enclosure as the moved/recover beats (the gate lifts on a prop diff, not a remount).
+    name: "engine-sync-memory-blocked",
+    processes: [
+      engineProcess({
+        ...syncBase,
+        phase: "sync-needed",
+        health: "blocked",
+        memorySource: ref({
+          branch: SOURCE_BRANCH,
+          commit: "d60a0511",
+          path: `/home/dev/Projects/ar-coordination/memory-repos/ar-agents-remember`,
+          behindSource: 2,
+        }),
+        // the memory lane is held (ledger-map blocked → ghosts under the steady gate); code lanes stay complete.
+        edges: edges({ ledger: "blocked" }),
+        actions: [
+          { action: "merge-memory", enabled: true },
+          { action: "skip-memory", enabled: true },
+        ],
+        nextAction: "merge-memory",
+        summary: "Memory blocked: origin/mem-main moved — worktree_sync (merge) before the memory lane continues.",
+        missingFacts: [
+          "origin/mem-main advanced ahead of the held memory worktree",
+        ],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // Y3·Y4 — recover (merge-memory → ff) + running: the memory worktree fast-forwards onto the moved
+    // upstream (behindSource cleared), the gate lifts, the ghost clears, both lanes solid, engines nominal.
+    // This is the default `engineProcess` rest state for the SAME enclosure (a ref/ff diff, no clone beats).
+    name: "engine-sync-recovered",
+    processes: [engineProcess({ ...syncBase, phase: "worktree-started", health: "running" })],
+    workspace: WORKSPACE,
+  },
+];
+
 // --- discrete state scenarios (05e §11) --------------------------------------
 
 export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
@@ -605,6 +822,36 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         edges: edges({ grepai: "failed" }),
         retryArgs: { repo_id: "agents-remember", task_name: "device-management", worktree_name: "device-mgmt", retry_provider_setup: true },
         summary: "GrepAI clone failed; the code engine is independent and healthy.",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // T9C (05o) R4 — the CGC seed is REFUSED (commit mismatch) and CGC reindexes IN PLACE: the cgc-seed
+    // conduit flashes AMBER (a reroute, not a failure) while GrepAI seeds normally. SOFT — health stays
+    // `running` (never blocked/failed), so it raises NO gate/STOP/attention; only the amber flash + the
+    // amber center-out reindex pulse (driven by seedFallback) + the soft indicator. One device-mgmt identity
+    // (same as engine-cgc-fallback) so the reroute → reindex-settled recover is a prop diff, not a remount.
+    name: "engine-cgc-seed-refused",
+    processes: [
+      engineProcess({
+        id: "device-mgmt",
+        taskName: "device-management",
+        repoName: "agents-remember",
+        phase: "provider-setup",
+        health: "running", // SOFT — a reroute, not a failure
+        setupState: "running",
+        currentPhase: "codegraphcontext-code reindex (seed refused — reroute)",
+        heartbeatAgeSeconds: 1,
+        seedFallback: true, // → CGC EngineGauge renders the amber center-out reindex pulse (data-fx='reindex')
+        completedPhases: ["grepai-memory clone: ok"],
+        // CGC reindexing (engine `indexing`, amber via reindex prop); GrepAI seeds normally (running clone)
+        providers: [boot("code", "indexing"), boot("memory", "indexing")],
+        // the cgc-seed conduit is REFUSED with AMBER polarity (the flash); grepai-clone keeps running normally
+        edges: edges({ cgcRefused: "amber", grepai: "running", worktreeAdd: "complete", ledger: "complete" }),
+        summary: "CGC seed refused on commit mismatch — rerouting to a full reindex (a fallback, not a failure).",
+        nextAction: "continue_work",
+        missingFacts: [],
       }),
     ],
     workspace: WORKSPACE,
@@ -788,6 +1035,32 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
     workspace: WORKSPACE,
   },
   {
+    // T14C (05o) C3 — the transient CONFLICT FLASH: the replay HIT a conflict; the integration return-lane(s)
+    // are `failed` (the refused-conduit RED flash fires) for one beat, then the next frame flips them to
+    // `blocked` (engine-integration-conflict, the steady STOP). `edges({ integration: 'failed' })` ALSO emits
+    // integration-mem in `failed` (the builder only suppresses it when state === 'blocked'), so BOTH return
+    // lanes flash red — matching podstage `refuse('flow-replay',true); refuse('flow-replay-mem',true)`. Same
+    // boot-audio identity as engine-integration-conflict, so the flash → STOP is a prop diff. Terminal.
+    name: "engine-integration-conflict-flash",
+    processes: [
+      engineProcess({
+        id: "boot-audio",
+        taskName: "boot-audio-polish",
+        repoName: "agents-remember",
+        phase: "integration-pending",
+        health: "blocked",
+        humanReviewStatus: "approved",
+        closeoutStatus: "completed",
+        integrationStatus: "conflict",
+        edges: edges({ integration: "failed" }),
+        actions: [],
+        nextAction: "resolve_integration_conflict",
+        summary: "Replay refused — conflict on the source line; nothing landed (all-or-nothing).",
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
     name: "engine-abandoned",
     processes: [
       engineProcess({
@@ -917,4 +1190,7 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
   ...bootStages,
   ...memoryBlockStages,
   ...staleBaseStages,
+  ...providerBlockStages,
+  ...seedFaultStages,
+  ...liveSyncStages,
 ];

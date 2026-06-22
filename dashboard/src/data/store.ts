@@ -16,6 +16,11 @@ export type ConnState = "connecting" | "live" | "signal-lost";
 export interface DashboardState {
   conn: ConnState;
   generatedAt: string | null;
+  // A monotonic generation counter bumped by `reset()`. The dev bench reuses ONE store across scenarios;
+  // keying the engine-room canvas by `gen` forces a clean REMOUNT on a scenario switch, so an exiting
+  // failure overlay (e.g. the FleetingEnclosure) from the previous mode can't orphan and bleed through. In
+  // production nothing calls `reset()`, so `gen` stays 0 and the canvas is never remounted by it.
+  gen: number;
   lifecycles: Record<string, LifecycleProjection>; // keyed by id
   enclosures: Record<string, EnclosureNode>; // keyed by `enclosure`
   providers: Record<string, ProviderNode>; // keyed by id
@@ -26,6 +31,7 @@ export interface DashboardState {
   applySnapshot: (projection: WorkspaceProjection) => void;
   applyDelta: (event: string, data: unknown) => void;
   pushEvent: (line: string) => void;
+  reset: () => void;
 }
 
 const byKey = <T>(items: T[], key: (item: T) => string): Record<string, T> =>
@@ -80,6 +86,7 @@ function reduceDelta(
 export const dashboardStore = createStore<DashboardState>((set) => ({
   conn: "connecting",
   generatedAt: null,
+  gen: 0,
   lifecycles: {},
   enclosures: {},
   providers: {},
@@ -107,6 +114,19 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
         return {}; // ignore malformed lines; never break the feed
       }
     }),
+  // Clear everything back to an empty workspace and bump `gen` (see the `gen` field). The dev bench calls
+  // this when a scenario mounts so the next mode starts from a clean slate with no overlay bleed.
+  reset: () =>
+    set((state) => ({
+      gen: state.gen + 1,
+      generatedAt: null,
+      lifecycles: {},
+      enclosures: {},
+      providers: {},
+      metrics: null,
+      analytics: null,
+      events: [],
+    })),
 }));
 
 export const useDashboard = <T>(selector: (state: DashboardState) => T): T =>

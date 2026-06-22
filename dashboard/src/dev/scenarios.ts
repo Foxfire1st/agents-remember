@@ -60,15 +60,100 @@ const tearDown: Scenario = {
   ],
 };
 
-// One failure mode for S1: a GrepAI seed fault, then the reindex reroute (an amber fallback, not a failure).
+// 05o T9B — the GrepAI seed FAULT: a RED refused-conduit flash + the GrepAI engine down-flicker (CGC
+// unaffected), then an honest re-seed recover (the conduit redraws, the engine charges) before settling
+// nominal — never a teleport. One boot-demo enclosure throughout, so the recover animates a prop diff.
 const seedFault: Scenario = {
   name: "seed-fault",
-  label: "Seed fault → reindex reroute",
+  label: "Seed fault · GrepAI red fault → retry (T9B)",
   frames: [
-    erFrame("engine-boot-0-main-only", "B0 · worktree_start — the official line is at rest"),
-    erFrame("engine-boot-3-providers-dim", "B3 · provider runtime — engines materialise, clone begins"),
-    erFrame("engine-grepai-failed", "S · GrepAI clone failed — the engine flickers red (CGC unaffected)"),
-    erFrame("engine-cgc-fallback", "S → reindex reroute — amber center-out pulse (a fallback, not a failure)", 2000),
+    erFrame("engine-boot-0-main-only", "S0 · seed-fault · start — the official line (main) is at rest"),
+    erFrame("engine-boot-1-code-worktree", "S1 · code worktree copies in from main (branch-copy)"),
+    erFrame("engine-boot-2-memory-contract", "S2 · memory worktree copies in; the contract coupler binds"),
+    erFrame("engine-boot-3-providers-dim", "S3 · provider runtime — engines materialise dim, cloned from main"),
+    erFrame("engine-boot-4-seeding", "S4 · seed / clone — both engines charge cyan (center-out boot-fill)"),
+    erFrame("engine-boot-seed-fault", "S5 · FAULT · GrepAI — seed failed: the seed arrow flashes RED and the engine flickers red (CGC unaffected)", 2400),
+    erFrame("engine-boot-seed-retry", "S6 · retry — re-seed GrepAI; the conduit redraws, the fault clears and the engine charges again"),
+    erFrame("engine-boot-5-nominal", "S7 · running — recovered after the seed fault; both engines green → nominal"),
+  ],
+};
+
+// 05o T9C — the CGC seed REFUSED → reindex reroute (a soft AMBER fallback, not a failure): the cgc-seed
+// conduit flashes amber while CGC reindexes in place; GrepAI seeds normally. Health stays running (no
+// gate/STOP). One device-mgmt enclosure: refuse → reindex-settled → nominal (a prop diff, never a teleport).
+const reindexReroute: Scenario = {
+  name: "reindex-reroute",
+  label: "Reindex reroute · CGC seed refused (soft · T9C)",
+  frames: [
+    erFrame("engine-boot-0-main-only", "R0 · reindex-reroute start — the official line (main) is at rest"),
+    erFrame("engine-boot-1-code-worktree", "R1 · code worktree copies in from main (branch-copy)"),
+    erFrame("engine-boot-2-memory-contract", "R2 · memory worktree copies in; the contract coupler binds"),
+    erFrame("engine-boot-3-providers-dim", "R3 · provider runtime — engines materialise dim; clone conduits seed from main"),
+    erFrame("engine-cgc-seed-refused", "R4 · CGC seed REFUSED → reindex — the seed arrow flashes AMBER and CGC reindexes in place (a fallback, not a failure); GrepAI seeds normally", 2000),
+    erFrame("engine-cgc-fallback", "R5 · indexing completes — the amber reindex finishes (not terminal); engine ready to lock"),
+    erFrame("engine-boot-5-nominal", "R6 · running — recovered via reindex; both engines green → nominal"),
+  ],
+};
+
+// 05o T7B — the provider-plan block (pre-contract): the runtime setup config is missing, so a gate drops on
+// the worktree code node BEFORE the contract anchors and the engines never light; recover supplies the
+// config and the runtime deploys (through the provider seed/clone beats). One boot-demo enclosure throughout.
+const providerBlock: Scenario = {
+  name: "provider-block",
+  label: "Provider block · pre-contract plan → retry (T7B)",
+  frames: [
+    erFrame("engine-boot-0-main-only", "P0 · provider-block start — the official line (main) is at rest"),
+    erFrame("engine-boot-1-code-worktree", "P1 · code worktree copies in from main (branch-copy)"),
+    erFrame("engine-boot-2-memory-contract", "P2 · memory worktree + coupler bind — code & memory ready, contract NOT yet written"),
+    erFrame("engine-boot-provider-verify", "P3 · provider plan — checking the runtime setup config (the scan ring sweeps AT the engine, pre-contract)"),
+    erFrame("engine-boot-provider-blocked", "P4 · BLOCK — setup config missing: a gate drops BEFORE the contract anchors and the engines never light; choices → retry / disabled / abandon", 2400),
+    erFrame("engine-boot-3-providers-dim", "P5 · recover — config supplied; the contract anchors, the gate lifts, the provider runtime deploys (engines materialise dim, clone arrows begin)"),
+    erFrame("engine-boot-4-seeding", "P6 · seed / clone — CGC seeds over the top, GrepAI clones under the bottom; the engines charge cyan"),
+    erFrame("engine-boot-5-nominal", "P7 · running — recovered after the provider-plan block; settled nominal, coupler bound"),
+  ],
+};
+
+// 05o T12B — the live memory-sync block: origin/mem-main moved ahead while the worktree holds local memory
+// commits — the memory lane gates + ghosts (soft cyan "moved ▲" → steady gate) while the CODE lane keeps
+// advancing. Recover is merge-memory: the memory worktree FAST-FORWARDS (a ref/ff diff — the engines never
+// went down, so it does NOT pass through the provider clone/seed beats). One live-sync enclosure throughout.
+const liveSync: Scenario = {
+  name: "live-sync",
+  label: "Live sync · memory moved → merge (T12B)",
+  frames: [
+    erFrame("engine-sync-recovered", "Y0 · live · running — the worktree is working; both lanes bound, engines nominal"),
+    erFrame("engine-sync-moved", "Y1 · upstream memory moves — origin/mem-main advances; a soft “moved ▲” badge announces the sync choice"),
+    erFrame("engine-sync-memory-blocked", "Y2 · BLOCKED · memory sync — a steady gate drops on the memory lane only; the code lane keeps advancing (commit ●)", 2400),
+    erFrame("engine-sync-recovered", "Y3·Y4 · recover · merge-memory — the gate lifts, the ghost clears, the memory worktree fast-forwards; back in sync"),
+  ],
+};
+
+// 05o T14C — the integration conflict: a TERMINAL failure mode (idle → closeout → replay → ⚡CONFLICT flash
+// → steady STOP). The all-or-nothing replay hits a conflict, the integrate arrows flash RED and resolve into
+// a steady STOP; the source branch did NOT move. NO recover tail — the developer resolves it manually.
+const integrationConflict: Scenario = {
+  name: "integration-conflict",
+  label: "Integration conflict · replay → STOP (T14C · terminal)",
+  frames: [
+    erFrame("engine-boot-5-nominal", "C0 · idle / working enclosure — closeout about to begin"),
+    erFrame("engine-landing-closeout", "C1 · closeout (gated · approved) — code commit ● + memory refresh + ledger maps + contract flips"),
+    erFrame("engine-landing-ffonly", "C2 · integrate · replay — the closeout commits attempt to replay onto the feat/fix source branch (code + memory)", 1400),
+    erFrame("engine-integration-conflict-flash", "C3 · ⚡ CONFLICT — the replay hits a conflict: the integrate arrows flash red and stop (all-or-nothing)"),
+    erFrame("engine-integration-conflict", "C4 · BLOCKED · integration conflict — a steady STOP; the source branch did NOT move. Terminal — no auto-recovery; resolve manually", 2600),
+  ],
+};
+
+// 05o T18 — abandon: the live enclosure DISSOLVES with no landing (idle → abandon invoked → dissolve →
+// gone). One boot-demo identity across every frame, so the X0→X2 step IS the Motion dissolve (a prop diff).
+// TERMINAL — no recover/boot-back tail; only the official line + an abandoned record remain.
+const abandon: Scenario = {
+  name: "abandon",
+  label: "Abandon · dissolve, no landing (T18)",
+  frames: [
+    erFrame("engine-boot-5-nominal", "X0 · idle / working enclosure — the worktree is live (both lanes bound, engines nominal)"),
+    erFrame("engine-boot-abandoned", "X1 · worktree_abandon — abandon invoked: no integration, no landing; nothing is pushed"),
+    erFrame("engine-boot-abandoned", "X2 · dissolve — the enclosure fades + slightly collapses; engines drain, branches detach (no landing beats)", 1300),
+    erFrame("engine-boot-abandoned", "X3 · gone · abandoned — only the official line remains; an 'abandoned' record is kept (no merge, no history)"),
   ],
 };
 
@@ -119,5 +204,17 @@ const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
   frames: [{ caption: entry.name, projection: entry.projection, events: entry.events }],
 }));
 
-// Timelines first (build-up · tear-down · the failure mode), then the folded-in resting frames.
-export const SCENARIOS: Scenario[] = [buildUp, tearDown, seedFault, memoryBlock, staleBase, ...restingScenarios];
+// Timelines first (build-up · tear-down · the 8 failure modes), then the folded-in resting frames.
+export const SCENARIOS: Scenario[] = [
+  buildUp,
+  tearDown,
+  seedFault,
+  reindexReroute,
+  memoryBlock,
+  staleBase,
+  providerBlock,
+  liveSync,
+  integrationConflict,
+  abandon,
+  ...restingScenarios,
+];

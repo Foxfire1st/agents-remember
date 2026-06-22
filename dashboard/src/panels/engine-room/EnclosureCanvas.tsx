@@ -37,6 +37,7 @@ import {
   engineGaugeLabel,
   engineGaugeOut,
   enginePetal,
+  engineDropout,
   engineReindexCharge,
   engineReindexOut,
   engineSpine,
@@ -63,6 +64,9 @@ import {
   ledgerSeam,
   ledgerShowMore,
   ledgerTable,
+  movedBadge,
+  movedText,
+  movedTriangle,
   officialWire,
   prBadge,
   prBadgeLabel,
@@ -70,6 +74,7 @@ import {
   reasonBadge,
   reasonDot,
   reasonText,
+  refusedConduit,
   remoteChip,
   remoteChipLabel,
   remoteChipState,
@@ -77,7 +82,6 @@ import {
   scanRing,
   sceneSvg,
   stopBar,
-  stopText,
   svgChip,
   svgChipText,
   svgNodeBox,
@@ -191,6 +195,36 @@ const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   // SOURCE (memory) before the carryover (feat → main mem). Same worktree→feat direction as the code lane.
   "integration-mem": [COL_WT_CX - 100, 403, COL_FEAT_CX + 68, 403],
 };
+
+// The conduit path string for an edge — a straight line for settled lanes, the cross-stage BOW for the
+// provider clone arcs (CGC over the top / GrepAI under the bottom). Shared by Conduit and the 05o refused-
+// conduit flash overlay so the flash traces the EXACT same lane geometry (no duplicated arc maths).
+function conduitPathD(edge: EngineProcessEdge): string | null {
+  const geom = EDGE_GEOM[edge.kind];
+  if (!geom) return null;
+  const [x1, y1, x2, y2] = geom;
+  const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
+  const dip = edge.kind === "grepai-clone" ? 104 : -116; // GrepAI bows down; CGC bows up
+  return cloneArc
+    ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
+    : `M${x1} ${y1} L ${x2} ${y2}`;
+}
+
+// 05o refused-conduit flash polarity (T9B/T9C/T14C), read off the projection — NEVER a class alone. A
+// seed/integration lane that is `refused` carries its polarity explicitly (amber reroute / red fault); a
+// `failed` lane is a fault (red), a `stale` lane a reroute (amber). Any other kind/state → no flash.
+function refusedPolarityOf(edge: EngineProcessEdge): "amber" | "red" | null {
+  const isSeedOrIntegration =
+    edge.kind === "cgc-seed" ||
+    edge.kind === "grepai-clone" ||
+    edge.kind === "integration" ||
+    edge.kind === "integration-mem";
+  if (!isSeedOrIntegration) return null;
+  if (edge.state === "refused") return edge.refusedPolarity === "red" ? "red" : "amber";
+  if (edge.state === "failed") return "red";
+  if (edge.state === "stale") return "amber";
+  return null;
+}
 
 // The build-up "branch-copy": a worktree node is born from its official-line node, rising from nothing
 // while sliding in from the main side. Driven by the honesty axis — a `planned` worktree ref is not yet
@@ -588,10 +622,7 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
   // engine — CGC bows OVER the top, GrepAI UNDER the bottom (the "copies + rewrites index" / "clones
   // vector DB" beat). Transient: shown only while running, gone at idle (see the opacity below).
   const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
-  const dip = edge.kind === "grepai-clone" ? 104 : -116; // GrepAI bows down; CGC bows up
-  const d = cloneArc
-    ? `M${x1} ${y1} C ${x1 + 210} ${y1 + dip}, ${x2 - 210} ${y2 + dip}, ${x2} ${y2}`
-    : `M${x1} ${y1} L ${x2} ${y2}`;
+  const d = conduitPathD(edge) ?? `M${x1} ${y1} L ${x2} ${y2}`; // straight lane, or the clone BOW (shared helper)
   // 5k F5 — at cleanup the worktree side de-materialises; fade every worktree conduit to 0 so the yellow
   // connector lines retract with the enclosure instead of dangling to the disposed nodes (the official line
   // keeps its own `officialWire` conduits, which are not in `node.edges`).
@@ -603,6 +634,8 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
       data-state={edge.state}
       data-strategy={isReplay ? "replay" : undefined}
       data-ghosted={ghosted || undefined}
+      // 05o — a refused seed lane (T9C) carries its flash polarity for the topmost refused-conduit overlay
+      data-refused-polarity={edge.refusedPolarity || undefined}
       // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
       // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
       // (instant under !animate, where it mounts at the end-state).
@@ -724,6 +757,52 @@ function NodeBlock({ cx, top, reason }: { cx: number; top: number; reason: strin
   );
 }
 
+// 05o T12B — the soft (cyan) "moved" remote indicator (podstage .imsg `moved`): a ▲ up-triangle + a pill
+// announcing the UPSTREAM memory ref advanced (origin/mem-main moved ahead while the worktree holds local
+// commits). Anchors ON the memory worktree NODE (never the connector lane), paints in the TOPMOST overlay.
+// Mirrors ReasonBadge geometry but with the ▲ "moved" glyph (soft notification, not the alarm gate).
+function MovedBadge({ cx, cy, text }: { cx: number; cy: number; text: string }) {
+  const label = truncate(text, 40);
+  const w = Math.max(120, label.length * 6.4 + 44);
+  const px = cx - w / 2;
+  return (
+    <g data-testid="moved-badge">
+      <rect className={movedBadge} x={px} y={cy} width={w} height={22} rx={6} />
+      {/* the ▲ "moved" pointer (an up-triangle): origin advanced AHEAD of the held worktree */}
+      <path className={movedTriangle} d={`M${px + 15} ${cy + 6} L${px + 21} ${cy + 16} L${px + 9} ${cy + 16} Z`} />
+      <text className={movedText} x={px + 30} y={cy + 15}>{label}</text>
+    </g>
+  );
+}
+
+// 05o T7B — the provider-plan block (podstage P4). The runtime setup config is missing, so the provider
+// engines never light. UNLIKE T1B/T3B this does NOT gate a repository node: the alarm bar sits BESIDE the
+// worktree CGC provider engine (podstage `gate(1004,150,w108)` — the barred provider runtime), and the reason
+// rides the TOP EDGE of the worktree enclosure as a header alert for the whole containment (dev directive),
+// not a node pointer. The two engine slots stay unlit; the dropout halos (rendered separately) mark them held.
+function ProviderBlock({ reason }: { reason: string }) {
+  // enclosure box mirrors the dashed border / FleetingEnclosure (x = COL_WT_CX-126, y 76, right edge 1148).
+  const enclosureCx = (COL_WT_CX - 126 + 1148) / 2;
+  return (
+    <g data-testid="provider-block">
+      {/* the alarm bar — a VERTICAL bar attached to the LEFT side of the top provider engine slot (dev
+          directive), not a horizontal bar across it and not on the code node; the provider runtime is barred
+          so the engines never light. Right edge meets the engine's left edge (1057); full slot height. */}
+      <rect
+        className={gateBar}
+        x={ENGINE.cgc.x - 12}
+        y={ENGINE.cgc.y - 6}
+        width={12}
+        height={ENGINE.h + 12}
+        rx={3}
+        data-testid="gate"
+      />
+      {/* the reason rides the enclosure's TOP edge (dev directive) — a containment header, not a node gate. */}
+      <ReasonBadge reason={reason} cx={enclosureCx} cy={65} />
+    </g>
+  );
+}
+
 // Recovery choices (node.nextAction + enabled actions) as chips along the bottom of the stage.
 function RecoveryChips({ labels }: { labels: string[] }) {
   if (!labels.length) return null;
@@ -786,19 +865,55 @@ function FleetingEnclosure({ summary, choices }: { summary: string; choices: str
   );
 }
 
-// t14c — terminal integration conflict: a STOP at the integration lane's midpoint (flash → steady).
+// t14c — terminal integration conflict (podstage C4: a STOP bar on the lane + the reason ABOVE it).
 // Heavier than the recoverable Gate; the source line does NOT move (all-or-nothing); no recovery chips.
+// Two earlier defects fixed: (1) the conflict words were rendered ON the lane midpoint, so the bright red
+// conduit line bisected the glyphs → illegible; they now ride a banner LIFTED clear of the lane line. (2) a
+// 128px pill centred on the 72px feat↔worktree gap overran the worktree node → the on-lane bar is now sized
+// to the gap. The bar carries NO `data-testid="gate"` (it is terminal, not a recoverable Gate).
 function TerminalStop({ edge }: { edge: EngineProcessEdge }) {
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
   const cx = (x1 + x2) / 2;
   const cy = (y1 + y2) / 2;
+  const label = "⛔ conflict · source did NOT move";
+  const w = label.length * 7 + 30;
+  const px = cx - w / 2;
+  const by = cy - 58; // banner top — in the clear band ABOVE the node row, off the lane line
   return (
     <g data-testid="terminal-stop" data-kind={edge.kind}>
-      <rect className={stopBar} data-fx="stop" x={cx - 64} y={cy - 13} width={128} height={26} rx={4} />
-      <text className={stopText} x={cx} y={cy + 4} textAnchor="middle">⛔ STOP · CONFLICT</text>
+      {/* the on-lane STOP bar — fits the feat↔worktree gap, marks the conflict point (no node collision) */}
+      <rect className={stopBar} data-fx="stop" x={cx - 33} y={cy - 6} width={66} height={12} rx={3} data-testid="terminal-stop-bar" />
+      {/* the conflict banner ABOVE the lane — the SAME legible combo as the recoverable reason badges (a dark
+          opaque pill with a RED border + LIGHT text), NOT dark-on-bright-red which washed out. The ⛔ glyph +
+          the red border + the on-lane red bar carry the terminal identity. */}
+      <rect className={reasonBadge} x={px} y={by} width={w} height={22} rx={6} />
+      <text className={reasonText} x={cx} y={by + 15} textAnchor="middle">{label}</text>
     </g>
+  );
+}
+
+// 05o refused-conduit flash (SHARED — T9B red fault / T9C amber reroute / T14C red conflict): a one-shot
+// GSAP flash (data-fx='refuse') along the EXACT lane geometry of the refused seed/return conduit — cyan →
+// white spark → its polarity colour → fade out. The polarity is chosen by the caller off the projection
+// (refusedPolarityOf), never hardcoded. Rests at opacity 0 (the cva base) so under effects=off it is
+// present-but-absent; the steady STOP/gate (a separate element) carries the settled state.
+function RefusedConduit({ edge, polarity }: { edge: EngineProcessEdge; polarity: "amber" | "red" }) {
+  const d = conduitPathD(edge);
+  if (!d) return null;
+  return (
+    <path
+      className={refusedConduit({ polarity })}
+      d={d}
+      data-fx="refuse"
+      data-testid="refused-conduit"
+      data-kind={edge.kind}
+      data-polarity={polarity}
+      data-refused-polarity={polarity}
+    >
+      <title>{edge.label} — seed refused ({polarity === "amber" ? "reroute → reindex" : "fault / conflict"})</title>
+    </path>
   );
 }
 
@@ -1087,9 +1202,33 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
   const memGated =
     node.memoryWorktree?.factState === "missing" ||
     node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "blocked");
+  // 05o T7B — the provider-plan block: PRE-CONTRACT, but distinct from T1B/T3B (which gate a SOURCE lane).
+  // Here BOTH worktrees already materialised (observed), NO provider boot nodes exist yet (engines unlit),
+  // and the runtime setup config is missing → the alarm bar sits BESIDE the worktree provider engine (the
+  // barred runtime, NOT the code node — see ProviderBlock) and the engines never light. Signal off the
+  // projection: blocked + setupState 'blocked' + zero providers +
+  // both worktrees on disk + a provider-plan/setup-config missing fact. Derived ABOVE `fleeting` because a
+  // T7B block must NOT fall into the big red FleetingEnclosure box (it shares the 'contract not yet written'
+  // fact) — `fleeting` is tightened with `&& !providerPlanBlocked` below.
+  const providerPlanBlocked =
+    isBlocked(node) &&
+    node.setupState === "blocked" &&
+    node.providers.length === 0 &&
+    codeWtMaterialised &&
+    memWtMaterialised &&
+    node.missingFacts.some((fact) => /provider (plan|setup|runtime)|setup config/i.test(fact));
+  // the provider-plan VERIFY sweep (P3): setupState 'running' with no boot nodes yet (pre-contract provider
+  // check) → a cyan scan ring AT the worktree CGC engine centre, not on a source lane.
+  const providerChecking =
+    node.setupState === "running" && node.providers.length === 0 && codeWtMaterialised && memWtMaterialised;
+  const providerScanAt = providerChecking
+    ? { x: ENGINE.cgc.x + ENGINE.w / 2, y: ENGINE.cgc.y + ENGINE.h / 2 }
+    : null;
   // a born-blocked (pre-contract) enclosure — the reducer marks it "contract not yet written"; it renders the
-  // big red FleetingEnclosure box (stale-base / pre-contract).
-  const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
+  // big red FleetingEnclosure box (stale-base / pre-contract). A T7B provider-plan block carries the same
+  // fact but anchors a node gate + unlit engines instead, so it is excluded here.
+  const fleeting =
+    node.missingFacts.some((fact) => /contract not yet written/i.test(fact)) && !providerPlanBlocked;
   // a stale-base block is the FLEETING (pre-contract) preflight case — `&& fleeting` keeps it distinct from a
   // live sync-needed block (which is also `behindSource > 0` but has a real worktree).
   const baseStale = (node.codeSource.behindSource ?? 0) > 0 && isBlocked(node) && fleeting;
@@ -1102,11 +1241,39 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
     : baseChecking
       ? { x: COL_MAIN_CX, y: POS.codeSource.y + NODE_H / 2 }
       : null;
+  // the topmost scan ring lights for a source-lane verify (T1B/T3B) OR the provider-plan verify-at-engine (T7B)
+  const scanCenter = scanAt ?? providerScanAt;
+  // 05o T12B — a LIVE memory sync block: the memory worktree is REAL but origin/mem-main MOVED ahead
+  // (memorySource.behindSource > 0) while the worktree holds local commits. `memMoved` (the soft cyan ▲
+  // notification) shows BEFORE the gate (running, not yet blocked — podstage Y1: imsg, no gate). `memSyncMoved`
+  // is the escalated gate beat: the memory ledger-map lane is held STEADY while the CODE lane keeps advancing.
+  // Restricted to a blocked LEDGER-MAP edge (the memory lane) so it never reclassifies the code-side
+  // `engine-sync-needed` gallery state (a blocked `sync` edge), which keeps its existing edge-gate rendering.
+  const memMoved =
+    !fleeting &&
+    (node.memorySource?.behindSource ?? 0) > 0 &&
+    memWtMaterialised &&
+    !isBlocked(node);
+  const movedAt = memMoved ? { cx: COL_WT_CX, cy: POS.memoryWorktree.y - 36 } : null;
+  const memSyncMoved =
+    !fleeting &&
+    (node.memorySource?.behindSource ?? 0) > 0 &&
+    memWtMaterialised &&
+    isBlocked(node) &&
+    node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "blocked");
   const blockNode = baseStale
-    ? { cx: COL_MAIN_CX, top: POS.codeSource.y }
-    : memGated && isBlocked(node)
-      ? { cx: COL_MAIN_CX, top: POS.memorySource.y }
-      : null;
+    ? { cx: COL_MAIN_CX, top: POS.codeSource.y } // T1B — the stale official-line CODE base
+    : memSyncMoved
+      ? { cx: COL_WT_CX, top: POS.memoryWorktree.y } // T12B — the held memory WORKTREE (upstream moved)
+      : memGated && isBlocked(node)
+        ? { cx: COL_MAIN_CX, top: POS.memorySource.y } // T3B — the unmappable official-line MEMORY base
+        : null;
+  // 05o T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed/refused/stale).
+  // Polarity comes off the projection (refusedPolarityOf), never a class. Rendered topmost so the flash is
+  // never covered; each path is a one-shot GSAP flash that rests at opacity 0 (absent) under effects=off.
+  const refusedEdges = node.edges
+    .map((edge) => ({ edge, polarity: refusedPolarityOf(edge) }))
+    .filter((entry): entry is { edge: EngineProcessEdge; polarity: "amber" | "red" } => entry.polarity !== null);
   // Official-line (workspace) engines — the real shared CGC/GrepAI feeding the official line (left
   // world); runtime derived like the OfficialStrip so the two surfaces always agree.
   const officialCode = workspaceEngines.find((engine) => engine.role === "code");
@@ -1204,7 +1371,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           edge={edge}
           strategy={node.integrationStrategy}
           retiring={retiring}
-          ghosted={memGated && edge.kind === "ledger-map"}
+          ghosted={(memGated || memSyncMoved) && edge.kind === "ledger-map"}
         />
       ))}
       {/* NB: the scan ring is NOT drawn here — it is centred ON a repository node, so it must paint in the
@@ -1402,6 +1569,18 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           <FleetingEnclosure key="fleeting-enclosure" summary={node.summary} choices={recovery} />
         ) : null}
       </AnimatePresence>
+      {/* 05o refused-conduit flash (T9B red seed fault / T9C amber seed reroute / T14C red integrate
+          conflict): a one-shot GSAP flash tracing the refused lane. NOT gated on `animate` — it rests at
+          opacity 0 (the cva base) so it is present-but-absent under effects=off (the STOP/gate carries the
+          settled state); GSAP plays the flash when effects are on. Rendered before the STOP so the steady
+          STOP/gate paints over it as the conflict resolves. */}
+      {!fleeting && refusedEdges.length ? (
+        <g data-testid="refused-flash">
+          {refusedEdges.map(({ edge, polarity }) => (
+            <RefusedConduit key={`refused-${edge.id}`} edge={edge} polarity={polarity} />
+          ))}
+        </g>
+      ) : null}
       <AnimatePresence>
         {!fleeting && terminalEdge ? (
           <motion.g key="terminal" {...alertProps(animate)}>
@@ -1423,14 +1602,27 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           </motion.g>
         ) : null}
       </AnimatePresence>
-      {/* TOPMOST LAYER — the verify scan ring (centred ON the checked repository node) and the block gate +
-          reason badge (at the node's top edge). Rendered dead last so the node's opaque rect can never cover
-          them; centring a pointer on a node and painting it BEHIND the node defeats the pointer (05o fix).
-          The scan group fades via Motion (opacity only — its inner circle's r/opacity expand-fade is GSAP). */}
+      {/* 05o T7B — the unlit-engine DROPOUT halo: a static alarm dashed outline over the two worktree engine
+          footprints when the provider plan is blocked (the engines never light because the runtime config is
+          missing). The engines themselves stay absent (no providers → faded out), so this is the only mark
+          that the slot is HELD. Rendered before the scan/gate so the gate sits over it. */}
       <AnimatePresence>
-        {scanAt && animate ? (
+        {providerPlanBlocked ? (
+          <motion.g key="engine-dropout" {...alertProps(animate)} data-testid="engine-dropout">
+            <rect className={engineDropout} x={ENGINE.cgc.x - 6} y={ENGINE.cgc.y - 6} width={ENGINE.w + 12} height={ENGINE.h + 12} rx={6} />
+            <rect className={engineDropout} x={ENGINE.grepai.x - 6} y={ENGINE.grepai.y - 6} width={ENGINE.w + 12} height={ENGINE.h + 12} rx={6} />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      {/* TOPMOST LAYER — the verify scan ring (centred ON the checked repository node, or AT the worktree
+          engine for the T7B provider-plan verify) and the block gate + reason badge (at the node's top edge).
+          Rendered dead last so the node's opaque rect can never cover them; centring a pointer on a node and
+          painting it BEHIND the node defeats the pointer (05o fix). The scan group fades via Motion (opacity
+          only — its inner circle's r/opacity expand-fade is GSAP). */}
+      <AnimatePresence>
+        {scanCenter && animate ? (
           <motion.g key="scan" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-            <circle className={scanRing} data-fx="scan" data-testid="scan-ring" cx={scanAt.x} cy={scanAt.y} r={6} />
+            <circle className={scanRing} data-fx="scan" data-testid="scan-ring" cx={scanCenter.x} cy={scanCenter.y} r={6} />
           </motion.g>
         ) : null}
       </AnimatePresence>
@@ -1439,10 +1631,23 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           <motion.g key="block" {...alertProps(animate)}>
             <NodeBlock cx={blockNode.cx} top={blockNode.top} reason={node.summary} />
           </motion.g>
+        ) : providerPlanBlocked ? (
+          <motion.g key="provider-block" {...alertProps(animate)}>
+            <ProviderBlock reason={node.summary} />
+          </motion.g>
         ) : !fleeting && gatedEdges.length ? (
           <motion.g key="edge-gate" {...alertProps(animate)}>
             {gatedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />)}
             {reasonCenter ? <ReasonBadge reason={node.summary} cx={reasonCenter.cx} cy={reasonCenter.cy} /> : null}
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      {/* 05o T12B — the soft cyan "moved ▲" badge: origin/mem-main advanced while the worktree holds local
+          commits (the notification BEFORE the gate). Anchored ON the memory worktree node, painted last. */}
+      <AnimatePresence>
+        {movedAt ? (
+          <motion.g key="moved" {...alertProps(animate)}>
+            <MovedBadge cx={movedAt.cx} cy={movedAt.cy} text="origin/mem-main · moved ▲" />
           </motion.g>
         ) : null}
       </AnimatePresence>

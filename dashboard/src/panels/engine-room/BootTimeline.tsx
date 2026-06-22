@@ -58,7 +58,13 @@ function bootSteps(node: EngineProcessNode): Step[] {
     const found = node.edges.find((candidate) => candidate.kind === kind);
     return found ? (EDGE_TO_STEP[found.state] ?? "pending") : "pending";
   };
-  const steps: Step[] = [{ label: "Code worktree", state: materialized(node.codeWorktree.exists) }];
+  // Contract anchor LEADS the boot sequence (dev directive): the task contract is the precondition the
+  // worktree is created from, so it heads the list — before the code / memory worktrees materialise and the
+  // providers seed — rather than sitting in the middle.
+  const steps: Step[] = [
+    { label: "Contract anchor", state: "complete" },
+    { label: "Code worktree", state: materialized(node.codeWorktree.exists) },
+  ];
   if (node.memoryMode === "external") {
     steps.push({
       label: "Ledger-map · memory worktree",
@@ -67,7 +73,6 @@ function bootSteps(node: EngineProcessNode): Step[] {
   } else {
     steps.push({ label: `Memory (${node.memoryMode})`, state: "skipped" });
   }
-  steps.push({ label: "Contract anchor", state: "complete" });
   steps.push({ label: "CGC seed", state: edge("cgc-seed") });
   if (node.memoryMode === "external") {
     steps.push({ label: "GrepAI clone", state: edge("grepai-clone") });
@@ -81,6 +86,7 @@ function bootSteps(node: EngineProcessNode): Step[] {
 const DISPOSE_PHASES = new Set([
   "closeout-pending",
   "integration-pending",
+  "integration-blocked", // t14c — a terminal integration conflict is part of the LANDING/tear-down arc, not boot
   "carryover-pending",
   "cleanup-pending",
   "abandoned",
@@ -107,7 +113,29 @@ function disposeFrontier(node: EngineProcessNode): number {
 
 function teardownSteps(node: EngineProcessNode): Step[] {
   const f = disposeFrontier(node);
-  const at = (i: number): StepState => (f > i ? "complete" : f === i ? "running" : "pending");
+  // t14c — a terminal integration conflict: closeout landed, then the replay onto the feat/fix source HIT a
+  // conflict (all-or-nothing). The integrate/push step reads BLOCKED and the arc stops there (no auto-recovery).
+  const conflict = node.phase === "integration-blocked";
+  // t18 — abandon BYPASSES the whole landing: no closeout / push / PR / pull / carryover ever runs (the
+  // diagnostics say "abandoned without integration — no landing"), so those read SKIPPED, not "done"; only the
+  // dispose tail (cleanup · de-materialise → retire) actually happened.
+  const abandoned = node.phase === "abandoned";
+  const at = (i: number): StepState =>
+    conflict
+      ? i === 0
+        ? "complete"
+        : i === 1
+          ? "blocked"
+          : "pending"
+      : abandoned
+        ? i <= 4
+          ? "skipped"
+          : "complete"
+        : f > i
+          ? "complete"
+          : f === i
+            ? "running"
+            : "pending";
   return [
     { label: "Closeout · code → ledger", state: at(0) },
     { label: "Push → origin/feat", state: at(1) },
@@ -119,12 +147,20 @@ function teardownSteps(node: EngineProcessNode): Step[] {
   ];
 }
 
+// A LIVE, fully-booted worktree (not booting, not disposing) — e.g. t12b live-sync, where origin/mem-main
+// moved while the worktree keeps working. The boot checklist is all done; calling it a "Boot sequence" reads
+// wrong for a running worktree, so it gets a STEADY-STATE label over the same completed checklist.
+const STEADY_PHASES = new Set(["sync-needed", "running", "nominal", "completed", "live"]);
+
 export function BootTimeline({ node }: { node: EngineProcessNode }) {
   const disposing = DISPOSE_PHASES.has(node.phase);
+  const steady = !disposing && STEADY_PHASES.has(node.phase);
   const steps = disposing ? teardownSteps(node) : bootSteps(node);
+  const mode = disposing ? "teardown" : steady ? "steady" : "boot";
+  const label = disposing ? "Tear-down sequence" : steady ? "Steady state" : "Boot sequence";
   return (
-    <div className={timeline} data-testid="boot-timeline" data-mode={disposing ? "teardown" : "boot"}>
-      <span className={sectionLabel}>{disposing ? "Tear-down sequence" : "Boot sequence"}</span>
+    <div className={timeline} data-testid="boot-timeline" data-mode={mode}>
+      <span className={sectionLabel}>{label}</span>
       <ol className={css({ display: "grid", gap: "0.2rem", margin: "0", padding: "0", listStyle: "none" })}>
         {steps.map((step) => (
           <li key={step.label} className={timelineStep({ state: step.state })} data-state={step.state}>

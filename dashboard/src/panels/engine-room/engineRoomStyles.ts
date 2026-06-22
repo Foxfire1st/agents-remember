@@ -973,6 +973,47 @@ export const scanRing = css({
 // group opacity (a className opacity on a Motion element loses on a static frame — see worktreeWire).
 export const ghostedLane = css({ opacity: "0.32", filter: "grayscale(0.45)" });
 
+// 05o refused-conduit flash (SHARED — T9B red fault · T9C amber reroute · T14C red conflict). The seed/
+// return conduit that is REFUSED (podstage `.refused`/`.refred`): cyan → white spark → its polarity colour
+// → fade out. AMBER = a fallback/reroute (CGC seed refused → reindex), RED = a fault/conflict (GrepAI seed
+// fault, integration conflict). Polarity is NEVER a class alone — it is read off the projection (edge.state
+// failed→red / stale→amber, or edge.refusedPolarity on a `refused` edge) and carried as the cva variant.
+// The one-shot colour sweep + the fade are owned by GSAP (data-fx='refuse', repeat:0 — CSS stays static,
+// 05f §8); the base recipe rests at opacity 0 (a one-shot flash has no settled state — it ends GONE, like
+// the prototype's `animation:refused .9s ease forwards` ending at opacity 0), so under effects=off the lane
+// is present-but-absent (the steady STOP/gate carries the settled state).
+export const refusedConduit = cva({
+  base: { fill: "none", strokeWidth: "2.6", opacity: "0" },
+  variants: {
+    polarity: {
+      // amber = reroute (a fallback, not a failure) — the T9C seed-refused lane
+      amber: { stroke: "token(colors.amber)", filter: "drop-shadow(0 0 4px token(colors.amber))" },
+      // red = fault / conflict — the T9B seed fault + the T14C integration conflict
+      red: { stroke: "token(colors.alarm)", filter: "drop-shadow(0 0 4px token(colors.alarm))" },
+    },
+  },
+});
+
+// 05o/T7B — a faint dropout halo behind the UNLIT worktree engines (the provider-plan block: the engines
+// never light because the runtime config is missing). A static, alarm-toned dashed outline marking the
+// engine slot as HELD (not merely not-yet, which is the build-up's faded-absent engine). No animation.
+export const engineDropout = css({
+  fill: "none",
+  stroke: "token(colors.alarm)",
+  strokeWidth: "1.4",
+  strokeDasharray: "5 5",
+  opacity: "0.5",
+  filter: "drop-shadow(0 0 4px token(colors.alarm))",
+});
+
+// 05o/T12B — the "moved" remote indicator (podstage .imsg `moved`, soft/cyan): a ▲ up-triangle + a pill
+// announcing the UPSTREAM memory ref advanced (origin/mem-main moved while the worktree holds local
+// commits). SOFT register — cyan, a notification that a sync CHOICE is needed, NOT the alarm gate (that
+// escalates a beat later). Mirrors reasonBadge/reasonDot/reasonText geometry but cyan, with a ▲ pointer.
+export const movedBadge = css({ fill: "oklch(0.18 0.04 230)", stroke: "token(colors.cyan)", strokeWidth: "1.1" });
+export const movedTriangle = css({ fill: "token(colors.cyan)", filter: "drop-shadow(0 0 3px token(colors.cyan))" });
+export const movedText = css({ fill: "token(colors.cyan)", fontSize: "11px", letterSpacing: "0.03em", fontWeight: "600" });
+
 // 05o T1B — the FLEETING block enclosure (the prototype's big red provisional box, podstage `.fbox`): a
 // born-blocked enclosure (stale-base / pre-contract) renders as a dark-red dashed box over the worktree
 // footprint — the BLOCKED title + reason centred + the recovery chips along the bottom — REPLACING the

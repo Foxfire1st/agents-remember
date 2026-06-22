@@ -24,8 +24,11 @@ export function ScenarioPlayer({ scenario }: { scenario: Scenario }) {
   const [loop, setLoop] = useState(false);
   const frames = scenario.frames;
 
-  // a new scenario resets the player to its first frame
+  // a new scenario resets the player to its first frame. The Bench keys this component by scenario name, so
+  // this runs once per scenario. Reset the SHARED store FIRST (bumps `gen`) so the engine-room canvas remounts
+  // clean and the previous mode's exiting failure overlays can't orphan + bleed through the dropdown switch.
   useEffect(() => {
+    dashboardStore.getState().reset();
     setCur(0);
     setPlaying(false);
   }, [scenario]);
