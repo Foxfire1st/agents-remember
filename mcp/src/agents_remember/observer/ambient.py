@@ -41,6 +41,7 @@ from agents_remember.observer.save_gate import (
     SaveGateRequired,
     compute_scope,
 )
+from agents_remember.observer.served_store import ServedRecord, ServedStore, served_key
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.timeutil import (
     HEARTBEAT_SECONDS,
@@ -51,6 +52,12 @@ from agents_remember.observer.timeutil import (
 from agents_remember.observer.ulid import new_ulid
 
 IdFactory = Callable[[], str]
+
+# The fixed facts-only allowlist for a ``read.packet`` per-file entry. The
+# read-packet emitter projects every caller entry to exactly these keys, so no
+# source/onboarding/overview content can reach ``Event.data`` regardless of the
+# caller (the privacy invariant is this projection, not Event's ``extra``).
+_READ_PACKET_FACTS = ("path", "lines", "status", "bytes")
 
 
 def _default_clock() -> datetime:
@@ -73,6 +80,7 @@ class AmbientLifecycle:
         ttl_seconds: float = TTL_SECONDS,
         clock: Clock = _default_clock,
         id_factory: IdFactory = new_ulid,
+        served_store: ServedStore | None = None,
     ) -> None:
         self._store = store
         self._heartbeat_seconds = heartbeat_seconds
@@ -83,6 +91,12 @@ class AmbientLifecycle:
         self._stop = threading.Event()
         self._ticker: threading.Thread | None = None
         self.current: LifecycleState | None = None
+        # The served-onboarding dedup ledger lives beside the event logs (one
+        # served.jsonl per lifecycle dir). The in-memory set is the hot path; it
+        # is hydrated from served.jsonl on first use so it survives a context
+        # compaction (the same lifecycle process keeps running).
+        self._served_store = served_store or ServedStore(store.root)
+        self._served: dict[str, set[str]] = {}
 
     # --- signals -----------------------------------------------------------
 
@@ -160,6 +174,7 @@ class AmbientLifecycle:
             current = self._require_active()
             self._emit_locked("lifecycle.ended", "declared", "model", outcome=outcome)
             self._stop_ticker_locked()
+            self._served.pop(current.id, None)
             self.current = None
             return replace(current, state=terminal)
 
@@ -282,6 +297,84 @@ class AmbientLifecycle:
                     ok=payload.get("ok"),
                 )
 
+    def emit_read_packet(self, files: list[dict[str, Any]]) -> None:
+        """Emit one facts-only ``read.packet`` for the active lifecycle.
+
+        Modeled on :meth:`emit_tool`: a lifecycle-less call is *dropped* (never
+        misattributed), and emission must never break the read it records, so a
+        validation or disk error is contained here. The facts-only guarantee is
+        **enforced structurally**: each caller entry is projected to the fixed
+        allowlist ``{path, lines, status, bytes}`` by construction (a new dict
+        picking only those keys), so any other key -- including file content --
+        is dropped here regardless of what the caller passes. (Event's
+        ``extra="forbid"`` only governs top-level Event fields, not the contents
+        of ``data``, so the projection -- not the envelope -- is the privacy
+        invariant.) This rides the same ambient choke as ``tool.completed`` so
+        it inherits the chat's fleeting identity (or the adopted worktree
+        lifecycle) and is session-traceable by construction.
+        """
+        projected = [
+            {key: entry[key] for key in _READ_PACKET_FACTS if key in entry}
+            for entry in files
+        ]
+        with self._lock:
+            if self.current is None:
+                return
+            with contextlib.suppress(ValidationError, OSError):
+                self._emit_locked("read.packet", "observed", "model", files=projected)
+
+    # --- served-onboarding dedup ledger -----------------------------------
+
+    def _served_for_locked(self, lifecycle_id: str) -> set[str]:
+        """The served-key set for a lifecycle, hydrated from disk on first use."""
+        cached = self._served.get(lifecycle_id)
+        if cached is None:
+            cached = self._served_store.served_set(lifecycle_id)
+            self._served[lifecycle_id] = cached
+        return cached
+
+    def served_keys(self, lifecycle_id: str) -> set[str]:
+        """A copy of the served-key set for a lifecycle (hydrated on first use)."""
+        with self._lock:
+            return set(self._served_for_locked(lifecycle_id))
+
+    def is_served(self, lifecycle_id: str, kind: str, path: str, content_hash: str) -> bool:
+        """True when this exact ``(kind, path, hash)`` was already served."""
+        with self._lock:
+            return served_key(kind, path, content_hash) in self._served_for_locked(lifecycle_id)
+
+    def record_served(
+        self, lifecycle_id: str, kind: str, path: str, content_hash: str, *, ts: str
+    ) -> None:
+        """Record a served onboarding piece in memory and on disk (append-only).
+
+        Emission/durability must never break the read, so a disk error is
+        contained -- the in-memory set still advances so the same call does not
+        re-serve within one process.
+        """
+        with self._lock:
+            served = self._served_for_locked(lifecycle_id)
+            served.add(served_key(kind, path, content_hash))
+            with contextlib.suppress(OSError):
+                self._served_store.append(
+                    lifecycle_id,
+                    ServedRecord(kind=kind, path=path, hash=content_hash, ts=ts),
+                )
+
+    def reset_served(self, lifecycle_id: str) -> None:
+        """Clear the served-set for a lifecycle (the compaction/refresh reset).
+
+        Drops the in-memory set and deletes the on-disk ``served.jsonl`` so the
+        next read re-serves every onboarding piece from scratch. The single live
+        owner deleting its own ledger keeps the single-writer invariant intact.
+        """
+        with self._lock:
+            self._served.pop(lifecycle_id, None)
+            with contextlib.suppress(OSError):
+                path = self._served_store.log_path(lifecycle_id)
+                if path.exists():
+                    path.unlink()
+
     def shutdown(self) -> None:
         """Stop the heartbeat ticker (process teardown / test isolation)."""
         with self._lock:
@@ -317,6 +410,7 @@ class AmbientLifecycle:
         else:
             self._emit_locked("lifecycle.ended", "declared", "model", outcome="abandoned")
             self._stop_ticker_locked()
+            self._served.pop(current.id, None)
             self.current = None
 
     def _promote_to_landing_zone_locked(self) -> None:
@@ -337,6 +431,8 @@ class AmbientLifecycle:
         """Leaving -> ``paused``: emit, stop the ticker, release the current."""
         self._emit_locked("lifecycle.paused", "observed", "system", cause=cause)
         self._stop_ticker_locked()
+        if self.current is not None:
+            self._served.pop(self.current.id, None)
         self.current = None
 
     def _emit_locked(self, kind: str, trust: Trust, actor: Actor, **data: Any) -> None:

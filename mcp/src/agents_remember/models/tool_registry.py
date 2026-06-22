@@ -66,6 +66,7 @@ from agents_remember.models.providers import (
     ProviderStatusResponse,
     ProviderWatchersResponse,
 )
+from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.task_doc import TaskDocResponse
@@ -85,6 +86,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "ping": PingResponse,
     "server_info": ServerInfoResponse,
     "context_packet": ContextPacketV2,
+    "read_ar_files": ReadArFilesResponse,
     "runtime_install": RuntimeInstallResponse,
     "resolve_context": ResolveContextResponse,
     "drift_check": DriftCheckResponse,

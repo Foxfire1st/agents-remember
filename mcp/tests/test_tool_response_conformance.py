@@ -90,6 +90,9 @@ def _simple_payloads(config) -> dict[str, dict]:
         "ping": tools.ping_payload(),
         "server_info": tools.server_info_payload(config),
         "context_packet": tools.context_packet_payload(config, REPO),
+        "read_ar_files": tools.read_ar_files_payload(
+            config, REPO, [{"path": "README.md", "source": "full"}]
+        ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, REPO),
         "drift_check": tools.drift_check_payload(config, REPO),

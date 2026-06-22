@@ -13,6 +13,7 @@ PUBLIC_TOOLS = (
     "ping",
     "server_info",
     "context_packet",
+    "read_ar_files",
     "runtime_install",
     "resolve_context",
     "drift_check",

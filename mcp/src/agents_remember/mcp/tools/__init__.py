@@ -55,6 +55,7 @@ from .providers import (
     provider_status_payload,
     provider_watchers_payload,
 )
+from .read_files import read_ar_files_payload
 from .task_doc import task_doc_payload
 from .worktree import (
     worktree_abandon_payload,
@@ -103,6 +104,7 @@ __all__ = [
     "provider_diagnostics_payload",
     "provider_status_payload",
     "provider_watchers_payload",
+    "read_ar_files_payload",
     "resolve_context_payload",
     "route_index_refresh_payload",
     "runtime_install_payload",

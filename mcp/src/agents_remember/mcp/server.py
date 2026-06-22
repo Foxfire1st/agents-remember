@@ -42,6 +42,7 @@ from .tools import (
     provider_diagnostics_payload,
     provider_status_payload,
     provider_watchers_payload,
+    read_ar_files_payload,
     resolve_context_payload,
     route_index_refresh_payload,
     runtime_install_payload,
@@ -99,6 +100,25 @@ def create_server(config: McpRuntimeConfig) -> Any:
             include_drift=include_drift,
             include_freshness=include_freshness,
         )
+
+    @server.tool()
+    def read_ar_files(
+        repo_id: str,
+        files: list[dict[str, Any]],
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Read-only batch read of up to 5 repo-relative paths inside an AR-managed repo,
+        each paired with its file-level onboarding. Per file pass {"path": "...", "source":
+        "full" | {"startLine": N, "endLine": M}, "onboarding": false?}; the response returns
+        {path, status, source?, onboarding?} where status is the onboarding-lookup outcome
+        (found | missing | disabled | unsupported | not_requested) and source is the full file
+        or the exact requested range (omitted for absent or non-UTF-8 files). It also
+        auto-attaches the repo overview and the governing route-overview chain, deduplicated
+        per session (served once, re-served only when changed; pass refresh=true to force
+        re-serve, e.g. after a compaction). Route-index rule: a file inside sourceScope but
+        absent from coveredFiles reports missing without probing. Prefer this over a native
+        read for understanding files in a managed repo."""
+        return read_ar_files_payload(config, repo_id, files, refresh=refresh)
 
     @server.tool()
     def runtime_install(

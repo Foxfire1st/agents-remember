@@ -67,6 +67,12 @@ from agents_remember.observer.reducer import (
     staleness_histogram,
     token_series,
 )
+from agents_remember.observer.served_store import (
+    SERVED_RECORD_SCHEMA,
+    ServedRecord,
+    ServedStore,
+    served_key,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.timeutil import (
     HEARTBEAT_SECONDS,
@@ -80,6 +86,7 @@ from agents_remember.observer.ulid import new_ulid
 __all__ = [
     "HEARTBEAT_SECONDS",
     "OBSERVER_EVENT_SCHEMA",
+    "SERVED_RECORD_SCHEMA",
     "STALE_AFTER_SECONDS",
     "TTL_SECONDS",
     "ActionAvailability",
@@ -101,6 +108,8 @@ __all__ = [
     "ProviderNode",
     "RouteCoverageNode",
     "SeriesNode",
+    "ServedRecord",
+    "ServedStore",
     "SetupProgressNode",
     "SetupSummaryNode",
     "SidecarStaleNode",
@@ -121,6 +130,7 @@ __all__ = [
     "project_workspace",
     "require_ambient",
     "reset_ambient",
+    "served_key",
     "staleness_histogram",
     "token_series",
 ]
