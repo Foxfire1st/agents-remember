@@ -11,6 +11,7 @@ from agents_remember.kernel.coordination_context import resolver as _resolver
 from agents_remember.kernel.coordination_context.cli import main
 from agents_remember.kernel.coordination_context.contracts import (
     find_task_contract,
+    find_worktree_contract,
     resolve_contract,
 )
 from agents_remember.kernel.coordination_context.cross_repo import (
@@ -193,6 +194,7 @@ __all__ = [
     "extract_yaml_blocks",
     "find_code_repository_root",
     "find_task_contract",
+    "find_worktree_contract",
     "git_branch",
     "git_head_or_empty",
     "infer_settings_path",

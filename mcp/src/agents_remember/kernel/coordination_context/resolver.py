@@ -298,7 +298,7 @@ def build_coordination_context(
     workspace_root: Path | None = None,
 ) -> CoordinationContext:
     contract, resolved_contract_path = resolve_contract(
-        contract_path, coordination_root, code_repository_name, task_name
+        contract_path, coordination_root, code_repository_name, task_name, worktree_name
     )
     task_root = _task_root(coordination_root, code_repository_name, task_name, contract)
     worktree_group = _worktree_group(coordination_root, code_repository_name, worktree_name, contract)
