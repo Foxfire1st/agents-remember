@@ -66,6 +66,36 @@ describe("scenario player model (5i)", () => {
     expect(groups.size).toBe(1);
   });
 
+  it("authors the T1B stale-base arc (preflight → fleeting block → fast-forward → clone), one enclosure", () => {
+    const staleBase = SCENARIOS.find((scenario) => scenario.name === "stale-base");
+    expect(staleBase).toBeTruthy();
+    const captions = staleBase!.frames.map((frame) => frame.caption).join(" | ");
+    expect(captions).toMatch(/preflight/i);
+    expect(captions).toMatch(/block/i);
+    expect(captions).toMatch(/fast-forward/i);
+    // the block beat drives a blocked, pre-contract (fleeting) process whose base is behind upstream
+    const blocked = staleBase!.frames
+      .flatMap((frame) => frame.projection.analytics.engineProcesses)
+      .find((node) => node.health === "blocked");
+    expect(blocked).toBeTruthy();
+    expect(blocked!.codeSource.behindSource ?? 0).toBeGreaterThan(0);
+    expect(blocked!.missingFacts.some((fact) => /contract not yet written/i.test(fact))).toBe(true);
+    // the recover runs the provider clone beats (copy-arrows), not a teleport to nominal
+    const hasClone = staleBase!.frames.some((frame) =>
+      frame.projection.analytics.engineProcesses.some((node) =>
+        node.edges.some((e) => (e.kind === "cgc-seed" || e.kind === "grepai-clone") && e.state === "running"),
+      ),
+    );
+    expect(hasClone).toBe(true);
+    // one enclosure throughout
+    const groups = new Set(
+      staleBase!.frames.flatMap((frame) =>
+        frame.projection.analytics.engineProcesses.map((node) => node.worktreeGroup),
+      ),
+    );
+    expect(groups.size).toBe(1);
+  });
+
   it("folds the old gallery states in as single-frame resting scenarios (no coverage lost)", () => {
     const resting = SCENARIOS.find((scenario) => scenario.name === "engine-cleanup-pending");
     expect(resting?.frames).toHaveLength(1);

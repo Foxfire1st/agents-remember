@@ -644,6 +644,17 @@ export const svgNodeLabel = css({
 export const svgNodeTitle = css({ fill: "token(colors.ink)", fontSize: "14px", fontWeight: "600" });
 export const svgNodeMeta = css({ fill: "token(colors.muted)", fontSize: "11px" });
 
+// 05o T1B — pruned/stale node: a real-but-disposed base node reads DORMANT (the spec §3 "pruned/retired"):
+// a desaturated dormant stroke + a dark muted fill, distinct from `planned`/`missing` (dotted, not-yet) and
+// from a live amber box. Projection-driven (applied to the stale base node when local main is behind upstream
+// in the stale-base block), static. Mirrors the spec `.node.pruned .box` (stroke var(--dormant), dark fill).
+export const prunedNode = css({
+  stroke: "token(colors.dormant)",
+  fill: "oklch(0.18 0.02 25)",
+  strokeDasharray: "3 3",
+  opacity: "0.8",
+});
+
 // Podracer engine gauge — outer column coloured by runtime; the charge fill shows the settled
 // (nominal) energy level. The center-out boot-fill GROWTH is G2 (this is the static end-state).
 export const engineGaugeOut = cva({
@@ -961,6 +972,29 @@ export const scanRing = css({
 // animation); it lives on the inner conduit <path>, NOT the Motion group, so it never fights Motion's
 // group opacity (a className opacity on a Motion element loses on a static frame — see worktreeWire).
 export const ghostedLane = css({ opacity: "0.32", filter: "grayscale(0.45)" });
+
+// 05o T1B — the FLEETING block enclosure (the prototype's big red provisional box, podstage `.fbox`): a
+// born-blocked enclosure (stale-base / pre-contract) renders as a dark-red dashed box over the worktree
+// footprint — the BLOCKED title + reason centred + the recovery chips along the bottom — REPLACING the
+// dashed-amber `enclosureBorder`, so "this enclosure is gated, not yet real" reads at a glance. The box rect
+// carries the .55 dim; the title/reason sit above it at full opacity (siblings, like the prototype).
+export const fleetingBox = css({
+  // brighter + more opaque than the prototype's .55 so it reads as a clear red panel over the dashboard's
+  // blueprint backdrop video (which the prototype doesn't have); a soft alarm glow lifts it off the scene.
+  fill: "oklch(0.22 0.06 25)",
+  stroke: "token(colors.alarm)",
+  strokeWidth: "1.8",
+  strokeDasharray: "8 7",
+  opacity: "0.82",
+  filter: "drop-shadow(0 0 6px token(colors.alarm))",
+});
+export const fleetingBoxTitle = css({
+  fill: "oklch(0.82 0.16 25)",
+  fontSize: "15px",
+  letterSpacing: "0.06em",
+  fontWeight: "700",
+});
+export const fleetingBoxReason = css({ fill: "token(colors.muted)", fontSize: "12px", letterSpacing: "0.02em" });
 
 // --- failure overlays (5g G3) ------------------------------------------------
 // blocked = STEADY red gate over the blocked lane (a human choice required) — never the fault flicker

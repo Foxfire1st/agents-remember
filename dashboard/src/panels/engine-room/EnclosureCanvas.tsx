@@ -40,6 +40,9 @@ import {
   engineReindexCharge,
   engineReindexOut,
   engineSpine,
+  fleetingBox,
+  fleetingBoxReason,
+  fleetingBoxTitle,
   flowConduit,
   flowPacket,
   gateBar,
@@ -63,6 +66,7 @@ import {
   officialWire,
   prBadge,
   prBadgeLabel,
+  prunedNode,
   reasonBadge,
   reasonDot,
   reasonText,
@@ -214,12 +218,13 @@ function mainRef(src: CommitRefNode): CommitRefNode {
   return { ...src, branch: "main" };
 }
 
-function BranchNode({ pos, label, refNode, landingIn = false, detaching = false }: {
+function BranchNode({ pos, label, refNode, landingIn = false, detaching = false, pruned = false }: {
   pos: { x: number; y: number; w: number };
   label: string;
   refNode: CommitRefNode;
   landingIn?: boolean;
   detaching?: boolean;
+  pruned?: boolean;
 }) {
   const animate = useShouldAnimate();
   const enter = branchEnter(refNode.factState);
@@ -248,7 +253,17 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false 
       transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1], delay: detachDelay }}
     >
       <title>{full}</title>
-      <rect className={svgNodeBox({ factState: refNode.factState })} x={pos.x} y={pos.y} width={pos.w} height={NODE_H} rx={8} />
+      {/* 05o T1B — a stale base node (local main behind upstream) reads DORMANT/pruned over its fact-state box.
+          NB: the local `cx` here is the node centre-x (a number) — it shadows Panda's `cx`, so combine by hand. */}
+      <rect
+        className={pruned ? `${svgNodeBox({ factState: refNode.factState })} ${prunedNode}` : svgNodeBox({ factState: refNode.factState })}
+        data-pruned={pruned || undefined}
+        x={pos.x}
+        y={pos.y}
+        width={pos.w}
+        height={NODE_H}
+        rx={8}
+      />
       <text className={svgNodeLabel} x={cx} y={pos.y + 17} textAnchor="middle">{label}</text>
       <text className={svgNodeTitle} x={cx} y={pos.y + 36} textAnchor="middle">{truncate(branch, maxChars)}</text>
       {refNode.commit ? (
@@ -637,6 +652,21 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
+// 05o — every failure/alert overlay (gate, reason, attention, chips, STOP, the block pointer) ENTERS with a
+// quick fade + subtle pop and EXITS the same way when the block clears (via AnimatePresence). The dashboard
+// never hard-pops state in (§8): Motion owns the enter/exit. Gated by `useShouldAnimate` → instant end-state
+// under effects-off so the snapshots stay deterministic. `transform-box: fill-box` scales from the element's
+// own centre (the `engineCharge` pattern), so the pop grows in place instead of sliding from the SVG origin.
+function alertProps(animate: boolean) {
+  return {
+    initial: animate ? { opacity: 0, scale: 0.88 } : false,
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.88 },
+    transition: { duration: animate ? 0.28 : 0, ease: [0.2, 0.7, 0.2, 1] as [number, number, number, number] },
+    style: { transformBox: "fill-box" as const, transformOrigin: "center" as const },
+  };
+}
+
 // Steady red gate over a blocked/failed lane — a human choice required, never the fault flicker (the
 // flicker is the engine, G4). Drawn at the blocked edge's midpoint.
 function Gate({ edge }: { edge: EngineProcessEdge }) {
@@ -681,6 +711,19 @@ function ReasonBadge({ reason, cx, cy }: { reason: string; cx: number; cy: numbe
   );
 }
 
+// 05o — the block indicators anchored ON the checked repository node (not the connector lane): a steady
+// gate bar straddling the node's top edge + the reason badge above it, so the gate visibly "points at" the
+// repository being blocked (the stale code base / the unmappable memory base). Mirrors the prototype, where
+// the gate sits on the Code node, not the wire.
+function NodeBlock({ cx, top, reason }: { cx: number; top: number; reason: string }) {
+  return (
+    <g data-testid="node-block">
+      <rect className={gateBar} x={cx - 64} y={top - 7} width={128} height={12} rx={3} data-testid="gate" />
+      <ReasonBadge reason={reason} cx={cx} cy={top - 36} />
+    </g>
+  );
+}
+
 // Recovery choices (node.nextAction + enabled actions) as chips along the bottom of the stage.
 function RecoveryChips({ labels }: { labels: string[] }) {
   if (!labels.length) return null;
@@ -699,6 +742,47 @@ function RecoveryChips({ labels }: { labels: string[] }) {
         return chip;
       })}
     </g>
+  );
+}
+
+// 05o T1B — the FLEETING block enclosure (podstage `.fbox`): a born-blocked enclosure (stale-base /
+// pre-contract) renders as the big red provisional box over the worktree footprint — the BLOCKED title +
+// reason centred + the recovery chips along the bottom — REPLACING the dashed-amber border. Motion fades it.
+function FleetingEnclosure({ summary, choices }: { summary: string; choices: string[] }) {
+  const animate = useShouldAnimate();
+  const x = COL_WT_CX - 126;
+  const y = 76;
+  const w = 1148 - (COL_WT_CX - 126);
+  const h = 506;
+  const cx = x + w / 2;
+  const shown = choices.slice(0, 3);
+  const widths = shown.map((label) => Math.max(110, label.length * 6.6 + 28));
+  const totalW = widths.reduce((sum, cw) => sum + cw, 0) + 12 * Math.max(0, widths.length - 1);
+  let chipX = cx - totalW / 2;
+  const chipY = y + h - 54;
+  return (
+    <motion.g
+      data-testid="fleeting-enclosure"
+      initial={animate ? { opacity: 0 } : false}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: animate ? 0.4 : 0 }}
+    >
+      <rect className={fleetingBox} x={x} y={y} width={w} height={h} rx={18} />
+      <text className={fleetingBoxTitle} x={cx} y={y + h / 2 - 16} textAnchor="middle">⚠ BLOCKED · start gated</text>
+      <text className={fleetingBoxReason} x={cx} y={y + h / 2 + 10} textAnchor="middle">{truncate(summary, 64)}</text>
+      {shown.map((label, i) => {
+        const cw = widths[i];
+        const chip = (
+          <g key={label}>
+            <rect className={svgChip} x={chipX} y={chipY} width={cw} height={22} rx={4} />
+            <text className={svgChipText} x={chipX + cw / 2} y={chipY + 15} textAnchor="middle">▸ {label}</text>
+          </g>
+        );
+        chipX += cw + 12;
+        return chip;
+      })}
+    </motion.g>
   );
 }
 
@@ -988,21 +1072,46 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
     node.codeWorktree.factState === "observed" || node.codeWorktree.factState === "derived";
   const memWtMaterialised =
     node.memoryWorktree?.factState === "observed" || node.memoryWorktree?.factState === "derived";
-  // 05o T3B — the ledger-verify primitives, both read off the projection (never a class alone). `checking`:
-  // the memory side is being verified (ledger-map running) before the gate decides, while the memory worktree
-  // is not yet on disk → the cyan scan ring sweeps the lane. `memGated`: the memory lane is held (no ledger
-  // map / a missing memory repo) → it ghosts (dim + desaturate) while the code lane stays solid.
-  const checking =
+  // 05o T3B/T1B — the pre-block verify sweeps, all read off the projection (never a class alone). `memChecking`
+  // (T3B): the memory side is verified (ledger-map running) before the ledger gate decides, while the memory
+  // worktree is not yet on disk. `baseChecking` (T1B): the base/code side is preflighted (worktree-add running,
+  // code worktree not yet on disk) — "is local main current with upstream?" — before the stale-base gate.
+  // `scanAt` anchors the cyan scan ring at the lane under check (memory y=403 / code y=281, both on the gap
+  // centre). `memGated`: the memory lane is held (no ledger map / a missing memory repo) → it ghosts while the
+  // code lane stays solid. `baseStale`: local main is behind upstream and the start is blocked → the main code
+  // node reads pruned/dormant (the spec §3 pruned register).
+  const memChecking =
     node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "running") && !memWtMaterialised;
+  const baseChecking =
+    node.edges.some((edge) => edge.kind === "worktree-add" && edge.state === "running") && !codeWtMaterialised;
   const memGated =
     node.memoryWorktree?.factState === "missing" ||
     node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "blocked");
+  // a born-blocked (pre-contract) enclosure — the reducer marks it "contract not yet written"; it renders the
+  // big red FleetingEnclosure box (stale-base / pre-contract).
+  const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
+  // a stale-base block is the FLEETING (pre-contract) preflight case — `&& fleeting` keeps it distinct from a
+  // live sync-needed block (which is also `behindSource > 0` but has a real worktree).
+  const baseStale = (node.codeSource.behindSource ?? 0) > 0 && isBlocked(node) && fleeting;
+  // 05o — the verify/block indicators anchor ON the checked REPOSITORY node (its rectangle), never the
+  // connector lane: T1B points at the official-line CODE base (stale), T3B at the official-line MEMORY base
+  // (no ledger map). `scanAt` centres the scan ring on that node; `blockNode` puts the steady gate at the
+  // node's top edge + the reason badge above it, so the gate visibly points at the repository (the prototype).
+  const scanAt = memChecking
+    ? { x: COL_MAIN_CX, y: POS.memorySource.y + NODE_H / 2 }
+    : baseChecking
+      ? { x: COL_MAIN_CX, y: POS.codeSource.y + NODE_H / 2 }
+      : null;
+  const blockNode = baseStale
+    ? { cx: COL_MAIN_CX, top: POS.codeSource.y }
+    : memGated && isBlocked(node)
+      ? { cx: COL_MAIN_CX, top: POS.memorySource.y }
+      : null;
   // Official-line (workspace) engines — the real shared CGC/GrepAI feeding the official line (left
   // world); runtime derived like the OfficialStrip so the two surfaces always agree.
   const officialCode = workspaceEngines.find((engine) => engine.role === "code");
   const officialMemory = workspaceEngines.find((engine) => engine.role === "memory");
-  // failure overlays (5g G3)
-  const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
+  // failure overlays (5g G3) — `fleeting` is derived above (it gates `baseStale`).
   // t14c — a terminal integration conflict draws a STOP (not the recoverable Gate) and no recovery chips.
   const terminal = node.phase === "integration-blocked";
   const terminalEdge = terminal
@@ -1068,7 +1177,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       <CanopyFrame />
       <text className={worldLabel} x={55} y={40}>Official line · workspace</text>
       <text className={worldLabel} x={930} y={40}>Worktree enclosure</text>
-      {hasMemory ? (
+      {hasMemory && !fleeting ? (
         <motion.rect
           className={enclosureBorder}
           // left edge tracks the worktree column (26px of inner padding before the code/memory nodes), so the
@@ -1098,19 +1207,15 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
           ghosted={memGated && edge.kind === "ledger-map"}
         />
       ))}
-      {/* 05o — the pre-block verify sweep: a cyan ring on the ledger-map (memory) lane midpoint while it is
-          being checked (ledger-map running, memory not yet on disk). GSAP (data-fx='scan') drives the
-          expand-fade; rendered only while animate, so under effects=off it is absent (no frozen ring). */}
-      {checking && animate ? (
-        <circle className={scanRing} data-fx="scan" data-testid="scan-ring" cx={COL_FEAT_CX} cy={403} r={6} />
-      ) : null}
+      {/* NB: the scan ring is NOT drawn here — it is centred ON a repository node, so it must paint in the
+          topmost overlay layer (below), after the nodes, or the node's opaque rect would cover it. */}
 
       {/* THREE-TIER (5f §7.4, copied 1-to-1 from the mockup): the OFFICIAL LINE is MAIN (the protected
           branch) — ALWAYS, in the build-up and the landing — and the worktree forks from it on the right.
           The feat/fix SOURCE the worktree was branched off appears in the GAP only during landing (the
           mockup's tear-down reveal), so closeout reads main ◂ feat ◂ worktree. The official-line nodes
           never relabel/remount across the transition; the feat tier fades in (landingIn). */}
-      <BranchNode pos={POS.codeSource} label="Official line · main" refNode={mainRef(node.codeSource)} />
+      <BranchNode pos={POS.codeSource} label="Official line · main" refNode={mainRef(node.codeSource)} pruned={baseStale} />
       {hasMemory && node.memorySource ? (
         <BranchNode pos={POS.memorySource} label="Official line · main" refNode={mainRef(node.memorySource)} />
       ) : null}
@@ -1288,16 +1393,59 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
         </text>
       ) : null}
 
-      {/* failure overlays (5g G3): a steady gate over each blocked lane + a local reason badge, the
-          alarm-parity attention badge, and recovery chips. A fleeting (pre-contract) block keeps its
-          ghost banner in EnclosureProcessMap, so the scene gate / reason / chips defer to it. */}
-      {!fleeting ? gatedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />) : null}
-      {!fleeting && terminalEdge ? <TerminalStop edge={terminalEdge} /> : null}
-      {!fleeting && reasonCenter ? (
-        <ReasonBadge reason={node.summary} cx={reasonCenter.cx} cy={reasonCenter.cy} />
-      ) : null}
-      {isBlocked(node) ? <Attention /> : null}
-      {!fleeting && !terminal ? <RecoveryChips labels={recovery} /> : null}
+      {/* failure overlays (5g G3): the big red `FleetingEnclosure` box (born-blocked, worktree footprint),
+          the alarm-parity attention badge, the terminal STOP, and the bottom recovery chips. ORDER MATTERS:
+          these come first, then the verify/block POINTERS render LAST (below) so they are the topmost layer —
+          a pointer is centred ON / sits ABOVE a repository node and must never be covered by it. */}
+      <AnimatePresence>
+        {fleeting ? (
+          <FleetingEnclosure key="fleeting-enclosure" summary={node.summary} choices={recovery} />
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {!fleeting && terminalEdge ? (
+          <motion.g key="terminal" {...alertProps(animate)}>
+            <TerminalStop edge={terminalEdge} />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {isBlocked(node) ? (
+          <motion.g key="attention" {...alertProps(animate)}>
+            <Attention />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {!fleeting && !terminal && recovery.length ? (
+          <motion.g key="chips" {...alertProps(animate)}>
+            <RecoveryChips labels={recovery} />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      {/* TOPMOST LAYER — the verify scan ring (centred ON the checked repository node) and the block gate +
+          reason badge (at the node's top edge). Rendered dead last so the node's opaque rect can never cover
+          them; centring a pointer on a node and painting it BEHIND the node defeats the pointer (05o fix).
+          The scan group fades via Motion (opacity only — its inner circle's r/opacity expand-fade is GSAP). */}
+      <AnimatePresence>
+        {scanAt && animate ? (
+          <motion.g key="scan" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
+            <circle className={scanRing} data-fx="scan" data-testid="scan-ring" cx={scanAt.x} cy={scanAt.y} r={6} />
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {blockNode ? (
+          <motion.g key="block" {...alertProps(animate)}>
+            <NodeBlock cx={blockNode.cx} top={blockNode.top} reason={node.summary} />
+          </motion.g>
+        ) : !fleeting && gatedEdges.length ? (
+          <motion.g key="edge-gate" {...alertProps(animate)}>
+            {gatedEdges.map((edge) => <Gate key={`gate-${edge.id}`} edge={edge} />)}
+            {reasonCenter ? <ReasonBadge reason={node.summary} cx={reasonCenter.cx} cy={reasonCenter.cy} /> : null}
+          </motion.g>
+        ) : null}
+      </AnimatePresence>
     </svg>
   );
 }

@@ -697,6 +697,15 @@
     </div>
 
   </div>
+
+  <div class="note"><b>Mode 2 — stale-base block (T1b).</b> Before the worktree forks, a preflight checks the
+    base: the <b>scan ring</b> (above) sweeps the <b>code/main lane</b> &mdash; <i>"is local main current with
+    upstream?"</i>. On a <b>behind / diverged</b> base a <b>fleeting enclosure is born blocked</b> (&sect;2.1
+    provisional &mdash; the contract isn't written yet) with the stale <b>main node pruned</b> (the &sect;3
+    dormant register) and two choices: <b>fast-forward</b> or <b>proceed-stale</b>. Fast-forward advances the
+    base and the worktree boots normally (the recover runs the provider clone, like the boot). Net-new vs mode 1
+    is only the <b>pruned node</b> on the base &mdash; the scan ring (&sect;10), the fleeting block (&sect;2.1),
+    the steady gate (&sect;2) and the recovery chips already exist.</div>
 </section>
 
 <!-- 11 -->

@@ -439,6 +439,67 @@ const memoryBlockStages: EngineRoomScenario[] = [
   },
 ];
 
+// --- T1B (05o) stale-base block arc ------------------------------------------
+// The preflight → block beats as ONE boot-demo enclosure (recover reuses the boot frames). The base
+// (local main) is behind upstream: the preflight scans the code lane, then a fleeting enclosure is born
+// blocked with the main code node pruned (dormant). Named `engine-boot-*` so the bench GALLERY hides them.
+const staleBaseStages: EngineRoomScenario[] = [
+  {
+    // preflight — scanning the base lane: is local main current with upstream? (worktree-add running, code
+    // worktree not yet on disk → the cyan scan ring sweeps the code lane). The base staleness isn't decided yet.
+    name: "engine-boot-stale-verify",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "worktree-started",
+        health: "running",
+        codeWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        setupState: undefined,
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "running", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        summary: "Preflight — checking the base (local main) is current with upstream.",
+        nextAction: "continue_work",
+        missingFacts: [],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+  {
+    // block — base behind upstream: a FLEETING enclosure is born blocked (start gated before the contract),
+    // the main code node reads pruned/dormant, and two recovery choices (fast-forward / proceed-stale) show.
+    name: "engine-boot-stale-blocked",
+    processes: [
+      engineProcess({
+        ...bootBase,
+        phase: "worktree-started",
+        health: "blocked",
+        codeSource: ref({ branch: SOURCE_BRANCH, commit: "08e9221a", path: `/home/dev/Projects/agents-remember`, behindSource: 3 }),
+        codeWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
+        setupState: undefined,
+        completedPhases: [],
+        providers: [],
+        edges: edges({ worktreeAdd: "planned", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        ledgerRows: [],
+        ledgerRowCount: 0,
+        actions: [
+          { action: "fast-forward", enabled: true },
+          { action: "proceed-stale", enabled: true },
+        ],
+        nextAction: "fast-forward",
+        summary: "Stale base — local main is 3 commits behind upstream.",
+        missingFacts: [
+          "start gated at stale-base preflight — contract not yet written",
+          "local main is behind upstream",
+        ],
+      }),
+    ],
+    workspace: WORKSPACE,
+  },
+];
+
 // --- discrete state scenarios (05e §11) --------------------------------------
 
 export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
@@ -855,4 +916,5 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
   },
   ...bootStages,
   ...memoryBlockStages,
+  ...staleBaseStages,
 ];

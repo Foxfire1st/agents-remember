@@ -92,6 +92,25 @@ const memoryBlock: Scenario = {
   ],
 };
 
+// 05o T1B — the stale-base block: a recoverable pre-contract failure mode, mirroring the prototype's T1B
+// F0→F8 (preflight → block → fast-forward → boot). One boot-demo enclosure throughout; the base (local main)
+// is behind upstream, so the preflight scans the code lane, a fleeting enclosure is born blocked with the
+// main node pruned, and fast-forward recovers through the same provider clone beats (copy-arrows) as the boot.
+const staleBase: Scenario = {
+  name: "stale-base",
+  label: "Stale base · preflight → fast-forward (T1B)",
+  frames: [
+    erFrame("engine-boot-0-main-only", "F0 · worktree_start — the official line (main) is at rest"),
+    erFrame("engine-boot-stale-verify", "F1 · preflight — scanning the base: is local main current with upstream?"),
+    erFrame("engine-boot-stale-blocked", "F2 · BLOCK — base behind upstream: the main node prunes (dormant), a fleeting enclosure is born blocked", 2400),
+    erFrame("engine-boot-1-code-worktree", "F3·F4 · fast-forward — the base updates; the code worktree copies in from the now-current main"),
+    erFrame("engine-boot-2-memory-contract", "F5 · memory worktree copies in; the contract coupler binds"),
+    erFrame("engine-boot-3-providers-dim", "F6 · provider runtime — the engines materialise dim, clone arrows begin"),
+    erFrame("engine-boot-4-seeding", "F7 · seed / clone — CGC seeds over the top, GrepAI clones under the bottom; engines charge cyan"),
+    erFrame("engine-boot-5-nominal", "F8 · running — recovered after the stale-base block; settled nominal"),
+  ],
+};
+
 // The old static gallery states fold in as single-frame "resting" scenarios — no coverage lost, and each
 // stays reachable by name (so `?scenario=` / `?state=` and the existing screenshot tooling keep working).
 const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
@@ -101,4 +120,4 @@ const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
 }));
 
 // Timelines first (build-up · tear-down · the failure mode), then the folded-in resting frames.
-export const SCENARIOS: Scenario[] = [buildUp, tearDown, seedFault, memoryBlock, ...restingScenarios];
+export const SCENARIOS: Scenario[] = [buildUp, tearDown, seedFault, memoryBlock, staleBase, ...restingScenarios];

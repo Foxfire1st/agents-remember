@@ -34,19 +34,19 @@ afterEach(() => {
   cleanup();
 });
 
-describe("EnclosureProcessMap — fleeting promote-in-place (5f S2)", () => {
-  it("renders a fleeting banner (block reason + recovery) for a pre-contract blocked-start node", () => {
+describe("EnclosureProcessMap — fleeting block enclosure (5f S2 / 05o)", () => {
+  it("renders the big red fleeting-enclosure box (BLOCKED title + reason + recovery) for a pre-contract block", () => {
     const node = nodeFrom("engine-precontract-blocked");
     const { getByTestId } = render(<EnclosureProcessMap node={node} />);
-    const banner = getByTestId("fleeting-banner");
-    expect(banner.textContent).toContain("contract not yet written");
-    expect(banner.textContent).toContain(node.summary);
-    expect(banner.textContent).toContain(node.nextAction ?? "");
+    const box = getByTestId("fleeting-enclosure");
+    expect(box.textContent).toContain("BLOCKED");
+    expect(box.textContent).toContain("ledger mapping"); // the block reason (from node.summary)
+    expect(box.textContent).toContain(node.nextAction ?? ""); // the recovery choice (reconciliation)
   });
 
-  it("renders no fleeting banner for a contract-anchored enclosure, and shows the pod-stage canvas", () => {
+  it("renders no fleeting-enclosure box for a contract-anchored enclosure, and shows the pod-stage canvas", () => {
     const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    expect(queryByTestId("fleeting-banner")).toBeNull();
+    expect(queryByTestId("fleeting-enclosure")).toBeNull();
     expect(queryByTestId("process-map")).not.toBeNull();
     expect(queryByTestId("enclosure-canvas")).not.toBeNull();
   });
@@ -320,6 +320,29 @@ describe("EnclosureCanvas — T3B failure primitives (05o: scan ring + ghosted l
     const ring = on.queryByTestId("scan-ring");
     expect(ring).not.toBeNull();
     expect(ring?.getAttribute("data-fx")).toBe("scan");
+  });
+});
+
+describe("EnclosureCanvas — T1B failure primitives (05o: pruned base + code-lane scan)", () => {
+  it("prunes the stale base node and raises a fleeting block with BOTH recovery choices", () => {
+    const { container, getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-boot-stale-blocked")} />);
+    // the main code (base) node reads pruned/dormant (local main behind upstream)
+    expect(container.querySelectorAll('[data-pruned="true"]').length).toBeGreaterThan(0);
+    // a stale-base block is a FLEETING born-blocked enclosure: the big red box surfaces BOTH choices
+    const box = getByTestId("fleeting-enclosure");
+    expect(box.textContent).toContain("fast-forward");
+    expect(box.textContent).toContain("proceed-stale");
+  });
+
+  it("sweeps the scan ring on the CODE/base lane (cy=281) during the preflight — only when effects are on", () => {
+    const off = render(<EnclosureProcessMap node={nodeFrom("engine-boot-stale-verify")} />);
+    expect(off.queryByTestId("scan-ring")).toBeNull();
+    cleanup();
+    document.documentElement.removeAttribute("data-effects");
+    const on = render(<EnclosureProcessMap node={nodeFrom("engine-boot-stale-verify")} />);
+    const ring = on.queryByTestId("scan-ring");
+    expect(ring).not.toBeNull();
+    expect(ring?.getAttribute("cy")).toBe("281"); // the code/base lane (the T3B memory verify is y=403)
   });
 });
 

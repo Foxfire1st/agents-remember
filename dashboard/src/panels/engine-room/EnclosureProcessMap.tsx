@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 
 import { css } from "../../../styled-system/css";
 import type { EngineProcessNode, LedgerNode, ProviderNode } from "../../types/projection";
@@ -9,11 +9,6 @@ import {
   backdropVideo,
   cleanupRecord,
   dissolveShell,
-  fleetingBanner,
-  fleetingChoice,
-  fleetingChoices,
-  fleetingLabel,
-  fleetingReason,
   stageContent,
 } from "./engineRoomStyles";
 import { useShouldAnimate } from "./useShouldAnimate";
@@ -31,25 +26,8 @@ const mapWrap = css({
   background: "bg",
 });
 
-// A pre-contract blocked-start node (5f §2.1): the reducer marks it with a "contract not yet
-// written" missing-fact. Provisional, not fake — shown distinctly until it promotes (the morph is S3).
-function isFleeting(node: EngineProcessNode): boolean {
-  return node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
-}
-
-function FleetingBanner({ node }: { node: EngineProcessNode }) {
-  return (
-    <div className={fleetingBanner} data-testid="fleeting-banner">
-      <span className={fleetingLabel}>⚠ Fleeting · blocked — creation gated, contract not yet written</span>
-      <span className={fleetingReason}>{node.summary}</span>
-      {node.nextAction ? (
-        <span className={fleetingChoices}>
-          <span className={fleetingChoice}>recover: {node.nextAction}</span>
-        </span>
-      ) : null}
-    </div>
-  );
-}
+// 05o — a pre-contract / stale-base blocked-start node (5f §2.1) is now drawn entirely inside the canvas
+// as the big red `FleetingEnclosure` box (EnclosureCanvas), so this shell no longer renders an HTML banner.
 
 // t18 — abandon: the enclosure dissolves (the shell dims + desaturates) and keeps an "abandoned" record.
 function AbandonRecord({ node }: { node: EngineProcessNode }) {
@@ -116,20 +94,8 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
         </div>
       ) : null}
       <div className={stageContent}>
-        <AnimatePresence initial={false}>
-          {isFleeting(node) ? (
-            <motion.div
-              key="fleeting"
-              layout={animate}
-              initial={animate ? { opacity: 0 } : false}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: animate ? 0.3 : 0 }}
-            >
-              <FleetingBanner node={node} />
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        {/* 05o — a fleeting (born-blocked) enclosure now renders inside the canvas as the big red
+            `FleetingEnclosure` box (podstage `.fbox`); the old HTML banner strip is gone. */}
         {teardown === "abandon" ? <AbandonRecord node={node} /> : null}
         {teardown === "cleanup" ? <CleanupRecord node={node} /> : null}
         {/* abandon dissolves the WHOLE enclosure (failure, nothing landed); a landed CLEANUP only
