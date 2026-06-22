@@ -53,6 +53,7 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     load_contract,
     task_root_candidates,
+    worktree_group_for,
     write_contract,
 )
 
@@ -497,6 +498,131 @@ class WorktreeSupportTests(unittest.TestCase):
             )
 
             self.assertEqual(context.task_root, root / "ar-coordination" / "tasks" / "repo-a")
+
+    def _external_memory_skeleton(self, root: Path) -> tuple[Path, Path]:
+        """Build an external-memory code+memory skeleton; return (code_repo, coordination_root)."""
+        code_repo = root / "repo-a"
+        code_repo.mkdir()
+        coordination_root = root / "ar-coordination"
+        memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+        (memory_repo / "system").mkdir(parents=True)
+        (memory_repo / "onboarding").mkdir()
+        (memory_repo / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+        return code_repo, coordination_root
+
+    def _write_task_contract(
+        self, coordination_root: Path, code_repo: Path, *, task_name: str, worktree_name: str
+    ):
+        """Write a real external-memory contract at tasks/<repo>/<task>/contract.md."""
+        contract = default_contract(
+            task_name=task_name,
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=coordination_root,
+            code_repo_path=code_repo,
+            code_source_branch="main",
+            code_work_branch=f"ar/{worktree_name}",
+            code_base_commit="abc123",
+            worktree_name=worktree_name,
+            memory_repo_path=coordination_root / "memory-repos" / "ar-repo-a",
+            memory_source_branch="main",
+            memory_work_branch=f"ar/{worktree_name}",
+            memory_base_commit="def456",
+        )
+        write_contract(contract.contract_path, contract)
+        return contract
+
+    def test_resolver_resolves_contract_by_worktree_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract = self._write_task_contract(
+                coordination_root,
+                code_repo,
+                task_name="260610_browser-dashboard",
+                worktree_name="260610-browser-dashboard",
+            )
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=coordination_root,
+                worktree_name="260610-browser-dashboard",
+            )
+
+            # Regression guard: contract-derived fields are populated, not blanked.
+            self.assertIsNotNone(context.contract_path)
+            self.assertIsNotNone(context.code_worktree)
+            self.assertIsNotNone(context.memory_worktree)
+            self.assertEqual(context.contract_path, contract.contract_path)
+            self.assertEqual(context.code_worktree, contract.code_worktree)
+            self.assertEqual(context.memory_worktree, contract.memory_worktree)
+            self.assertEqual(
+                context.worktree_group,
+                worktree_group_for(coordination_root, "repo-a", "260610-browser-dashboard"),
+            )
+
+    def test_resolver_returns_empty_for_unknown_worktree_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            # A real contract exists, but for a different worktree group.
+            self._write_task_contract(
+                coordination_root,
+                code_repo,
+                task_name="task-other",
+                worktree_name="something-else",
+            )
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=coordination_root,
+                worktree_name="no-such-worktree",
+            )
+
+            self.assertIsNone(context.contract_path)
+            self.assertIsNone(context.code_worktree)
+            self.assertIsNone(context.memory_worktree)
+
+    def test_resolver_prefers_task_name_over_worktree_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract_a = self._write_task_contract(
+                coordination_root, code_repo, task_name="task-a", worktree_name="worktree-a"
+            )
+            contract_b = self._write_task_contract(
+                coordination_root, code_repo, task_name="task-b", worktree_name="worktree-b"
+            )
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=coordination_root,
+                task_name="task-a",
+                worktree_name="worktree-b",  # would match contract B on its own
+            )
+
+            # task_name wins; the worktree_name match (B) is never consulted.
+            self.assertEqual(context.contract_path, contract_a.contract_path)
+            self.assertEqual(context.code_worktree, contract_a.code_worktree)
+            self.assertNotEqual(context.code_worktree, contract_b.code_worktree)
+
+    def test_find_worktree_contract_matches_group_or_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract = self._write_task_contract(
+                coordination_root, code_repo, task_name="task-x", worktree_name="worktree-x"
+            )
+
+            found = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-x")
+            self.assertEqual(found, contract.contract_path)
+
+            missing = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-y")
+            self.assertIsNone(missing)
 
     def test_worktree_provider_start_passes_grepai_worktree_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
