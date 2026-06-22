@@ -57,6 +57,28 @@ class TokenSample(BaseModel):
     cumulative: int
 
 
+class GateNode(BaseModel):
+    """A durable gate materialized into the projection (slice 6c): the dashboard's
+    review surface for a decision point on a lifecycle.
+
+    Distinct from the event-derived ``ask`` proto-gate -- this is the persisted
+    ``GateRecord`` (``controlplane``) the operator acts on. ``decisions`` is the set
+    of verbs the cockpit may POST for an open gate (empty once decided), so the UI
+    renders the affordances straight from the reducer, never inferring them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: str
+    state: str
+    decidedBy: str | None = None
+    decidedVia: str | None = None
+    decisions: list[str] = Field(default_factory=list)
+    packet: dict[str, Any] = Field(default_factory=dict)
+    ts: str
+
+
 class LifecycleProjection(BaseModel):
     """One lifecycle's resolved state, folded from its event log.
 
@@ -84,6 +106,9 @@ class LifecycleProjection(BaseModel):
     inferred: bool = False
     # The latest open block ask (the proto-gate); slice 06 materializes the record.
     ask: dict[str, Any] | None = None
+    # The durable gate materialized from the GateStore (slice 6c): the dashboard's
+    # review surface. None when the lifecycle has no open gate.
+    gate: GateNode | None = None
     actions: list[ActionAvailability] = Field(default_factory=list)
     # The cumulative-token fuel gauge, folded from the log's tool.completed events.
     tokenSeries: list[TokenSample] = Field(default_factory=list)
@@ -344,6 +369,39 @@ class TaskCodeExampleNode(BaseModel):
     snippet: str = ""
 
 
+class TaskSubTaskRefNode(BaseModel):
+    """One slice in a master's series index -- the drill-in row (slice 6g).
+
+    Mirrors ``tasks.document.SubTaskRef``: ``status`` drives the index marker and ``file`` is the
+    drill-in match key (its stem resolves to the slice document's slug).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    number: str
+    name: str
+    file: str = ""
+    status: str
+    scope: str = ""
+    # When `file` points at another master (a parallel/external series), the contract-paired lifecycle
+    # it links to — the dashboard renders such a row as a "→" cross-series jump (slice 6g). Null for an
+    # in-series slice row.
+    linkedLifecycleId: str | None = None
+
+
+class TaskSectionNode(BaseModel):
+    """One ordered section of a master's render plan: freeform prose or a generated block (6g).
+
+    Mirrors ``tasks.document.Section`` so the master overview renders its bespoke sections in order.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    heading: str
+    body: str = ""
+
+
 class TaskDocNode(BaseModel):
     """A task document's progress, keyed by lifecycle (slice 3c, surface 7).
 
@@ -376,6 +434,14 @@ class TaskDocNode(BaseModel):
     decisions: list[TaskDecisionNode] = Field(default_factory=list)
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
+    # Master-only (kind == "master"): the series index + the ordered render plan. A master carries
+    # no lifecycleId of its own (schema) -- it is contract-paired to the series lifecycle by the
+    # reader (slice 6g). Empty for light/subTask docs.
+    subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
+    sections: list[TaskSectionNode] = Field(default_factory=list)
+    # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
+    # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
+    masterLifecycleId: str | None = None
 
 
 class SeriesSubTaskNode(BaseModel):

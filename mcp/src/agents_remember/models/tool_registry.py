@@ -29,6 +29,12 @@ from agents_remember.models.benchmarks import (
 )
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
+from agents_remember.models.gates import (
+    GateCreateResponse,
+    GateDecideResponse,
+    GateListResponse,
+    GateWaitResponse,
+)
 from agents_remember.models.lifecycle import (
     LifecycleBlockResponse,
     LifecycleEndResponse,
@@ -119,4 +125,8 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "switch_lifecycle": SwitchLifecycleResponse,
     "lifecycle_phase": LifecyclePhaseResponse,
     "task_doc": TaskDocResponse,
+    "gate_create": GateCreateResponse,
+    "gate_decide": GateDecideResponse,
+    "gate_wait": GateWaitResponse,
+    "gate_list": GateListResponse,
 }

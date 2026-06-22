@@ -8,11 +8,13 @@ import { dashboardStore, useDashboard } from "../data/store";
 import { connectEvents, connectState } from "../data/stream";
 import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
+import { Chats } from "../panels/Chats";
 import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
 import { Hangar } from "../panels/Hangar";
+import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
 import { Topology } from "../panels/Topology";
@@ -22,9 +24,10 @@ import { Topology } from "../panels/Topology";
 // visible), a switchable centre viewport (Operations / Engine Room / Memory / Topology / Hangar),
 // and a persistent right rail (the event river ticker). The mode bar selects the viewport.
 // Selection is ephemeral UI state held here and shared across panels and views.
-// Slice 5f S1 (§4.1): the two "machine map" views (Engine Room / Topology) drop the rails and span
-// the full body width; the top-bar caution stays visible so an alarm is never hidden.
-type View = "operations" | "engine" | "memory" | "topology" | "hangar";
+// Slice 5f S1 (§4.1): the "machine map" views (Engine Room / Topology) and the Chats terminal
+// (slice 6e) drop the rails and span the full body width; the top-bar caution stays visible so an
+// alarm is never hidden.
+type View = "operations" | "engine" | "memory" | "topology" | "hangar" | "chats";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "operations", label: "Operations" },
@@ -32,6 +35,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "memory", label: "Memory" },
   { id: "topology", label: "Topology" },
   { id: "hangar", label: "Hangar" },
+  { id: "chats", label: "Chats" },
 ];
 
 // Shell layout (slice 5d: co-located Panda css). The shell pins to the viewport so the top + mode
@@ -150,6 +154,17 @@ const viewport = css({
   minHeight: "0",
   overflow: "hidden", // the viewport does not scroll — its panel scrolls on its own
 });
+// Chats is kept mounted across every view (hidden via display, never unmounted) so the xterm
+// instance, its scrollback buffer, and the live WebSocket survive a view switch — the cure for
+// "switching away throws the terminal away." Cheap: the heavy xterm chunk is lazy and loads once a
+// session opens, and re-entry is instant (no remount / re-init).
+const chatsLayer = css({
+  display: "flex",
+  flexDirection: "column",
+  flex: "1",
+  minHeight: "0",
+  minWidth: "0",
+});
 
 // Cockpit wires the live SSE streams, then renders the presentational shell. The shell is split
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
@@ -164,8 +179,9 @@ export function CockpitShell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const animate = useShouldAnimate();
 
-  // The machine-map views span full width: the rails hide and the view's own layout breathes.
-  const fullBleed = view === "engine" || view === "topology";
+  // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
+  // layout breathes.
+  const fullBleed = view === "engine" || view === "topology" || view === "chats";
 
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
@@ -195,7 +211,16 @@ export function CockpitShell() {
           </motion.aside>
         )}
         <main className={cx(viewport, "viewport")} data-view={view}>
-          <ViewBody view={view} selectedId={selectedId} onOpen={open} />
+          {view !== "chats" && <ViewBody view={view} selectedId={selectedId} onOpen={open} />}
+          {/* Chats is never unmounted — only hidden — so the xterm buffer + live WebSocket survive a
+              view switch instead of being re-created empty. See `chatsLayer`. */}
+          <div
+            className={chatsLayer}
+            style={{ display: view === "chats" ? "flex" : "none" }}
+            aria-hidden={view !== "chats"}
+          >
+            <Chats />
+          </div>
         </main>
         {!fullBleed && (
           <motion.aside
@@ -209,6 +234,10 @@ export function CockpitShell() {
         )}
       </div>
       <ModeBar items={VIEWS} value={view} onChange={setView} label="Views" />
+      {/* Slice 6f: a cockpit-wide composer that a text selection raises — send the selection (+ a
+          message) to a chat session as a context package. Mounted once here so it works on every view;
+          renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
+      <HighlightComposer onSent={() => setView("chats")} />
     </div>
   );
 }
@@ -231,9 +260,11 @@ function ViewBody({
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
+    // "chats" is intentionally not here — Chats is kept mounted in CockpitShell (hidden via CSS) so
+    // the live terminal survives a view switch; routing it through this switch would unmount it.
     case "operations":
     default:
-      return <DetailPanel selectedId={selectedId} />;
+      return <DetailPanel selectedId={selectedId} onOpenLifecycle={onOpen} />;
   }
 }
 

@@ -32,6 +32,7 @@ from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
+    read_gates,
     read_ledger,
     read_providers,
     read_route_coverage,
@@ -87,9 +88,10 @@ def project_and_write(
     root = observer_root(config)
     coordination_root = config.coordination_root
     sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces(config, moment)
+    enclosures = read_enclosures(coordination_root)
     projection = project_workspace(
         read_lifecycle_logs(root),
-        enclosures=read_enclosures(coordination_root),
+        enclosures=enclosures,
         providers=read_providers(config, now=moment),
         now=moment,
         drift_snapshots=read_drift_snapshots(coordination_root, now=moment),
@@ -99,10 +101,11 @@ def project_and_write(
         route_coverage=route_coverage,
         tool_reports=read_tool_reports(coordination_root, now=moment),
         ledgers=ledgers,
-        task_documents=read_task_documents(coordination_root, now=moment),
+        task_documents=read_task_documents(coordination_root, enclosures=enclosures, now=moment),
         series=read_series_documents(coordination_root, now=moment),
         engine_process_facts=read_engine_process_facts(coordination_root),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
+        gates=read_gates(coordination_root),
     )
     write_projection(root, projection)
     return projection

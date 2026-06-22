@@ -53,6 +53,10 @@ PUBLIC_TOOLS = (
     "switch_lifecycle",
     "lifecycle_phase",
     "task_doc",
+    "gate_create",
+    "gate_decide",
+    "gate_wait",
+    "gate_list",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 

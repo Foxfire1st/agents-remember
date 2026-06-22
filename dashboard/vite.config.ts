@@ -11,8 +11,10 @@ export default defineConfig({
   build: { outDir: "dist", emptyOutDir: true },
   server: {
     port: 5173,
+    // `ws: true` upgrades proxied WebSockets — the Mode B2 terminal bridge (`/api/terminal/{id}`,
+    // slice 6e) rides the same `/api` proxy as the SSE/HTTP channels onto the dashboard server.
     proxy: {
-      "/api": { target: "http://127.0.0.1:8765", changeOrigin: true },
+      "/api": { target: "http://127.0.0.1:8765", changeOrigin: true, ws: true },
     },
   },
 });

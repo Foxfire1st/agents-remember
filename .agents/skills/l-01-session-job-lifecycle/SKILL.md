@@ -232,6 +232,11 @@ Land the work. **Implementation approval is not commit approval.**
    Relay the proposed code, memory, and ledger commit messages.
 2. **Commit gate:** stop for explicit developer commit approval before any real commit or closeout
    apply. If required onboarding is missing, run the `c-05-create-or-update-onboarding-files` skill for the affected file and re-run the preview.
+   When the lifecycle is dashboard-connected, this gate is also enforced **server-side**: a durable
+   developer-attributed `closeout-approval` gate is the un-forgeable record of approval, and
+   `worktree_closeout_apply` refuses unless it is approved by the developer — an agent self-approval
+   never satisfies it. The `c-12-closeout` skill owns the opt-in gate choreography (`gate_create` /
+   `gate_wait`); gateless lifecycles keep this chat commit gate unchanged.
 3. On approval, the `c-09-git-worktree-manager` skill owns the external-memory invariant in order: commit code → refresh affected
    onboarding metadata to the new code commit → run memory quality control → commit memory content →
    update and commit the ledger.

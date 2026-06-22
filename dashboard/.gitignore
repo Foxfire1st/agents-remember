@@ -1,6 +1,8 @@
 node_modules/
 dist/
 *.local
+# Untracked per-branch dev proxy overrides (e.g. vite.dual-8766.mts → backend :8766); local-only.
+vite.dual-*.mts
 *.tsbuildinfo
 .DS_Store
 playwright-report/

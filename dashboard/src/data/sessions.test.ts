@@ -1,0 +1,103 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { deliverToSession, registerConnection, sendToSession, sessionStore } from "./sessions";
+import { bracketedPaste, sanitizeForInjection, type TerminalConnection } from "./terminal";
+
+// A controllable TerminalConnection: records injected input and exposes a settable output clock so the
+// submitAndConfirm loop can be driven to a "responded" state under fake timers.
+function fakeConn(): TerminalConnection & { inputs: string[]; outputAt: number } {
+  return {
+    inputs: [] as string[],
+    outputAt: 0,
+    sendInput(data: string) {
+      this.inputs.push(data);
+    },
+    sendResize() {},
+    whenReady() {
+      return Promise.resolve();
+    },
+    lastOutputAt() {
+      return this.outputAt;
+    },
+    dispose() {},
+  };
+}
+
+// The session registry store (slice 6e hardening) — the state that now survives a cockpit view
+// switch. Reset it between cases since the store is module-level (the whole point).
+beforeEach(() => sessionStore.setState({ sessions: [], activeId: null, count: 0 }));
+
+describe("sessionStore (6e hardening)", () => {
+  it("add appends a labelled session, bumps the ordinal, and activates it", () => {
+    sessionStore.getState().add("Terminal", "a");
+    sessionStore.getState().add("Claude Code", "b");
+    const state = sessionStore.getState();
+    expect(state.sessions).toEqual([
+      { id: "a", label: "Terminal 1" },
+      { id: "b", label: "Claude Code 2" },
+    ]);
+    expect(state.activeId).toBe("b");
+  });
+
+  it("close removes the session and clears activeId only when it was the active one", () => {
+    sessionStore.getState().add("Terminal", "a");
+    sessionStore.getState().add("Terminal", "b"); // active = b
+    sessionStore.getState().close("a"); // not active → activeId stays b
+    expect(sessionStore.getState().activeId).toBe("b");
+    sessionStore.getState().close("b"); // active → cleared
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(sessionStore.getState().activeId).toBeNull();
+  });
+
+  it("setActive switches the active session without touching the list", () => {
+    sessionStore.getState().add("Terminal", "a");
+    sessionStore.getState().add("Terminal", "b");
+    sessionStore.getState().setActive("a");
+    expect(sessionStore.getState().activeId).toBe("a");
+    expect(sessionStore.getState().sessions).toHaveLength(2);
+  });
+});
+
+describe("connection registry + deliverToSession (6f hardening)", () => {
+  it("queues sendToSession into pending and flushes in order once the terminal registers", () => {
+    const conn = fakeConn();
+    sendToSession("q1", "one");
+    sendToSession("q1", "two");
+    expect(conn.inputs).toEqual([]); // not registered yet → queued, not lost
+    registerConnection("q1", conn);
+    expect(conn.inputs).toEqual(["one", "two"]); // flushed in order on register
+    registerConnection("q1", null); // teardown clears the connection
+  });
+
+  it("waits for a late-registering terminal, then injects ONE sanitized bracketed paste and confirms", async () => {
+    vi.useFakeTimers();
+    try {
+      const conn = fakeConn();
+      const raw = "msg\x1abody\x1b[201~tail"; // a 0x1a suspend byte + a stray paste-end marker
+      const done = deliverToSession("race-1", raw);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(conn.inputs).toEqual([]); // nothing sent before the terminal exists (the create-then-send race)
+      registerConnection("race-1", conn);
+      await vi.advanceTimersByTimeAsync(0); // whenReady resolves → the package is injected
+      expect(conn.inputs[0]).toBe(bracketedPaste(sanitizeForInjection(raw))); // sanitized AND wrapped, composed
+      await vi.advanceTimersByTimeAsync(500); // paste-settle + CR-echo-settle → baseline captured
+      conn.outputAt = 1; // the harness responds (advances past the baseline of 0)
+      await vi.advanceTimersByTimeAsync(1800);
+      expect(await done).toBe("delivered");
+      registerConnection("race-1", null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resolves 'unconfirmed' (never hangs) when a terminal never registers", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = deliverToSession("never", "hi");
+      await vi.advanceTimersByTimeAsync(12_000); // CONNECTION_TIMEOUT_MS elapses with no registration
+      expect(await done).toBe("unconfirmed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

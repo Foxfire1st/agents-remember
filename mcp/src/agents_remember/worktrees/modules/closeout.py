@@ -3,12 +3,17 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from agents_remember.controlplane.enforcement import CloseoutGuard, evaluate_closeout_gate
+from agents_remember.controlplane.records import apply_gate
+from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     load_ledger,
     prepend_mapping,
     write_ledger,
 )
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
+from agents_remember.observer.events import now_iso
+from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
@@ -224,6 +229,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "route_overview_body_gate": route_overview_body_gate,
         "route_overviews_attested_no_impact": route_overview_body_gate["attested_no_impact"],
         "route_index_refresh": route_index_refresh,
+        "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract)),
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -282,6 +288,54 @@ def _closeout_approval_note(args: WorktreeArgs) -> str:
             "closeout requires --approval-note describing the developer's explicit commit approval"
         )
     return approval_note
+
+
+def _closeout_gate_guard(contract) -> CloseoutGuard | None:
+    """The lifecycle's closeout-gate verdict, or ``None`` when the lifecycle is gateless.
+
+    Reads the same gate log the dashboard writes -- the observer root under the
+    contract's coordination root, keyed by ``contract.lifecycle_id``. A pure read;
+    whether an unsatisfied verdict raises is the caller's choice, so the preview can
+    surface the verdict without failing.
+    """
+    if not contract.lifecycle_id:
+        return None
+    store = GateStore(observer_logs_root(contract.coordination_root))
+    return evaluate_closeout_gate(store.current(contract.lifecycle_id))
+
+
+def _enforce_closeout_gate(contract) -> CloseoutGuard | None:
+    """Server-side gate enforcement (slice 6b): block closeout on an unsatisfied gate.
+
+    A dashboard-opened ``closeout-approval`` gate is binding; a gateless lifecycle
+    falls back to the chat commit gate (``--approved`` + note), unchanged. The agent
+    cannot satisfy the gate itself: its own ``gate_decide`` is ``decidedBy="model"``,
+    which :func:`evaluate_closeout_gate` rejects.
+    """
+    guard = _closeout_gate_guard(contract)
+    if guard is not None and not guard.permitted:
+        raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
+    return guard
+
+
+def _mark_closeout_gate_applied(contract, gate_id: str) -> None:
+    """Append an ``applied`` snapshot so one approval cannot be replayed by a second closeout."""
+    store = GateStore(observer_logs_root(contract.coordination_root))
+    gate = store.current(contract.lifecycle_id).get(gate_id)
+    if gate is not None:
+        store.append(apply_gate(gate, now=now_iso()))
+
+
+def _closeout_gate_payload(guard: CloseoutGuard | None) -> dict[str, object]:
+    """How the preview/apply response reports gate enforcement to the commit-approval relay."""
+    if guard is None:
+        return {"enforced": False, "reason": "gateless lifecycle; chat commit approval governs"}
+    return {
+        "enforced": True,
+        "permitted": guard.permitted,
+        "gateId": guard.gate_id,
+        "reason": guard.reason,
+    }
 
 
 def _closeout_contract_context(contract):
@@ -393,6 +447,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if args.dry_run:
         return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     approval_note = _closeout_approval_note(args)
+    gate_guard = _enforce_closeout_gate(contract)
 
     worklist = closeout_changed_paths(contract)
     changed_paths = worklist["all"]
@@ -458,6 +513,8 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         ledger_commit=ledger_commit,
     )
     write_contract(contract.contract_path, updated)
+    if gate_guard is not None and gate_guard.gate_id is not None:
+        _mark_closeout_gate_applied(contract, gate_guard.gate_id)
     return WorktreeCommandResult(
         0,
         {
@@ -478,5 +535,6 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "route_overviews_stamped_without_body_review": stamped_overviews,
             "route_index_refresh": route_index_refresh,
             "memory_quality": memory_quality,
+            "closeout_gate": _closeout_gate_payload(gate_guard),
         },
     )

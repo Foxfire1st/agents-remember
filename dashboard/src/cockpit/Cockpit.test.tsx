@@ -45,3 +45,26 @@ describe("CockpitShell full-bleed machine-map views (5f S1)", () => {
     expect(container.querySelector(".rail--right")).not.toBeNull();
   });
 });
+
+describe("Chats persistence across view switches (6e hardening)", () => {
+  it("keeps <Chats> mounted (hidden) on other views and shows the same node on Chats", () => {
+    seed("engine-fleet");
+    const { container, getByRole } = render(<CockpitShell />);
+
+    // Default Operations view: Chats is already mounted but hidden — the live terminal it owns is
+    // never torn down, so a view switch can't throw the session's visuals away.
+    const chats = container.querySelector('[data-testid="chats"]');
+    expect(chats).not.toBeNull();
+    expect((chats?.parentElement as HTMLElement).style.display).toBe("none");
+
+    // Switching to Chats reveals the *same* element (it was never remounted).
+    fireEvent.click(getByRole("radio", { name: "Chats" }));
+    expect(container.querySelector('[data-testid="chats"]')).toBe(chats);
+    expect((chats?.parentElement as HTMLElement).style.display).toBe("flex");
+
+    // Leaving Chats hides it again without unmounting (still the same node).
+    fireEvent.click(getByRole("radio", { name: "Operations" }));
+    expect(container.querySelector('[data-testid="chats"]')).toBe(chats);
+    expect((chats?.parentElement as HTMLElement).style.display).toBe("none");
+  });
+});

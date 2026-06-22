@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { CockpitShell } from "../cockpit/Cockpit";
+import { TerminalSocketContext } from "../data/terminal";
+import { mockTerminalSocketFactory } from "./mockTerminalSocket";
 import { ScenarioPlayer } from "./ScenarioPlayer";
 import { SCENARIOS } from "./scenarios";
 
@@ -31,7 +33,9 @@ export function Bench() {
   ].filter((group) => group.entries.length > 0);
 
   return (
-    <>
+    // The dev mock socket makes the Chats view (slice 6e) render a live-looking terminal with no
+    // backend; production has no provider, so the real cockpit uses a same-origin WebSocket.
+    <TerminalSocketContext.Provider value={mockTerminalSocketFactory}>
       <div className="bench-overlay bench__picker">
         <label className="bench__picker-label" htmlFor="bench-scenario">
           scenario
@@ -58,6 +62,6 @@ export function Bench() {
       </div>
       <CockpitShell />
       <ScenarioPlayer key={scenario.name} scenario={scenario} />
-    </>
+    </TerminalSocketContext.Provider>
   );
 }

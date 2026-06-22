@@ -134,6 +134,16 @@
   min-width: 2.6rem;
   text-align: right;
 }
+.bench__picker select {
+  font: inherit;
+  font-size: 0.7rem;
+  background: var(--bg);
+  color: var(--amber);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
 .reference {
   display: flex;
   flex-direction: column;

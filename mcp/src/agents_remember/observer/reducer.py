@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, get_args
 
+from agents_remember.controlplane.records import DECISION_STATES, GateRecord
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
     INITIAL_PHASE,
@@ -39,6 +40,7 @@ from agents_remember.observer.projection import (
     EngineProcessEdge,
     EngineProcessFacts,
     EngineProcessNode,
+    GateNode,
     LandingRefNode,
     LedgerNode,
     LifecycleProjection,
@@ -102,6 +104,7 @@ def project_workspace(
     series: list[SeriesNode] | None = None,
     engine_process_facts: list[EngineProcessFacts] | None = None,
     engine_start_progress: list[dict[str, Any]] | None = None,
+    gates: list[GateRecord] | None = None,
     stalest_limit: int = 10,
 ) -> WorkspaceProjection:
     """Assemble the whole tree from already-read logs + structural + analytical snapshots.
@@ -119,6 +122,7 @@ def project_workspace(
     # the lifecycles they are -- not as nothing. (A runtime that emits no events leaves this as the
     # whole tree.) Fleeting + active lifecycles still come from the logs above.
     lifecycles = lifecycles + _persistent_lifecycles(enriched, lifecycles)
+    lifecycles = _attach_gates(lifecycles, gates or [])
     sidecars = sidecar_staleness or []
     engine_processes = build_engine_processes(
         engine_process_facts or [],
@@ -143,6 +147,7 @@ def project_workspace(
             drift_snapshots or [],
             setup_progress or [],
             engine_start_progress or [],
+            gates or [],
         ),
         engine_processes=engine_processes,
         stalest_limit=stalest_limit,
@@ -461,6 +466,7 @@ def build_attention_queue(
     drift_snapshots: list[DriftSnapshotNode],
     setup_progress: list[SetupProgressNode],
     start_progress: list[dict[str, Any]] | None = None,
+    gates: list[GateRecord] | None = None,
 ) -> list[AttentionItem]:
     """The home-screen attention queue: a ranked cross-section of what needs the human.
 
@@ -474,6 +480,7 @@ def build_attention_queue(
     """
     items = [
         *_lifecycle_attention(lifecycles),
+        *_gate_attention(gates or []),
         *_provider_attention(providers),
         *_drift_attention(drift_snapshots),
         *_setup_attention(setup_progress),
@@ -533,6 +540,55 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                 )
             )
     return items
+
+
+def _gate_node(gate: GateRecord) -> GateNode:
+    """Project one durable gate; an open gate exposes the decision verbs the cockpit can POST."""
+    return GateNode(
+        id=gate.id,
+        kind=gate.kind,
+        state=gate.state,
+        decidedBy=gate.decidedBy,
+        decidedVia=gate.decidedVia,
+        decisions=sorted(DECISION_STATES) if gate.state == "open" else [],
+        packet=gate.packet,
+        ts=gate.ts,
+    )
+
+
+def _attach_gates(
+    lifecycles: list[LifecycleProjection], gates: list[GateRecord]
+) -> list[LifecycleProjection]:
+    """Materialize each lifecycle's latest open gate onto its projection (slice 6c)."""
+    by_lifecycle: dict[str, list[GateRecord]] = {}
+    for gate in gates:
+        by_lifecycle.setdefault(gate.lifecycleId or "", []).append(gate)
+    attached: list[LifecycleProjection] = []
+    for lifecycle in lifecycles:
+        open_gates = [g for g in by_lifecycle.get(lifecycle.id, []) if g.state == "open"]
+        if open_gates:
+            latest = max(open_gates, key=lambda gate: gate.ts)
+            attached.append(lifecycle.model_copy(update={"gate": _gate_node(latest)}))
+        else:
+            attached.append(lifecycle)
+    return attached
+
+
+def _gate_attention(gates: list[GateRecord]) -> list[AttentionItem]:
+    """An open gate -- the operator must decide it (slice 6c)."""
+    return [
+        AttentionItem(
+            id=f"gate:{gate.id}",
+            kind="gate-open",
+            severity="warn",
+            lane="lifecycle",
+            title=f"Gate — {gate.kind}",
+            detail="awaiting your decision",
+            lifecycleId=gate.lifecycleId,
+        )
+        for gate in gates
+        if gate.state == "open"
+    ]
 
 
 def _provider_attention(providers: list[ProviderNode]) -> list[AttentionItem]:

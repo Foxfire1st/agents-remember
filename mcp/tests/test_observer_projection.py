@@ -21,6 +21,8 @@ from types import SimpleNamespace
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane.records import create_gate, decide_gate
+from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     prepend_mapping,
@@ -33,6 +35,7 @@ from agents_remember.observer.events import Event
 from agents_remember.observer.paths import (
     DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
+    observer_logs_root,
     observer_root,
 )
 from agents_remember.observer.projection import (
@@ -69,6 +72,7 @@ from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
+    read_gates,
     read_ledger,
     read_providers,
     read_route_coverage,
@@ -778,6 +782,78 @@ class AttentionQueueTests(unittest.TestCase):
         self.assertEqual(proj.analytics.attentionQueue, [])
 
 
+class GateProjectionTests(unittest.TestCase):
+    """Slice 6c: durable gates materialize onto the lifecycle + the attention queue."""
+
+    LATER = "2026-06-13T18:05:00+00:00"
+
+    def _open(self, *, gate_id: str = "G1", ts: str = T0):
+        return create_gate(
+            kind="closeout-approval", lifecycle_id="LC1", gate_id=gate_id, now=ts
+        )
+
+    def test_open_gate_materializes_onto_lifecycle(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[self._open()],
+        )
+        gate = proj.lifecycles[0].gate
+        assert gate is not None
+        self.assertEqual((gate.id, gate.kind, gate.state), ("G1", "closeout-approval", "open"))
+        self.assertEqual(gate.decisions, ["approve", "cancel", "reject", "request-revision"])
+
+    def test_decided_gate_is_not_attached(self) -> None:
+        decided = decide_gate(
+            self._open(), decision="approve", by="developer", via="dashboard",
+            note=None, now=self.LATER,
+        )
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[decided],
+        )
+        self.assertIsNone(proj.lifecycles[0].gate)
+
+    def test_latest_open_gate_wins(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[self._open(gate_id="A", ts=T0), self._open(gate_id="B", ts=self.LATER)],
+        )
+        gate = proj.lifecycles[0].gate
+        assert gate is not None
+        self.assertEqual(gate.id, "B")
+
+    def test_open_gate_adds_attention_item(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            gates=[self._open()],
+        )
+        item = next(i for i in proj.analytics.attentionQueue if i.kind == "gate-open")
+        self.assertEqual((item.severity, item.lane, item.lifecycleId), ("warn", "lifecycle", "LC1"))
+
+    def test_no_gates_leaves_lifecycle_and_queue_clean(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH
+        )
+        self.assertIsNone(proj.lifecycles[0].gate)
+        self.assertEqual([i for i in proj.analytics.attentionQueue if i.kind == "gate-open"], [])
+
+
+class GateReaderTests(unittest.TestCase):
+    def test_reads_lifecycle_and_workspace_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coord = Path(tmp)
+            store = GateStore(observer_logs_root(coord))
+            store.append(
+                create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id="G1", now=T0)
+            )
+            store.append(create_gate(kind="alarm-ack", lifecycle_id=None, gate_id="W1", now=T0))
+            self.assertEqual({g.id for g in read_gates(coord)}, {"G1", "W1"})
+
+    def test_missing_root_reads_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(read_gates(Path(tmp)), [])
+
+
 class DriftSnapshotReaderTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -1326,7 +1402,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                 ],
             ),
         )
-        nodes = read_task_documents(self.coord, now=FRESH)
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
         self.assertEqual(len(nodes), 1)
         self.assertEqual(
             (nodes[0].lifecycleId, nodes[0].stepsDone, nodes[0].stepsTotal, nodes[0].currentStep),
@@ -1337,29 +1413,67 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         root = self.coord / "tasks" / "repo-a" / "demo"
         write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # no lifecycleId
         (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
-        self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
+        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
 
-    def test_master_is_not_projected_as_a_lifecycle(self) -> None:
-        # A master spans the series, carries no lifecycleId (schema-enforced), and must
-        # never surface as a lifecycle node in the observer projection.
+    def _master(self) -> TaskDocument:
+        return TaskDocument.model_validate({
+            "id": "series", "slug": "series", "title": "Series", "kind": "master",
+            "repo": "repo-a", "createdAt": "2026-01-01T00:00",
+            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+        })
+
+    def test_master_without_a_contract_is_skipped(self) -> None:
+        # A master carries no lifecycleId (schema-enforced). With no sibling contract to pair it
+        # to a series lifecycle, it has no dashboard home and is skipped.
         root = self.coord / "tasks" / "repo-a" / "series"
-        master = TaskDocument.model_validate(
-            {
-                "id": "series",
-                "slug": "series",
-                "title": "Series",
-                "kind": "master",
-                "repo": "repo-a",
-                "createdAt": "2026-01-01T00:00",
-                "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
-                "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
-            }
+        write_task_doc(root, self._master())
+        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+
+    def test_master_is_contract_paired_to_series_lifecycle(self) -> None:
+        # Slice 6g: a master inherits the lifecycleId of the contract in its task folder, and
+        # surfaces its series index (subTasks) + ordered render plan (sections).
+        root = self.coord / "tasks" / "repo-a" / "series"
+        write_task_doc(root, self._master())
+        enclosure = _enclosure(
+            enclosure=(root / "contract.md").as_posix(), lifecycleId="LC-SERIES"
         )
-        write_task_doc(root, master)
-        self.assertEqual(read_task_documents(self.coord, now=FRESH), [])
+        nodes = read_task_documents(self.coord, enclosures=[enclosure], now=FRESH)
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        self.assertEqual((node.kind, node.lifecycleId), ("master", "LC-SERIES"))
+        self.assertEqual([ref.number for ref in node.subTasks], ["1"])
+        self.assertEqual([section.kind for section in node.sections], ["subTasks"])
+
+    def test_cross_master_links_resolve_to_lifecycles(self) -> None:
+        # Slice 6g: a parent master whose subTask `file` points at a child master resolves the child's
+        # lifecycle (the "→" jump); the child's `master` ref resolves the parent's (the breadcrumb).
+        parent_dir = self.coord / "tasks" / "repo-a" / "parent"
+        child_dir = self.coord / "tasks" / "repo-a" / "child"
+        write_task_doc(parent_dir, TaskDocument.model_validate({
+            "id": "p", "slug": "parent", "title": "Parent", "kind": "master", "repo": "repo-a",
+            "createdAt": "2026-01-01T00:00",
+            "subTasks": [{"number": "06", "name": "Child series", "file": "../child/task.md",
+                          "status": "inProgress"}],
+        }))
+        write_task_doc(child_dir, TaskDocument.model_validate({
+            "id": "c", "slug": "child", "title": "Child", "kind": "master", "repo": "repo-a",
+            "createdAt": "2026-01-01T00:00", "master": "../parent/task.md",
+            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+        }))
+        enclosures = [
+            _enclosure(enclosure=(parent_dir / "contract.md").as_posix(), lifecycleId="LC-PARENT"),
+            _enclosure(enclosure=(child_dir / "contract.md").as_posix(), lifecycleId="LC-CHILD"),
+        ]
+        nodes = read_task_documents(self.coord, enclosures=enclosures, now=FRESH)
+        parent = next(n for n in nodes if n.lifecycleId == "LC-PARENT")
+        child = next(n for n in nodes if n.lifecycleId == "LC-CHILD")
+        self.assertEqual(parent.subTasks[0].linkedLifecycleId, "LC-CHILD")
+        self.assertIsNone(parent.masterLifecycleId)
+        self.assertEqual(child.masterLifecycleId, "LC-PARENT")
 
     def test_missing_tasks_dir_is_empty(self) -> None:
-        self.assertEqual(read_task_documents(self.coord / "nope", now=FRESH), [])
+        self.assertEqual(read_task_documents(self.coord / "nope", enclosures=[], now=FRESH), [])
 
     def test_build_analytics_includes_task_documents(self) -> None:
         node = TaskDocNode(
