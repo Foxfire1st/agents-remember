@@ -116,8 +116,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         auto-attaches the repo overview and the governing route-overview chain, deduplicated
         per session (served once, re-served only when changed; pass refresh=true to force
         re-serve, e.g. after a compaction). Route-index rule: a file inside sourceScope but
-        absent from coveredFiles reports missing without probing. Prefer this over a native
-        read for understanding files in a managed repo."""
+        absent from coveredFiles reports missing without probing. In a managed repo this is
+        the read for the research phase (the lifecycle up to the build/job decision): use it
+        instead of a native read to get each file paired with its onboarding plus the
+        repository and governing route overviews. Native read is the edit precondition once
+        building begins."""
         return read_ar_files_payload(config, repo_id, files, refresh=refresh)
 
     @server.tool()

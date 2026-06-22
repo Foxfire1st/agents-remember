@@ -20,7 +20,9 @@ Choose the next substrate by the missing context bundle:
   CodeGraphContext over the configured code repo when available.
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
-  onboarding plus bounded source confirmation.
+  onboarding plus bounded source confirmation. Prefer the `read_ar_files` MCP tool for the
+  paired onboarding + source read (mirrors how Semantics prefers GrepAI and Relationship
+  prefers CodeGraphContext).
 
 Substrates can be chained. A triage prompt may start with Relationship to find
 the neighborhood around a ticket anchor, then switch to Intent to prove the
@@ -128,6 +130,10 @@ Use direct source reads only to confirm specific anchors CGC surfaced.
 
 ## Intent: Onboarding And Source
 
+The `read_ar_files` MCP tool performs this entire paired-read recipe in one batch call: each
+source path is returned with its deterministic sidecar, plus the repository overview and the
+governing route-overview chain auto-attached.
+
 Use Intent when the route, file, or anchor is known and their relationships (CGC) are
 understood. The missing context is the code's contract, invariant, behavioral 
 expectation, branch-valid truth, or fix direction.
@@ -151,6 +157,16 @@ Stop confirmation as soon as source proves the subsystem boundary, immediate
 cause, user-facing consequence, and next fix direction. After that, do not read
 more overviews, sidecars, provider results, or broad searches unless the packet
 names an unresolved source question.
+
+### Rules:
+
+- During the research phase (the lifecycle up to the build/job decision), read managed-repo
+  source with `read_ar_files`, not the native read tool — one call returns each file paired
+  with its onboarding plus the repository and governing route overviews (the recipe above,
+  batched and observable).
+- Native read is reserved as the edit precondition once building begins.
+- Keep a running count of your `read_ar_files` calls and list them as research evidence,
+  alongside Semantics (GrepAI) and Relationship (CGC) queries.
 
 ## Route Index Semantics
 

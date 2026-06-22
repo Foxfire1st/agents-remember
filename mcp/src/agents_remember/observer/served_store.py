@@ -7,12 +7,14 @@ does not re-spam onboarding the model already holds. The ledger survives a
 context compaction (the same lifecycle continues in place), so the dedup state is
 on-disk, not only in process memory.
 
-A compaction normally also resets the served set (so onboarding the model lost
-to truncation is re-served), but the SessionStart / PreCompact hook that WRITES
-the ``compact-reset.json`` marker is deferred to slice-07 S5 with Probe B and
-does NOT exist yet; until then ``refresh=true`` is the working manual reset. The
-controller-side consumer of that marker already exists
-(``read_files._maybe_reset_served``).
+A compaction would otherwise leave the served set stale (onboarding the model
+lost to truncation would not re-serve), but a session-hook producer for the
+``compact-reset.json`` marker is **not** planned: compaction-reset is a
+fresh-worker / lifecycle concern (small work -> new worker -> new lifecycle ->
+fresh ledger) deferred to the post-3.0 agentic-control-plane follow-up, and
+``clear`` / a new chat already yields a fresh lifecycle and ledger. Until then
+``refresh=true`` is the working manual reset; the controller-side marker consumer
+(``read_files._maybe_reset_served``) stays as defensive scaffolding.
 
 Served records live in ``<observer_root>/lifecycles/<lifecycle-id>/served.jsonl``
 beside that lifecycle's ``events.jsonl`` / ``gates.jsonl`` -- the GateStore

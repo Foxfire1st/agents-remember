@@ -445,12 +445,15 @@ def _maybe_reset_served(
     """Clear the served set on an explicit ``refresh`` or a compaction marker.
 
     This is the MCP-side CONSUMER of the marker
-    (``<observer_root>/workspace/compact-reset.json``); the SessionStart /
-    PreCompact hook that WRITES it is deferred to slice-07 S5 with Probe B and
-    does NOT exist yet. Until then, ``refresh=true`` is the working manual
-    reset. When the producer lands, this consumer follows the
-    ``read_setup_progress``-style "absent == no signal" idiom and deletes the
-    marker after consuming it so it fires once.
+    (``<observer_root>/workspace/compact-reset.json``); no producer writes it
+    today and one is **not** planned at the session-hook level. Compaction-reset
+    is a fresh-worker / lifecycle concern (small work -> new worker -> new
+    lifecycle -> fresh ledger) deferred to the post-3.0 agentic-control-plane
+    follow-up; ``clear`` / a new chat already yields a fresh lifecycle and ledger.
+    Until then ``refresh=true`` is the working manual reset, and this consumer
+    stays as defensive scaffolding: if a marker ever appears it follows the
+    ``read_setup_progress``-style "absent == no signal" idiom and deletes it
+    after consuming it so it fires once.
     """
     if amb is None or lifecycle_id is None:
         return

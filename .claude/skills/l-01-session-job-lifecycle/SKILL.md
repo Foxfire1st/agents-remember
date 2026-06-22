@@ -133,14 +133,21 @@ deeper research that the agreed frame requires. The `tasks/AGENTS.md`
 collaboration doctrine applies here in plain chat, before any task file or task
 format exists.
 
+**Read tool for this phase.** Until the build-mode decision (Phase 3), read managed-repo source
+through the `read_ar_files` MCP tool, not the harness's native read — it returns paired
+source+onboarding plus the repository/route overviews in one observable, lifecycle-attributed
+call, and you keep a running count of those calls as evidence. Native read is the edit
+precondition in Phase 4.
+
 1. **Gather evidence for the reframe** through reading the
    `c-04-retrieval-strategy-router` skill. Pick the strategy by the question:
    - _Semantics_ (grepai over onboarding) — "where does X live / what handles Y."
    - _Relationship_ (cgc) — callers/callees/dependencies/impact.
    - _Intent_ (onboarding + bounded source confirmation) — hidden contracts, invariants,
      branch-valid truths, behavioral expectations. This is a workflow of paired
-     source+onboarding reads: read the source file together with its verified onboarding.
-     Use the memory-repo root `overview.md` file to gain a bird's-eye view of a code repo.
+     source+onboarding reads via the `read_ar_files` MCP tool: one call pairs each source
+     file with its verified onboarding and auto-attaches the repository overview + governing
+     route-overview chain (the bird's-eye view).
 2. **Reframe** the request through `tasks/AGENTS.md`: distinguish the surface
    request, deeper objective, highest-leverage framing, assumptions, boundaries,
    invariants, and truth gaps. Do not rush a statement into a plan.
@@ -152,6 +159,7 @@ format exists.
    `deep-research-report-template.md` for the report shape; the lifecycle owns
    the required proof categories, while the template owns evidence formatting.
 5. The deeper research report must list its proof and tie evidence to the claim it supports:
+   - `read_ar_files` calls (paired source+onboarding reads — the running count)
    - onboarding docs read
    - semantic queries performed
    - code graph queries performed
