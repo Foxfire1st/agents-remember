@@ -283,6 +283,34 @@ def _gate_payloads(config) -> dict[str, dict]:
     }
 
 
+def _operator_inbox_payloads(config) -> dict[str, dict]:
+    """External-chat inbox substrate: post, poll, then consume one entry."""
+    posted = tools.operator_inbox_post_payload(
+        config,
+        lifecycle_id="inbox-demo",
+        agent_id="agent-a",
+        gate_id="gate-demo",
+        ask="Continue?",
+        response="Yes, proceed.",
+        created_by="developer",
+        created_via="dashboard",
+    )
+    return {
+        "operator_inbox_post": posted,
+        "operator_inbox_poll": tools.operator_inbox_poll_payload(
+            config,
+            lifecycle_id=None,
+            agent_id="agent-a",
+        ),
+        "operator_inbox_consume": tools.operator_inbox_consume_payload(
+            config,
+            entry_id=posted["entryId"],
+            consumed_by="model",
+            consumed_via="cli",
+        ),
+    }
+
+
 def _allowed_keys(model) -> set[str]:
     """Serialized keys the model is allowed to emit (field names plus aliases)."""
     allowed: set[str] = set()
@@ -302,8 +330,8 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(6)]
-        base, worktree, carryover, lifecycle, task_doc_root, gate_root = (
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(7)]
+        base, worktree, carryover, lifecycle, task_doc_root, gate_root, inbox_root = (
             Path(d) for d in cls._temp_dirs
         )
         cls.payloads = {}
@@ -313,6 +341,7 @@ class ToolResponseConformanceTests(unittest.TestCase):
         cls.payloads.update(_lifecycle_payloads(lifecycle))
         cls.payloads.update(_task_doc_payloads(task_doc_root))
         cls.payloads.update(_gate_payloads(_base_fixture(gate_root)))
+        cls.payloads.update(_operator_inbox_payloads(_base_fixture(inbox_root)))
 
     @classmethod
     def tearDownClass(cls) -> None:

@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Button, Dialog, TextArea, TextField } from "react-aria-components";
 
 import { css, cx } from "../../styled-system/css";
+import { postOperatorInbox } from "../data/operatorInbox";
 import {
   deliverToSession,
   findSessionForLifecycle,
@@ -12,7 +13,7 @@ import {
 import type { GateNode } from "../types/projection";
 
 type ResponseMode = "no" | "chat";
-type GateResponseStatus = "idle" | "sending" | "delivered" | "unconfirmed" | "missing";
+type GateResponseStatus = "idle" | "sending" | "delivered" | "inbox" | "unconfirmed" | "inbox-error";
 
 const shell = css({
   display: "grid",
@@ -155,8 +156,9 @@ function packageResponse(
 function statusText(status: GateResponseStatus, label: string | undefined): string {
   if (status === "sending") return "Sending...";
   if (status === "delivered") return label ? `Sent to ${label}.` : "Sent.";
-  if (status === "missing") return "No hosted chat is attached.";
+  if (status === "inbox") return "Queued in external inbox.";
   if (status === "unconfirmed") return "Couldn't confirm delivery. Retry?";
+  if (status === "inbox-error") return "Couldn't queue external inbox response. Retry?";
   return "";
 }
 
@@ -194,18 +196,22 @@ export function GateResponder({
     const text = response.trim();
     if (!text || sendingRef.current) return;
     const target = findSessionForLifecycle(lifecycleId);
-    if (!target) {
-      setStatus("missing");
-      return;
-    }
     sendingRef.current = true;
     setStatus("sending");
     try {
-      const result: DeliveryStatus = await deliverToSession(
-        target.id,
-        packageResponse(lifecycleId, gateNode, ask, text),
-      );
-      setStatus(result === "delivered" ? "delivered" : "unconfirmed");
+      const packaged = packageResponse(lifecycleId, gateNode, ask, text);
+      if (target) {
+        const result: DeliveryStatus = await deliverToSession(target.id, packaged);
+        setStatus(result === "delivered" ? "delivered" : "unconfirmed");
+      } else {
+        const result = await postOperatorInbox({
+          lifecycleId,
+          gateId: gateNode?.id,
+          ask: fullRequest,
+          response: text,
+        });
+        setStatus(result === "posted" ? "inbox" : "inbox-error");
+      }
     } finally {
       sendingRef.current = false;
     }
@@ -246,7 +252,7 @@ export function GateResponder({
           </pre>
           <div className={route}>
             <span data-testid="gate-route">
-              {attachedSession ? `To ${attachedSession.label}` : `No hosted chat attached to ${lifecycleId}`}
+              {attachedSession ? `To ${attachedSession.label}` : `External inbox for ${lifecycleId}`}
             </span>
             {canAttachActive && activeSession ? (
               <Button
@@ -262,7 +268,7 @@ export function GateResponder({
             <Button
               className={respondButton}
               onPress={() => void send("Proceed.")}
-              isDisabled={!attachedSession || status === "sending"}
+              isDisabled={status === "sending"}
               data-testid="gate-respond-yes"
             >
               Yes
@@ -290,7 +296,7 @@ export function GateResponder({
             {note ? (
               <span
                 className={statusNote}
-                role={status === "unconfirmed" || status === "missing" ? "alert" : "status"}
+                role={status === "unconfirmed" || status === "inbox-error" ? "alert" : "status"}
                 data-testid="gate-respond-status"
               >
                 {note}
@@ -302,10 +308,10 @@ export function GateResponder({
               <Button
                 className={respondButton}
                 onPress={() => void send(draft)}
-                isDisabled={!attachedSession || status === "sending" || !draft.trim()}
+                isDisabled={status === "sending" || !draft.trim()}
                 data-testid="gate-respond-send"
               >
-                {status === "sending" ? "Sending..." : status === "unconfirmed" ? "Retry" : "Send"}
+                {status === "sending" ? "Sending..." : status === "unconfirmed" || status === "inbox-error" ? "Retry" : "Send"}
               </Button>
             ) : null}
           </div>

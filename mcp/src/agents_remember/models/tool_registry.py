@@ -53,6 +53,11 @@ from agents_remember.models.memory import (
     MemoryQualityCheckResponse,
     RouteIndexRefreshResponse,
 )
+from agents_remember.models.operator_inbox import (
+    OperatorInboxConsumeResponse,
+    OperatorInboxPollResponse,
+    OperatorInboxPostResponse,
+)
 from agents_remember.models.providers import (
     CGCCalleesResponse,
     CGCCallersResponse,
@@ -131,4 +136,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "gate_decide": GateDecideResponse,
     "gate_wait": GateWaitResponse,
     "gate_list": GateListResponse,
+    "operator_inbox_post": OperatorInboxPostResponse,
+    "operator_inbox_poll": OperatorInboxPollResponse,
+    "operator_inbox_consume": OperatorInboxConsumeResponse,
 }

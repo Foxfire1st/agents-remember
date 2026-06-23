@@ -58,6 +58,9 @@ PUBLIC_TOOLS = (
     "gate_decide",
     "gate_wait",
     "gate_list",
+    "operator_inbox_post",
+    "operator_inbox_poll",
+    "operator_inbox_consume",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 

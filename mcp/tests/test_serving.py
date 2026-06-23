@@ -30,6 +30,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.config import ConfigError, McpRuntimeConfig
@@ -305,6 +306,43 @@ class ActionGateTests(unittest.TestCase):
             response = client.post("/api/actions/approve", json={"target": "L1"})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["status"], "no-open-gate")
+
+    def test_api_operator_inbox_records_developer_response(self) -> None:
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/operator-inbox",
+                json={
+                    "lifecycleId": "L1",
+                    "agentId": "agent-a",
+                    "gateId": "G1",
+                    "ask": "Continue?",
+                    "response": "Yes, proceed.",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["operation"], "operator_inbox_post")
+        self.assertEqual(body["state"], "pending")
+
+        store = OperatorInboxStore(observer_logs_root(self.tmp))
+        entries = store.list_pending(lifecycle_id="L1", agent_id="agent-a")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].gateId, "G1")
+        self.assertEqual(entries[0].ask, "Continue?")
+        self.assertEqual(entries[0].response, "Yes, proceed.")
+        self.assertEqual(entries[0].createdBy, "developer")
+        self.assertEqual(entries[0].createdVia, "dashboard")
+
+    def test_api_operator_inbox_requires_address(self) -> None:
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/operator-inbox",
+                json={"ask": "Continue?", "response": "Yes, proceed."},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "bad-address")
 
 
 class StaticTests(unittest.TestCase):

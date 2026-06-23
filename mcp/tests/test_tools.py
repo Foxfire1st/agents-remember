@@ -306,6 +306,9 @@ class McpToolTests(unittest.TestCase):
             "memory_carryover_apply",
             "codex_benchmark_prepare",
             "codex_benchmark_run",
+            "operator_inbox_post",
+            "operator_inbox_poll",
+            "operator_inbox_consume",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
         self.assertNotIn("cgc_query", PUBLIC_TOOLS)

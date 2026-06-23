@@ -38,6 +38,9 @@ from .tools import (
     memory_carryover_plan_payload,
     memory_init_payload,
     memory_quality_check_payload,
+    operator_inbox_consume_payload,
+    operator_inbox_poll_payload,
+    operator_inbox_post_payload,
     ping_payload,
     provider_diagnostics_payload,
     provider_status_payload,
@@ -925,6 +928,53 @@ def create_server(config: McpRuntimeConfig) -> Any:
         """List the current (folded) gates for a lifecycle, or the workspace gates when no
         lifecycle id is given. Read-only."""
         return gate_list_payload(config, lifecycle_id=lifecycle_id)
+
+    @server.tool()
+    def operator_inbox_post(
+        ask: str,
+        response: str,
+        lifecycle_id: str | None = None,
+        agent_id: str | None = None,
+        gate_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Queue an operator response for an external chat to poll. Supply lifecycle_id
+        and/or agent_id as the mailbox key. Over MCP this route is attributed to the
+        model via cli; trusted dashboard code can call the payload builder directly with
+        developer/dashboard attribution."""
+        return operator_inbox_post_payload(
+            config,
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
+            gate_id=gate_id,
+            ask=ask,
+            response=response,
+            created_by="model",
+            created_via="cli",
+        )
+
+    @server.tool()
+    def operator_inbox_poll(
+        lifecycle_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """List pending external-chat inbox entries for a lifecycle_id and/or agent_id
+        mailbox key. Consuming an entry is explicit via operator_inbox_consume."""
+        return operator_inbox_poll_payload(
+            config,
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
+        )
+
+    @server.tool()
+    def operator_inbox_consume(entry_id: str) -> dict[str, Any]:
+        """Mark an external-chat inbox entry consumed. The entry remains in the append-only
+        inbox log; repeated consume calls are idempotent."""
+        return operator_inbox_consume_payload(
+            config,
+            entry_id=entry_id,
+            consumed_by="model",
+            consumed_via="cli",
+        )
 
     return server
 

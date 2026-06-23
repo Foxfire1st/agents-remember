@@ -17,6 +17,10 @@ Endpoints:
   (``approve`` / ``reject`` / ``request-revision`` / ``cancel``) are recorded as
   developer-attributed gate decisions (slice 6b), which server-side closeout enforcement
   makes binding. Routing maps :class:`ActionOutcome` onto the response; see ``serving/actions.py``.
+* ``POST /api/operator-inbox``  -- the external-chat gate response return channel. The
+  dashboard writes a developer response to the append-only operator inbox when no hosted chat
+  session can be injected into; external agents poll/consume through the MCP ``operator_inbox_*``
+  tools.
 
 Local-first posture: bind ``127.0.0.1`` only (the CLI default) with no auth in v1. This is a
 cockpit for the developer's own machine; exposing it (an SSH tunnel, a reverse proxy) hands an
@@ -52,9 +56,10 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle
+from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
@@ -224,6 +229,16 @@ class TerminalOpenRequest(BaseModel):
     lifecycle_id: str | None = None
 
 
+class OperatorInboxPostRequest(BaseModel):
+    """Body of ``POST /api/operator-inbox`` for non-hosted chat replies."""
+
+    lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
+    agent_id: str | None = Field(default=None, alias="agentId")
+    gate_id: str | None = Field(default=None, alias="gateId")
+    ask: str
+    response: str
+
+
 def resolve_terminal_launch(
     kind: str,
     *,
@@ -339,6 +354,26 @@ def create_app(
                 content={**outcome.body, "gate": gate}, status_code=outcome.status_code
             )
         return JSONResponse(content=outcome.body, status_code=outcome.status_code)
+
+    @app.post("/api/operator-inbox")
+    def api_operator_inbox(request: OperatorInboxPostRequest) -> Response:
+        # Task 10 external-chat path: a dashboard response with no hosted session is written to the
+        # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
+        # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
+        try:
+            payload = operator_inbox_post_payload(
+                config,
+                lifecycle_id=request.lifecycle_id,
+                agent_id=request.agent_id,
+                gate_id=request.gate_id,
+                ask=request.ask,
+                response=request.response,
+                created_by="developer",
+                created_via="dashboard",
+            )
+        except ValueError as exc:
+            return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
+        return JSONResponse(content=payload, status_code=200)
 
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:
