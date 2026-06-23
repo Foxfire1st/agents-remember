@@ -104,7 +104,7 @@ export function mountConstel(
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     buildStars();
     layout();
-    if (frozen) render();
+    render(); // always paint a frame on (re)size — don't depend on the rAF loop (throttled in hidden tabs)
   }
 
   function ringLabel(cx: number, cy: number, R: number, rf: number, text: string): void {
@@ -331,8 +331,10 @@ export function mountConstel(
     nodes = next; // swap the model in place — the rAF loop keeps running, so nothing resets
     comets.length = 0; // node indices may have shifted; drop in-flight comets
     hovered = -1;
-    if (cw) layout();
-    if (frozen) render();
+    if (cw) {
+      layout();
+      render(); // repaint on data updates too, not only inside the rAF loop
+    }
   }
 
   return {

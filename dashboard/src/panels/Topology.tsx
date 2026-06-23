@@ -23,7 +23,12 @@ const wrap = css({
   borderRadius: "3px",
   background: "radial-gradient(120% 100% at 50% 40%, oklch(0.2 0.02 250) 0%, var(--bg) 80%)",
 });
-const canvasBox = css({ display: "block", width: "100%", height: "100%" });
+// position:absolute takes the canvas out of flow so its DPR-scaled buffer height can't feed back
+// into the wrap height (an indefinite-height ancestor would otherwise drive a ResizeObserver
+// doubling loop). width/height:100% are kept so the replaced <canvas> still fills the wrap — as an
+// absolutely-positioned element, height:100% resolves against the positioned wrap rather than
+// collapsing to the buffer's intrinsic size (which would clip + off-center it). Wrap is position:relative.
+const canvasBox = css({ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "block" });
 const tip = css({
   position: "absolute",
   transform: "translate(-50%, calc(-100% - 10px))",
@@ -123,7 +128,7 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   }, [model]);
 
   return (
-    <Panel testid="topology" title="Topology · workspace constellation" className={sizing}>
+    <Panel testid="topology" title="Topology · workspace constellation" className={sizing} fill>
       <div className={wrap} ref={wrapRef}>
         <canvas ref={canvasRef} className={canvasBox} data-testid="topology-canvas" />
         <div className={tip} ref={tipRef} aria-hidden="true" />
