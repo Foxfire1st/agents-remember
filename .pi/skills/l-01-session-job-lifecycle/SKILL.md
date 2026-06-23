@@ -28,7 +28,7 @@ or build-mode decisions proceed.
 ## Gate Protocol — Report Turn, Then Action Turn
 
 Every lifecycle gate — reframe agreement, plan gate, worktree intent, commit
-approval, push approval, integration, cleanup — is **two turns, never one**:
+approval, push approval, integration, cleanup/finalization — is **two turns, never one**:
 
 1. **Report turn.** Deliver the complete gate report as plain assistant output
    (the reframe, the plan, the intent packet, or the closeout relay with
@@ -85,7 +85,7 @@ the right one per junction):
 | commit / closeout | `closeout-approval` | `c-12-closeout` |
 | push | `push-approval` | `l-01-session-job-lifecycle` / `c-09-git-worktree-manager` |
 | integration | `integration-approval` | `c-09-git-worktree-manager` / `c-12-closeout` |
-| cleanup | `cleanup-approval` | `c-09-git-worktree-manager` / `c-12-closeout` |
+| cleanup / lifecycle finalization | `cleanup-approval` | `c-09-git-worktree-manager` / `c-12-closeout` |
 | any other dev-wait | `agent-question` (ambient `lifecycle_block(kind="question")`) | `l-01-session-job-lifecycle` |
 
 `closeout-approval` **is** the commit gate — there is no separate
@@ -314,14 +314,21 @@ Land the work. **Implementation approval is not commit approval.**
    `gate_wait`), and only push after the developer approves and the agent has sent `lifecycle_resume`.
    The `c-09-git-worktree-manager` skill raises the matching `integration-approval` and
    `cleanup-approval` gates at its landing tail.
-5. **Cleanup + carryover:** reclaim the worktree/provider stack and bring the parked memory home.
-   When the worktree memory branch diverged or the code PR squash-merged, use
-   `c-11-memory-carryover-from-branch`; when it is a clean linear descendant of main-memory, a
-   fast-forward + push is enough.
-6. **Map the ledger to the landed commit.** A PR merge usually lands a **merge commit** on top of the
+5. **Map the ledger to the landed commit.** A PR merge usually lands a **merge commit** on top of the
    work — tree-identical to the verified tip but a new SHA the ledger does not yet map. Ensure the
    ledger maps that merge commit so the next worktree can base off the merged branch without a manual
    reconciliation. `system/git-workflow.md` owns this step.
+6. **Finalize the lifecycle:** run `lifecycle_finalize_task(..., dry_run=true)` once the local parent
+   branch contains the landed commit and memory carryover is done. Relay its landed-commit proof,
+   cleanup plan, and task-document updates, then ask for cleanup/finalization approval. On approval,
+   send `lifecycle_resume()` and run the real finalizer. The tool proves one parent-child branch edge,
+   reclaims the worktrees, and marks the leaf task plus immediate parent row `Completed` when those
+   task-doc paths are supplied. It does not recursively complete ancestors; repeat the edge at the next
+   parent level when that parent task lands.
+7. **Keep squash out of the normal path.** A PR-gated edge is structurally the same as a direct edge
+   after the model finishes the PR merge and pulls the target branch locally. Do not use squash-merge
+   equivalence as a default finalization proof; squash is an emergency/manual recovery path because it
+   erases commit lineage and can make memory lookup history wrong.
 
 A research-only exit skips this phase entirely.
 

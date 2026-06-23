@@ -160,6 +160,9 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_cleanup"] = tools.worktree_cleanup_payload(
         config, contract_path, dry_run=False
     )
+    payloads["lifecycle_finalize_task"] = tools.lifecycle_finalize_task_payload(
+        config, contract_path, dry_run=True
+    )
     abandon_start = tools.worktree_start_payload(
         config,
         REPO,

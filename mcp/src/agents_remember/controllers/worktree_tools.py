@@ -282,6 +282,32 @@ def worktree_abandon_tool(
     return _worktree_result("worktree_abandon", git_worktree_manager.abandon_result(args))
 
 
+def lifecycle_finalize_task_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    task_doc_path: str | None = None,
+    master_doc_path: str | None = None,
+    subtask_number: str = "",
+    dry_run: bool = False,
+    teardown_providers: bool = True,
+) -> dict[str, Any]:
+    confined_contract = require_within_coordination(config, contract_path, "contract_path")
+    args = git_worktree_manager.FinalizeArgs(
+        contract_path=confined_contract,
+        task_doc_path=require_within_coordination(config, task_doc_path, "task_doc_path")
+        if task_doc_path
+        else None,
+        master_doc_path=require_within_coordination(config, master_doc_path, "master_doc_path")
+        if master_doc_path
+        else None,
+        subtask_number=subtask_number,
+        dry_run=dry_run,
+        teardown_providers=teardown_providers,
+    )
+    return _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
+
+
 def _worktree_namespace(
     config: McpRuntimeConfig,
     repo: RepositoryScope,

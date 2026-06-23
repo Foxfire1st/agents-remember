@@ -52,8 +52,8 @@ folder holds a master `task.md` plus flat, numbered sub-task files (`NN_<name>.m
 
 The series lifecycle follows **one task = one workflow = one worktree**: the whole series runs in a
 single `c-09-git-worktree-manager` worktree, each sub-task slice is committed via its own closeout (a commit, behind an
-explicit commit gate), the worktree stays open across slices, and the series **integrates + cleans up
-once, at the end**. The master owns the single version bump and any release packaging, after every
+explicit commit gate), the worktree stays open across slices, and the series **integrates + finalizes
+once, at the end** through `lifecycle_finalize_task`. The master owns the single version bump and any release packaging, after every
 sub-task commit exists. See `master-template.md` for the convention and scaffolds.
 
 ## Agent Responsibilities
@@ -70,7 +70,7 @@ The agent should:
 8. stop for approval before implementation
 9. after approval, treat code changes, onboarding propagation through `c-05-create-or-update-onboarding-files`, and the checks listed in the `c-08-ar-coordination-context-resolver` resolved `system/tools.md` as one implementation cycle
 10. for worktree-backed tasks, present a commit/closeout preview and stop for explicit commit approval before any `c-09-git-worktree-manager` closeout commits are created
-11. set the task status to `Completed` once the approved implementation cycle and any approved closeout are finished
+11. after the task branch has landed on its parent branch, use `lifecycle_finalize_task` to prove the edge, run or verify cleanup, and set the leaf task plus immediate parent row to `Completed`
 
 ## Context Gathering
 
@@ -103,6 +103,9 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
     `task_doc` MCP tool (which writes the `ar-task-document/v1` JSON and renders the markdown); do not
     hand-edit a generated `task.md`. `template.md`/`master-template.md` are the render spec; series
     master files stay hand-authored markdown for now, and existing markdown tasks migrate going forward.
+15. Worktree-backed task status reaches `Completed` through `lifecycle_finalize_task`, not immediately
+    after closeout. The finalizer updates the current task and the immediate parent row after the task
+    commit is proven landed on the parent source branch; it does not recursively complete ancestors.
 
 ## Relationship To Other Instructions
 

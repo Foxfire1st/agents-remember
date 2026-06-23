@@ -1,24 +1,24 @@
 ---
 name: c-09-git-worktree-manager
-description: "Create, attach to, report on, integrate, and clean up Agents Remember worktree-backed tasks while preserving human approval gates and external-memory compatibility."
+description: "Create, attach to, report on, integrate, finalize, and clean up Agents Remember worktree-backed tasks while preserving human approval gates and external-memory compatibility."
 ---
 
 # c-09-git-worktree-manager Git Worktree Manager
 
 Use this skill when a task should run through an explicit code/memory worktree wrapper.
 
-The `c-09-git-worktree-manager` skill wraps the existing chat-build, light-task, or external workflow. It owns Git worktree state, task contracts, external-memory compatibility checks, integration, and cleanup. It does not replace the workflow that performs the actual implementation.
+The `c-09-git-worktree-manager` skill wraps the existing chat-build, light-task, or external workflow. It owns Git worktree state, task contracts, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
 
 For closeout, use the `c-12-closeout` skill. The `c-09-git-worktree-manager` skill only supplies the worktree-specific
-contract path and integration/cleanup follow-up rules.
+contract path and integration/finalization follow-up rules.
 
 ## MCP Tools
 
 Use the Agents Remember MCP worktree tools as the normal installed runtime
 entry point:
 
-> **Preview first.** `worktree_start`, `worktree_integrate`, and
-> `worktree_cleanup` now **apply by default**. Run each once with `dry_run=true`
+> **Preview first.** `worktree_start`, `worktree_integrate`, `worktree_cleanup`,
+> and `lifecycle_finalize_task` now **apply by default**. Run each once with `dry_run=true`
 > to inspect the plan, confirm, then run the real apply (omit `dry_run`).
 
 ```text
@@ -30,6 +30,7 @@ worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<m
 worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_integrate(contract_path="<contract.md>", strategy="ff-only")
 worktree_cleanup(contract_path="<contract.md>")
+lifecycle_finalize_task(contract_path="<contract.md>", task_doc_path="<task.json>", master_doc_path="<parent task.json>", subtask_number="<N>", dry_run=true)
 ```
 
 Callers identify repositories by configured MCP `repo_id`. The MCP server owns
@@ -85,7 +86,7 @@ The Worktree Intent Gate must name:
 4. proposed work branch and worktree name
 5. memory mode and memory branch behavior
 6. intended landing path from closeout through integration, PR/merge when needed,
-   cleanup, and memory carryover
+   memory carryover, and lifecycle finalization
 7. material risks, unusual choices, or unresolved branch-policy questions
 
 If the repo is PR-gated, the intent packet must make the protection boundary
@@ -209,20 +210,36 @@ Strategies:
 
 Conflict rule: if code replay or memory-content replay conflicts, stop before moving source branches. The agent must discuss the resolution with the developer and decide what is true before continuing. Do not replay an old ledger commit over current memory main; always regenerate the ledger row after memory content has been mediated.
 
-After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches. Cleanup is not automatic.
+After successful integration, complete any repo-specific landing tail first: push/PR/merge for PR-gated code, pull the protected target back locally, and carry memory forward until the official memory branch maps the landed code commit. Then use `lifecycle_finalize_task` for the terminal edge.
 
-## Cleanup
+## Lifecycle Finalization And Cleanup
 
-Cleanup is explicitly human-gated and runs only after integration completed. It removes the recorded code and memory worktrees, deletes local task branches only when Git can prove they are merged, removes empty worktree group folders when safe, and records `cleanup: completed` in the contract.
+Lifecycle finalization is explicitly human-gated and runs only after closeout, integration, and any PR/carryover tail are complete. It proves the current parent-child branch edge, then removes the recorded code and memory worktrees, deletes local task branches only when Git can prove they are merged, removes empty worktree group folders when safe, records `cleanup: completed` in the contract, and updates task documents.
 
 Raise the cleanup junction with the `cleanup-approval` gate kind per the
 `l-01-session-job-lifecycle` skill's Gate Choreography, alongside the two-turn
-report→action chat protocol: ask whether to reclaim the worktrees, then
+report→action chat protocol: run `lifecycle_finalize_task(..., dry_run=true)`, relay the landed-commit proof, cleanup plan, and task-document updates, ask whether to finalize the task, then
 `lifecycle_block(kind="decision", prompt=…)` **and**
 `gate_create(kind="cleanup-approval", packet={ ...what cleanup removes... })`, then
 `gate_wait` until the developer decides. A model-attributed `gate_decide` is never
 a developer approval. Once the developer has approved, the agent **always** sends
-`lifecycle_resume()` to clear the block, then runs `worktree_cleanup`.
+`lifecycle_resume()` to clear the block, then runs `lifecycle_finalize_task`.
+
+`lifecycle_finalize_task` proves one immediate edge: the contract's landed code
+commit (`integrated_code_commit` when present, otherwise `code_commit`) must be an
+ancestor of the recorded local `code_source_branch`, and external-memory carryover
+must already be done. This handles leaf-to-parent and parent-to-parent chains the
+same way; for a PR-gated edge, the model first finishes the PR workflow and pulls
+the target branch locally, then the finalizer sees the same local branch
+relationship as a direct edge. The tool does not infer squash equivalence by
+default; squash merges are emergency/manual recovery because they erase commit
+lineage and can invalidate memory lookup history.
+
+When `task_doc_path` is supplied, the finalizer sets that task document to
+`Completed`. When `master_doc_path` and `subtask_number` are supplied, it sets the
+immediate parent row for that sub-task to `Completed`. It does not mark the parent
+task itself complete and does not recursively complete ancestors; each parent-child
+edge is finalized separately.
 
 Cleanup is idempotent. If the worktrees or merged branches are already gone, it reports the already-clean state instead of failing. If Git refuses to delete an unmerged branch, cleanup leaves that branch in place and reports it for developer review.
 
@@ -237,5 +254,6 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 7. The `c-09-git-worktree-manager` skill must not call `worktree_start` until
    the developer has approved the Worktree Intent Gate.
 8. The `c-09-git-worktree-manager` skill must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
-9. The `c-09-git-worktree-manager` skill must not clean up without explicit cleanup approval.
-10. The `c-08-ar-coordination-context-resolver` skill remains the facts-only resolver; the `c-09-git-worktree-manager` skill owns worktree and lifecycle mutation.
+9. The `c-09-git-worktree-manager` skill must not finalize or clean up without explicit cleanup/finalization approval.
+10. The `c-09-git-worktree-manager` skill must not treat squash-merged content as a normal landed edge.
+11. The `c-08-ar-coordination-context-resolver` skill remains the facts-only resolver; the `c-09-git-worktree-manager` skill owns worktree and lifecycle mutation.

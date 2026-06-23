@@ -32,6 +32,7 @@ from .lifecycle import (
     lifecycle_start_payload,
     switch_lifecycle_payload,
 )
+from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
     drift_check_payload,
     memory_baseline_adopt_payload,
@@ -96,6 +97,7 @@ __all__ = [
     "grepai_trace_payload",
     "lifecycle_block_payload",
     "lifecycle_end_payload",
+    "lifecycle_finalize_task_payload",
     "lifecycle_phase_payload",
     "lifecycle_resume_payload",
     "lifecycle_start_payload",

@@ -53,6 +53,7 @@ PUBLIC_TOOLS = (
     "lifecycle_end",
     "switch_lifecycle",
     "lifecycle_phase",
+    "lifecycle_finalize_task",
     "task_doc",
     "gate_create",
     "gate_decide",

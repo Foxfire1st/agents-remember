@@ -12,8 +12,8 @@ The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 **Closeout is worktree-only:** every change affecting the code repo runs through a
 `c-09-git-worktree-manager` dual worktree (code + memory) — there is no
 direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
-worktree start, attach, status, integration, and cleanup; use this skill for the
-closeout gate and code-memory-ledger commit order.
+worktree start, attach, status, integration, lifecycle finalization, and cleanup;
+use this skill for the closeout gate and code-memory-ledger commit order.
 
 ## MCP Tools
 
@@ -26,7 +26,8 @@ worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer i
 
 Worktree closeout records closeout state in the contract the
 `c-09-git-worktree-manager` skill created or attached; the
-`c-09-git-worktree-manager` skill owns later integration and cleanup.
+`c-09-git-worktree-manager` skill owns later integration, lifecycle finalization,
+cleanup, and task-document completion.
 
 ## Approval Gate
 
@@ -176,6 +177,12 @@ it never pushes. Pushing the integration branch is part of the landing tail the
 the `l-01-session-job-lifecycle` skill's Gate Choreography — raise, wait for the
 developer's decision, then `lifecycle_resume` before any push.
 
+Closeout does not mark the task `Completed`. After closeout, integration, any
+PR-gated merge/pull, and memory carryover are done, use
+`lifecycle_finalize_task` from the `c-09-git-worktree-manager` skill to prove the
+landed parent-child branch edge, run or verify cleanup, and update the current
+task plus immediate parent row.
+
 ## Failure Conditions
 
 Closeout fails without mutation when required onboarding is missing,
@@ -201,7 +208,7 @@ for that source file, then rerun the closeout preview.
 ## Boundaries
 
 1. The `c-12-closeout` skill owns closeout approval and code-memory-ledger commit sequencing.
-2. The `c-12-closeout` skill does not create worktrees, integrate worktrees, or clean up worktrees.
+2. The `c-12-closeout` skill does not create worktrees, integrate worktrees, finalize lifecycles, or clean up worktrees.
 3. The `c-12-closeout` skill does not initialize memory roots; use the `c-00-initialize-memory-repo` skill.
 4. The `c-12-closeout` skill must not commit without explicit commit approval after a closeout preview.
 5. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.

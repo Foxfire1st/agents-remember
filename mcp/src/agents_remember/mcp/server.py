@@ -29,6 +29,7 @@ from .tools import (
     grepai_trace_payload,
     lifecycle_block_payload,
     lifecycle_end_payload,
+    lifecycle_finalize_task_payload,
     lifecycle_phase_payload,
     lifecycle_resume_payload,
     lifecycle_start_payload,
@@ -631,6 +632,31 @@ def create_server(config: McpRuntimeConfig) -> Any:
         worktrees and unmerged branches (reporting the commits); force=true discards them
         (git worktree remove --force, git branch -D). Preview with dry_run=true."""
         return worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)
+
+    @server.tool()
+    def lifecycle_finalize_task(
+        contract_path: str,
+        task_doc_path: str | None = None,
+        master_doc_path: str | None = None,
+        subtask_number: str = "",
+        dry_run: bool = False,
+        teardown_providers: bool = True,
+    ) -> dict[str, Any]:
+        """Finalize one parent-child task lifecycle edge. The task's landed commit must be
+        reachable from the contract's local target/source branch; PR-gated flows must complete the
+        PR merge and pull first, making the proof structurally identical to a non-PR edge. After
+        landed-state and memory carryover checks, this runs or verifies cleanup and reconciles the
+        supplied JSON-primary task documents. No squash-merge equivalence is attempted. Preview with
+        dry_run=true."""
+        return lifecycle_finalize_task_payload(
+            config,
+            contract_path,
+            task_doc_path=task_doc_path,
+            master_doc_path=master_doc_path,
+            subtask_number=subtask_number,
+            dry_run=dry_run,
+            teardown_providers=teardown_providers,
+        )
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:

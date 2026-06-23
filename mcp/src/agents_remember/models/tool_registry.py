@@ -43,6 +43,7 @@ from agents_remember.models.lifecycle import (
     LifecycleStartResponse,
     SwitchLifecycleResponse,
 )
+from agents_remember.models.lifecycle_finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.memory import (
     DriftCheckResponse,
     MemoryBaselineAdoptResponse,
@@ -131,6 +132,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "lifecycle_end": LifecycleEndResponse,
     "switch_lifecycle": SwitchLifecycleResponse,
     "lifecycle_phase": LifecyclePhaseResponse,
+    "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
     "gate_create": GateCreateResponse,
     "gate_decide": GateDecideResponse,

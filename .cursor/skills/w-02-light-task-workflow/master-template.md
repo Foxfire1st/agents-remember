@@ -24,8 +24,9 @@ master `task.md` and move the existing plan into the first `NN_<name>.md`.
   one worktree per sub-task — that is ceremony explosion.
 - **One task = one workflow = one worktree, with many commits and one integrate.** Each sub-task slice
   is committed via its own `c-09-git-worktree-manager` closeout (a commit) behind an explicit commit gate; the worktree stays
-  open across slices. The series **integrates + cleans up once, at the end**, after every slice is
-  committed.
+  open across slices. The series **integrates + finalizes once, at the end**, after every slice is
+  committed; `lifecycle_finalize_task` proves the landed edge, performs or verifies cleanup, and marks
+  the current task plus immediate parent row complete.
 - **The master owns the single release:** the version bump and any tag/release packaging happen once,
   at series end, after all sub-task commits exist. Sub-tasks never bump the version.
 - **Each slice is test-verified before its commit:** run the repo test suite + the `system/tools.md`
@@ -63,7 +64,8 @@ Dependencies: <what must land before what>.
 ## Single Release (the master owns the final bump + tags)
 
 - Sub-tasks commit **incrementally** (one `c-09-git-worktree-manager` closeout per slice, behind a commit gate); the worktree
-  stays open across slices and integrates once at the end.
+  stays open across slices and integrates once at the end, then `lifecycle_finalize_task` performs the
+  terminal cleanup/task-document reconciliation.
 - The master owns the **final release step only**: the version bump and any tag/release packaging,
   once every sub-task commit exists.
 
@@ -113,7 +115,7 @@ is scoped to one slice and points back at the master:
 
 1. Create the master `task.md` and the first sub-task file together in one wrapper folder.
 2. Keep sub-task files flat and numbered; do not nest phase folders.
-3. Run the whole series in **one** worktree; commit per slice; integrate + release once at the end.
+3. Run the whole series in **one** worktree; commit per slice; integrate, finalize, and release once at the end.
 4. Only the master records the version bump and release; sub-tasks never bump.
 5. Each slice runs the test suite + listed checks green before its commit.
 6. Decision logs are append-only in both the master and the sub-task files.

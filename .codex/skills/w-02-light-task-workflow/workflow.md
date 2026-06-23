@@ -158,7 +158,7 @@ When the approved plan has been fully implemented:
 2. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
 3. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
 4. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
-5. set the task status to `Completed` only after the implementation cycle is finished and any required worktree closeout has received explicit commit approval
+5. leave worktree-backed task status below `Completed` after closeout; `lifecycle_finalize_task` sets completion after the landed commit is proven on the parent branch and cleanup/finalization is approved
 
 ## Phase 3 — Close
 
@@ -173,7 +173,7 @@ When all planned work is complete:
 1. present what was done, any deviations, and any deferred items
 2. verify that the Phase 2 completion summary still reflects the final state accurately
 3. confirm that durable findings discovered during implementation were routed through `c-05-create-or-update-onboarding-files` rather than left implicit in chat history
-4. for worktree-backed tasks, confirm whether the current state is still awaiting commit approval, already closed out, awaiting integration, or awaiting cleanup
+4. for worktree-backed tasks, confirm whether the current state is still awaiting commit approval, closed out, awaiting integration, awaiting PR/pull/carryover, or ready for lifecycle finalization
 
 ### 2. Cross-reference check
 
@@ -238,8 +238,9 @@ Run the series as **one task, one workflow, one worktree**:
 2. implement each sub-task slice, then commit it via its own `c-09-git-worktree-manager` closeout behind an explicit commit
    gate — multiple commits accumulate on the worktree branch as slices complete
 3. keep the worktree open across slices; the test suite + listed checks run green before each commit
-4. when every sub-task is committed, **integrate + clean up once** and let the master perform the
-   single version bump / release
+4. when every sub-task is committed, **integrate + finalize once** with `lifecycle_finalize_task`; the
+   finalizer proves the landed edge, cleans up, and marks the current task plus immediate parent row
+   complete before the master performs the single version bump / release
 
 The master owns only the final release step; sub-tasks never bump the version.
 
