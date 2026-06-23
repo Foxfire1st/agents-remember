@@ -23,7 +23,12 @@ GATE_RECORD_SCHEMA = "ar-gate-record/v1"
 
 # What needs the human/operator. Extensible: a new gate kind is one literal.
 GateKind = Literal[
+    "plan-approval",
+    "worktree-intent",
+    # `closeout-approval` IS the commit gate: closeout is the single commit-of-record for code + memory +
+    # ledger (there is no separate `commit-approval`; singular commits route through closeout).
     "closeout-approval",
+    "push-approval",
     "integration-approval",
     "cleanup-approval",
     "agent-question",

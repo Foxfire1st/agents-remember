@@ -93,6 +93,22 @@ visible: the protected target is not the recorded `source_branch`; the recorded
 `source_branch` is the pushable integration branch that `worktree_integrate`
 will move before the branch is pushed for PR.
 
+Raise the intent junction as a kind-typed gate per the
+`l-01-session-job-lifecycle` skill's Gate Choreography — in addition to the
+two-turn report→action chat protocol, not instead of it:
+
+```text
+lifecycle_block(kind="decision", prompt="<the intent ask>", options=["approve", "revise"])
+gate_create(kind="worktree-intent", packet={ ...the intent packet facts... })
+gate_wait(gate_id="<id>", timeout_seconds=30)   # re-call until timedOut=false
+```
+
+The developer approves from the dashboard (a developer-attributed decision) or in
+chat; the agent's own `gate_decide` is model-attributed and never counts as
+approval. Once the developer has approved, the agent **always** sends
+`lifecycle_resume()` to clear the block, then calls `worktree_start`. A chat
+"approved" does not propagate itself.
+
 For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. The `c-09-git-worktree-manager` skill then places `contract.md` beside that `task.md` when worktrees are created.
 
 ## Start / Attach / Status
@@ -170,6 +186,16 @@ moved since task start.
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
 
+Raise the integration junction with the `integration-approval` gate kind per the
+`l-01-session-job-lifecycle` skill's Gate Choreography, on top of the two-turn
+report→action chat protocol: deliver the integration preview, then
+`lifecycle_block(kind="decision", prompt=…)` **and**
+`gate_create(kind="integration-approval", packet={ ...the integration plan... })`,
+then `gate_wait` until the developer decides (dashboard or chat). The agent never
+self-approves — a model-attributed `gate_decide` is not a developer approval. Once
+the developer has approved, the agent **always** sends `lifecycle_resume()` to
+clear the block, then runs `worktree_integrate`.
+
 Before previewing integration, check out the recorded code and memory `source_branch` in their source repositories; `worktree_integrate` requires those active checkouts even for `dry_run=true`.
 
 Integration always lands into the recorded `source_branch`. It does not open a
@@ -188,6 +214,15 @@ After successful integration, ask whether to remove the code and memory worktree
 ## Cleanup
 
 Cleanup is explicitly human-gated and runs only after integration completed. It removes the recorded code and memory worktrees, deletes local task branches only when Git can prove they are merged, removes empty worktree group folders when safe, and records `cleanup: completed` in the contract.
+
+Raise the cleanup junction with the `cleanup-approval` gate kind per the
+`l-01-session-job-lifecycle` skill's Gate Choreography, alongside the two-turn
+report→action chat protocol: ask whether to reclaim the worktrees, then
+`lifecycle_block(kind="decision", prompt=…)` **and**
+`gate_create(kind="cleanup-approval", packet={ ...what cleanup removes... })`, then
+`gate_wait` until the developer decides. A model-attributed `gate_decide` is never
+a developer approval. Once the developer has approved, the agent **always** sends
+`lifecycle_resume()` to clear the block, then runs `worktree_cleanup`.
 
 Cleanup is idempotent. If the worktrees or merged branches are already gone, it reports the already-clean state instead of failing. If Git refuses to delete an unmerged branch, cleanup leaves that branch in place and reports it for developer review.
 

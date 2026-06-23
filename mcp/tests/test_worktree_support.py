@@ -1299,15 +1299,18 @@ class WorktreeSupportTests(unittest.TestCase):
                 ),
             )
 
-    def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
+    def test_status_reports_integration_pending_for_dirty_closed_contract(self) -> None:
+        # slice 09: a dirty tree is no longer read as a commit-approval gate. A closed-out contract reports
+        # its honest lifecycle position (integration-pending) even when the worktree is dirty;
+        # commit-approval-pending is owned by the closeout preview / a raised gate, not `git status`.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
             (contract.code_worktree / "followup.txt").write_text("follow-up\n", encoding="utf-8")
             payload = worktree_manager.status_payload(contract)
-            self.assertEqual(payload["phase"], "commit-approval-pending")
-            self.assertEqual(payload["nextOperation"], "request_commit_approval")
-            self.assertEqual(payload["nextTool"], "worktree_closeout_preview")
+            self.assertEqual(payload["phase"], "integration-pending")
+            self.assertEqual(payload["nextOperation"], "request_integration_decision")
+            self.assertEqual(payload["nextTool"], "worktree_integrate")
             self.assertNotIn("next_command", payload)
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:

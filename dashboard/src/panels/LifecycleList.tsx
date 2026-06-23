@@ -97,7 +97,7 @@ export function LifecycleList({
 
   const head = (
     <div className={headRow}>
-      <h2 className={headTitle}>Lifecycles · {Object.keys(lifecycles).length}</h2>
+      <h2 className={headTitle}>Tasks · {Object.keys(lifecycles).length}</h2>
       <ToggleButtonGroup
         className={pivotBar}
         selectionMode="single"
@@ -107,7 +107,7 @@ export function LifecycleList({
           const next = [...keys][0];
           if (next === "repo" || next === "phase") setPivot(next);
         }}
-        aria-label="Group lifecycles by"
+        aria-label="Group tasks by"
       >
         <ToggleButton id="repo" className={pivotBtn}>
           BY REPO
@@ -122,11 +122,11 @@ export function LifecycleList({
   return (
     <Panel testid="lifecycle-list" head={head} className={sizing}>
       {tree.length === 0 ? (
-        <p className="muted">No lifecycles.</p>
+        <p className="muted">No tasks.</p>
       ) : (
         <ListBox
           className={listBox}
-          aria-label="Lifecycles"
+          aria-label="Tasks"
           selectionMode="single"
           selectedKeys={selectedId ? [selectedId] : []}
           onSelectionChange={(keys) => {

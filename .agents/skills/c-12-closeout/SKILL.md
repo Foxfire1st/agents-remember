@@ -53,12 +53,20 @@ the dashboard, closeout is **also** enforced server-side through a durable
 `closeout-approval` gate, so a developer can approve from the cockpit and the
 mutating tool — not a UI button — is the security boundary.
 
+`closeout-approval` **is** the commit gate — closeout is the single
+commit-of-record for code, memory, and ledger, so there is no separate
+`commit-approval` kind; every commit routes through this gate. The choreography
+follows the `l-01-session-job-lifecycle` skill's Gate Choreography (raise → wait →
+clear) on top of the two-turn relay above.
+
 How it binds:
 
-1. To route approval through the dashboard, open the gate at the closeout point
-   and block on the developer:
+1. To route approval through the dashboard, **raise** the gate at the closeout
+   point — the ambient block (carrying the ask) plus the durable kind-typed record
+   — and block on the developer:
 
    ```text
+   lifecycle_block(kind="decision", prompt="<the commit ask>", options=["approve", "revise"])
    gate_create(kind="closeout-approval", lifecycle_id="<id>", packet={ ...preview facts... })
    gate_wait(gate_id="<id>", lifecycle_id="<id>", timeout_seconds=30)   # re-call until timedOut=false
    ```
@@ -66,12 +74,15 @@ How it binds:
 2. The developer approves (or rejects / requests revision) from the dashboard.
    Only the dashboard writes a **developer-attributed** decision
    (`decidedBy="developer"`); the agent's own `gate_decide` is recorded
-   `decidedBy="model"`.
+   `decidedBy="model"` and never counts as approval.
 
-3. `worktree_closeout_apply` reads the lifecycle's gate and **refuses** unless it
-   is `approved` by the developer. An `open`, `rejected`, `revision-requested`,
-   already-`applied`, or **model-approved** gate blocks the closeout; on success
-   the tool appends an `applied` snapshot so one approval cannot be replayed.
+3. On the developer's resolution reaching the agent, **clear** the ambient block
+   with `lifecycle_resume()`, then run `worktree_closeout_apply`. A chat "approved"
+   does not propagate itself; the agent always sends the clear. The apply step
+   reads the lifecycle's gate and **refuses** unless it is `approved` by the
+   developer — an `open`, `rejected`, `revision-requested`, already-`applied`, or
+   **model-approved** gate blocks the closeout; on success the tool appends an
+   `applied` snapshot so one approval cannot be replayed.
 
 Rules:
 
@@ -159,7 +170,11 @@ Route overview metadata and generated route indexes are memory-content changes.
 They must be refreshed before `memory_quality_check`, and `memory_quality_check`
 must be clean before creating the memory content commit.
 
-Push behavior is not automatic.
+Push behavior is not automatic. Closeout commits code, memory, and ledger only;
+it never pushes. Pushing the integration branch is part of the landing tail the
+`c-09-git-worktree-manager` skill owns, gated by the `push-approval` gate kind per
+the `l-01-session-job-lifecycle` skill's Gate Choreography — raise, wait for the
+developer's decision, then `lifecycle_resume` before any push.
 
 ## Failure Conditions
 

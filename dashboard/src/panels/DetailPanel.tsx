@@ -337,7 +337,7 @@ export function DetailPanel({
     return (
       <Panel testid="detail-panel" title="Detail" className={sizing} fill>
         <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">
-          Select a session to inspect its phase, gate, and tokens.
+          Select a task to inspect its phase, gate, and tokens.
         </EmptyStateBackdrop>
       </Panel>
     );
@@ -518,7 +518,7 @@ function TaskContent({
   onJump: (id: string) => void;
 }) {
   if (docs.length === 0) {
-    return <p className="muted">No task document bound to this lifecycle.</p>;
+    return <p className="muted">No task document bound to this task.</p>;
   }
   const master = docs.find((doc) => doc.kind === "master");
   const sliceDocs = docs.filter((doc) => doc.kind !== "master");

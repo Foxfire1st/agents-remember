@@ -7,7 +7,6 @@ from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.git import (
-    contract_has_worktree_changes,
     run_git,
     worktree_dirty,
 )
@@ -129,17 +128,10 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
                 args=contract_next_args(contract, dry_run=True),
             ),
         }
-    if contract_has_worktree_changes(contract):
-        return {
-            "phase": "commit-approval-pending",
-            "summary": "Worktree changes are present; prepare a closeout preview and ask for explicit commit approval before creating commits.",
-            **next_guidance(
-                "request_commit_approval",
-                tool="worktree_closeout_preview",
-                args=contract_next_args(contract),
-                required_args=["code_commit_message"],
-            ),
-        }
+    # slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
+    # closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
+    # adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
+    # `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
     if contract.closeout_status == "completed":
         return {
             "phase": "integration-pending",

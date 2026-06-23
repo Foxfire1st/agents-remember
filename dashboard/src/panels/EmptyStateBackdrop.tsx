@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import type { ReactNode } from "react";
 
 import { css } from "../../styled-system/css";
@@ -8,7 +9,9 @@ import { useShouldAnimate } from "./engine-room/useShouldAnimate";
 // forward+reverse boomerang, so `loop` is seamless (first frame == last). Absent under calm-cockpit /
 // `prefers-reduced-motion` (useShouldAnimate) — the empty text then stands alone. aria-hidden +
 // pointer-events:none: pure atmosphere, never state. Host container must be a flex column so the
-// `flex:1` canvas fills the slot (Panel `fill`; Chats `terminalArea`).
+// `flex:1` canvas fills the slot (Panel `fill`; Chats `terminalArea`). A slow 12s back-and-forth Motion
+// scale yoyo (1→1.03, 6s each way, no CSS per the animation doctrine) gives the near-still clip gentle
+// life on the same effects gate; scale stays ≥1 so `objectFit:cover` never reveals an edge.
 const canvas = css({
   position: "relative",
   flex: "1",
@@ -52,7 +55,18 @@ export function EmptyStateBackdrop({ src, children }: { src: string; children: R
     <div className={canvas}>
       {animate ? (
         <div className={backdrop} aria-hidden="true" data-testid="empty-backdrop">
-          <video className={backdropVideo} src={src} autoPlay loop muted playsInline preload="auto" />
+          <motion.video
+            className={backdropVideo}
+            src={src}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            initial={{ scale: 1 }}
+            animate={{ scale: 1.03 }}
+            transition={{ duration: 6, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" }}
+          />
         </div>
       ) : null}
       <div className={content}>{children}</div>

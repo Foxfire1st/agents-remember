@@ -867,9 +867,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         """Open a durable control-plane gate on a lifecycle: a decision point that needs
         the human/operator (closeout approval, an answer, an alarm ack). Append-only and
         attributed; returns the gate id. Read the gate set with gate_list, block on it with
-        gate_wait. kind: closeout-approval | integration-approval | cleanup-approval |
-        agent-question | provider-retry | alarm-ack. Creating a gate does not itself enforce
-        anything (mutating tools obeying gate state is a later slice)."""
+        gate_wait. kind: plan-approval | worktree-intent | closeout-approval | push-approval |
+        integration-approval | cleanup-approval | agent-question | provider-retry | alarm-ack
+        (closeout-approval is the commit gate — there is no separate commit-approval). Creating a gate
+        does not itself enforce anything (mutating tools obeying gate state is a later slice)."""
         return gate_create_payload(
             config,
             kind=kind,
