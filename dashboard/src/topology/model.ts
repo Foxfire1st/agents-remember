@@ -1,6 +1,6 @@
 // The coordination-topology model (mc2 harvest #4): a deterministic radial tree derived from
 // the projection — workspace core → repos (inner ring) → worktrees (middle ring) → lifecycles
-// (rim), with workspace-scoped providers as satellites orbiting the core. Pure + deterministic
+// (rim), with provider satellites orbiting their scoped parent. Pure + deterministic
 // (id-sorted) so the render is stable across snapshots and unit-testable without a canvas.
 
 import { engineState } from "../data/selectors";
@@ -75,6 +75,7 @@ export function buildTopology(
 
   // Worktrees (enclosures) spread within their repo's angular span.
   const wtIdxByEnclosure = new Map<string, number>();
+  const wtIdxByGroup = new Map<string, number>();
   const span = (TAU / nRepos) * 0.74;
   const enclByRepo = new Map<string, EnclosureNode[]>();
   for (const enclosure of [...enclosures].sort((a, b) => a.enclosure.localeCompare(b.enclosure))) {
@@ -89,10 +90,9 @@ export function buildTopology(
     encls.forEach((enclosure, wi) => {
       const a = repoAng + (encls.length > 1 ? (wi / (encls.length - 1) - 0.5) * span : 0);
       const status: ConstelStatus = enclosure.cleanup === "pending" ? "warn" : "ok";
-      wtIdxByEnclosure.set(
-        enclosure.enclosure,
-        add({ kind: "wt", parent, rf: RF.wt, ang: a, poff: 0, base: 3.1, status, label: enclosure.taskName || enclosure.enclosure, sub: `worktree · ${enclosure.cleanup} cleanup`, id: null }),
-      );
+      const wtIdx = add({ kind: "wt", parent, rf: RF.wt, ang: a, poff: 0, base: 3.1, status, label: enclosure.taskName || enclosure.enclosure, sub: `worktree · ${enclosure.cleanup} cleanup`, id: null });
+      wtIdxByEnclosure.set(enclosure.enclosure, wtIdx);
+      wtIdxByGroup.set(enclosure.worktreeGroup, wtIdx);
     });
   }
 
@@ -111,11 +111,13 @@ export function buildTopology(
     }
   }
 
-  // Provider satellites orbit the core (providers are workspace-scoped today).
+  // Provider satellites orbit their scoped parent: worktree providers attach to their enclosure;
+  // workspace providers stay on the core until the backend emits per-repo coverage.
   providers.forEach((provider, pi) => {
     const engine = engineState(provider);
     const status: ConstelStatus = engine === "down" ? "crit" : engine === "indexing" ? "idle" : "ok";
-    add({ kind: "prov", parent: ws, rf: 0, ang: 0, poff: (pi / Math.max(providers.length, 1)) * TAU, base: 1.5, status, label: provider.id, sub: `provider · ${provider.state}`, id: null });
+    const parent = provider.worktreeGroup ? (wtIdxByGroup.get(provider.worktreeGroup) ?? ws) : ws;
+    add({ kind: "prov", parent, rf: 0, ang: 0, poff: (pi / Math.max(providers.length, 1)) * TAU, base: 1.5, status, label: provider.id, sub: `provider · ${provider.state}`, id: null });
   });
 
   return nodes;
