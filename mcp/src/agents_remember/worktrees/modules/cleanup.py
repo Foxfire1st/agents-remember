@@ -95,7 +95,7 @@ def delete_branch_force(repo: Path, branch: str, dry_run: bool) -> dict[str, obj
 
 def _repo_default_branch(repo: Path) -> str:
     """The repo's default branch (e.g. ``main``) from the local ``origin/HEAD`` symref; ``"main"`` on
-    failure. Used only to refuse ever deleting the default branch during retirement (05m)."""
+    failure. Used only to refuse ever deleting the default branch during work-branch cleanup."""
     res = run_git(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
     if res.returncode == 0 and res.stdout.strip():
         return res.stdout.strip().split("/", 1)[-1]
@@ -140,42 +140,6 @@ def _retire_work_branch(
     return out
 
 
-def _retire_branch(
-    repo: Path,
-    branch: str,
-    default_branch: str,
-    dry_run: bool,
-    *,
-    landed: bool,
-    remote: bool,
-) -> dict[str, object]:
-    """Retire a landed work/source branch so feature branches do not pile up (05m).
-
-    Local delete: ``-d`` first (proves merged), then force ``-D`` when it balks AND the work has landed
-    (carryover done -> the content is safe in main / official memory). Never the default branch; if the
-    branch is the repo's checked-out HEAD it is switched off first (a divergent source branch left
-    checked out by integration cannot otherwise be deleted). ``remote`` also clears ``origin/<branch>``.
-    """
-    out: dict[str, object] = {"branch": branch}
-    if not branch or branch == default_branch:
-        out.update({"deleted": False, "reason": "default-or-empty"})
-        return out
-    if not branch_exists(repo, branch):
-        out.update({"deleted": False, "reason": "already-absent"})
-    elif dry_run:
-        out.update({"deleted": False, "would_delete": True, "force_if_needed": landed})
-    else:
-        if run_git(repo, ["branch", "--show-current"]).stdout.strip() == branch:
-            run_git(repo, ["checkout", default_branch])
-        res = delete_branch_if_merged(repo, branch, dry_run)
-        if not res.get("deleted") and landed:
-            res = delete_branch_force(repo, branch, dry_run)
-        out.update(res)
-    if remote:
-        out["remote"] = delete_remote_branch_if_present(repo, branch, dry_run)
-    return out
-
-
 def remove_empty_dir(
     path: Path, dry_run: bool, planned_removed: set[Path] | None = None
 ) -> dict[str, object]:
@@ -211,45 +175,29 @@ def _removed_worktrees(contract, dry_run: bool) -> dict[str, dict[str, object]]:
     return removed_worktrees
 
 
-def _deleted_branches(contract, dry_run: bool, *, landed: bool) -> dict[str, dict[str, object]]:
-    # After carryover, BOTH the worktree branch and the (PR'd) source branch retire -- locally for code
-    # + memory, and the remote for code -- or feature/fix branches pile up forever (05m). Memory is
-    # local-only (carried to local memory main), so it has no remote branch to clear.
+def _deleted_branches(contract, dry_run: bool) -> dict[str, dict[str, object]]:
+    # Cleanup operates on the just-finalized child edge only: remove the task work branches
+    # after they are proven reachable from their parent/source branches. Parent/source branches
+    # are the next node up the task tree and are finalized/cleaned by their own lifecycle edge.
     code_default = _repo_default_branch(contract.code_repo_path)
     branches: dict[str, dict[str, object]] = {
-        "code_work": _retire_work_branch(
+        "code": _retire_work_branch(
             contract.code_repo_path,
             contract.code_work_branch,
             contract.code_source_branch,
             code_default,
             dry_run,
             remote=True,
-        ),
-        "code_source": _retire_branch(
-            contract.code_repo_path,
-            contract.code_source_branch,
-            code_default,
-            dry_run,
-            landed=landed,
-            remote=True,
-        ),
+        )
     }
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
         mem_default = _repo_default_branch(contract.memory_repo_path)
-        branches["memory_work"] = _retire_work_branch(
+        branches["memory"] = _retire_work_branch(
             contract.memory_repo_path,
             contract.memory_work_branch,
             contract.memory_source_branch,
             mem_default,
             dry_run,
-            remote=False,
-        )
-        branches["memory_source"] = _retire_branch(
-            contract.memory_repo_path,
-            contract.memory_source_branch,
-            mem_default,
-            dry_run,
-            landed=landed,
             remote=False,
         )
         integration_work_branch = integration_branch(contract)
@@ -363,7 +311,7 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
         else {"state": "skipped", "reason": "teardown_providers disabled"}
     )
     removed_worktrees = _removed_worktrees(contract, args.dry_run)
-    branches = _deleted_branches(contract, args.dry_run, landed=carried)
+    branches = _deleted_branches(contract, args.dry_run)
     planned_removed = (
         _scheduled_removal_paths(providers, removed_worktrees) if args.dry_run else None
     )
@@ -378,7 +326,7 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 args.dry_run, updated.cleanup == "completed", removed_worktrees, branches
             ),
             **status_payload(updated),
-            "summary": "Cleanup completed; the worktree provider stack was reclaimed, worktrees were removed, and the landed work + source branches were retired (carryover ran first, so the content is safe in main/official memory; the code source branch's remote was cleared too).",
+            "summary": "Cleanup completed; the worktree provider stack was reclaimed, worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
             "providers": providers,
             "removed_worktrees": removed_worktrees,
             "branches": branches,

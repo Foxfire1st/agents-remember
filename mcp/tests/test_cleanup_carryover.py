@@ -1,9 +1,9 @@
-"""Tests for 05m: carryover-before-cleanup ordering + work/source branch retirement.
+"""Tests for 05m: carryover-before-cleanup ordering + task work-branch retirement.
 
 The lifecycle must carry the parked memory home (via the existing ``memory_carryover_apply``) *before*
-cleanup deletes the worktree it reads from, and cleanup must then retire BOTH the worktree branch and
-the (PR'd) source branch -- locally for code + memory, plus the remote for code -- so feature/fix
-branches do not pile up. The "carryover done" signal is the official ledger itself (no contract stamp).
+cleanup deletes the worktree it reads from, and cleanup must then retire the just-finalized task work
+branches. Parent/source branches belong to the next edge up the task tree and must survive this
+child-edge cleanup. The "carryover done" signal is the official ledger itself (no contract stamp).
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
-    _retire_branch,
     cleanup_result,
     delete_branch_if_merged_into,
     delete_remote_branch_if_present,
@@ -153,46 +152,6 @@ class CleanupCarryoverGuardTests(unittest.TestCase):
         self.assertIn("carryover", str(caught.exception).lower())
 
 
-class RetireBranchTests(unittest.TestCase):
-    """The sensitive part: never delete the default branch; force-delete only once the work has landed."""
-
-    def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory()
-        self.repo = Path(self._td.name) / "repo"
-        init_repo(self.repo, "main")
-        # a divergent (unmerged-from-main, squash-like) branch
-        git(self.repo, "checkout", "-b", "feat/x")
-        (self.repo / "x.txt").write_text("x\n", encoding="utf-8")
-        git(self.repo, "add", "x.txt")
-        git(self.repo, "commit", "-m", "feature work")
-        git(self.repo, "checkout", "main")
-
-    def tearDown(self) -> None:
-        self._td.cleanup()
-
-    def test_force_deletes_divergent_branch_when_landed(self) -> None:
-        out = _retire_branch(self.repo, "feat/x", "main", dry_run=False, landed=True, remote=False)
-        self.assertTrue(out["deleted"])
-        self.assertEqual(git(self.repo, "branch", "--list", "feat/x").strip(), "")
-
-    def test_keeps_divergent_branch_when_not_landed(self) -> None:
-        out = _retire_branch(self.repo, "feat/x", "main", dry_run=False, landed=False, remote=False)
-        self.assertFalse(out["deleted"])  # -d balks, not landed -> preserved (no data loss)
-        self.assertIn("feat/x", git(self.repo, "branch", "--list", "feat/x"))
-
-    def test_never_deletes_the_default_branch(self) -> None:
-        out = _retire_branch(self.repo, "main", "main", dry_run=False, landed=True, remote=False)
-        self.assertFalse(out["deleted"])
-        self.assertEqual(out["reason"], "default-or-empty")
-        self.assertIn("main", git(self.repo, "branch", "--list", "main"))
-
-    def test_switches_off_a_checked_out_branch_before_deleting(self) -> None:
-        git(self.repo, "checkout", "feat/x")  # integration can leave the repo on the source branch
-        out = _retire_branch(self.repo, "feat/x", "main", dry_run=False, landed=True, remote=False)
-        self.assertTrue(out["deleted"])
-        self.assertEqual(git(self.repo, "branch", "--show-current").strip(), "main")
-
-
 class SourceBranchProofTests(unittest.TestCase):
     """Cleanup proves work-branch reachability against the recorded source branch."""
 
@@ -241,6 +200,74 @@ class SourceBranchProofTests(unittest.TestCase):
         self.assertEqual(out["reason"], "not-merged-into-source")
         self.assertEqual(out["target"], "feat/dashboard")
         self.assertIn("ar/unmerged", git(self.repo, "branch", "--list", "ar/unmerged"))
+
+
+class CleanupChildEdgeTests(unittest.TestCase):
+    """Full cleanup removes the finalized child task branches, not their parent/source branches."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def _repo_with_landed_task(self, name: str) -> tuple[Path, Path]:
+        repo = self.tmp / name
+        init_repo(repo, "main")
+        git(repo, "checkout", "-b", "feat/dashboard")
+        (repo / "dashboard.txt").write_text(f"{name} dashboard\n", encoding="utf-8")
+        git(repo, "add", "dashboard.txt")
+        git(repo, "commit", "-m", "dashboard source")
+        git(repo, "checkout", "-b", "ar/task")
+        (repo / "task.txt").write_text(f"{name} task\n", encoding="utf-8")
+        git(repo, "add", "task.txt")
+        git(repo, "commit", "-m", "task work")
+        git(repo, "checkout", "feat/dashboard")
+        git(repo, "merge", "--ff-only", "ar/task")
+        git(repo, "checkout", "main")
+        worktree = self.tmp / "grp" / name
+        git(repo, "worktree", "add", str(worktree), "ar/task")
+        return repo, worktree
+
+    @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
+    def test_cleanup_removes_child_branches_and_preserves_parent_sources(
+        self, carryover: MagicMock
+    ) -> None:
+        carryover.return_value = (True, "2026-06-24T09:00:00+02:00")
+        code_repo, code_worktree = self._repo_with_landed_task("code")
+        memory_repo, memory_worktree = self._repo_with_landed_task("memory")
+        contract = _contract(
+            self.tmp,
+            code_repo_path=code_repo,
+            memory_repo_path=memory_repo,
+            code_source_branch="feat/dashboard",
+            code_work_branch="ar/task",
+            memory_source_branch="feat/dashboard",
+            memory_work_branch="ar/task",
+            worktree_group=self.tmp / "grp",
+            code_worktree=code_worktree,
+            memory_worktree=memory_worktree,
+            ledger_path=memory_worktree / "memory.md",
+        )
+        write_contract(contract.contract_path, contract)
+
+        result = cleanup_result(
+            WorktreeArgs(
+                contract_path=contract.contract_path,
+                approved=True,
+                dry_run=False,
+                teardown_providers=False,
+            )
+        )
+        branches = result.payload["branches"]  # type: ignore[index]
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(sorted(branches), ["code", "memory"])
+        self.assertEqual(git(code_repo, "branch", "--list", "ar/task").strip(), "")
+        self.assertEqual(git(memory_repo, "branch", "--list", "ar/task").strip(), "")
+        self.assertIn("feat/dashboard", git(code_repo, "branch", "--list", "feat/dashboard"))
+        self.assertIn("feat/dashboard", git(memory_repo, "branch", "--list", "feat/dashboard"))
 
 
 class CleanupDryRunDirectoryTests(unittest.TestCase):
