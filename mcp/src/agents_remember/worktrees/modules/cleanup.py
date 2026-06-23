@@ -263,6 +263,24 @@ def _cleanup_state(
     return "already-clean" if already_clean else "cleanup-completed"
 
 
+def _cleanup_summary(state: str) -> str:
+    if state == "would-cleanup":
+        return (
+            "Cleanup would reclaim the worktree provider stack, remove worktrees, "
+            "and delete merged local task branches where Git proves they are merged."
+        )
+    if state == "already-clean":
+        return (
+            "Cleanup already completed; no worktrees or merged local task branches "
+            "remained to remove."
+        )
+    return (
+        "Cleanup completed; the worktree provider stack was reclaimed, worktrees "
+        "were removed and merged local task branches were deleted where Git proved "
+        "they were merged."
+    )
+
+
 def _kept_branches(branches: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
     return {
         key: value
@@ -319,14 +337,15 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     updated = contract if args.dry_run else replace(contract, cleanup="completed")
     if not args.dry_run:
         write_contract(contract.contract_path, updated)
+    state = _cleanup_state(
+        args.dry_run, updated.cleanup == "completed", removed_worktrees, branches
+    )
     return WorktreeCommandResult(
         0,
         {
-            "state": _cleanup_state(
-                args.dry_run, updated.cleanup == "completed", removed_worktrees, branches
-            ),
+            "state": state,
             **status_payload(updated),
-            "summary": "Cleanup completed; the worktree provider stack was reclaimed, worktrees were removed and merged local task branches were deleted where Git proved they were merged.",
+            "summary": _cleanup_summary(state),
             "providers": providers,
             "removed_worktrees": removed_worktrees,
             "branches": branches,

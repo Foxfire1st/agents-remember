@@ -320,6 +320,8 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         directories = result.payload["directories"]  # type: ignore[index]
 
         self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.payload["state"], "would-cleanup")  # type: ignore[index]
+        self.assertIn("Cleanup would reclaim", result.payload["summary"])  # type: ignore[index]
         self.assertTrue(directories["worktree_group"]["would_remove"])  # type: ignore[index]
 
 
