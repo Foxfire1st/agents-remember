@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import branch_exists, run_git
+from agents_remember.worktrees.modules.git import branch_exists, is_ancestor, run_git
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -44,6 +45,36 @@ def delete_branch_if_merged(repo: Path, branch: str, dry_run: bool) -> dict[str,
             "reason": result.stderr.strip() or "git branch -d refused the branch",
         }
     return {"branch": branch, "deleted": True}
+
+
+def delete_branch_if_merged_into(
+    repo: Path, branch: str, target_ref: str, dry_run: bool
+) -> dict[str, object]:
+    if not branch_exists(repo, branch):
+        return {"branch": branch, "deleted": False, "reason": "already-absent"}
+    if not is_ancestor(repo, branch, target_ref):
+        return {
+            "branch": branch,
+            "deleted": False,
+            "reason": "not-merged-into-source",
+            "target": target_ref,
+        }
+    if dry_run:
+        return {
+            "branch": branch,
+            "deleted": False,
+            "would_delete": True,
+            "target": target_ref,
+        }
+    result = run_git(repo, ["branch", "-D", branch])
+    if result.returncode != 0:
+        return {
+            "branch": branch,
+            "deleted": False,
+            "reason": result.stderr.strip() or "git branch -D failed",
+            "target": target_ref,
+        }
+    return {"branch": branch, "deleted": True, "target": target_ref}
 
 
 def delete_branch_force(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
@@ -88,6 +119,27 @@ def delete_remote_branch_if_present(repo: Path, branch: str, dry_run: bool) -> d
     return {"remote_deleted": True}
 
 
+def _retire_work_branch(
+    repo: Path,
+    branch: str,
+    source_branch: str,
+    default_branch: str,
+    dry_run: bool,
+    *,
+    remote: bool,
+) -> dict[str, object]:
+    out: dict[str, object] = {"branch": branch}
+    if not branch or branch == default_branch:
+        out.update({"deleted": False, "reason": "default-or-empty"})
+        return out
+    if not dry_run and run_git(repo, ["branch", "--show-current"]).stdout.strip() == branch:
+        run_git(repo, ["checkout", default_branch])
+    out.update(delete_branch_if_merged_into(repo, branch, source_branch, dry_run))
+    if remote and (out.get("deleted") or out.get("would_delete")):
+        out["remote"] = delete_remote_branch_if_present(repo, branch, dry_run)
+    return out
+
+
 def _retire_branch(
     repo: Path,
     branch: str,
@@ -124,9 +176,16 @@ def _retire_branch(
     return out
 
 
-def remove_empty_dir(path: Path, dry_run: bool) -> dict[str, object]:
+def remove_empty_dir(
+    path: Path, dry_run: bool, planned_removed: set[Path] | None = None
+) -> dict[str, object]:
     if not path.exists():
         return {"path": path.as_posix(), "removed": False, "reason": "already-absent"}
+    if dry_run and planned_removed is not None:
+        remaining = {child.resolve() for child in path.iterdir()} - planned_removed
+        if remaining:
+            return {"path": path.as_posix(), "removed": False, "reason": "not-empty"}
+        return {"path": path.as_posix(), "removed": False, "would_remove": True}
     if any(path.iterdir()):
         return {"path": path.as_posix(), "removed": False, "reason": "not-empty"}
     if dry_run:
@@ -158,41 +217,78 @@ def _deleted_branches(contract, dry_run: bool, *, landed: bool) -> dict[str, dic
     # local-only (carried to local memory main), so it has no remote branch to clear.
     code_default = _repo_default_branch(contract.code_repo_path)
     branches: dict[str, dict[str, object]] = {
-        "code_work": _retire_branch(
-            contract.code_repo_path, contract.code_work_branch, code_default, dry_run,
-            landed=landed, remote=True,
+        "code_work": _retire_work_branch(
+            contract.code_repo_path,
+            contract.code_work_branch,
+            contract.code_source_branch,
+            code_default,
+            dry_run,
+            remote=True,
         ),
         "code_source": _retire_branch(
-            contract.code_repo_path, contract.code_source_branch, code_default, dry_run,
-            landed=landed, remote=True,
+            contract.code_repo_path,
+            contract.code_source_branch,
+            code_default,
+            dry_run,
+            landed=landed,
+            remote=True,
         ),
     }
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
         mem_default = _repo_default_branch(contract.memory_repo_path)
-        branches["memory_work"] = _retire_branch(
-            contract.memory_repo_path, contract.memory_work_branch, mem_default, dry_run,
-            landed=landed, remote=False,
+        branches["memory_work"] = _retire_work_branch(
+            contract.memory_repo_path,
+            contract.memory_work_branch,
+            contract.memory_source_branch,
+            mem_default,
+            dry_run,
+            remote=False,
         )
         branches["memory_source"] = _retire_branch(
-            contract.memory_repo_path, contract.memory_source_branch, mem_default, dry_run,
-            landed=landed, remote=False,
+            contract.memory_repo_path,
+            contract.memory_source_branch,
+            mem_default,
+            dry_run,
+            landed=landed,
+            remote=False,
         )
         integration_work_branch = integration_branch(contract)
         if branch_exists(contract.memory_repo_path, integration_work_branch):
-            branches["memory_integration"] = _retire_branch(
-                contract.memory_repo_path, integration_work_branch, mem_default, dry_run,
-                landed=landed, remote=False,
+            branches["memory_integration"] = _retire_work_branch(
+                contract.memory_repo_path,
+                integration_work_branch,
+                contract.memory_source_branch,
+                mem_default,
+                dry_run,
+                remote=False,
             )
     return branches
 
 
-def _removed_directories(contract, dry_run: bool) -> dict[str, dict[str, object]]:
+def _scheduled_removal_paths(
+    providers: Mapping[str, object], removed_worktrees: dict[str, dict[str, object]]
+) -> set[Path]:
+    planned: set[Path] = set()
+    for item in removed_worktrees.values():
+        if item.get("removed") or item.get("would_remove"):
+            planned.add(Path(str(item["path"])).resolve())
+    provider_runtime = providers.get("providerRuntime")
+    if isinstance(provider_runtime, dict) and (
+        provider_runtime.get("removed") or provider_runtime.get("would_remove")
+    ):
+        planned.add(Path(str(provider_runtime["path"])).resolve())
+    return planned
+
+
+def _removed_directories(
+    contract, dry_run: bool, planned_removed: set[Path] | None = None
+) -> dict[str, dict[str, object]]:
     directories = {
-        "worktree_group": remove_empty_dir(contract.worktree_group, dry_run),
+        "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned_removed),
     }
     if contract.worktree_group.parent.exists():
         directories["repo_worktree_group"] = remove_empty_dir(
-            contract.worktree_group.parent, dry_run
+            contract.worktree_group.parent, dry_run, planned_removed
         )
     return directories
 
@@ -211,8 +307,7 @@ def _cleanup_state(
             for item in removed_worktrees.values()
         )
         and all(
-            not item.get("deleted")
-            and item.get("reason") in {"already-absent", "default-or-empty"}
+            not item.get("deleted") and item.get("reason") in {"already-absent", "default-or-empty"}
             for item in branches.values()
         )
         and cleanup_completed
@@ -269,7 +364,10 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     )
     removed_worktrees = _removed_worktrees(contract, args.dry_run)
     branches = _deleted_branches(contract, args.dry_run, landed=carried)
-    directories = _removed_directories(contract, args.dry_run)
+    planned_removed = (
+        _scheduled_removal_paths(providers, removed_worktrees) if args.dry_run else None
+    )
+    directories = _removed_directories(contract, args.dry_run, planned_removed)
     updated = contract if args.dry_run else replace(contract, cleanup="completed")
     if not args.dry_run:
         write_contract(contract.contract_path, updated)

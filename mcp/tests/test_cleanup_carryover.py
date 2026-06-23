@@ -23,6 +23,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     _retire_branch,
     cleanup_result,
+    delete_branch_if_merged_into,
     delete_remote_branch_if_present,
 )
 from agents_remember.worktrees.modules.guidance import carryover_done, lifecycle_guidance
@@ -190,6 +191,109 @@ class RetireBranchTests(unittest.TestCase):
         out = _retire_branch(self.repo, "feat/x", "main", dry_run=False, landed=True, remote=False)
         self.assertTrue(out["deleted"])
         self.assertEqual(git(self.repo, "branch", "--show-current").strip(), "main")
+
+
+class SourceBranchProofTests(unittest.TestCase):
+    """Cleanup proves work-branch reachability against the recorded source branch."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.repo = Path(self._td.name) / "repo"
+        init_repo(self.repo, "main")
+        git(self.repo, "checkout", "-b", "feat/dashboard")
+        (self.repo / "dashboard.txt").write_text("dashboard\n", encoding="utf-8")
+        git(self.repo, "add", "dashboard.txt")
+        git(self.repo, "commit", "-m", "dashboard source")
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_deletes_work_branch_merged_into_recorded_source_while_main_is_checked_out(
+        self,
+    ) -> None:
+        git(self.repo, "checkout", "-b", "ar/task")
+        (self.repo / "task.txt").write_text("task\n", encoding="utf-8")
+        git(self.repo, "add", "task.txt")
+        git(self.repo, "commit", "-m", "task work")
+        git(self.repo, "checkout", "feat/dashboard")
+        git(self.repo, "merge", "--ff-only", "ar/task")
+        git(self.repo, "checkout", "main")
+
+        out = delete_branch_if_merged_into(self.repo, "ar/task", "feat/dashboard", dry_run=False)
+
+        self.assertTrue(out["deleted"])
+        self.assertEqual(out["target"], "feat/dashboard")
+        self.assertEqual(git(self.repo, "branch", "--list", "ar/task").strip(), "")
+
+    def test_keeps_work_branch_not_merged_into_recorded_source(self) -> None:
+        git(self.repo, "checkout", "main")
+        git(self.repo, "checkout", "-b", "ar/unmerged")
+        (self.repo / "unmerged.txt").write_text("unmerged\n", encoding="utf-8")
+        git(self.repo, "add", "unmerged.txt")
+        git(self.repo, "commit", "-m", "unmerged work")
+        git(self.repo, "checkout", "main")
+
+        out = delete_branch_if_merged_into(
+            self.repo, "ar/unmerged", "feat/dashboard", dry_run=False
+        )
+
+        self.assertFalse(out["deleted"])
+        self.assertEqual(out["reason"], "not-merged-into-source")
+        self.assertEqual(out["target"], "feat/dashboard")
+        self.assertIn("ar/unmerged", git(self.repo, "branch", "--list", "ar/unmerged"))
+
+
+class CleanupDryRunDirectoryTests(unittest.TestCase):
+    """Dry-run directory reporting models paths cleanup has already scheduled."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    @patch("agents_remember.worktrees.modules.cleanup.teardown_worktree_providers")
+    @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
+    def test_worktree_group_would_remove_when_only_scheduled_paths_remain(
+        self, carryover: MagicMock, teardown: MagicMock
+    ) -> None:
+        carryover.return_value = (True, "2026-06-23T09:00:00+02:00")
+        code_repo = self.tmp / "code"
+        memory_repo = self.tmp / "mem"
+        init_repo(code_repo, "main")
+        init_repo(memory_repo, "main")
+        worktree_group = self.tmp / "grp"
+        code_worktree = worktree_group / "code"
+        memory_worktree = worktree_group / "memory"
+        provider_runtime = worktree_group / "provider-runtime"
+        code_worktree.mkdir(parents=True)
+        memory_worktree.mkdir()
+        provider_runtime.mkdir()
+        teardown.return_value = {
+            "state": "would-teardown",
+            "providerRuntime": {
+                "path": provider_runtime.as_posix(),
+                "removed": False,
+                "would_remove": True,
+            },
+        }
+        contract = _contract(
+            self.tmp,
+            code_repo_path=code_repo,
+            memory_repo_path=memory_repo,
+            worktree_group=worktree_group,
+            code_worktree=code_worktree,
+            memory_worktree=memory_worktree,
+            ledger_path=memory_worktree / "memory.md",
+        )
+        write_contract(contract.contract_path, contract)
+
+        result = cleanup_result(WorktreeArgs(contract_path=contract.contract_path, dry_run=True))
+        directories = result.payload["directories"]  # type: ignore[index]
+
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(directories["worktree_group"]["would_remove"])  # type: ignore[index]
 
 
 class RemoteBranchDeleteTests(unittest.TestCase):
