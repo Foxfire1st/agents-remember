@@ -6,6 +6,7 @@
 import type { EngineStack } from "../../data/selectors";
 import type {
   EngineProcessNode,
+  GateNode,
   LifecycleProjection,
   ProviderNode,
 } from "../../types/projection";
@@ -20,6 +21,7 @@ export interface EngineProcessView {
   enclosureKey: string;
   node: EngineProcessNode;
   lifecycle?: LifecycleProjection;
+  gate?: GateNode;
 }
 
 /** The Engine Room's render model: enclosure process pods + the shared workspace stack. */

@@ -22,6 +22,18 @@ describe("SessionList (6e-2c)", () => {
     expect(getByTestId("chats-session-b").getAttribute("data-selected")).not.toBeNull();
   });
 
+  it("renders a lifecycle tag when a session is attached", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[{ id: "a", label: "Terminal 1", lifecycleId: "LC1" }]}
+        activeId="a"
+        onSelect={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(getByTestId("chats-session-a").textContent).toContain("LC1");
+  });
+
   it("selecting a row reports the new active id", () => {
     const onSelect = vi.fn();
     const { getByTestId } = render(

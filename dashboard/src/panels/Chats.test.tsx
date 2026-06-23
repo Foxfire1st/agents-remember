@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionStore } from "../data/sessions";
@@ -76,5 +76,15 @@ describe("Chats session-tab persistence (6e-4)", () => {
     expect(getByTestId("term-s2")).not.toBeNull();
     expect(getByTestId("chats-terminal-layer-s1").style.display).toBe("flex");
     expect(getByTestId("chats-terminal-layer-s2").style.display).toBe("none");
+  });
+
+  it("attaches the active untagged session to the selected lifecycle", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByTestId } = render(<Chats selectedLifecycleId="LC1" />);
+    fireEvent.click(await findByTestId("chats-attach-lifecycle"));
+
+    expect(sessionStore.getState().sessions[0]?.lifecycleId).toBe("LC1");
   });
 });

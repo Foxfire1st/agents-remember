@@ -83,6 +83,16 @@ describe("HighlightComposer (6f-1)", () => {
     );
   });
 
+  it("tags a created chat with the selected lifecycle", async () => {
+    const { findByTestId, getByRole } = render(<HighlightComposer selectedLifecycleId="LC1" />);
+    fireEvent.click(await findByTestId("highlight-add-to-chat"));
+    await findByTestId("highlight-target-c:claude");
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter" });
+    await waitFor(() =>
+      expect(createSession).toHaveBeenCalledWith("Claude Code", "harness", "claude", "LC1"),
+    );
+  });
+
   it("picking a different harness create option targets that harness", async () => {
     const { findByTestId, getByRole } = render(<HighlightComposer />);
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
@@ -102,6 +112,21 @@ describe("HighlightComposer (6f-1)", () => {
     );
     expect(sessionStore.getState().activeId).toBe("s1");
     await waitFor(() => expect(clear).toHaveBeenCalled()); // dismiss only after "delivered"
+  });
+
+  it("filters open chat targets to the selected lifecycle", async () => {
+    sessionStore.getState().add("Terminal", "s1", "LC1");
+    sessionStore.getState().add("Terminal", "s2", "LC2");
+    const { findByTestId, getByRole, queryByTestId } = render(
+      <HighlightComposer selectedLifecycleId="LC1" />,
+    );
+    fireEvent.click(await findByTestId("highlight-add-to-chat"));
+    expect(await findByTestId("highlight-target-s:s1")).not.toBeNull();
+    expect(queryByTestId("highlight-target-s:s2")).toBeNull();
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter" });
+    await waitFor(() =>
+      expect(deliverToSession).toHaveBeenCalledWith("s1", expect.stringContaining("a blocked finding")),
+    );
   });
 
   it("keeps the composer open with a retry status when delivery is not confirmed", async () => {

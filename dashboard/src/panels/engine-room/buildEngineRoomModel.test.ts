@@ -74,6 +74,27 @@ describe("buildEngineRoomModel", () => {
     expect(model.usesFallback).toBe(false);
   });
 
+  it("exposes the lifecycle gate on the process view", () => {
+    const model = buildEngineRoomModel(
+      [node({ lifecycleId: "L1" })],
+      [],
+      [
+        lifecycle({
+          id: "L1",
+          gate: {
+            id: "G1",
+            kind: "closeout-approval",
+            state: "open",
+            decisions: [],
+            packet: { question: "land?" },
+            ts: "",
+          },
+        }),
+      ],
+    );
+    expect(model.processes[0]?.gate?.kind).toBe("closeout-approval");
+  });
+
   it("lifts workspace-scoped providers into workspaceEngines", () => {
     const ws: ProviderNode = {
       id: "codegraphcontext-code",

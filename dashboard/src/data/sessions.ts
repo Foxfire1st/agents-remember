@@ -18,6 +18,7 @@ import {
 export interface OpenSession {
   id: string;
   label: string;
+  lifecycleId?: string;
 }
 
 interface SessionState {
@@ -25,22 +26,36 @@ interface SessionState {
   activeId: string | null;
   count: number;
   /** Append a session labelled `{prefix} {n}`, bump the ordinal, and make it active. */
-  add: (prefix: string, id: string) => void;
+  add: (prefix: string, id: string, lifecycleId?: string) => void;
   /** Drop a session; clear `activeId` if it was the one removed (the tmux session persists). */
   close: (id: string) => void;
   setActive: (id: string) => void;
+  /** Attach a hosted session to one lifecycle; latest attachment owns that lifecycle route. */
+  setLifecycle: (id: string, lifecycleId: string | null) => void;
+}
+
+function clearLifecycle(session: OpenSession): OpenSession {
+  return { id: session.id, label: session.label };
 }
 
 export const sessionStore = createStore<SessionState>((set) => ({
   sessions: [],
   activeId: null,
   count: 0,
-  add: (prefix, id) =>
+  add: (prefix, id, lifecycleId) =>
     set((state) => {
       const ordinal = state.count + 1;
+      const next = { id, label: `${prefix} ${ordinal}`, ...(lifecycleId ? { lifecycleId } : {}) };
       return {
         count: ordinal,
-        sessions: [...state.sessions, { id, label: `${prefix} ${ordinal}` }],
+        sessions: [
+          ...state.sessions.map((session) =>
+            lifecycleId && session.lifecycleId === lifecycleId
+              ? clearLifecycle(session)
+              : session,
+          ),
+          next,
+        ],
         activeId: id,
       };
     }),
@@ -50,10 +65,24 @@ export const sessionStore = createStore<SessionState>((set) => ({
       activeId: state.activeId === id ? null : state.activeId,
     })),
   setActive: (id) => set({ activeId: id }),
+  setLifecycle: (id, lifecycleId) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) => {
+        if (session.id === id) return lifecycleId ? { ...session, lifecycleId } : clearLifecycle(session);
+        if (lifecycleId && session.lifecycleId === lifecycleId) {
+          return clearLifecycle(session);
+        }
+        return session;
+      }),
+    })),
 }));
 
 export const useSessions = <T>(selector: (state: SessionState) => T): T =>
   useStore(sessionStore, selector);
+
+export function findSessionForLifecycle(lifecycleId: string): OpenSession | undefined {
+  return sessionStore.getState().sessions.find((session) => session.lifecycleId === lifecycleId);
+}
 
 // --- Live connections (slice 6f): the per-session `TerminalConnection` registry, exposed cockpit-wide
 // so a surface outside <Chats> (the highlight composer) can inject into a session's stdin. Non-reactive
@@ -153,10 +182,11 @@ export async function createSession(
   prefix: string,
   kind: "terminal" | "harness" = "terminal",
   harness?: string,
+  lifecycleId?: string,
 ): Promise<string> {
   const id = crypto.randomUUID();
   // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
   await openTerminalSession(id, kind, "", harness);
-  sessionStore.getState().add(prefix, id);
+  sessionStore.getState().add(prefix, id, lifecycleId);
   return id;
 }

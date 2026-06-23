@@ -46,6 +46,20 @@ const label = css({
   whiteSpace: "nowrap",
   paddingBlock: "0.25rem",
 });
+const lifecycle = css({
+  maxWidth: "5rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  flexShrink: 0,
+  fontSize: "0.64rem",
+  color: "cyan",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.25rem",
+});
 const close = css({
   font: "inherit",
   fontSize: "0.7rem",
@@ -89,6 +103,7 @@ export function SessionList({
           data-testid={`chats-session-${session.id}`}
         >
           <span className={label}>{session.label}</span>
+          {session.lifecycleId ? <span className={lifecycle}>{session.lifecycleId}</span> : null}
           <Button
             className={close}
             aria-label={`Close ${session.label}`}

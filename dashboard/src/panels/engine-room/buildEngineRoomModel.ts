@@ -26,11 +26,15 @@ export function buildEngineRoomModel(
   const worktreeStacks = stacks.filter((stack) => stack.scope === "worktree");
 
   const lifecycleById = new Map(lifecycles.map((lifecycle) => [lifecycle.id, lifecycle]));
-  const processes = engineProcesses.map((node) => ({
-    enclosureKey: node.worktreeGroup,
-    node,
-    lifecycle: node.lifecycleId ? lifecycleById.get(node.lifecycleId) : undefined,
-  }));
+  const processes = engineProcesses.map((node) => {
+    const lifecycle = node.lifecycleId ? lifecycleById.get(node.lifecycleId) : undefined;
+    return {
+      enclosureKey: node.worktreeGroup,
+      node,
+      lifecycle,
+      gate: lifecycle?.gate,
+    };
+  });
 
   const usesFallback = engineProcesses.length === 0 && worktreeStacks.length > 0;
   return {

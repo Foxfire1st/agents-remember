@@ -178,6 +178,9 @@ export function CockpitShell() {
   const [view, setView] = useState<View>("operations");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const animate = useShouldAnimate();
+  const selectedLifecycleId = useDashboard((s) =>
+    selectedId ? s.lifecycles[selectedId]?.id : undefined,
+  );
 
   // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
   // layout breathes.
@@ -219,7 +222,7 @@ export function CockpitShell() {
             style={{ display: view === "chats" ? "flex" : "none" }}
             aria-hidden={view !== "chats"}
           >
-            <Chats />
+            <Chats selectedLifecycleId={selectedLifecycleId} />
           </div>
         </main>
         {!fullBleed && (
@@ -237,7 +240,7 @@ export function CockpitShell() {
       {/* Slice 6f: a cockpit-wide composer that a text selection raises — send the selection (+ a
           message) to a chat session as a context package. Mounted once here so it works on every view;
           renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
-      <HighlightComposer onSent={() => setView("chats")} />
+      <HighlightComposer selectedLifecycleId={selectedLifecycleId} onSent={() => setView("chats")} />
     </div>
   );
 }

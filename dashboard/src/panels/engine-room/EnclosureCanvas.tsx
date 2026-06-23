@@ -16,6 +16,7 @@ import type {
   CommitRefNode,
   EngineProcessEdge,
   EngineProcessNode,
+  GateNode,
   LandingRefNode,
   LedgerNode,
   LedgerRefNode,
@@ -1153,8 +1154,9 @@ function LandingFlows({ refs }: { refs: LandingRefNode[] }) {
   );
 }
 
-export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }: {
+export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officialLedger }: {
   node: EngineProcessNode;
+  gateNode?: GateNode;
   workspaceEngines?: ProviderNode[];
   officialLedger?: LedgerNode;
 }) {
@@ -1332,6 +1334,7 @@ export function EnclosureCanvas({ node, workspaceEngines = [], officialLedger }:
       role="img"
       aria-label={`Engine room — ${node.taskName} — ${node.health}`}
       data-testid="enclosure-canvas"
+      data-gate-kind={gateNode?.kind}
     >
       <defs>
         {/* refX sits at the chevron's VISUAL tip (geom apex 8.5 + the round join's ~1.1) so the

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
@@ -120,41 +120,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("DetailPanel gate review (6c Part B)", () => {
-  it("renders the gate review drawer with a button per decision verb", () => {
+describe("DetailPanel gate respond (task 11)", () => {
+  it("renders the gate respond drawer with the full request packet", () => {
     seed("gate-review");
-    const { getByTestId } = render(<DetailPanel selectedId="closeout-005" />);
+    const { getByTestId, queryByTestId } = render(<DetailPanel selectedId="closeout-005" />);
     expect(getByTestId("gate-review").textContent).toContain("closeout-approval");
-    expect(getByTestId("gate-approve")).toBeTruthy();
-    expect(getByTestId("gate-reject")).toBeTruthy();
+    expect(getByTestId("gate-respond-open")).toBeTruthy();
+    expect(queryByTestId("gate-approve")).toBeNull();
+    fireEvent.click(getByTestId("gate-respond-open"));
+    expect(getByTestId("gate-request").textContent).toContain("changedPaths");
   });
 
-  it("POSTs the decision to /api/actions and reports recorded", async () => {
-    seed("gate-review");
-    const fetchMock = vi.fn().mockResolvedValue({ status: 202 });
-    vi.stubGlobal("fetch", fetchMock);
-    const { getByTestId } = render(<DetailPanel selectedId="closeout-005" />);
-    fireEvent.click(getByTestId("gate-approve"));
-    await waitFor(() => expect(getByTestId("gate-status").textContent).toContain("recorded"));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/actions/approve",
-      expect.objectContaining({ method: "POST" }),
-    );
-  });
-
-  it("reports no-open-gate on a 409", async () => {
-    seed("gate-review");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 409 }));
-    const { getByTestId } = render(<DetailPanel selectedId="closeout-005" />);
-    fireEvent.click(getByTestId("gate-reject"));
-    await waitFor(() => expect(getByTestId("gate-status").textContent).toContain("no open gate"));
-  });
-
-  it("falls back to the proto-gate ask banner when there is no durable gate", () => {
+  it("renders the proto-gate ask through the same respond surface", () => {
     seed("blocked");
     const { getByTestId, queryByTestId } = render(<DetailPanel selectedId="plan-002" />);
     expect(queryByTestId("gate-review")).toBeNull();
     expect(getByTestId("gate-banner").textContent).toContain("Approve the plan?");
+    expect(getByTestId("gate-respond-open")).toBeTruthy();
   });
 });
 

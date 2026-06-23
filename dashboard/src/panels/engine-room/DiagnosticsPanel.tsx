@@ -1,7 +1,8 @@
 import { css } from "../../../styled-system/css";
 import { fmtWait } from "../../data/selectors";
 import { Affordance } from "../../grammar/Affordance";
-import type { CommitRefNode, EngineProcessNode } from "../../types/projection";
+import type { CommitRefNode, EngineProcessNode, GateNode } from "../../types/projection";
+import { GateResponder, isWorktreeGateKind } from "../GateResponder";
 import {
   actionRow,
   diagKey,
@@ -36,7 +37,15 @@ function CommitRow({ label, refNode }: { label: string; refNode: CommitRefNode }
   );
 }
 
-export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
+export function DiagnosticsPanel({
+  node,
+  lifecycleId,
+  gateNode,
+}: {
+  node: EngineProcessNode;
+  lifecycleId?: string;
+  gateNode?: GateNode;
+}) {
   // 5k F3 — during the power-down (cleanup-pending / abandon) the providers are being torn down, so the
   // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale) provider
   // lines. Derived from `phase` on the frontend (the live runtime is pre-05m, so it sends no power-down signal).
@@ -100,7 +109,16 @@ export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
           <span className={diagValue}>reroute → reindex fallback</span>
         </div>
       ) : null}
-      {node.actions.length > 0 ? (
+      {lifecycleId && gateNode && isWorktreeGateKind(gateNode.kind) ? (
+        <div className={actionRow}>
+          <GateResponder
+            lifecycleId={lifecycleId}
+            gateNode={gateNode}
+            compact
+            testId="engine-gate-responder"
+          />
+        </div>
+      ) : node.actions.length > 0 ? (
         <div className={actionRow}>
           {node.actions.map((action) => (
             <Affordance key={action.action} action={action} />

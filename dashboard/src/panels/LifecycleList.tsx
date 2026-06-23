@@ -80,6 +80,20 @@ const rowId = css({
   whiteSpace: "nowrap",
 });
 const rowSec = css({ color: "cyan", fontSize: "0.76rem" });
+const rowGate = css({
+  maxWidth: "8rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: "0.66rem",
+  color: "amber",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "amber",
+  borderRadius: "2px",
+  paddingInline: "0.28rem",
+  paddingBlock: "0.04rem",
+});
 const rowMeta = css({ marginLeft: "auto", color: "muted", fontSize: "0.72rem", whiteSpace: "nowrap" });
 
 export function LifecycleList({
@@ -144,6 +158,7 @@ export function LifecycleList({
                   : lifecycle.id;
                 const secondary = pivot === "repo" ? lifecycle.phase : (lifecycle.repoId ?? "—");
                 const hint = taskHint(docs);
+                const gate = gateHint(lifecycle.gate?.kind, lifecycle.ask);
                 return (
                   <ListBoxItem
                     key={lifecycle.id}
@@ -154,6 +169,7 @@ export function LifecycleList({
                     <Dot variant={lifecycle.state} />
                     <span className={rowId}>{label}</span>
                     <span className={rowSec}>{secondary}</span>
+                    {gate ? <span className={rowGate}>{gate}</span> : null}
                     <span className={rowMeta}>
                       {hint ? `${hint} · ` : ""}
                       {fmtWait(lifecycle.staleSeconds)}
@@ -168,6 +184,13 @@ export function LifecycleList({
       )}
     </Panel>
   );
+}
+
+function gateHint(kind: string | undefined, ask: Record<string, unknown> | undefined): string {
+  if (kind) return kind;
+  const question = ask?.question;
+  if (typeof question === "string" && question.trim()) return question;
+  return ask ? "ask" : "";
 }
 
 function groupDocs(docs: TaskDocNode[]): Map<string, TaskDocNode[]> {

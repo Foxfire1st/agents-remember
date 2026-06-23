@@ -167,7 +167,13 @@ type Target =
   | { key: string; kind: "session"; id: string; label: string }
   | { key: string; kind: "create"; harnessId?: string; prefix: string; label: string };
 
-export function HighlightComposer({ onSent }: { onSent?: () => void }) {
+export function HighlightComposer({
+  selectedLifecycleId,
+  onSent,
+}: {
+  selectedLifecycleId?: string;
+  onSent?: () => void;
+}) {
   const { selection, clear } = useSelectionCapture();
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
@@ -217,8 +223,11 @@ export function HighlightComposer({ onSent }: { onSent?: () => void }) {
   if (!selection) return null;
 
   // Targets: every open chat, then a create option per detected harness, then a plain shell.
+  const routedSessions = selectedLifecycleId
+    ? sessions.filter((session) => session.lifecycleId === selectedLifecycleId)
+    : sessions;
   const targets: Target[] = [
-    ...sessions.map((s): Target => ({ key: `s:${s.id}`, kind: "session", id: s.id, label: s.label })),
+    ...routedSessions.map((s): Target => ({ key: `s:${s.id}`, kind: "session", id: s.id, label: s.label })),
     ...harnesses
       .filter((h) => h.detected)
       .map((h): Target => ({ key: `c:${h.id}`, kind: "create", harnessId: h.id, prefix: h.name, label: `＋ ${h.name}` })),
@@ -227,8 +236,8 @@ export function HighlightComposer({ onSent }: { onSent?: () => void }) {
   // Default target: the active chat, else the first open chat, else the first create option (an agent
   // when one is detected) — so Enter always has somewhere to send, and never silently picks a shell.
   const defaultKey =
-    (activeId && `s:${activeId}`) ||
-    (sessions[0] && `s:${sessions[0].id}`) ||
+    (activeId && routedSessions.some((session) => session.id === activeId) && `s:${activeId}`) ||
+    (routedSessions[0] && `s:${routedSessions[0].id}`) ||
     targets.find((t) => t.kind === "create")?.key ||
     null;
   const selectedKey = targets.find((t) => t.key === targetKey) ? targetKey : defaultKey;
@@ -273,7 +282,14 @@ export function HighlightComposer({ onSent }: { onSent?: () => void }) {
           sessionStore.getState().setActive(selected.id);
           id = selected.id;
         } else {
-          id = await createSession(selected.prefix, selected.harnessId ? "harness" : "terminal", selected.harnessId);
+          id = selectedLifecycleId
+            ? await createSession(
+                selected.prefix,
+                selected.harnessId ? "harness" : "terminal",
+                selected.harnessId,
+                selectedLifecycleId,
+              )
+            : await createSession(selected.prefix, selected.harnessId ? "harness" : "terminal", selected.harnessId);
         }
         ctx = { id, imagePath: null };
         deliveryRef.current = ctx; // capture now so a Retry reuses this session, never re-creates it

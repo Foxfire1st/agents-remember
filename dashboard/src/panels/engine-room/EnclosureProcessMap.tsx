@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 
 import { css } from "../../../styled-system/css";
-import type { EngineProcessNode, LedgerNode, ProviderNode } from "../../types/projection";
+import type { EngineProcessNode, GateNode, LedgerNode, ProviderNode } from "../../types/projection";
 import { EnclosureCanvas } from "./EnclosureCanvas";
 import {
   abandonRecord,
@@ -57,8 +57,9 @@ function CleanupRecord({ node }: { node: EngineProcessNode }) {
 // solidifies in place into the contract-anchored enclosure (T4 morph, 5f S3) — never a teleport.
 // The ghost banner fades as the node promotes; `layout` carries the morph. Honest motion: under
 // data-effects=off / reduced-motion the shell is an instant swap (no tween).
-export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedger }: {
+export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], officialLedger }: {
   node: EngineProcessNode;
+  gateNode?: GateNode;
   workspaceEngines?: ProviderNode[];
   officialLedger?: LedgerNode;
 }) {
@@ -109,10 +110,20 @@ export function EnclosureProcessMap({ node, workspaceEngines = [], officialLedge
             animate={{ opacity: 0.4, filter: "grayscale(0.75)" }}
             transition={{ duration: animate ? 0.6 : 0, ease: "easeOut" }}
           >
-            <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
+            <EnclosureCanvas
+              node={node}
+              gateNode={gateNode}
+              workspaceEngines={workspaceEngines}
+              officialLedger={officialLedger}
+            />
           </motion.div>
         ) : (
-          <EnclosureCanvas node={node} workspaceEngines={workspaceEngines} officialLedger={officialLedger} />
+          <EnclosureCanvas
+            node={node}
+            gateNode={gateNode}
+            workspaceEngines={workspaceEngines}
+            officialLedger={officialLedger}
+          />
         )}
       </div>
     </motion.div>

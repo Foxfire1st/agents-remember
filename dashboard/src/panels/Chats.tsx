@@ -73,6 +73,16 @@ const launchButton = css({
   _hover: { background: "rgba(232, 193, 112, 0.1)" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
+const attachBadge = css({
+  fontSize: "0.7rem",
+  color: "muted",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.12rem",
+});
 const harnessIcon = css({ flexShrink: 0, display: "block" });
 const body = css({ display: "flex", flex: "1", minHeight: "0", gap: "0.5rem" });
 const sidebar = css({
@@ -133,11 +143,12 @@ function HarnessIcon({ id }: { id: string }) {
   );
 }
 
-export function Chats() {
+export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string }) {
   // The session registry lives in the store (shared, testable state); <Chats> is kept mounted across
   // view switches (hidden via CSS in `Cockpit`), so the live terminal + this connection ref persist.
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
+  const activeSession = sessions.find((session) => session.id === activeId);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
@@ -153,7 +164,14 @@ export function Chats() {
   }, []);
 
   const startSession = (label: string, kind: "terminal" | "harness", harness?: string) =>
-    createSession(label, kind, harness);
+    selectedLifecycleId
+      ? createSession(label, kind, harness, selectedLifecycleId)
+      : createSession(label, kind, harness);
+
+  const attachActive = () => {
+    if (!activeSession || activeSession.lifecycleId || !selectedLifecycleId) return;
+    sessionStore.getState().setLifecycle(activeSession.id, selectedLifecycleId);
+  };
 
   return (
     <section className={wrap} data-testid="chats">
@@ -180,6 +198,20 @@ export function Chats() {
               <span>{harness.name}</span>
             </button>
           ))}
+        {selectedLifecycleId && activeSession?.lifecycleId === selectedLifecycleId ? (
+          <span className={attachBadge}>task {selectedLifecycleId}</span>
+        ) : selectedLifecycleId && activeSession && !activeSession.lifecycleId ? (
+          <button
+            type="button"
+            className={launchButton}
+            onClick={attachActive}
+            data-testid="chats-attach-lifecycle"
+          >
+            Attach {selectedLifecycleId}
+          </button>
+        ) : activeSession?.lifecycleId ? (
+          <span className={attachBadge}>task {activeSession.lifecycleId}</span>
+        ) : null}
       </header>
       <div className={body}>
         {sessions.length > 0 && (

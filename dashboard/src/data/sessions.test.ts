@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deliverToSession, registerConnection, sendToSession, sessionStore } from "./sessions";
+import { deliverToSession, findSessionForLifecycle, registerConnection, sendToSession, sessionStore } from "./sessions";
 import { bracketedPaste, sanitizeForInjection, type TerminalConnection } from "./terminal";
 
 // A controllable TerminalConnection: records injected input and exposes a settable output clock so the
@@ -55,6 +55,29 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().setActive("a");
     expect(sessionStore.getState().activeId).toBe("a");
     expect(sessionStore.getState().sessions).toHaveLength(2);
+  });
+
+  it("attaches a lifecycle to a hosted session and resolves it for gate routing", () => {
+    sessionStore.getState().add("Claude Code", "agent-1", "LC1");
+    expect(findSessionForLifecycle("LC1")?.id).toBe("agent-1");
+    expect(sessionStore.getState().sessions[0]).toEqual({
+      id: "agent-1",
+      label: "Claude Code 1",
+      lifecycleId: "LC1",
+    });
+  });
+
+  it("keeps one owning session per lifecycle and clears tags explicitly", () => {
+    sessionStore.getState().add("Claude Code", "agent-1", "LC1");
+    sessionStore.getState().add("Codex", "agent-2");
+    sessionStore.getState().setLifecycle("agent-2", "LC1");
+    expect(sessionStore.getState().sessions).toEqual([
+      { id: "agent-1", label: "Claude Code 1" },
+      { id: "agent-2", label: "Codex 2", lifecycleId: "LC1" },
+    ]);
+    sessionStore.getState().setLifecycle("agent-2", null);
+    expect(findSessionForLifecycle("LC1")).toBeUndefined();
+    expect(sessionStore.getState().sessions[1]).toEqual({ id: "agent-2", label: "Codex 2" });
   });
 });
 

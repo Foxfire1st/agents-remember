@@ -185,13 +185,18 @@ export function EngineRoom() {
             <EnclosureProcessMap
               key={gen}
               node={selected.node}
+              gateNode={selected.gate}
               workspaceEngines={model.workspaceEngines}
               officialLedger={officialLedger}
             />
           </div>
           <div className={roomZone} data-testid="engine-room-diagnostics">
             <BootTimeline node={selected.node} />
-            <DiagnosticsPanel node={selected.node} />
+            <DiagnosticsPanel
+              node={selected.node}
+              lifecycleId={selected.lifecycle?.id}
+              gateNode={selected.gate}
+            />
           </div>
         </div>
       </div>

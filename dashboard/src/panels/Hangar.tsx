@@ -4,6 +4,7 @@ import { useDashboard } from "../data/store";
 import { Affordance } from "../grammar/Affordance";
 import { Panel } from "../grammar/Panel";
 import type { EnclosureNode, LifecycleProjection } from "../types/projection";
+import { GateResponder, isWorktreeGateKind } from "./GateResponder";
 
 // The hangar (notes 01/06): persistent worktree-backed lifecycles are NEVER auto-reaped — when
 // they rot, this is where the staleness surfaces for the developer (the TTL reaper is fleeting-only).
@@ -94,7 +95,16 @@ export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
                   <span className={badge}>integrate {enclosure.integrationStatus}</span>
                   <span className={badge}>cleanup {enclosure.cleanup}</span>
                 </div>
-                {enclosure.actions.length > 0 ? (
+                {lifecycleId && lifecycle?.gate && isWorktreeGateKind(lifecycle.gate.kind) ? (
+                  <div className={actions}>
+                    <GateResponder
+                      lifecycleId={lifecycleId}
+                      gateNode={lifecycle.gate}
+                      compact
+                      testId="hangar-gate-responder"
+                    />
+                  </div>
+                ) : enclosure.actions.length > 0 ? (
                   <div className={actions}>
                     {enclosure.actions.map((action) => (
                       <Affordance key={action.action} action={action} />
