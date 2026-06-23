@@ -19,6 +19,8 @@ import type {
   TaskSubTaskRefNode,
 } from "../types/projection";
 
+import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
+
 // The l-01 phase vocabulary, in order (mcp/.../lifecycle_state.py). The stepper marks phases before
 // the current as done — mc2's Request→Close mini-map.
 const PHASES: Phase[] = [
@@ -333,8 +335,10 @@ export function DetailPanel({
 
   if (!lifecycle) {
     return (
-      <Panel testid="detail-panel" title="Detail" className={sizing}>
-        <p className="muted">Select a session to inspect its phase, gate, and tokens.</p>
+      <Panel testid="detail-panel" title="Detail" className={sizing} fill>
+        <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">
+          Select a session to inspect its phase, gate, and tokens.
+        </EmptyStateBackdrop>
       </Panel>
     );
   }

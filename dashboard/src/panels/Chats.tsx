@@ -9,6 +9,7 @@ import {
   useSessions,
 } from "../data/sessions";
 import { bracketedPaste, fetchHarnesses, sanitizeForInjection, type HarnessInfo } from "../data/terminal";
+import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
 import { SessionComposer } from "./SessionComposer";
 import { SessionList } from "./SessionList";
 
@@ -215,10 +216,10 @@ export function Chats() {
               />
             </>
           ) : (
-            <div className={empty}>
+            <EmptyStateBackdrop src="/assets/sc2-adjutant-boomerang.mp4">
               ＋ Terminal opens a shell the dashboard owns; harness buttons launch a supported agent —
               both at the workspace root.
-            </div>
+            </EmptyStateBackdrop>
           )}
         </div>
       </div>
