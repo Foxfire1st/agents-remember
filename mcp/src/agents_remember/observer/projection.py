@@ -137,11 +137,14 @@ class EnclosureNode(BaseModel):
 
 
 class ProviderNode(BaseModel):
-    """One provider's current-state snapshot (data surface 1).
+    """One provider's current-state snapshot (data surfaces 1 and 4).
 
     ``snapshotStaleSeconds`` is the age of the ``current.json`` file: provider
     state is call-triggered and stale between calls, so the reducer surfaces how
-    old the snapshot is rather than pretending it is live.
+    old the snapshot is rather than pretending it is live. Workspace providers
+    can be aggregate nodes or repo-covered nodes when the provider snapshot
+    carries per-repo evidence. Worktree providers carry ``worktreeGroup`` and
+    bind to their isolated enclosure.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -152,10 +155,11 @@ class ProviderNode(BaseModel):
     watcherUp: bool = False
     indexingState: str = "unknown"
     snapshotStaleSeconds: float | None = None
-    # Binding (slice 5c): a provider is either workspace-scoped or part of a worktree's *isolated*
-    # stack. The engine room shows each worktree's CGC (its code repo) + GrepAI (its memory repo),
-    # so a worktree-scoped node carries its worktree group + repo + role rather than being lumped
-    # in with main's. ``worktreeGroup`` is the join key back to the enclosure (group name).
+    # Binding (slice 5c + task 12 S2): a provider is either workspace-scoped or
+    # part of a worktree's isolated stack. Workspace providers can carry repoId
+    # when current-state has repo coverage evidence (CGC watcher rows, GrepAI
+    # targetRepos); worktreeGroup remains the join key back to an enclosure and
+    # takes precedence over repoId client-side.
     scope: str = "workspace"  # "workspace" | "worktree"
     role: str | None = None  # "code" (CGC) | "memory" (GrepAI)
     repoId: str | None = None

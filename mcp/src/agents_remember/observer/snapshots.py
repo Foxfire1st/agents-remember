@@ -58,6 +58,10 @@ from agents_remember.observer.projection import (
     TaskSubTaskRefNode,
     ToolReportNode,
 )
+from agents_remember.observer.provider_nodes import (
+    workspace_provider_nodes,
+    worktree_provider_node,
+)
 from agents_remember.observer.timeutil import age_seconds
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import progress_status, read_setup_progress
@@ -80,11 +84,6 @@ from agents_remember.worktrees.start_progress import read_start_progress
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
-
-
-def _provider_role(provider_id: str) -> str:
-    """Map a provider id to its repo role: GrepAI serves the memory repo, CGC the code repo."""
-    return "memory" if "memory" in provider_id or "grepai" in provider_id else "code"
 
 
 def read_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderNode]:
@@ -110,25 +109,7 @@ def _workspace_providers(config: McpRuntimeConfig, *, now: datetime) -> list[Pro
     providers = payload.get("providers")
     if not isinstance(providers, dict):
         return []
-    nodes: list[ProviderNode] = []
-    for key, value in providers.items():
-        if not isinstance(value, dict):
-            continue
-        ok = value.get("ok")
-        provider_id = str(value.get("id", key))
-        nodes.append(
-            ProviderNode(
-                id=provider_id,
-                state=str(value.get("state", "unknown")),
-                ok=ok if isinstance(ok, bool) else None,
-                watcherUp=bool(value.get("watcherUp", False)),
-                indexingState=str(value.get("indexingState", "unknown")),
-                snapshotStaleSeconds=stale,
-                scope="workspace",
-                role=_provider_role(provider_id),
-            )
-        )
-    return nodes
+    return workspace_provider_nodes(providers, stale_seconds=stale)
 
 
 def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[ProviderNode]:
@@ -151,17 +132,7 @@ def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[Provi
         for provider in providers:
             provider_id = str(provider)
             nodes.append(
-                ProviderNode(
-                    id=f"{provider_id}@{group}",
-                    state="configured",  # the group state file exists => the stack was set up
-                    ok=True,
-                    indexingState="unknown",
-                    snapshotStaleSeconds=stale,
-                    scope="worktree",
-                    role=_provider_role(provider_id),
-                    repoId=repo,
-                    worktreeGroup=group,
-                )
+                worktree_provider_node(provider_id, group=group, repo_id=repo, stale_seconds=stale)
             )
     return nodes
 

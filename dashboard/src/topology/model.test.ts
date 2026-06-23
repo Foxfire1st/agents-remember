@@ -60,4 +60,42 @@ describe("buildTopology", () => {
 
     expect(providerNode?.parent).toBe(workspaceIndex);
   });
+
+  it("parents repo-scoped workspace providers to their covered repo node", () => {
+    const nodes = buildTopology(
+      [],
+      [],
+      [
+        provider({
+          id: "codegraphcontext-code:repo-b",
+          scope: "workspace",
+          repoId: "repo-b",
+          worktreeGroup: undefined,
+        }),
+      ],
+    );
+    const repoIndex = nodes.findIndex((node) => node.kind === "repo" && node.label === "repo-b");
+    const providerNode = nodes.find((node) => node.kind === "prov");
+
+    expect(repoIndex).toBeGreaterThan(-1);
+    expect(providerNode?.parent).toBe(repoIndex);
+  });
+
+  it("keeps worktreeGroup precedence over repoId for provider parenting", () => {
+    const owner = enclosure();
+    const nodes = buildTopology(
+      [],
+      [owner],
+      [
+        provider({
+          worktreeGroup: owner.worktreeGroup,
+          repoId: "repo-b",
+        }),
+      ],
+    );
+    const worktreeIndex = nodes.findIndex((node) => node.kind === "wt" && node.label === owner.taskName);
+    const providerNode = nodes.find((node) => node.kind === "prov");
+
+    expect(providerNode?.parent).toBe(worktreeIndex);
+  });
 });

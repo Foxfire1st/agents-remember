@@ -67,7 +67,18 @@ class ProviderCurrentStateTests(unittest.TestCase):
                 ).as_posix(),
             )
             saved = json.loads(Path(written["path"]).read_text(encoding="utf-8"))
+            memory_root = config.repositories["agents-remember"].memory_root
+            assert memory_root is not None
             self.assertEqual(saved["providers"]["grepai-memory"]["watcherUp"], True)
+            self.assertEqual(
+                saved["providers"]["grepai-memory"]["targetRepos"],
+                [
+                    {
+                        "repoId": "agents-remember",
+                        "path": memory_root.as_posix(),
+                    }
+                ],
+            )
             self.assertEqual(
                 saved["providers"]["grepai-memory"]["resources"]["postgres"]["uptimeSeconds"],
                 7200,

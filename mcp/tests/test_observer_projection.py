@@ -512,6 +512,122 @@ class SnapshotReaderTests(unittest.TestCase):
         self.assertEqual(nodes["codegraphcontext-code"].state, "ready")
         self.assertEqual(nodes["codegraphcontext-code"].snapshotStaleSeconds, 600.0)
 
+    def test_read_providers_projects_cgc_repo_watchers(self) -> None:
+        config = self._config()
+        path = current_state_path(config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "checkedAt": T0,
+                    "providers": {
+                        "codegraphcontext-code": {
+                            "id": "codegraphcontext-code",
+                            "state": "degraded",
+                            "ok": False,
+                            "indexingState": "mixed",
+                            "resources": {
+                                "watchers": {
+                                    "repo-b": {
+                                        "state": "degraded",
+                                        "ok": False,
+                                        "repoId": "repo-b",
+                                        "watcherUp": True,
+                                        "indexingState": "empty",
+                                    },
+                                    "agents-remember": {
+                                        "state": "ready",
+                                        "ok": True,
+                                        "repoId": "agents-remember",
+                                        "watcherUp": True,
+                                        "indexingState": "indexed",
+                                    },
+                                }
+                            },
+                        },
+                        "grepai-memory": {
+                            "id": "grepai-memory",
+                            "state": "ready",
+                            "ok": True,
+                            "watcherUp": True,
+                            "indexingState": "indexed",
+                            "resources": {
+                                "watcher": {
+                                    "state": "ready",
+                                }
+                            },
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        nodes = {node.id: node for node in read_providers(config, now=STALE)}
+
+        self.assertEqual(
+            set(nodes),
+            {
+                "codegraphcontext-code:agents-remember",
+                "codegraphcontext-code:repo-b",
+                "grepai-memory",
+            },
+        )
+        self.assertEqual(nodes["codegraphcontext-code:agents-remember"].repoId, "agents-remember")
+        self.assertEqual(nodes["codegraphcontext-code:agents-remember"].scope, "workspace")
+        self.assertEqual(nodes["codegraphcontext-code:agents-remember"].role, "code")
+        self.assertEqual(nodes["codegraphcontext-code:agents-remember"].state, "ready")
+        self.assertTrue(nodes["codegraphcontext-code:agents-remember"].ok)
+        self.assertTrue(nodes["codegraphcontext-code:agents-remember"].watcherUp)
+        self.assertEqual(nodes["codegraphcontext-code:repo-b"].state, "degraded")
+        self.assertEqual(nodes["codegraphcontext-code:repo-b"].indexingState, "empty")
+        self.assertIsNone(nodes["grepai-memory"].repoId)
+        self.assertEqual(nodes["grepai-memory"].role, "memory")
+
+    def test_read_providers_projects_grepai_target_repos(self) -> None:
+        config = self._config()
+        path = current_state_path(config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "checkedAt": T0,
+                    "providers": {
+                        "grepai-memory": {
+                            "id": "grepai-memory",
+                            "state": "ready",
+                            "ok": True,
+                            "watcherUp": True,
+                            "indexingState": "indexed",
+                            "targetRepos": [
+                                {
+                                    "repoId": "agents-remember",
+                                    "path": "/memory/agents-remember",
+                                },
+                                {
+                                    "repoId": "repo-b",
+                                    "path": "/memory/repo-b",
+                                },
+                            ],
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        nodes = {node.id: node for node in read_providers(config, now=STALE)}
+
+        self.assertEqual(set(nodes), {"grepai-memory:agents-remember", "grepai-memory:repo-b"})
+        self.assertEqual(nodes["grepai-memory:agents-remember"].repoId, "agents-remember")
+        self.assertEqual(nodes["grepai-memory:agents-remember"].scope, "workspace")
+        self.assertEqual(nodes["grepai-memory:agents-remember"].role, "memory")
+        self.assertEqual(nodes["grepai-memory:agents-remember"].state, "ready")
+        self.assertTrue(nodes["grepai-memory:agents-remember"].ok)
+        self.assertTrue(nodes["grepai-memory:agents-remember"].watcherUp)
+        self.assertEqual(nodes["grepai-memory:repo-b"].repoId, "repo-b")
+        self.assertEqual(nodes["grepai-memory:repo-b"].indexingState, "indexed")
+
     def test_read_providers_absent_is_empty(self) -> None:
         self.assertEqual(read_providers(self._config(), now=FRESH), [])
 

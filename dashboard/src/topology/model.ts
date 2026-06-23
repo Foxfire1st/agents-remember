@@ -50,6 +50,10 @@ export function buildTopology(
     ...new Set([
       ...enclosures.map((e) => e.repoName),
       ...lifecycles.map((l) => l.repoId).filter((r): r is string => Boolean(r)),
+      ...providers
+        .filter((provider) => provider.scope !== "worktree")
+        .map((provider) => provider.repoId)
+        .filter((repo): repo is string => Boolean(repo)),
     ]),
   ].sort();
 
@@ -112,11 +116,11 @@ export function buildTopology(
   }
 
   // Provider satellites orbit their scoped parent: worktree providers attach to their enclosure;
-  // workspace providers stay on the core until the backend emits per-repo coverage.
+  // repo-covered workspace providers attach to their repo; aggregate workspace providers stay core.
   providers.forEach((provider, pi) => {
     const engine = engineState(provider);
     const status: ConstelStatus = engine === "down" ? "crit" : engine === "indexing" ? "idle" : "ok";
-    const parent = provider.worktreeGroup ? (wtIdxByGroup.get(provider.worktreeGroup) ?? ws) : ws;
+    const parent = provider.worktreeGroup ? (wtIdxByGroup.get(provider.worktreeGroup) ?? ws) : provider.repoId ? (repoIdx.get(provider.repoId) ?? ws) : ws;
     add({ kind: "prov", parent, rf: 0, ang: 0, poff: (pi / Math.max(providers.length, 1)) * TAU, base: 1.5, status, label: provider.id, sub: `provider · ${provider.state}`, id: null });
   });
 

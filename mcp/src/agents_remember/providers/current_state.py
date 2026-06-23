@@ -101,6 +101,7 @@ def current_provider_states(
             providers["grepai-memory"] = grepai_current_state(
                 provider,
                 by_provider.get("grepai", {}),
+                target_repos=grepai_target_repos(config),
             )
     if "codegraphcontext-code" in config.providers:
         provider = config.providers["codegraphcontext-code"]
@@ -128,20 +129,25 @@ def disabled_provider_state(provider: ProviderScope) -> dict[str, Any]:
     }
 
 
-def grepai_current_state(provider: ProviderScope, result: dict[str, Any]) -> dict[str, Any]:
+def grepai_current_state(
+    provider: ProviderScope,
+    result: dict[str, Any],
+    *,
+    target_repos: list[dict[str, str]],
+) -> dict[str, Any]:
     backend = container_resource(result.get("backend", {}))
     embedder = container_resource(result.get("embedder", {}))
     watcher = container_resource(result.get("watcher", {}))
     watcher_up = watcher.get("running") is True and watcher.get("containerState") != "restarting"
-    state = provider_state(result.get("ok"), [backend, embedder, watcher])
-    if state == "ready" and not grepai_workspace_present(result):
+    provider_status = provider_state(result.get("ok"), [backend, embedder, watcher])
+    if provider_status == "ready" and not grepai_workspace_present(result):
         # Containers are up but the watcher has no searchable workspace, so every
         # search fails. Readiness must reflect that instead of trusting liveness.
-        state = "degraded"
-    return {
+        provider_status = "degraded"
+    payload = {
         "id": provider.provider_id,
-        "state": state,
-        "ok": state == "ready",
+        "state": provider_status,
+        "ok": provider_status == "ready",
         "enabled": True,
         "runtimeRoot": provider.runtime_root.as_posix(),
         "logRoot": provider.log_root.as_posix(),
@@ -153,6 +159,17 @@ def grepai_current_state(provider: ProviderScope, result: dict[str, Any]) -> dic
             "watcher": watcher,
         },
     }
+    if target_repos:
+        payload["targetRepos"] = target_repos
+    return payload
+
+
+def grepai_target_repos(config: McpRuntimeConfig) -> list[dict[str, str]]:
+    return [
+        {"repoId": repo.repo_id, "path": repo.memory_root.as_posix()}
+        for repo in sorted(config.repositories.values(), key=lambda item: item.repo_id)
+        if repo.memory_root is not None
+    ]
 
 
 def cgc_current_state(provider: ProviderScope, result: dict[str, Any]) -> dict[str, Any]:

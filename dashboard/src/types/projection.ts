@@ -79,8 +79,8 @@ export interface ProviderNode {
   snapshotStaleSeconds?: number;
   scope: string; // "workspace" | "worktree"
   role?: string; // "code" (CGC) | "memory" (GrepAI)
-  repoId?: string;
-  worktreeGroup?: string; // join key to the enclosure (group name); absent for workspace
+  repoId?: string; // covered repo for workspace providers, owning repo for worktree providers
+  worktreeGroup?: string; // join key to the enclosure; takes precedence over repoId
 }
 
 export interface Metrics {
