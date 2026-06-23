@@ -297,7 +297,7 @@ class AmbientLifecycle:
                     ok=payload.get("ok"),
                 )
 
-    def emit_read_packet(self, files: list[dict[str, Any]]) -> None:
+    def emit_read_packet(self, repo_id: str, files: list[dict[str, Any]]) -> None:
         """Emit one facts-only ``read.packet`` for the active lifecycle.
 
         Modeled on :meth:`emit_tool`: a lifecycle-less call is *dropped* (never
@@ -309,9 +309,11 @@ class AmbientLifecycle:
         is dropped here regardless of what the caller passes. (Event's
         ``extra="forbid"`` only governs top-level Event fields, not the contents
         of ``data``, so the projection -- not the envelope -- is the privacy
-        invariant.) This rides the same ambient choke as ``tool.completed`` so
-        it inherits the chat's fleeting identity (or the adopted worktree
-        lifecycle) and is session-traceable by construction.
+        invariant.) The packet ``data`` also carries the read's ``repoId`` (the
+        repo the files belong to -- a fact, distinct from the lifecycle's
+        top-level Event ``repoId``). This rides the same ambient choke as
+        ``tool.completed`` so it inherits the chat's fleeting identity (or the
+        adopted worktree lifecycle) and is session-traceable by construction.
         """
         projected = [
             {key: entry[key] for key in _READ_PACKET_FACTS if key in entry}
@@ -321,7 +323,7 @@ class AmbientLifecycle:
             if self.current is None:
                 return
             with contextlib.suppress(ValidationError, OSError):
-                self._emit_locked("read.packet", "observed", "model", files=projected)
+                self._emit_locked("read.packet", "observed", "model", repoId=repo_id, files=projected)
 
     # --- served-onboarding dedup ledger -----------------------------------
 

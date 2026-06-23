@@ -519,6 +519,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
         packet = packets[0]
         self.assertEqual(packet.lifecycleId, self.lifecycle_id)
         self.assertEqual(packet.trust, "observed")
+        self.assertEqual(packet.data["repoId"], REPO)
         files = packet.data["files"]
         # Positive allowlist: exactly the facts-only keys, nothing else.
         self.assertEqual(set(files[0]), {"path", "lines", "status", "bytes"})
@@ -544,6 +545,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
         # projected to the fixed allowlist by emit_read_packet, so the content
         # never reaches Event.data -- the privacy invariant is structural.
         self.amb.emit_read_packet(
+            REPO,
             [
                 {
                     "path": "pkg/mod.py",

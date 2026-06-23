@@ -124,7 +124,7 @@ def read_ar_files_tool(
             payload["route_overviews"] = served["route_overviews"]
 
     if amb is not None:
-        amb.emit_read_packet(event_files)
+        amb.emit_read_packet(repo.repo_id, event_files)
     return payload
 
 
