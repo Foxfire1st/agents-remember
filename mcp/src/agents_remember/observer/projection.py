@@ -429,6 +429,7 @@ class TaskDocNode(BaseModel):
     stepsTotal: int = 0
     currentStep: str | None = None
     docPath: str
+    createdAt: str = ""
     ageSeconds: float | None = None
     steps: list[TaskStepNode] = Field(default_factory=list)
     # The readable task content (slice 5c): so the dashboard *is* the task reader -- you never
@@ -453,6 +454,8 @@ class SeriesSubTaskNode(BaseModel):
     """One subtask of a series master -- a single checkbox.
 
     ``status`` is the lever: ``planning`` -> ⬜, ``inProgress`` -> 🔨, ``Completed`` -> ✅.
+    ``createdAt`` is resolved from the referenced leaf task document when present; the dashboard
+    uses it for creation-order display without parsing file-name prefixes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -462,6 +465,7 @@ class SeriesSubTaskNode(BaseModel):
     file: str = ""
     status: str
     scope: str = ""
+    createdAt: str | None = None
 
 
 class SeriesSectionNode(BaseModel):
@@ -492,6 +496,7 @@ class SeriesNode(BaseModel):
     repository: str
     title: str
     status: str
+    objective: str = ""
     subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
     doneCount: int = 0
     totalCount: int = 0

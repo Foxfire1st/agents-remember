@@ -6,6 +6,7 @@ import { GALLERY } from "../dev/fixtures";
 import type {
   EnclosureNode,
   LifecycleProjection,
+  SeriesNode,
   TaskDocNode,
   WorkspaceProjection,
 } from "../types/projection";
@@ -23,6 +24,7 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     repository: "repo-a",
     title: "doc",
     status: "inProgress",
+    createdAt: "2026-06-20T09:00:00+00:00",
     stepsDone: 0,
     stepsTotal: 0,
     steps: [],
@@ -34,6 +36,22 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     references: [],
     subTasks: [],
     sections: [],
+    ...over,
+  };
+}
+
+function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesId">): SeriesNode {
+  return {
+    repository: "repo-a",
+    title: "series",
+    status: "inProgress",
+    objective: "",
+    subTasks: [],
+    doneCount: 0,
+    totalCount: 0,
+    sections: [],
+    decisions: [],
+    docPath: `/t/${over.seriesId}/task.json`,
     ...over,
   };
 }
@@ -70,23 +88,30 @@ function seedSeries() {
     actions: [],
     tokenSeries: [],
   };
-  const master = taskDoc({
-    kind: "master",
+  const master = seriesNode({
+    seriesId: "series",
     title: "My Series",
     objective: "Series objective text",
     docPath: "/t/series/task.json",
     subTasks: [
-      { number: "1", name: "First slice", file: "01_first.md", status: "inProgress", scope: "" },
+      {
+        number: "1",
+        name: "First slice",
+        file: "01_first.md",
+        status: "inProgress",
+        scope: "",
+        createdAt: "2026-06-20T09:00:00+00:00",
+      },
       {
         number: "2",
         name: "Parallel series",
         file: "../other/task.md",
         status: "inProgress",
         scope: "",
+        createdAt: "2026-06-21T09:00:00+00:00",
         linkedLifecycleId: "LC-OTHER",
       },
     ],
-    masterLifecycleId: "LC-PARENT",
     sections: [
       {
         kind: "freeform",
@@ -126,7 +151,62 @@ function seedSeries() {
       routeCoverage: [],
       toolReports: [],
       ledgers: [],
-      taskDocuments: [master, slice],
+      taskDocuments: [slice],
+      series: [master],
+      attentionQueue: [],
+      engineProcesses: [],
+    },
+  };
+  dashboardStore.getState().applySnapshot(projection);
+}
+
+function seedSeriesOrdering() {
+  const master = seriesNode({
+    seriesId: "series",
+    title: "Ordered Series",
+    subTasks: [
+      {
+        number: "99",
+        name: "Alpha later",
+        file: "alpha_later.md",
+        status: "inProgress",
+        scope: "",
+        createdAt: "2026-06-22T09:00:00+00:00",
+      },
+      {
+        number: "01",
+        name: "Zulu earlier",
+        file: "zulu_earlier.md",
+        status: "planning",
+        scope: "",
+        createdAt: "2026-06-20T09:00:00+00:00",
+      },
+    ],
+  });
+  const projection: WorkspaceProjection = {
+    version: 2,
+    generatedAt: "2026-06-20T09:01:00+00:00",
+    lifecycles: [],
+    enclosures: [],
+    providers: [],
+    metrics: {
+      lifecycleCount: 0,
+      runningCount: 0,
+      blockedCount: 0,
+      pausedCount: 0,
+      totalTokens: 0,
+      stalenessHistogram: {},
+    },
+    analytics: {
+      driftSnapshots: [],
+      stalestSidecars: [],
+      setupSummaries: [],
+      setupProgress: [],
+      routeCoverage: [],
+      toolReports: [],
+      ledgers: [],
+      taskDocuments: [],
+      series: [master],
       attentionQueue: [],
       engineProcesses: [],
     },
@@ -203,6 +283,7 @@ function seedPromotedLeaf() {
       toolReports: [],
       ledgers: [],
       taskDocuments: [doc, leaf],
+      series: [],
       attentionQueue: [],
       engineProcesses: [],
     },
@@ -240,7 +321,7 @@ describe("DetailPanel master series navigation (6g)", () => {
   it("pins the sub-task index above the description and keeps the in-section copy", () => {
     seedSeries();
     const { getAllByText, getByTestId, getByText } = render(
-      <DetailPanel selectedId="LC-SER" />,
+      <DetailPanel selectedId="series" />,
     );
     expect(getAllByText("My Series").length).toBeGreaterThan(0);
     const objective = getByText("Series objective text");
@@ -254,39 +335,49 @@ describe("DetailPanel master series navigation (6g)", () => {
 
   it("drills into a slice's reader and returns via the breadcrumb", () => {
     seedSeries();
-    const { getByTestId, getByText, queryByText } = render(<DetailPanel selectedId="LC-SER" />);
+    const { getAllByText, getByTestId, getByText, queryByText } = render(
+      <DetailPanel selectedId="series" />,
+    );
     // The master overview is shown, the slice body is not.
     expect(queryByText("Slice objective text")).toBeNull();
 
     fireEvent.click(getByTestId("subtask-open-1"));
     expect(getByText("Slice objective text")).toBeTruthy(); // the slice's full reader
-    expect(getByText("do the thing")).toBeTruthy(); // its steps render
+    expect(getAllByText("do the thing")).toHaveLength(2); // top + implementation steps
 
     fireEvent.click(getByTestId("series-breadcrumb"));
     expect(getByTestId("subtask-open-1")).toBeTruthy(); // back to the master index
     expect(queryByText("Slice objective text")).toBeNull();
   });
 
-  it("jumps lifecycles from a cross-master row and the parent breadcrumb", () => {
+  it("jumps lifecycles from a cross-master row", () => {
     seedSeries();
     const onOpenLifecycle = vi.fn();
     const { getByTestId } = render(
-      <DetailPanel selectedId="LC-SER" onOpenLifecycle={onOpenLifecycle} />,
+      <DetailPanel selectedId="series" onOpenLifecycle={onOpenLifecycle} />,
     );
     fireEvent.click(getByTestId("subtask-open-link-2")); // the "→" cross-series row
     expect(onOpenLifecycle).toHaveBeenCalledWith("LC-OTHER");
-    fireEvent.click(getByTestId("master-parent-link")); // the "↑ parent series" breadcrumb
-    expect(onOpenLifecycle).toHaveBeenCalledWith("LC-PARENT");
   });
 
   it("renders markdown in master sections (GFM table + bold), not raw", () => {
     seedSeries();
-    const { container, queryByText } = render(<DetailPanel selectedId="LC-SER" />);
+    const { container, queryByText } = render(<DetailPanel selectedId="series" />);
     const table = container.querySelector("table");
     expect(table).toBeTruthy(); // the GFM table is a real <table>, not raw pipes
     expect(container.querySelector("th")?.textContent).toBe("Slice");
     expect(container.querySelector("strong")?.textContent).toBe("strong");
     expect(queryByText(/\| Slice \| Status \|/)).toBeNull(); // raw markdown is gone
+  });
+
+  it("orders master leaves by creation time and displays local ordinals", () => {
+    seedSeriesOrdering();
+    const { getByTestId, queryByText } = render(<DetailPanel selectedId="series" />);
+
+    expect(getByTestId("subtask-open-1").textContent).toContain("1. Zulu earlier");
+    expect(getByTestId("subtask-open-2").textContent).toContain("2. Alpha later");
+    expect(queryByText("99 · Alpha later")).toBeNull();
+    expect(queryByText("01 · Zulu earlier")).toBeNull();
   });
 });
 
@@ -301,7 +392,7 @@ describe("DetailPanel promoted lifecycle identity", () => {
     expect(getByText("subTask")).toBeTruthy();
     expect(getByText("Engine Room Stack Entry Height")).toBeTruthy();
     expect(getByText("Keep a single Engine Room enclosure entry visually bounded.")).toBeTruthy();
-    expect(getByText("Fix the stack entry height")).toBeTruthy();
+    expect(getAllByText("Fix the stack entry height")).toHaveLength(2);
     expect(getByText("Notes")).toBeTruthy();
     expect(getByText("This is the authored leaf task document.")).toBeTruthy();
     expect(queryByText("Lifecycle Finalize Task")).toBeNull();

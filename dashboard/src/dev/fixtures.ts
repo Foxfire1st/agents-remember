@@ -22,6 +22,7 @@ const EMPTY_ANALYTICS: WorkspaceProjection["analytics"] = {
   toolReports: [],
   ledgers: [],
   taskDocuments: [],
+  series: [],
   attentionQueue: [],
   engineProcesses: [],
 };

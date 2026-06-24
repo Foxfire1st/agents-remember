@@ -200,6 +200,7 @@ export interface TaskSubTaskRefNode {
   file: string; // drill-in match key: its stem resolves to the slice doc's slug
   status: string;
   scope: string;
+  createdAt?: string;
   linkedLifecycleId?: string; // set when `file` points at another master → a "→" cross-series jump
 }
 
@@ -219,6 +220,7 @@ export interface TaskDocNode {
   stepsTotal: number;
   currentStep?: string;
   docPath: string;
+  createdAt?: string;
   ageSeconds?: number;
   steps: TaskStepNode[];
   objective: string;
@@ -231,6 +233,21 @@ export interface TaskDocNode {
   subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
   sections: TaskSectionNode[]; // master render plan or non-master freeform sections
   masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
+}
+
+export interface SeriesNode {
+  seriesId: string;
+  repository: string;
+  title: string;
+  status: string;
+  objective: string;
+  subTasks: TaskSubTaskRefNode[];
+  doneCount: number;
+  totalCount: number;
+  sections: TaskSectionNode[];
+  decisions: TaskDecisionNode[];
+  docPath: string;
+  ageSeconds?: number;
 }
 
 export interface AttentionItem {
@@ -364,6 +381,7 @@ export interface Analytics {
   toolReports: ToolReportNode[];
   ledgers: LedgerNode[];
   taskDocuments: TaskDocNode[];
+  series: SeriesNode[];
   attentionQueue: AttentionItem[]; // derived surface — composed by the reducer (slice 05)
   engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map (slice 5e)
 }

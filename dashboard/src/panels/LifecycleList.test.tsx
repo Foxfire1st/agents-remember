@@ -20,6 +20,7 @@ const EMPTY_ANALYTICS: Analytics = {
   toolReports: [],
   ledgers: [],
   taskDocuments: [],
+  series: [],
   attentionQueue: [],
   engineProcesses: [],
 };

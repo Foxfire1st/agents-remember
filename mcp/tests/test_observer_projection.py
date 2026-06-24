@@ -1540,6 +1540,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
             (nodes[0].lifecycleId, nodes[0].stepsDone, nodes[0].stepsTotal, nodes[0].currentStep),
             ("LC1", 1, 2, "S2 — b"),
         )
+        self.assertEqual(nodes[0].createdAt, "2026-01-01T00:00")
 
     def test_skips_docs_without_lifecycle_and_non_task_json(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "demo"
@@ -1680,6 +1681,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                 "status": "inProgress",
                 "repo": "repo-a",
                 "createdAt": "2026-01-01T00:00",
+                "objective": "Series X objective",
                 "subTasks": [
                     {"number": "01", "name": "alpha", "status": "Completed"},
                     {"number": "02", "name": "beta", "status": "Completed"},
@@ -1694,6 +1696,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(len(nodes), 1)
         node = nodes[0]
         self.assertEqual(node.seriesId, "series-x")
+        self.assertEqual(node.objective, "Series X objective")
         self.assertEqual((node.doneCount, node.totalCount), (2, 3))
         self.assertEqual(
             [(s.number, s.status) for s in node.subTasks],
@@ -1701,6 +1704,66 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         )
         self.assertEqual(node.sections[0].heading, "Objective")
         self.assertEqual(node.decisions[0].decision, "d")
+
+    def test_read_series_documents_orders_subtasks_by_leaf_creation(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "series-z"
+        write_task_doc(
+            root,
+            TaskDocument.model_validate(
+                {
+                    "id": "series-z",
+                    "slug": "series-z",
+                    "title": "Series Z",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-01-01T00:00",
+                    "subTasks": [
+                        {
+                            "number": "99",
+                            "name": "Alpha later",
+                            "file": "alpha_later.md",
+                            "status": "inProgress",
+                        },
+                        {
+                            "number": "01",
+                            "name": "Zulu earlier",
+                            "file": "zulu_earlier.md",
+                            "status": "planning",
+                        },
+                    ],
+                }
+            ),
+        )
+        write_task_doc(
+            root,
+            self._doc(
+                id="alpha",
+                slug="alpha_later",
+                kind="subTask",
+                title="Alpha later",
+                createdAt="2026-01-03T00:00",
+            ),
+        )
+        write_task_doc(
+            root,
+            self._doc(
+                id="zulu",
+                slug="zulu_earlier",
+                kind="subTask",
+                title="Zulu earlier",
+                createdAt="2026-01-01T00:00",
+            ),
+        )
+
+        [node] = read_series_documents(self.coord, now=FRESH)
+
+        self.assertEqual(
+            [(sub.name, sub.createdAt) for sub in node.subTasks],
+            [
+                ("Zulu earlier", "2026-01-01T00:00"),
+                ("Alpha later", "2026-01-03T00:00"),
+            ],
+        )
 
     def test_read_series_documents_skips_leaf_docs(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "demo"

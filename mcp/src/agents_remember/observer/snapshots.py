@@ -662,16 +662,8 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
                 repository=doc.repo,
                 title=doc.title,
                 status=doc.status,
-                subTasks=[
-                    SeriesSubTaskNode(
-                        number=sub.number,
-                        name=sub.name,
-                        file=sub.file,
-                        status=sub.status,
-                        scope=sub.scope,
-                    )
-                    for sub in doc.subTasks
-                ],
+                objective=doc.objective,
+                subTasks=_series_subtask_nodes(path, doc),
                 doneCount=series_done(doc),
                 totalCount=series_total(doc),
                 sections=[
@@ -687,6 +679,42 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
             )
         )
     return nodes
+
+
+def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNode]:
+    indexed = [
+        (index, sub, _series_subtask_created_at(path.parent, sub.file))
+        for index, sub in enumerate(doc.subTasks)
+    ]
+    if all(created_at for _, _, created_at in indexed):
+        indexed.sort(key=lambda item: (item[2] or "", item[0]))
+    return [
+        SeriesSubTaskNode(
+            number=sub.number,
+            name=sub.name,
+            file=sub.file,
+            status=sub.status,
+            scope=sub.scope,
+            createdAt=created_at,
+        )
+        for _, sub, created_at in indexed
+    ]
+
+
+def _series_subtask_created_at(base_dir: Path, ref_file: str) -> str | None:
+    if not ref_file:
+        return None
+    ref_path = (base_dir / ref_file).with_suffix(".json")
+    payload = _read_json(ref_path)
+    if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
+        return None
+    if payload.get("kind") == "master":
+        return None
+    try:
+        doc = TaskDocument.model_validate(payload)
+    except ValueError:
+        return None
+    return doc.createdAt
 
 
 def _iter_task_json(tasks_root: Path) -> list[Path]:
@@ -731,6 +759,7 @@ def _task_doc_node(
         stepsTotal=step_total(doc),
         currentStep=current_step(doc),
         docPath=path.as_posix(),
+        createdAt=doc.createdAt,
         ageSeconds=_file_age_seconds(path, now),
         steps=[
             TaskStepNode(

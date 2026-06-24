@@ -15,6 +15,7 @@ import { TokenGauge } from "../grammar/TokenGauge";
 import type {
   Phase,
   ProviderNode,
+  SeriesNode,
   TaskCodeExampleNode,
   TaskDecisionNode,
   TaskDocNode,
@@ -302,8 +303,11 @@ export function DetailPanel({
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   useEffect(() => setOpenSlug(null), [selectedId]); // switching lifecycles closes any open sub-task
   const allDocs = analytics?.taskDocuments ?? [];
+  const selectedSeries = selectedId
+    ? analytics?.series.find((item) => item.seriesId === selectedId)
+    : undefined;
 
-  if (!lifecycle) {
+  if (!lifecycle && !selectedSeries) {
     return (
       <Panel testid="detail-panel" title="Detail" className={sizing} fill>
         <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">
@@ -313,12 +317,52 @@ export function DetailPanel({
     );
   }
 
-  const currentIdx = PHASES.indexOf(lifecycle.phase);
+  if (!lifecycle && selectedSeries) {
+    const seriesDoc = seriesAsMasterDoc(selectedSeries);
+    const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
+    const openDoc = openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
+    const head = (
+      <>
+        <h2>{selectedSeries.title}</h2>
+        {openDoc ? (
+          <button
+            type="button"
+            className={crumb}
+            onClick={() => setOpenSlug(null)}
+            data-testid="series-breadcrumb"
+          >
+            ← {selectedSeries.title}
+          </button>
+        ) : null}
+      </>
+    );
+
+    return (
+      <Panel testid="detail-panel" head={head} className={sizing}>
+        <div className={where}>series master · {selectedSeries.repository}</div>
+        {openDoc ? (
+          <TaskReader doc={openDoc} />
+        ) : (
+          <MasterOverview
+            doc={seriesDoc}
+            sliceDocs={seriesSlices}
+            onOpen={setOpenSlug}
+            onJump={jump}
+          />
+        )}
+      </Panel>
+    );
+  }
+
+  const activeLifecycle = lifecycle;
+  if (!activeLifecycle) return null;
+
+  const currentIdx = PHASES.indexOf(activeLifecycle.phase);
   const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
-  const enclosure = findLifecycleEnclosure(lifecycle, enclosures, enclosuresByLifecycle);
-  const directDocs = allDocs.filter((doc) => doc.lifecycleId === lifecycle.id);
-  const docs = taskDocsForLifecycle(lifecycle, allDocs);
-  const title = taskLabel(lifecycle, directDocs, enclosure);
+  const enclosure = findLifecycleEnclosure(activeLifecycle, enclosures, enclosuresByLifecycle);
+  const directDocs = allDocs.filter((doc) => doc.lifecycleId === activeLifecycle.id);
+  const docs = taskDocsForLifecycle(activeLifecycle, allDocs);
+  const title = taskLabel(activeLifecycle, directDocs, enclosure);
   const groupName = enclosure ? (enclosure.worktreeGroup.split("/").filter(Boolean).pop() ?? "") : "";
   const engines = groupName
     ? Object.values(providers).filter((p) => p.scope === "worktree" && p.worktreeGroup === groupName)
@@ -357,10 +401,10 @@ export function DetailPanel({
   return (
     <Panel testid="detail-panel" head={head} className={sizing}>
       <div className={where}>
-        {lifecycle.fleeting
+        {activeLifecycle.fleeting
           ? "fleeting · no worktree"
-          : `persistent worktree · ${lifecycle.repoId ?? "—"}`}
-        {lifecycle.inferred ? " · inferred" : ""}
+          : `persistent worktree · ${activeLifecycle.repoId ?? "—"}`}
+        {activeLifecycle.inferred ? " · inferred" : ""}
       </div>
 
       <ol className={stepper} aria-label="phase">
@@ -374,12 +418,12 @@ export function DetailPanel({
         ))}
       </ol>
 
-      {lifecycle.gate || lifecycle.ask ? (
+      {activeLifecycle.gate || activeLifecycle.ask ? (
         <GateResponder
-          lifecycleId={lifecycle.id}
-          gateNode={lifecycle.gate}
-          ask={lifecycle.ask}
-          testId={lifecycle.gate ? "gate-review" : "gate-banner"}
+          lifecycleId={activeLifecycle.id}
+          gateNode={activeLifecycle.gate}
+          ask={activeLifecycle.ask}
+          testId={activeLifecycle.gate ? "gate-review" : "gate-banner"}
         />
       ) : null}
 
@@ -407,7 +451,7 @@ export function DetailPanel({
 
       <div className={tokensRow}>
         <span className={label}>tokens</span>
-        <TokenGauge series={lifecycle.tokenSeries} />
+        <TokenGauge series={activeLifecycle.tokenSeries} />
       </div>
     </Panel>
   );
@@ -424,6 +468,24 @@ const sliceForRef = (
   ref: TaskSubTaskRefNode,
 ): TaskDocNode | undefined =>
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
+const pathDir = (path: string): string => path.split("/").slice(0, -1).join("/");
+const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
+  sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
+
+type MasterDocView = Pick<
+  TaskDocNode,
+  "kind" | "title" | "status" | "objective" | "subTasks" | "sections" | "decisions" | "masterLifecycleId"
+>;
+
+const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
+  kind: "master",
+  title: seriesNode.title,
+  status: seriesNode.status,
+  objective: seriesNode.objective,
+  subTasks: seriesNode.subTasks,
+  sections: seriesNode.sections,
+  decisions: seriesNode.decisions,
+});
 
 // The lifecycle's bound task documents (6g). A `master` (contract-paired, no lifecycleId of its
 // own) shows its overview + a clickable sub-task index; clicking a slice drills into its full
@@ -461,7 +523,7 @@ function MasterOverview({
   onOpen,
   onJump,
 }: {
-  doc: TaskDocNode;
+  doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
@@ -507,7 +569,7 @@ function MasterSection({
   onJump,
 }: {
   section: TaskSectionNode;
-  doc: TaskDocNode;
+  doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
@@ -547,11 +609,13 @@ function SubTaskIndex({
   if (refs.length === 0) {
     return <p className="muted">No sub-tasks indexed.</p>;
   }
+  const orderedRefs = orderedByCreation(refs);
   return (
     <ul className={slices}>
-      {refs.map((ref) => {
+      {orderedRefs.map((ref, index) => {
+        const ordinal = index + 1;
         const match = sliceForRef(sliceDocs, ref);
-        const label = `${ref.number} · ${ref.name}`;
+        const label = `${ordinal}. ${ref.name}`;
         const meta = (
           <span className={sliceMeta}>
             {match && match.stepsTotal > 0 ? `${match.stepsDone}/${match.stepsTotal} · ` : ""}
@@ -561,12 +625,12 @@ function SubTaskIndex({
         // A row whose ref points at another master is a parallel/external series → jump lifecycles.
         if (ref.linkedLifecycleId) {
           return (
-            <li key={ref.number}>
+            <li key={subTaskKey(ref, index)}>
               <button
                 type="button"
                 className={crossButton}
                 onClick={() => onJump(ref.linkedLifecycleId as string)}
-                data-testid={`${testidPrefix}-link-${ref.number}`}
+                data-testid={`${testidPrefix}-link-${ordinal}`}
                 title={`open the ${ref.linkedLifecycleId} series`}
               >
                 <span>→ {label}</span>
@@ -576,19 +640,23 @@ function SubTaskIndex({
           );
         }
         return (
-          <li key={ref.number}>
+          <li key={subTaskKey(ref, index)}>
             {match ? (
               <button
                 type="button"
                 className={sliceButton}
                 onClick={() => onOpen(sliceSlug(match))}
-                data-testid={`${testidPrefix}-${ref.number}`}
+                data-testid={`${testidPrefix}-${ordinal}`}
               >
                 <span>{label}</span>
                 {meta}
               </button>
             ) : (
-              <div className={slice} title="not authored as a task document yet">
+              <div
+                className={slice}
+                data-testid={`${testidPrefix}-${ordinal}`}
+                title="not authored as a task document yet"
+              >
                 <span>{label}</span>
                 {meta}
               </div>
@@ -597,6 +665,17 @@ function SubTaskIndex({
         );
       })}
     </ul>
+  );
+}
+
+function subTaskKey(ref: TaskSubTaskRefNode, index: number): string {
+  return `${ref.file || ref.name}:${index}`;
+}
+
+function orderedByCreation<T extends { createdAt?: string }>(items: T[]): T[] {
+  if (!items.every((item) => item.createdAt)) return items;
+  return [...items].sort((left, right) =>
+    (left.createdAt as string).localeCompare(right.createdAt as string),
   );
 }
 
@@ -614,8 +693,7 @@ function SliceList({
         <span className={badge}>series</span> {sliceDocs.length} task slices
       </div>
       <ul className={slices}>
-        {[...sliceDocs]
-          .sort((a, b) => a.title.localeCompare(b.title))
+        {orderedByCreation(sliceDocs)
           .map((doc) => (
             <li key={doc.docPath}>
               <button
@@ -673,6 +751,11 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
         <span className={taskdocStatus}>{doc.status}</span>
         <ProgressFill completed={doc.stepsDone} total={doc.stepsTotal} label="steps done" />
       </div>
+      {doc.steps.length > 0 ? (
+        <Section title="Progress">
+          <StepList steps={doc.steps} />
+        </Section>
+      ) : null}
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
