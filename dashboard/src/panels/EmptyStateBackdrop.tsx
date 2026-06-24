@@ -1,4 +1,3 @@
-import { motion } from "motion/react";
 import type { ReactNode } from "react";
 
 import { css } from "../../styled-system/css";
@@ -9,9 +8,8 @@ import { useShouldAnimate } from "./engine-room/useShouldAnimate";
 // forward+reverse boomerang, so `loop` is seamless (first frame == last). Absent under calm-cockpit /
 // `prefers-reduced-motion` (useShouldAnimate) — the empty text then stands alone. aria-hidden +
 // pointer-events:none: pure atmosphere, never state. Host container must be a flex column so the
-// `flex:1` canvas fills the slot (Panel `fill`; Chats `terminalArea`). A slow 12s back-and-forth Motion
-// scale yoyo (1→1.03, 6s each way, no CSS per the animation doctrine) gives the near-still clip gentle
-// life on the same effects gate; scale stays ≥1 so `objectFit:cover` never reveals an edge.
+// `flex:1` canvas fills the slot (Panel `fill`; Chats `terminalArea`). Any slow zoom is baked into the
+// 60fps boomerang assets themselves; this component keeps the browser layer static.
 const canvas = css({
   position: "relative",
   flex: "1",
@@ -31,6 +29,7 @@ const backdrop = css({
   overflow: "hidden",
 });
 const backdropVideo = css({
+  display: "block",
   width: "100%",
   height: "100%",
   objectFit: "cover",
@@ -51,22 +50,12 @@ const content = css({
 
 export function EmptyStateBackdrop({ src, children }: { src: string; children: ReactNode }) {
   const animate = useShouldAnimate();
+
   return (
     <div className={canvas}>
       {animate ? (
         <div className={backdrop} aria-hidden="true" data-testid="empty-backdrop">
-          <motion.video
-            className={backdropVideo}
-            src={src}
-            autoPlay
-            loop
-            muted
-            playsInline
-            preload="auto"
-            initial={{ scale: 1 }}
-            animate={{ scale: 1.03 }}
-            transition={{ duration: 6, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" }}
-          />
+          <video className={backdropVideo} src={src} autoPlay loop muted playsInline preload="auto" />
         </div>
       ) : null}
       <div className={content}>{children}</div>

@@ -36,11 +36,15 @@ describe("EmptyStateBackdrop (07b)", () => {
     expect(getByText("No session")).not.toBeNull();
   });
 
-  it("mounts the looping, muted, autoplaying boomerang <video> with the given src when effects are on", () => {
+  it("mounts the looping, muted, autoplaying boomerang <video> directly when effects are on", () => {
     const { getByTestId } = render(
       <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">x</EmptyStateBackdrop>,
     );
-    const video = getByTestId("empty-backdrop").querySelector("video") as HTMLVideoElement | null;
+    const backdrop = getByTestId("empty-backdrop");
+    const video = backdrop.querySelector("video") as HTMLVideoElement | null;
+
+    expect(video?.parentElement).toBe(backdrop);
+    expect(backdrop.querySelector('[data-testid="empty-backdrop-zoom"]')).toBeNull();
     expect(video?.getAttribute("src")).toBe("/assets/sc2-battlecruiser-boomerang.mp4");
     expect(video?.hasAttribute("loop")).toBe(true);
     // muted is load-bearing: browsers block autoplay on a non-muted <video>. React 19 reflects `muted`
@@ -48,7 +52,7 @@ describe("EmptyStateBackdrop (07b)", () => {
     expect(video?.muted).toBe(true);
     expect(video?.hasAttribute("autoplay")).toBe(true);
     expect(video?.hasAttribute("playsinline")).toBe(true);
-    expect(getByTestId("empty-backdrop").getAttribute("aria-hidden")).toBe("true");
+    expect(backdrop.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("omits the backdrop under calm-cockpit (data-effects=off; message still shown)", () => {
