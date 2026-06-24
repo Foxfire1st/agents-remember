@@ -159,4 +159,54 @@ describe("LifecycleList task labels", () => {
     expect(getByText("16_engine-room-stack-entry-height")).toBeTruthy();
     expect(queryByText("01KVW2FE8MQK6QCQQP0J4SEK3C")).toBeNull();
   });
+
+  it("exposes the full long task title and row context on title hover", () => {
+    const longTitle =
+      "Operations task reader row title that is intentionally long enough to require ellipsis in the left rail";
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({
+            id: "01KVWK7Z8PQZ7BV9T6QPXFHM3B",
+            state: "blocked",
+            phase: "reframe-research",
+            repoId: "agents-remember",
+            gate: {
+              id: "gate-1",
+              kind: "plan-approval",
+              state: "open",
+              decisions: ["approve", "revise"],
+              packet: {},
+              ts: "2026-06-24T06:00:40+00:00",
+            },
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              lifecycleId: "01KVWK7Z8PQZ7BV9T6QPXFHM3B",
+              title: longTitle,
+              currentStep: "Constrain Tasks panel row title layout",
+              stepsDone: 1,
+              stepsTotal: 4,
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={() => {}} />);
+
+    const title = getByText(longTitle);
+    expect(title.getAttribute("title")).toContain(`Title: ${longTitle}`);
+    expect(title.getAttribute("title")).toContain("Lifecycle: 01KVWK7Z8PQZ7BV9T6QPXFHM3B");
+    expect(title.getAttribute("title")).toContain("State: blocked");
+    expect(title.getAttribute("title")).toContain("Phase: reframe-research");
+    expect(title.getAttribute("title")).toContain("Repo: agents-remember");
+    expect(title.getAttribute("title")).toContain("Gate: plan-approval");
+    expect(title.getAttribute("title")).toContain(
+      "Current step: Constrain Tasks panel row title layout",
+    );
+  });
 });

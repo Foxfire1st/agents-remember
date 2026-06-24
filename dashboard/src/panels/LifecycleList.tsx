@@ -15,7 +15,7 @@ import { useDashboard } from "../data/store";
 import { findLifecycleEnclosure, groupEnclosuresByLifecycle, taskLabel } from "../data/taskIdentity";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
-import type { TaskDocNode } from "../types/projection";
+import type { LifecycleProjection, TaskDocNode } from "../types/projection";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
@@ -75,13 +75,17 @@ const row = cva({
   variants: { fleeting: { true: { borderLeftStyle: "dashed", opacity: "0.85" } } },
 });
 const rowId = css({
+  minWidth: "0",
+  flex: "1 1 auto",
   fontWeight: "600",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 });
-const rowSec = css({ color: "cyan", fontSize: "0.76rem" });
+const rowSec = css({ flexShrink: "0", color: "cyan", fontSize: "0.76rem" });
 const rowGate = css({
+  minWidth: "0",
+  flex: "0 1 8rem",
   maxWidth: "8rem",
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -95,7 +99,13 @@ const rowGate = css({
   paddingInline: "0.28rem",
   paddingBlock: "0.04rem",
 });
-const rowMeta = css({ marginLeft: "auto", color: "muted", fontSize: "0.72rem", whiteSpace: "nowrap" });
+const rowMeta = css({
+  flexShrink: "0",
+  marginLeft: "auto",
+  color: "muted",
+  fontSize: "0.72rem",
+  whiteSpace: "nowrap",
+});
 
 export function LifecycleList({
   selectedId,
@@ -165,6 +175,7 @@ export function LifecycleList({
                 const secondary = pivot === "repo" ? lifecycle.phase : (lifecycle.repoId ?? "—");
                 const hint = taskHint(docs);
                 const gate = gateHint(lifecycle.gate?.kind, lifecycle.ask);
+                const title = taskTitle(lifecycle, label, docs, gate);
                 return (
                   <ListBoxItem
                     key={lifecycle.id}
@@ -173,7 +184,9 @@ export function LifecycleList({
                     className={row({ fleeting: lifecycle.fleeting })}
                   >
                     <Dot variant={lifecycle.state} />
-                    <span className={rowId}>{label}</span>
+                    <span className={rowId} title={title}>
+                      {label}
+                    </span>
                     <span className={rowSec}>{secondary}</span>
                     {gate ? <span className={rowGate}>{gate}</span> : null}
                     <span className={rowMeta}>
@@ -197,6 +210,25 @@ function gateHint(kind: string | undefined, ask: Record<string, unknown> | undef
   const question = ask?.question;
   if (typeof question === "string" && question.trim()) return question;
   return ask ? "ask" : "";
+}
+
+function taskTitle(
+  lifecycle: LifecycleProjection,
+  label: string,
+  docs: TaskDocNode[],
+  gate: string,
+): string {
+  const lines = [
+    `Title: ${label}`,
+    `Lifecycle: ${lifecycle.id}`,
+    `State: ${lifecycle.state}`,
+    `Phase: ${lifecycle.phase}`,
+  ];
+  if (lifecycle.repoId) lines.push(`Repo: ${lifecycle.repoId}`);
+  if (gate) lines.push(`Gate: ${gate}`);
+  const currentStep = docs.length === 1 ? docs[0].currentStep : undefined;
+  if (currentStep) lines.push(`Current step: ${currentStep}`);
+  return lines.join("\n");
 }
 
 function groupDocs(docs: TaskDocNode[]): Map<string, TaskDocNode[]> {
