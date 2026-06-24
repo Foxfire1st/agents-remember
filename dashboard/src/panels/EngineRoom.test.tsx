@@ -86,6 +86,41 @@ function seedOfficialProviders(providers: ProviderNode[]) {
   dashboardStore.getState().applySnapshot({ ...fixture.projection, providers });
 }
 
+function seedParallelLeafRoom() {
+  const fixture = GALLERY.find((entry) => entry.name === "engine-bootstrap");
+  if (!fixture) throw new Error("fixture not found: engine-bootstrap");
+  const base = fixture.projection.analytics.engineProcesses[0];
+  if (!base) throw new Error("engine-bootstrap fixture missing process");
+  dashboardStore.getState().applySnapshot({
+    ...fixture.projection,
+    analytics: {
+      ...fixture.projection.analytics,
+      engineProcesses: [
+        {
+          ...base,
+          id: "/tasks/260610_browser-dashboard/enclosures/15_parallel-leaf-enclosure-workflow/series-contract.md",
+          enclosure: "/tasks/260610_browser-dashboard/enclosures/15_parallel-leaf-enclosure-workflow/series-contract.md",
+          worktreeGroup: "/worktrees/260610-browser-dashboard-s15-ar",
+          taskName: "260610_browser-dashboard",
+          leafId: "15_parallel-leaf-enclosure-workflow",
+          phase: "cleanup-pending",
+          closeoutStatus: "completed",
+          integrationStatus: "completed",
+        },
+        {
+          ...base,
+          id: "/tasks/260610_browser-dashboard/enclosures/16_engine-room-stack-entry-height/series-contract.md",
+          enclosure: "/tasks/260610_browser-dashboard/enclosures/16_engine-room-stack-entry-height/series-contract.md",
+          worktreeGroup: "/worktrees/260610-browser-dashboard-s16-ar",
+          taskName: "260610_browser-dashboard",
+          leafId: "16_engine-room-stack-entry-height",
+          phase: "worktree-started",
+        },
+      ],
+    },
+  });
+}
+
 // Freeze motion so the phase-activity flag (not the pulse) is what's asserted.
 beforeEach(() => {
   document.documentElement.dataset.effects = "off";
@@ -156,5 +191,21 @@ describe("EngineRoom lifecycle phase motion (5f S5, T12–T18)", () => {
     expect(nominal?.getAttribute("title")).toContain("beta");
     expect(indexing?.getAttribute("title")).toContain("gamma");
     expect(down?.getAttribute("title")).toContain("delta");
+  });
+
+  it("renders leaf enclosure identity ahead of the parent series task name", () => {
+    seedParallelLeafRoom();
+
+    const { getAllByTestId, getByTestId } = render(<EngineRoom />);
+    const rows = getAllByTestId("enclosure-stack-item");
+
+    expect(rows[0]?.textContent).toContain("16_engine-room-stack-entry-height");
+    expect(rows[0]?.textContent).toContain("260610_browser-dashboard");
+    expect(rows[0]?.textContent).toContain("worktree-started");
+    expect(rows[1]?.textContent).toContain("15_parallel-leaf-enclosure-workflow");
+    expect(rows[1]?.textContent).toContain("cleanup-pending");
+    expect(getByTestId("engine-room-header").textContent).toContain(
+      "16_engine-room-stack-entry-height",
+    );
   });
 });

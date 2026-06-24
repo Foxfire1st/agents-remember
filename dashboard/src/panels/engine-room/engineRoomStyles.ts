@@ -118,6 +118,8 @@ export const sectionLabel = css({
 
 export const stackList = css({
   display: "grid",
+  alignContent: "start",
+  alignItems: "start",
   gap: "0.4rem",
   listStyle: "none",
   margin: "0",

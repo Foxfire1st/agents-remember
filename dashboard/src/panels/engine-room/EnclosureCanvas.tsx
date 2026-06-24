@@ -1325,7 +1325,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       viewBox="0 0 1200 660"
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label={`Engine room — ${node.taskName} — ${node.health}`}
+      aria-label={`Engine room — ${node.leafId || node.taskName} — ${node.health}`}
       data-testid="enclosure-canvas"
       data-gate-kind={gateNode?.kind}
     >

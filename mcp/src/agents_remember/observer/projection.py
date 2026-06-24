@@ -412,11 +412,10 @@ class TaskSectionNode(BaseModel):
 class TaskDocNode(BaseModel):
     """A task document's progress, keyed by lifecycle (slice 3c, surface 7).
 
-    Read from the JSON-primary ``ar-task-document/v1`` document (the source of
-    truth -- never the rendered markdown), so the dashboard can show what a
-    lifecycle is doing at step granularity. Bounded to the dashboard's needs: the
-    per-step detail stays in the document file, and documents not yet bound to a
-    lifecycle are omitted by the reader.
+    Read from the JSON-primary ``ar-task-document/v1`` document, so the dashboard
+    can show what a lifecycle is doing without opening files on disk. Bounded to
+    the dashboard's needs: the per-step detail stays in the document file, and
+    documents not yet bound to a lifecycle are omitted by the reader.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -441,9 +440,8 @@ class TaskDocNode(BaseModel):
     decisions: list[TaskDecisionNode] = Field(default_factory=list)
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
-    # Master-only (kind == "master"): the series index + the ordered render plan. A master carries
-    # no lifecycleId of its own (schema) -- it is contract-paired to the series lifecycle by the
-    # reader (slice 6g). Empty for light/subTask docs.
+    # Master docs use these for the series index + ordered render plan; non-master task docs may
+    # carry freeform sections. Empty when the document has no authored sections.
     subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
     sections: list[TaskSectionNode] = Field(default_factory=list)
     # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
@@ -627,6 +625,7 @@ class EngineProcessNode(BaseModel):
     enclosure: str
     worktreeGroup: str
     taskId: str
+    leafId: str = ""
     taskName: str
     repoName: str
     lifecycleId: str | None = None

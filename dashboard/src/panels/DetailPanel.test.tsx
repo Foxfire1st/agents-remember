@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
 import type {
+  EnclosureNode,
   LifecycleProjection,
   TaskDocNode,
   WorkspaceProjection,
@@ -35,6 +36,24 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     sections: [],
     ...over,
   };
+}
+
+function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure" | "lifecycleId">) {
+  return {
+    enclosureId: over.enclosure,
+    leafId: over.enclosure,
+    taskRoot: "/tasks/260610_browser-dashboard",
+    taskId: "260610_BROWSER-DASHBOARD",
+    taskName: "260610_browser-dashboard",
+    repoName: "agents-remember",
+    worktreeGroup: "/worktrees/260610-browser-dashboard-s16-ar",
+    humanReviewStatus: "pending-review",
+    closeoutStatus: "not-started",
+    integrationStatus: "not-started",
+    cleanup: "pending",
+    actions: [],
+    ...over,
+  } satisfies EnclosureNode;
 }
 
 // A series projection: one lifecycle, a contract-paired master, and one authored slice doc.
@@ -115,9 +134,86 @@ function seedSeries() {
   dashboardStore.getState().applySnapshot(projection);
 }
 
+function seedPromotedLeaf() {
+  const lc: LifecycleProjection = {
+    id: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+    state: "paused",
+    phase: "build",
+    fleeting: false,
+    enclosure: "/contracts/16",
+    repoId: "agents-remember",
+    tokens: 0,
+    startedAt: "2026-06-24T06:00:00+00:00",
+    lastEventTs: "2026-06-24T06:00:30+00:00",
+    inferred: false,
+    actions: [],
+    tokenSeries: [],
+  };
+  const doc = taskDoc({
+    lifecycleId: "260610_BROWSER-DASHBOARD",
+    kind: "subTask",
+    title: "Lifecycle Finalize Task",
+    docPath: "/tasks/260610_browser-dashboard/14_lifecycle-finalize-task.json",
+    objective: "Close out the lifecycle finalizer.",
+  });
+  const leaf = taskDoc({
+    lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+    kind: "subTask",
+    title: "Engine Room Stack Entry Height",
+    status: "inProgress",
+    docPath: "/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json",
+    objective: "Keep a single Engine Room enclosure entry visually bounded.",
+    requirements: ["Render the selected leaf task document, not the parent task or enclosure contract."],
+    stepsTotal: 1,
+    steps: [{ id: "S1", title: "Fix the stack entry height", status: "inProgress", substeps: [] }],
+    sections: [
+      {
+        kind: "freeform",
+        heading: "Notes",
+        body: "This is the authored leaf task document.",
+      },
+    ],
+  });
+  const projection: WorkspaceProjection = {
+    version: 2,
+    generatedAt: "2026-06-24T06:01:00+00:00",
+    lifecycles: [lc],
+    enclosures: [
+      enclosure({
+        enclosure: "/contracts/16",
+        lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+        leafId: "16_engine-room-stack-entry-height",
+      }),
+    ],
+    providers: [],
+    metrics: {
+      lifecycleCount: 1,
+      runningCount: 0,
+      blockedCount: 0,
+      pausedCount: 1,
+      totalTokens: 0,
+      stalenessHistogram: {},
+    },
+    analytics: {
+      driftSnapshots: [],
+      stalestSidecars: [],
+      setupSummaries: [],
+      setupProgress: [],
+      routeCoverage: [],
+      toolReports: [],
+      ledgers: [],
+      taskDocuments: [doc, leaf],
+      attentionQueue: [],
+      engineProcesses: [],
+    },
+  };
+  dashboardStore.getState().applySnapshot(projection);
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  dashboardStore.getState().reset();
 });
 
 describe("DetailPanel gate respond (task 11)", () => {
@@ -143,8 +239,10 @@ describe("DetailPanel gate respond (task 11)", () => {
 describe("DetailPanel master series navigation (6g)", () => {
   it("pins the sub-task index above the description and keeps the in-section copy", () => {
     seedSeries();
-    const { getByTestId, getByText } = render(<DetailPanel selectedId="LC-SER" />);
-    expect(getByText("My Series")).toBeTruthy();
+    const { getAllByText, getByTestId, getByText } = render(
+      <DetailPanel selectedId="LC-SER" />,
+    );
+    expect(getAllByText("My Series").length).toBeGreaterThan(0);
     const objective = getByText("Series objective text");
     const topIndex = getByTestId("subtask-open-1"); // pinned navigation copy
     expect(getByTestId("subtask-mid-1")).toBeTruthy(); // authored in-section copy stays
@@ -189,5 +287,28 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(container.querySelector("th")?.textContent).toBe("Slice");
     expect(container.querySelector("strong")?.textContent).toBe("strong");
     expect(queryByText(/\| Slice \| Status \|/)).toBeNull(); // raw markdown is gone
+  });
+});
+
+describe("DetailPanel promoted lifecycle identity", () => {
+  it("renders the leaf task document without falling back to the master task documents", () => {
+    seedPromotedLeaf();
+    const { getAllByText, getByText, queryByText } = render(
+      <DetailPanel selectedId="01KVW2FE8MQK6QCQQP0J4SEK3C" />,
+    );
+
+    expect(getAllByText("16_engine-room-stack-entry-height").length).toBeGreaterThan(0);
+    expect(getByText("subTask")).toBeTruthy();
+    expect(getByText("Engine Room Stack Entry Height")).toBeTruthy();
+    expect(getByText("Keep a single Engine Room enclosure entry visually bounded.")).toBeTruthy();
+    expect(getByText("Fix the stack entry height")).toBeTruthy();
+    expect(getByText("Notes")).toBeTruthy();
+    expect(getByText("This is the authored leaf task document.")).toBeTruthy();
+    expect(queryByText("Lifecycle Finalize Task")).toBeNull();
+    expect(queryByText("Close out the lifecycle finalizer.")).toBeNull();
+    expect(queryByText("Series Contract")).toBeNull();
+    expect(queryByText("schema: ar-series-contract/v1")).toBeNull();
+    expect(queryByText("01KVW2FE8MQK6QCQQP0J4SEK3C")).toBeNull();
+    expect(queryByText("No task document bound to this task.")).toBeNull();
   });
 });

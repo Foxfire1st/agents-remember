@@ -12,6 +12,7 @@ import {
 import { css, cva } from "../../styled-system/css";
 import { buildTree, fmtWait, type Pivot } from "../data/selectors";
 import { useDashboard } from "../data/store";
+import { findLifecycleEnclosure, groupEnclosuresByLifecycle, taskLabel } from "../data/taskIdentity";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
 import type { TaskDocNode } from "../types/projection";
@@ -105,8 +106,10 @@ export function LifecycleList({
 }) {
   const [pivot, setPivot] = useState<Pivot>("repo");
   const lifecycles = useDashboard((s) => s.lifecycles);
+  const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
   const docsByLifecycle = groupDocs(analytics?.taskDocuments ?? []);
+  const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
   const tree = buildTree(Object.values(lifecycles), pivot);
 
   const head = (
@@ -153,9 +156,12 @@ export function LifecycleList({
               <Header className={groupHeader}>{group.label}</Header>
               {group.lifecycles.map((lifecycle) => {
                 const docs = docsByLifecycle.get(lifecycle.id) ?? [];
-                const label = lifecycle.id.includes("/")
-                  ? lifecycle.id.slice(lifecycle.id.indexOf("/") + 1)
-                  : lifecycle.id;
+                const enclosure = findLifecycleEnclosure(
+                  lifecycle,
+                  enclosures,
+                  enclosuresByLifecycle,
+                );
+                const label = taskLabel(lifecycle, docs, enclosure);
                 const secondary = pivot === "repo" ? lifecycle.phase : (lifecycle.repoId ?? "—");
                 const hint = taskHint(docs);
                 const gate = gateHint(lifecycle.gate?.kind, lifecycle.ask);

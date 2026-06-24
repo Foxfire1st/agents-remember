@@ -13,6 +13,7 @@ function node(over: Partial<EngineProcessNode> = {}): EngineProcessNode {
     enclosure: "/c.md",
     worktreeGroup: "/w/r/grp",
     taskId: "T",
+    leafId: "demo-leaf",
     taskName: "demo",
     repoName: "r",
     phase: "worktree-started",
@@ -129,5 +130,31 @@ describe("buildEngineRoomModel", () => {
     expect(fleeting.processes[0]?.enclosureKey).toBe("/w/r/grp");
     expect(real.processes[0]?.enclosureKey).toBe("/w/r/grp");
     expect(fleeting.processes[0]?.enclosureKey).toBe(real.processes[0]?.enclosureKey);
+  });
+
+  it("orders active leaf enclosures before cleanup-pending siblings for the same parent task", () => {
+    const model = buildEngineRoomModel(
+      [
+        node({
+          worktreeGroup: "/w/r/old",
+          leafId: "15_parallel-leaf-enclosure-workflow",
+          phase: "cleanup-pending",
+          closeoutStatus: "completed",
+          integrationStatus: "completed",
+        }),
+        node({
+          worktreeGroup: "/w/r/current",
+          leafId: "16_engine-room-stack-entry-height",
+          phase: "worktree-started",
+        }),
+      ],
+      [],
+      [],
+    );
+
+    expect(model.processes.map((view) => view.node.leafId)).toEqual([
+      "16_engine-room-stack-entry-height",
+      "15_parallel-leaf-enclosure-workflow",
+    ]);
   });
 });

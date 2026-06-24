@@ -1547,6 +1547,27 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
         self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
 
+    def test_leaf_contract_alone_is_not_a_task_document(self) -> None:
+        contract = default_contract(
+            task_name="demo",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=self.coord / "repos" / "repo-a",
+            code_source_branch="ar/demo",
+            code_work_branch="ar/demo-leaf",
+            code_base_commit="abc123",
+            worktree_name="01_leaf-work",
+            lifecycle_id="LC-LEAF",
+        )
+        write_contract(contract.contract_path, contract)
+
+        self.assertEqual(
+            read_task_documents(self.coord, enclosures=read_enclosures(self.coord), now=FRESH),
+            [],
+        )
+
     def _master(self) -> TaskDocument:
         return TaskDocument.model_validate(
             {

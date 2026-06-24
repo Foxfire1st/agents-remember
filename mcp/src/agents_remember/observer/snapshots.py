@@ -584,14 +584,12 @@ def read_ledger(memory_root: Path, code_root: Path | None = None) -> LedgerNode 
 def read_task_documents(
     coordination_root: Path, *, enclosures: list[EnclosureNode], now: datetime
 ) -> list[TaskDocNode]:
-    """Surface 7 (slices 3c + 6g): per-lifecycle task-document progress, masters included.
+    """Surface 7 (slices 3c + 6g): per-lifecycle task-document progress.
 
     Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
-    source of truth, never the rendered markdown. A ``light``/``subTask`` doc keys on
-    its own ``lifecycleId``; a ``master`` carries none (schema), so it is *contract-paired*
-    to its series lifecycle -- it inherits the ``lifecycleId`` of the contract sitting in the
-    same task folder (slice 6g). Documents with no resolvable lifecycle (an unbound slice or
-    an orphan master), non-task JSON, and malformed files are skipped.
+    source of truth, never the rendered markdown. A ``light``/``subTask`` doc keys
+    on its own ``lifecycleId``. Documents with no resolvable lifecycle, non-task
+    JSON, and malformed files are skipped.
     """
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():

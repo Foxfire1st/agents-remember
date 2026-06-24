@@ -193,7 +193,7 @@ export interface TaskCodeExampleNode {
   snippet: string;
 }
 
-// Master-only (kind === "master"): the series index row + an ordered render-plan section (slice 6g).
+// Series index rows are master-only; sections also carry non-master freeform task-doc prose.
 export interface TaskSubTaskRefNode {
   number: string;
   name: string;
@@ -229,7 +229,7 @@ export interface TaskDocNode {
   openQuestions: string[];
   references: string[];
   subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
-  sections: TaskSectionNode[]; // master-only; empty for light/subTask
+  sections: TaskSectionNode[]; // master render plan or non-master freeform sections
   masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
 }
 
@@ -317,6 +317,7 @@ export interface EngineProcessNode {
   enclosure: string;
   worktreeGroup: string;
   taskId: string;
+  leafId: string;
   taskName: string;
   repoName: string;
   lifecycleId?: string;

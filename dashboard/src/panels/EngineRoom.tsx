@@ -137,9 +137,10 @@ function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
   const sev = queue[0]?.severity ?? "clear";
   const phaseActive = LIFECYCLE_PHASES.has(node.phase);
   const pulse = animate && phaseActive;
+  const label = node.leafId || node.taskName;
   return (
     <div className={roomHeader} data-testid="engine-room-header" data-phase-active={phaseActive}>
-      <span className={roomHeaderName}>{node.taskName}</span>
+      <span className={roomHeaderName}>{label}</span>
       <span className={roomHeaderMeta}>
         <span className={healthDot({ health: node.health })} aria-hidden="true" />
         <span>{node.health}</span>
@@ -150,6 +151,7 @@ function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
         >
           {node.phase}
         </motion.span>
+        {node.leafId ? <span>{node.taskName}</span> : null}
         <span>{node.repoName}</span>
       </span>
       {node.nextAction ? <span className={roomHeaderNext}>→ {node.nextAction}</span> : null}

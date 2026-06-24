@@ -222,6 +222,7 @@ function engineProcess(
     enclosure: enclosurePath,
     worktreeGroup: group,
     taskId: over.id.toUpperCase(),
+    leafId: over.leafId ?? over.id,
     phase: "worktree-started",
     health: "nominal",
     codeSource: ref({ branch: SOURCE_BRANCH, commit: "08e9221a", path: `/home/dev/Projects/${over.repoName}` }),

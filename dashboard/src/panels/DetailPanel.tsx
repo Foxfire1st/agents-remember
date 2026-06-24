@@ -2,6 +2,12 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
 import { useDashboard } from "../data/store";
+import {
+  findLifecycleEnclosure,
+  groupEnclosuresByLifecycle,
+  taskDocsForLifecycle,
+  taskLabel,
+} from "../data/taskIdentity";
 import { Markdown } from "../grammar/Markdown";
 import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
@@ -295,9 +301,7 @@ export function DetailPanel({
   // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   useEffect(() => setOpenSlug(null), [selectedId]); // switching lifecycles closes any open sub-task
-  const docs = selectedId
-    ? (analytics?.taskDocuments ?? []).filter((doc) => doc.lifecycleId === selectedId)
-    : [];
+  const allDocs = analytics?.taskDocuments ?? [];
 
   if (!lifecycle) {
     return (
@@ -310,7 +314,11 @@ export function DetailPanel({
   }
 
   const currentIdx = PHASES.indexOf(lifecycle.phase);
-  const enclosure = lifecycle.enclosure ? enclosures[lifecycle.enclosure] : undefined;
+  const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
+  const enclosure = findLifecycleEnclosure(lifecycle, enclosures, enclosuresByLifecycle);
+  const directDocs = allDocs.filter((doc) => doc.lifecycleId === lifecycle.id);
+  const docs = taskDocsForLifecycle(lifecycle, allDocs);
+  const title = taskLabel(lifecycle, directDocs, enclosure);
   const groupName = enclosure ? (enclosure.worktreeGroup.split("/").filter(Boolean).pop() ?? "") : "";
   const engines = groupName
     ? Object.values(providers).filter((p) => p.scope === "worktree" && p.worktreeGroup === groupName)
@@ -323,7 +331,7 @@ export function DetailPanel({
   const openDoc = openSlug ? sliceForSlug(slices, openSlug) : undefined;
   const head = (
     <>
-      <h2>{lifecycle.id}</h2>
+      <h2>{title}</h2>
       {openDoc ? (
         <button
           type="button"
@@ -375,11 +383,7 @@ export function DetailPanel({
         />
       ) : null}
 
-      {openDoc ? (
-        <TaskReader doc={openDoc} />
-      ) : (
-        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} />
-      )}
+      {openDoc ? <TaskReader doc={openDoc} /> : <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} />}
 
       {enclosure ? (
         <div className={spine}>
@@ -706,6 +710,11 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
           <Bullets items={doc.openQuestions} />
         </Section>
       ) : null}
+      {doc.sections.map((section) => (
+        <Section key={`${section.kind}:${section.heading}`} title={section.heading}>
+          {section.body ? <Markdown>{section.body}</Markdown> : null}
+        </Section>
+      ))}
       {doc.references.length > 0 ? (
         <Section title="References">
           <Bullets items={doc.references} />

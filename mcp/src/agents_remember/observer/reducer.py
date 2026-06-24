@@ -959,6 +959,7 @@ def _engine_process(
         enclosure=enclosure_id,
         worktreeGroup=group_full,
         taskId=str(cp.get("task_id", "")),
+        leafId=str(cp.get("leaf_id", "")),
         taskName=str(cp.get("task_name", "")),
         repoName=str(cp.get("repo_name", "")),
         lifecycleId=_str_or_none(cp.get("lifecycle_id")),
