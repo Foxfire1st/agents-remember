@@ -25,10 +25,10 @@ from agents_remember.kernel.coordination_context.paths import (
     settings_path_for_roots,
 )
 from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
+from agents_remember.worktrees.task_resolver import resolve_active_task_root
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     load_contract,
-    task_root_for,
     worktree_group_for,
 )
 
@@ -154,6 +154,8 @@ def resolve_coordination_context(
     code_repository_root: Path | None = None,
     contract_path: Path | None = None,
     task_name: str | None = None,
+    parent_task: str | None = None,
+    leaf_id: str | None = None,
     worktree_name: str | None = None,
 ) -> CoordinationContext:
     repo = _resolve_code_repository(code_repository_name, workspace_root, code_repository_root)
@@ -165,6 +167,8 @@ def resolve_coordination_context(
             onboarding_root,
             contract_path,
             task_name,
+            parent_task,
+            leaf_id,
             worktree_name,
         )
     return _context_from_selection(
@@ -174,6 +178,8 @@ def resolve_coordination_context(
         settings_path,
         contract_path,
         task_name,
+        parent_task,
+        leaf_id,
         worktree_name,
     )
 
@@ -192,7 +198,9 @@ def _resolve_code_repository(
             "workspace": workspace_root.resolve() if workspace_root else resolved_code_root.parent,
         }
     if not code_repository_name:
-        raise ValueError("code_repository_name is required when code_repository_root is not supplied")
+        raise ValueError(
+            "code_repository_name is required when code_repository_root is not supplied"
+        )
     return {
         "name": code_repository_name,
         "root": find_code_repository_root(resolved_workspace_root, code_repository_name),
@@ -207,11 +215,13 @@ def _context_from_onboarding_root(
     onboarding_root: Path,
     contract_path: Path | None,
     task_name: str | None,
+    parent_task: str | None,
+    leaf_id: str | None,
     worktree_name: str | None,
 ) -> CoordinationContext:
     resolved_onboarding_root = onboarding_root.resolve()
-    resolved_settings = settings_path.resolve() if settings_path else infer_settings_path(
-        resolved_onboarding_root
+    resolved_settings = (
+        settings_path.resolve() if settings_path else infer_settings_path(resolved_onboarding_root)
     )
     topology = requested_topology or infer_topology_from_onboarding_root(resolved_onboarding_root)
     coordination_root, memory_root = memory_roots_from_settings(
@@ -230,6 +240,8 @@ def _context_from_onboarding_root(
         cross_repo=cross_repo,
         contract_path=contract_path,
         task_name=task_name,
+        parent_task=parent_task,
+        leaf_id=leaf_id,
         worktree_name=worktree_name,
         workspace_root=Path(repo["workspace"]),
     )
@@ -242,6 +254,8 @@ def _context_from_selection(
     settings_path: Path | None,
     contract_path: Path | None,
     task_name: str | None,
+    parent_task: str | None,
+    leaf_id: str | None,
     worktree_name: str | None,
 ) -> CoordinationContext:
     contract_coordination_root = _contract_coordination_root(contract_path, coordination_root)
@@ -266,6 +280,8 @@ def _context_from_selection(
         cross_repo=cross_repo,
         contract_path=contract_path,
         task_name=task_name,
+        parent_task=parent_task,
+        leaf_id=leaf_id,
         worktree_name=worktree_name,
         workspace_root=Path(repo["workspace"]),
     )
@@ -294,14 +310,25 @@ def build_coordination_context(
     cross_repo: CrossRepoSettings,
     contract_path: Path | None = None,
     task_name: str | None = None,
+    parent_task: str | None = None,
+    leaf_id: str | None = None,
     worktree_name: str | None = None,
     workspace_root: Path | None = None,
 ) -> CoordinationContext:
     contract, resolved_contract_path = resolve_contract(
-        contract_path, coordination_root, code_repository_name, task_name
+        contract_path,
+        coordination_root,
+        code_repository_name,
+        task_name,
+        parent_task,
+        leaf_id,
     )
-    task_root = _task_root(coordination_root, code_repository_name, task_name, contract)
-    worktree_group = _worktree_group(coordination_root, code_repository_name, worktree_name, contract)
+    task_root = _task_root(
+        coordination_root, code_repository_name, task_name, parent_task, contract
+    )
+    worktree_group = _worktree_group(
+        coordination_root, code_repository_name, worktree_name, contract
+    )
     memory_mode = contract.memory_mode if contract is not None else _memory_mode(topology)
     effective_memory_root = _effective_memory_root(memory_root, contract)
     system_root = _system_root(memory_root, coordination_root)
@@ -335,12 +362,18 @@ def build_coordination_context(
 
 
 def _task_root(
-    coordination_root: Path, code_repository_name: str, task_name: str | None, contract
+    coordination_root: Path,
+    code_repository_name: str,
+    task_name: str | None,
+    parent_task: str | None,
+    contract,
 ) -> Path:
     if contract is not None:
         return contract.task_root
     if task_name:
-        return task_root_for(coordination_root, code_repository_name, task_name)
+        return resolve_active_task_root(
+            coordination_root, code_repository_name, task_name, parent_task=parent_task
+        )
     return coordination_root / "tasks" / code_repository_name
 
 

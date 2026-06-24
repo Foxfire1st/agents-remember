@@ -20,8 +20,8 @@ use this skill for the closeout gate and code-memory-ledger commit order.
 Use the worktree closeout tools against the task contract:
 
 ```text
-worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 ```
 
 Worktree closeout records closeout state in the contract the
@@ -131,7 +131,7 @@ not modified in the current task, because advancing verification metadata over
 stale content defeats the commit-hash-based drift check. Update changed sidecars
 during implementation, not at the metadata-refresh step.
 
-The closeout worklist covers the working tree plus the contract-recorded
+The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
 contract's recorded closeout commit, falling back to the task base) and the
 work branch HEAD, scoped by the recorded base so synced-in parallel work and

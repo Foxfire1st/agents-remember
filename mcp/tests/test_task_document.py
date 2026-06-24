@@ -131,8 +131,13 @@ class SchemaTests(unittest.TestCase):
     def test_master_roundtrips_with_subtasks_and_sections(self) -> None:
         doc = _master(
             subTasks=[
-                {"number": "3c", "name": "Persist", "file": "03c.md",
-                 "status": "inProgress", "scope": "x"}
+                {
+                    "number": "3c",
+                    "name": "Persist",
+                    "file": "03c.md",
+                    "status": "inProgress",
+                    "scope": "x",
+                }
             ],
             sections=[{"kind": "freeform", "heading": "H", "body": "b"}],
         )
@@ -348,7 +353,10 @@ class RenderTests(unittest.TestCase):
 
     def test_leaf_freeform_sections_render_after_references(self) -> None:
         md = render_markdown(
-            _doc(references=["ref"], sections=[{"heading": "Status history", "body": "line a\nline b"}])
+            _doc(
+                references=["ref"],
+                sections=[{"heading": "Status history", "body": "line a\nline b"}],
+            )
         )
         self.assertIn("## Status history", md)
         self.assertIn("line a\nline b", md)
@@ -393,10 +401,14 @@ class MasterRenderTests(unittest.TestCase):
             status="inProgress",
             createdAt="2026-06-12T15:58",
             subTasks=[
-                {"number": "1", "name": "Design", "file": "01_d.md",
-                 "status": "Completed", "scope": "keystone"},
-                {"number": "3c", "name": "Persist", "file": "03c_p.md",
-                 "status": "inProgress"},
+                {
+                    "number": "1",
+                    "name": "Design",
+                    "file": "01_d.md",
+                    "status": "Completed",
+                    "scope": "keystone",
+                },
+                {"number": "3c", "name": "Persist", "file": "03c_p.md", "status": "inProgress"},
                 {"number": "4", "name": "Serve", "status": "planning"},
             ],
             decisions=[{"at": "2026-06-12T15:58", "decision": "8 slices", "rationale": "fits"}],
@@ -597,8 +609,13 @@ class ControllerTests(unittest.TestCase):
             operation="create",
             task_name="3c-x",
             fields={
-                "id": "3C", "slug": "03c_x", "title": "Smoke", "kind": "subTask",
-                "repo": "agents-remember", "type": "Code", "createdAt": "2026-01-01T00:00",
+                "id": "3C",
+                "slug": "03c_x",
+                "title": "Smoke",
+                "kind": "subTask",
+                "repo": "agents-remember",
+                "type": "Code",
+                "createdAt": "2026-01-01T00:00",
                 "objective": "Preview me.",
             },
             dry_run=True,
@@ -616,8 +633,13 @@ class ControllerTests(unittest.TestCase):
         before_json = json_path.read_text(encoding="utf-8")
         before_md = md_path.read_text(encoding="utf-8")
         result = task_doc_tool(
-            self.cfg, repo_id="agents-remember", operation="set_field",
-            task_name="3c-x", slug="03c_x", fields={"objective": "changed"}, dry_run=True,
+            self.cfg,
+            repo_id="agents-remember",
+            operation="set_field",
+            task_name="3c-x",
+            slug="03c_x",
+            fields={"objective": "changed"},
+            dry_run=True,
         )
         self.assertIn("changed", str(result["rendered"]))  # the would-be render reflects the edit
         # …but disk is untouched
@@ -629,8 +651,13 @@ class ControllerTests(unittest.TestCase):
         md_path = Path(str(created["renderedPath"]))
         # a clean re-preview (no real change) matches disk exactly: no loss, empty diff
         clean = task_doc_tool(
-            self.cfg, repo_id="agents-remember", operation="set_field",
-            task_name="3c-x", slug="03c_x", fields={"objective": "orig"}, dry_run=True,
+            self.cfg,
+            repo_id="agents-remember",
+            operation="set_field",
+            task_name="3c-x",
+            slug="03c_x",
+            fields={"objective": "orig"},
+            dry_run=True,
         )
         self.assertFalse(clean["wouldLose"])
         self.assertEqual(clean["diff"], "")
@@ -640,8 +667,13 @@ class ControllerTests(unittest.TestCase):
             encoding="utf-8",
         )
         lossy = task_doc_tool(
-            self.cfg, repo_id="agents-remember", operation="set_field",
-            task_name="3c-x", slug="03c_x", fields={"objective": "orig"}, dry_run=True,
+            self.cfg,
+            repo_id="agents-remember",
+            operation="set_field",
+            task_name="3c-x",
+            slug="03c_x",
+            fields={"objective": "orig"},
+            dry_run=True,
         )
         self.assertTrue(lossy["wouldLose"])
         self.assertIn("keep me", str(lossy["diff"]))
@@ -699,7 +731,7 @@ class ControllerTests(unittest.TestCase):
             self.cfg,
             repo_id="agents-remember",
             operation="get",
-            contract_path=str(task_root / "contract.md"),
+            contract_path=str(task_root / "series-contract.md"),
             slug="03c_x",
         )
         self.assertEqual(result["taskId"], "3C")
@@ -813,28 +845,41 @@ class MasterControllerTests(unittest.TestCase):
             operation="create",
             task_name="lite",
             fields={
-                "id": "L", "slug": "task", "title": "L", "kind": "light",
-                "repo": "r", "createdAt": "2026-01-01T00:00",
+                "id": "L",
+                "slug": "task",
+                "title": "L",
+                "kind": "light",
+                "repo": "r",
+                "createdAt": "2026-01-01T00:00",
             },
         )
         # set_subtask stays master-only (the series index has no meaning on a leaf)
         with self.assertRaises(TaskDocError):
             task_doc_tool(
-                self.cfg, repo_id="agents-remember", operation="set_subtask",
-                task_name="lite", subtask={"number": "1", "name": "x"},
+                self.cfg,
+                repo_id="agents-remember",
+                operation="set_subtask",
+                task_name="lite",
+                subtask={"number": "1", "name": "x"},
             )
         # set_section on a leaf adds a freeform extra section (R4)
         result = task_doc_tool(
-            self.cfg, repo_id="agents-remember", operation="set_section",
-            task_name="lite", section={"heading": "Status history", "body": "old."},
+            self.cfg,
+            repo_id="agents-remember",
+            operation="set_section",
+            task_name="lite",
+            section={"heading": "Status history", "body": "old."},
         )
         doc = read_task_doc(Path(str(result["docPath"])))
         self.assertEqual([s.heading for s in doc.sections], ["Status history"])
         # a non-freeform section on a leaf is rejected (the validator backstop)
         with self.assertRaises(TaskDocError):
             task_doc_tool(
-                self.cfg, repo_id="agents-remember", operation="set_section",
-                task_name="lite", section={"heading": "X", "kind": "subTasks"},
+                self.cfg,
+                repo_id="agents-remember",
+                operation="set_section",
+                task_name="lite",
+                section={"heading": "X", "kind": "subTasks"},
             )
 
     def test_master_op_argument_errors(self) -> None:

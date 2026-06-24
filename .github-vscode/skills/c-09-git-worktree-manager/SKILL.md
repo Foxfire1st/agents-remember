@@ -7,7 +7,7 @@ description: "Create, attach to, report on, integrate, finalize, and clean up Ag
 
 Use this skill when a task should run through an explicit code/memory worktree wrapper.
 
-The `c-09-git-worktree-manager` skill wraps the existing chat-build, light-task, or external workflow. It owns Git worktree state, task contracts, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
+The `c-09-git-worktree-manager` skill wraps the existing chat-build, light-task, or external workflow. It owns Git worktree state, series contracts, leaf enclosures, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
 
 For closeout, use the `c-12-closeout` skill. The `c-09-git-worktree-manager` skill only supplies the worktree-specific
 contract path and integration/finalization follow-up rules.
@@ -22,15 +22,15 @@ entry point:
 > to inspect the plan, confirm, then run the real apply (omit `dry_run`).
 
 ```text
-worktree_start(repo_id="<repo-id>", task_name="<task>", worktree_name="<name>", workflow_kind="light-task")
-worktree_attach(repo_id="<repo-id>", task_name="<task>")
-worktree_status(repo_id="<repo-id>", task_name="<task>")
-worktree_sync(contract_path="<contract.md>")
-worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_integrate(contract_path="<contract.md>", strategy="ff-only")
-worktree_cleanup(contract_path="<contract.md>")
-lifecycle_finalize_task(contract_path="<contract.md>", task_doc_path="<task.json>", master_doc_path="<parent task.json>", subtask_number="<N>", dry_run=true)
+worktree_start(repo_id="<repo-id>", task_name="<task>", worktree_name="<leaf-worktree>", leaf_id="<leaf-id>", workflow_kind="light-task")
+worktree_attach(repo_id="<repo-id>", task_name="<task>", leaf_id="<leaf-id>")
+worktree_status(repo_id="<repo-id>", task_name="<task>", leaf_id="<leaf-id>")
+worktree_sync(contract_path="<enclosure series-contract.md>")
+worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_integrate(contract_path="<enclosure series-contract.md>", strategy="ff-only")
+worktree_cleanup(contract_path="<enclosure series-contract.md>")
+lifecycle_finalize_task(contract_path="<enclosure series-contract.md>", task_doc_path="<task.json>", master_doc_path="<parent task.json>", subtask_number="<N>", dry_run=true)
 ```
 
 Callers identify repositories by configured MCP `repo_id`. The MCP server owns
@@ -46,9 +46,10 @@ lifecycle, with identity kept server-side:
 
 - `worktree_start` **promotes** the session's current (fleeting) lifecycle to
   **persistent** and writes its id into the contract's `lifecycle:` block. The
-  enclosure (`tasks/<repo>/<task>/contract.md`) is the durable anchor that
-  outlives worktree cleanup — one enclosure = one lifecycle, even across a
-  multi-task series.
+  leaf enclosure (`tasks/<repo>/<task>/enclosures/<leaf-id>/series-contract.md`)
+  is the durable anchor that outlives worktree cleanup. One leaf enclosure = one
+  lifecycle. A master task's root `series-contract.md` is a separate integration
+  contract and is not itself worktree material.
 - `worktree_attach` **resumes** that lifecycle: it reads the id from the contract
   and re-adopts it, so a new chat session continues the same observable lifecycle.
   The model never passes an id.
@@ -66,11 +67,12 @@ The intended order is:
 2. run the `c-02-memory-quality-control` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
 4. decide whether the work is a chat build, a `w-02-light-task-workflow` light task (or master + light sub-task series), or external workflow
-5. read the repository's `system/git-workflow.md` and identify the branch that
-   `worktree_integrate` would move; if that branch is protected, PR-gated, or
-   otherwise not directly landable, create or check out a pushable integration
-   branch from it first and use that integration branch as the worktree
-   `source_branch`
+5. read the repository's `system/git-workflow.md` and identify the parent branch
+   edge. For a standalone task, the leaf worktree branches from the approved
+   source branch. For a master series, the master owns a root `series-contract.md`
+   and a pushable integration branch first; each leaf enclosure branches from that
+   integration branch and integrates back into it. For a nested master, create
+   the child integration branch from the parent integration branch.
 6. choose or review the task slug and workflow variables
 7. present the **Worktree Intent Gate** and wait for explicit developer approval
 8. create the durable task wrapper when one is needed
@@ -82,17 +84,17 @@ The Worktree Intent Gate must name:
 
 1. target repo and build mode
 2. discovered branch policy from `system/git-workflow.md`
-3. proposed pushable `source_branch`
-4. proposed work branch and worktree name
+3. proposed protected/source branch and, for a master series, the integration branch
+4. proposed leaf work branch, worktree name, and `leaf_id`
 5. memory mode and memory branch behavior
 6. intended landing path from closeout through integration, PR/merge when needed,
    memory carryover, and lifecycle finalization
 7. material risks, unusual choices, or unresolved branch-policy questions
 
 If the repo is PR-gated, the intent packet must make the protection boundary
-visible: the protected target is not the recorded `source_branch`; the recorded
-`source_branch` is the pushable integration branch that `worktree_integrate`
-will move before the branch is pushed for PR.
+visible: leaf work branches integrate into the pushable integration/source branch
+recorded by their enclosure; protected targets are reached later through the
+repo's PR flow.
 
 Raise the intent junction as a kind-typed gate per the
 `l-01-session-job-lifecycle` skill's Gate Choreography — in addition to the
@@ -110,11 +112,11 @@ approval. Once the developer has approved, the agent **always** sends
 `lifecycle_resume()` to clear the block, then calls `worktree_start`. A chat
 "approved" does not propagate itself.
 
-For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. The `c-09-git-worktree-manager` skill then places `contract.md` beside that `task.md` when worktrees are created.
+For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. A standalone worktree-backed task stores its leaf enclosure at `<task-folder>/enclosures/<leaf-id>/series-contract.md`. A master series additionally stores its integration contract at `<master-task-folder>/series-contract.md`.
 
 ## Start / Attach / Status
 
-The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` context, creates or loads `contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
+The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` context, creates or loads the leaf `series-contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. If the task root is a master and no root series contract exists yet, start first creates the master integration branch and root `series-contract.md`, then starts the leaf from that integration branch. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
 
 Start runs a **stale-base preflight** (GitHub #54) before any worktree exists:
 when the code or memory source branch is `behind` or `diverged` from its remote
@@ -128,11 +130,11 @@ external-memory source branch is no longer a manual step: start auto-creates it
 at the official memory tip using the code source branch name as template
 (reported as `memorySourceBranch` in the result).
 
-The recorded `source_branch` is not merely the base branch. It is the branch
-that `worktree_integrate` will later fast-forward or replay into. For
-protected, PR-gated, or otherwise not-directly-landable flows, `source_branch`
-must be the developer-approved pushable integration branch, not the protected
-target branch.
+The recorded leaf `source_branch` is not merely the base branch. It is the branch
+that `worktree_integrate` will later fast-forward or replay into. In a master
+series this is the master integration branch; in a nested master it is the
+nearest parent integration branch. Protected targets are handled after the
+integration branch lands.
 
 When external memory is enabled, the `c-09-git-worktree-manager` skill validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. Missing external memory is not a `c-09-git-worktree-manager` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If no compatible memory state exists, the `c-09-git-worktree-manager` skill stops and reports the allowed human choices:
 
@@ -150,8 +152,8 @@ without needing `reconciliation`.
 
 ## Mid-Task Sync
 
-A live worktree's base pair decays while parallel cycles land (a PR merge
-fast-forwards code main; carryover advances memory main). `worktree_sync`
+A live worktree's base pair decays while parallel cycles land (a sibling leaf may
+advance the integration/source branch; carryover may advance official memory). `worktree_sync`
 (GitHub #54) pulls the moved official line in **atomically**: it fetches the
 source upstreams, requires the new code tip to be ledger-mapped at the official
 memory tip (a mid-cycle official line blocks with guidance to run
@@ -175,7 +177,7 @@ Use the `c-12-closeout` skill for worktree closeout. The `c-12-closeout` skill o
 missing-onboarding check, code commit, onboarding and entity refresh, memory
 quality gate, memory content commit, ledger update, and ledger commit.
 
-For worktree-backed tasks, pass the task `contract.md` to
+For worktree-backed tasks, pass the leaf enclosure `series-contract.md` to
 `worktree_closeout_preview` / `worktree_closeout_apply`. The apply step records
 the developer's explicit commit approval in the contract and updates the
 contract closeout state after the code, memory, and ledger commits are created.
@@ -245,7 +247,7 @@ Cleanup is idempotent. If the worktrees or merged branches are already gone, it 
 
 ## Boundaries
 
-1. The `c-09-git-worktree-manager` skill may create or reuse worktrees and task contracts.
+1. The `c-09-git-worktree-manager` skill may create or reuse worktrees, root series contracts, and leaf enclosure contracts.
 2. The `c-09-git-worktree-manager` skill does not initialize memory roots; use the `c-00-initialize-memory-repo` skill before starting external-memory worktrees.
 3. Closeout belongs to the `c-12-closeout` skill; the `c-09-git-worktree-manager` skill only supplies worktree contract context.
 4. The `c-09-git-worktree-manager` skill must not use divergent memory as semi-trusted reference context.

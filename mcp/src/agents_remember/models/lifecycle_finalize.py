@@ -19,9 +19,11 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     state: str
     dryRun: bool = False
     contractPath: str
+    enclosurePath: str | None = None
     landedCommit: str | None = None
     targetBranch: str | None = None
     blockers: list[str] = Field(default_factory=list)
     cleanup: dict[str, Any] = Field(default_factory=dict)
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
+    taskArchive: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""

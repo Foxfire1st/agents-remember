@@ -98,6 +98,9 @@ function enclosure(
 ): EnclosureNode {
   return {
     taskId: over.enclosure,
+    enclosureId: over.enclosure,
+    leafId: over.taskName,
+    taskRoot: over.enclosure,
     lifecycleId: "",
     worktreeGroup: over.enclosure,
     humanReviewStatus: "pending",

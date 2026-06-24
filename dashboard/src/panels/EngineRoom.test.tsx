@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
-import type { LifecycleProjection, WorkspaceProjection } from "../types/projection";
+import type { LifecycleProjection, ProviderNode, WorkspaceProjection } from "../types/projection";
 import { EngineRoom } from "./EngineRoom";
 
 function seed(name: string) {
@@ -51,6 +51,41 @@ function seedGateRoom() {
   dashboardStore.getState().applySnapshot(projection);
 }
 
+function workspaceProvider(over: Partial<ProviderNode> & Pick<ProviderNode, "id" | "role" | "repoId">): ProviderNode {
+  return {
+    state: "ready",
+    ok: true,
+    watcherUp: true,
+    indexingState: "indexed",
+    scope: "workspace",
+    ...over,
+  };
+}
+
+function cgc(repoId: string, over: Partial<ProviderNode> = {}): ProviderNode {
+  return workspaceProvider({
+    id: `cgc-${repoId}`,
+    role: "code",
+    repoId,
+    ...over,
+  });
+}
+
+function grepai(repoId: string, over: Partial<ProviderNode> = {}): ProviderNode {
+  return workspaceProvider({
+    id: `grepai-${repoId}`,
+    role: "memory",
+    repoId,
+    ...over,
+  });
+}
+
+function seedOfficialProviders(providers: ProviderNode[]) {
+  const fixture = GALLERY.find((entry) => entry.name === "engine-bootstrap");
+  if (!fixture) throw new Error("fixture not found: engine-bootstrap");
+  dashboardStore.getState().applySnapshot({ ...fixture.projection, providers });
+}
+
 // Freeze motion so the phase-activity flag (not the pulse) is what's asserted.
 beforeEach(() => {
   document.documentElement.dataset.effects = "off";
@@ -78,5 +113,48 @@ describe("EngineRoom lifecycle phase motion (5f S5, T12–T18)", () => {
     const { getByTestId } = render(<EngineRoom />);
     expect(getByTestId("engine-gate-responder").textContent).toContain("Respond");
     expect(getByTestId("enclosure-canvas").getAttribute("data-gate-kind")).toBe("cleanup-approval");
+  });
+
+  it("aggregates same-state official CGC engines into one strip chip", () => {
+    seedOfficialProviders([
+      ...Array.from({ length: 7 }, (_, i) => cgc(`repo-${i + 1}`)),
+      grepai("agents-remember-memory"),
+    ]);
+
+    const { getAllByTestId, getByTestId } = render(<EngineRoom />);
+    const strip = getByTestId("official-strip");
+    const groups = getAllByTestId("official-engine-group");
+    const cgcGroup = groups.find((group) => group.textContent === "7 CGC · nominal");
+
+    expect(strip.textContent?.match(/CGC · nominal/g)?.length).toBe(1);
+    expect(cgcGroup?.getAttribute("title")).toContain("repo-1");
+    expect(cgcGroup?.getAttribute("title")).toContain("repo-7");
+    expect(strip.textContent).toContain("GrepAI · nominal");
+  });
+
+  it("keeps official CGC aggregate chips separated by runtime state", () => {
+    seedOfficialProviders([
+      cgc("alpha"),
+      cgc("beta"),
+      cgc("gamma", { indexingState: "indexing" }),
+      cgc("delta", { state: "stopped", ok: false, indexingState: "unknown" }),
+      grepai("agents-remember-memory"),
+    ]);
+
+    const { getAllByTestId } = render(<EngineRoom />);
+    const groups = getAllByTestId("official-engine-group");
+    const labels = groups.map((group) => group.textContent);
+    const nominal = groups.find((group) => group.textContent === "2 CGC · nominal");
+    const indexing = groups.find((group) => group.textContent === "CGC · indexing");
+    const down = groups.find((group) => group.textContent === "CGC · down");
+
+    expect(labels).toContain("2 CGC · nominal");
+    expect(labels).toContain("CGC · indexing");
+    expect(labels).toContain("CGC · down");
+    expect(labels).toContain("GrepAI · nominal");
+    expect(nominal?.getAttribute("title")).toContain("alpha");
+    expect(nominal?.getAttribute("title")).toContain("beta");
+    expect(indexing?.getAttribute("title")).toContain("gamma");
+    expect(down?.getAttribute("title")).toContain("delta");
   });
 });

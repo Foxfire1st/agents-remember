@@ -11,6 +11,7 @@ from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.task_resolver import archive_completed_root_task
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
@@ -35,6 +36,7 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
                 "state": "not-finalizable-yet",
                 "dryRun": args.dry_run,
                 "contractPath": contract.contract_path.as_posix(),
+                "enclosurePath": contract.contract_path.as_posix(),
                 "blockers": readiness,
                 "summary": "Task lifecycle is not finalizable yet.",
             },
@@ -49,6 +51,7 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
                 "state": "cleanup-blocked",
                 "dryRun": args.dry_run,
                 "contractPath": contract.contract_path.as_posix(),
+                "enclosurePath": contract.contract_path.as_posix(),
                 "cleanup": cleanup.payload,
                 "summary": "Cleanup did not complete; task documents were not changed.",
             },
@@ -56,6 +59,19 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
 
     updated_contract = load_contract(contract.contract_path) if not args.dry_run else contract
     updates = _reconcile_task_documents(args)
+    if updated_contract.kind == "series":
+        archive = archive_completed_root_task(
+            updated_contract.coordination_root,
+            updated_contract.repo_name,
+            updated_contract.task_root,
+            dry_run=args.dry_run,
+        )
+    else:
+        archive = {
+            "state": "skipped",
+            "reason": "leaf-contract",
+            "taskRoot": updated_contract.task_root.as_posix(),
+        }
     return WorktreeCommandResult(
         0,
         {
@@ -63,10 +79,12 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
             "state": "finalized" if not args.dry_run else "would-finalize",
             "dryRun": args.dry_run,
             "contractPath": updated_contract.contract_path.as_posix(),
+            "enclosurePath": updated_contract.contract_path.as_posix(),
             "landedCommit": _landed_commit(updated_contract),
             "targetBranch": updated_contract.code_source_branch,
             "cleanup": cleanup.payload,
             "taskUpdates": updates,
+            "taskArchive": archive,
             "summary": (
                 "Task lifecycle finalized."
                 if not args.dry_run
@@ -105,9 +123,7 @@ def _landed_commit(contract: WorktreeContract) -> str:
     return contract.integrated_code_commit or contract.code_commit
 
 
-def _run_or_verify_cleanup(
-    contract: WorktreeContract, args: FinalizeArgs
-) -> WorktreeCommandResult:
+def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> WorktreeCommandResult:
     if contract.cleanup == "completed":
         return WorktreeCommandResult(
             0,
@@ -160,7 +176,11 @@ def _complete_leaf(path: Path, *, dry_run: bool) -> dict[str, Any]:
         return {"state": "skipped", "reason": "task document not found", "path": path.as_posix()}
     doc = read_task_doc(path)
     if doc.kind == "master":
-        return {"state": "skipped", "reason": "leaf path points at a master", "path": path.as_posix()}
+        return {
+            "state": "skipped",
+            "reason": "leaf path points at a master",
+            "path": path.as_posix(),
+        }
     data = doc.model_dump(by_alias=True)
     data["status"] = "Completed"
     data["decisions"] = _finalized_decisions(data)
@@ -173,7 +193,11 @@ def _complete_parent_row(path: Path, subtask_number: str, *, dry_run: bool) -> d
         return {"state": "skipped", "reason": "master document not found", "path": path.as_posix()}
     doc = read_task_doc(path)
     if doc.kind != "master":
-        return {"state": "skipped", "reason": "master path is not a master", "path": path.as_posix()}
+        return {
+            "state": "skipped",
+            "reason": "master path is not a master",
+            "path": path.as_posix(),
+        }
     data = doc.model_dump(by_alias=True)
     refs = data["subTasks"]
     index = next((idx for idx, ref in enumerate(refs) if ref["number"] == subtask_number), None)
@@ -196,7 +220,9 @@ def _write_or_preview(task_root: Path, doc: TaskDocument, *, dry_run: bool) -> d
     if dry_run:
         return {
             "state": "would-update",
-            "docPath": (task_root / f"{doc.slug if doc.kind == 'subTask' else 'task'}.json").as_posix(),
+            "docPath": (
+                task_root / f"{doc.slug if doc.kind == 'subTask' else 'task'}.json"
+            ).as_posix(),
             "status": doc.status,
         }
     json_path, markdown_path = write_task_doc(task_root, doc)

@@ -2,7 +2,7 @@
 
 ``worktree_start`` prepares a code worktree and can then block on external memory (or providers,
 or a stale base) *before* a contract is written. The contract is the dashboard's durable anchor
--- the enclosures surface reads ``contract.md`` files -- so a start that is stuck before its
+-- the enclosures surface reads leaf ``series-contract.md`` files -- so a start that is stuck before its
 contract is currently invisible. This module writes a small, transient progress file on each
 blocked early return and clears it once the contract lands, so the Engine Room can show a start
 that is gated before it ever produces a contract.

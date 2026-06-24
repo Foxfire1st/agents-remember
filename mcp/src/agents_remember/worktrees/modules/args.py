@@ -28,6 +28,8 @@ class WorktreeArgs:
     topology: Literal["internal", "external"] | None = None
     contract_path: Path | None = None
     task_name: str | None = None
+    parent_task: str | None = None
+    leaf_id: str | None = None
 
     # Start inputs
     worktree_name: str | None = None

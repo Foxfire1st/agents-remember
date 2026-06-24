@@ -81,6 +81,11 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.start_progress import read_start_progress
+from agents_remember.worktrees.task_resolver import (
+    ARCHIVE_DIR,
+    ENCLOSURES_DIR,
+    iter_leaf_enclosure_contracts,
+)
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
@@ -138,18 +143,15 @@ def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[Provi
 
 
 def read_enclosures(coordination_root: Path) -> list[EnclosureNode]:
-    """Surfaces 5/6: every worktree contract under ``tasks/<repo>/<task>/``.
+    """Surfaces 5/6: every active leaf enclosure contract.
 
-    The contract lives in the durable task folder (design §1.1), so it outlives
-    worktree cleanup -- an enclosure stays in the projection as the kanban record
-    even after its worktree is reclaimed. A malformed contract is skipped, never
-    fatal to the whole projection.
+    Leaf contracts live below ``enclosures/<leaf-id>/series-contract.md``. Root
+    series contracts describe integration branches and are not live worktree
+    processes. A malformed contract is skipped, never fatal to the projection.
     """
     tasks_root = coordination_root / "tasks"
-    if not tasks_root.is_dir():
-        return []
     nodes: list[EnclosureNode] = []
-    for path in sorted(tasks_root.glob("*/*/contract.md")):
+    for path in iter_leaf_enclosure_contracts(tasks_root):
         node = _enclosure_from_contract(path)
         if node is not None:
             nodes.append(node)
@@ -163,9 +165,12 @@ def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
         return None
     return EnclosureNode(
         enclosure=contract.contract_path.as_posix(),
+        enclosureId=contract.leaf_id or contract.contract_path.parent.name,
+        leafId=contract.leaf_id,
         taskId=contract.task_id,
         taskName=contract.task_name,
         repoName=contract.repo_name,
+        taskRoot=contract.task_root.as_posix(),
         lifecycleId=contract.lifecycle_id,
         worktreeGroup=contract.worktree_group.as_posix(),
         humanReviewStatus=contract.human_review_status,
@@ -198,9 +203,9 @@ def read_gates(coordination_root: Path) -> list[GateRecord]:
 
 
 def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFacts]:
-    """Slice 5e: gather one fact bundle per worktree contract for the Engine Room map.
+    """Slice 5e: gather one fact bundle per leaf enclosure for the Engine Room map.
 
-    Globs the same ``tasks/<repo>/<task>/contract.md`` files as :func:`read_enclosures`, but
+    Globs the same leaf enclosure files as :func:`read_enclosures`, but
     enriches each with the status-guidance facts the structural ``EnclosureNode`` omits (the
     code/memory branches, base commits, worktree paths, existence/dirty flags, base freshness,
     and provider-boot status). ``contract_payload`` and ``lifecycle_guidance`` are pure; only
@@ -209,10 +214,8 @@ def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFact
     crashing the projection tick. A malformed contract is skipped, never fatal.
     """
     tasks_root = coordination_root / "tasks"
-    if not tasks_root.is_dir():
-        return []
     facts: list[EngineProcessFacts] = []
-    for path in sorted(tasks_root.glob("*/*/contract.md")):
+    for path in iter_leaf_enclosure_contracts(tasks_root):
         try:
             contract = load_contract(path)
         except (ContractError, OSError):
@@ -535,7 +538,9 @@ def read_tool_reports(coordination_root: Path, *, now: datetime) -> list[ToolRep
     for tool_dir in sorted(root.iterdir()):
         if not tool_dir.is_dir():
             continue
-        reports = sorted(tool_dir.glob("*.json"), reverse=True)  # UTC-stamped names sort newest-first
+        reports = sorted(
+            tool_dir.glob("*.json"), reverse=True
+        )  # UTC-stamped names sort newest-first
         if not reports:
             continue
         newest = reports[0]
@@ -591,16 +596,18 @@ def read_task_documents(
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
         return []
-    # Contract-paired master binding: the enclosure already surfaces each contract's lifecycle_id,
-    # keyed here by the resolved task folder (the contract's parent) the master JSON shares. Resolved
-    # so cross-folder `../<task>/task.md` refs (slice 6g cross-master links) compare equal.
-    lifecycle_by_dir = {
-        Path(enclosure.enclosure).parent.resolve(): enclosure.lifecycleId
+    lifecycle_by_enclosure = {
+        enclosure.enclosure: enclosure.lifecycleId
         for enclosure in enclosures
         if enclosure.lifecycleId
     }
+    lifecycle_by_dir = {
+        Path(enclosure.taskRoot).resolve(): enclosure.lifecycleId
+        for enclosure in enclosures
+        if enclosure.lifecycleId and enclosure.taskRoot
+    }
     nodes: list[TaskDocNode] = []
-    for path in sorted(tasks_root.glob("*/*/*.json")):
+    for path in _iter_task_json(tasks_root):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
             continue
@@ -608,13 +615,23 @@ def read_task_documents(
             doc = TaskDocument.model_validate(payload)
         except ValueError:
             continue
-        lifecycle_id = (
-            lifecycle_by_dir.get(path.parent.resolve()) if doc.kind == "master" else doc.lifecycleId
-        )
+        if doc.kind == "master":
+            continue
+        lifecycle_id = doc.lifecycleId or _doc_enclosure_lifecycle(doc, lifecycle_by_enclosure)
         if not lifecycle_id:  # an unpaired master, or a slice not yet bound to a durable worktree
             continue
         nodes.append(_task_doc_node(doc, lifecycle_id, path, lifecycle_by_dir, now))
     return nodes
+
+
+def _doc_enclosure_lifecycle(
+    doc: TaskDocument, lifecycle_by_enclosure: dict[str, str]
+) -> str | None:
+    for enclosure in doc.enclosures:
+        lifecycle_id = lifecycle_by_enclosure.get(enclosure.enclosurePath)
+        if lifecycle_id:
+            return lifecycle_id
+    return None
 
 
 def read_series_documents(coordination_root: Path, *, now: datetime) -> list[SeriesNode]:
@@ -631,7 +648,7 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
     if not tasks_root.is_dir():
         return []
     nodes: list[SeriesNode] = []
-    for path in sorted(tasks_root.glob("*/*/*.json")):
+    for path in _iter_task_json(tasks_root):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
             continue
@@ -672,6 +689,14 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
             )
         )
     return nodes
+
+
+def _iter_task_json(tasks_root: Path) -> list[Path]:
+    return [
+        path
+        for path in sorted(tasks_root.rglob("*.json"))
+        if ARCHIVE_DIR not in path.parts and ENCLOSURES_DIR not in path.parts
+    ]
 
 
 def _ref_lifecycle(

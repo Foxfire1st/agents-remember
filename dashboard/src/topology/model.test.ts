@@ -4,7 +4,10 @@ import type { EnclosureNode, ProviderNode } from "../types/projection";
 import { buildTopology } from "./model";
 
 const enclosure = (overrides: Partial<EnclosureNode> = {}): EnclosureNode => ({
-  enclosure: "/tasks/demo/contract.md",
+  enclosure: "/tasks/demo/enclosures/demo/series-contract.md",
+  enclosureId: "/tasks/demo/enclosures/demo/series-contract.md",
+  leafId: "demo",
+  taskRoot: "/tasks/demo",
   taskId: "DEMO",
   taskName: "demo",
   repoName: "agents-remember",

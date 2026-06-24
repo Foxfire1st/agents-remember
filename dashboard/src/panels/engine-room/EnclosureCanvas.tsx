@@ -246,13 +246,6 @@ function branchEnter(factState: CommitRefNode["factState"]): { opacity: number; 
   }
 }
 
-// During landing the official-line node reads as the protected branch (main) — the feat/fix SOURCE the
-// worktree was branched off is shown as its own tier in the gap. Same on-disk commit; only the branch
-// label flips, so the closeout reads main ◂ feat ◂ worktree instead of collapsing main and feat into one.
-function mainRef(src: CommitRefNode): CommitRefNode {
-  return { ...src, branch: "main" };
-}
-
 function BranchNode({ pos, label, refNode, landingIn = false, detaching = false, pruned = false }: {
   pos: { x: number; y: number; w: number };
   label: string;
@@ -444,7 +437,7 @@ const compactDate = (iso: string | undefined): string =>
 
 // The warp coupler = the memory.md LEDGER link: the lookup-table row binding this side's code commit to
 // its memory commit across the two physically distinct repos (5h coupler-semantics fix; NOT the task
-// contract.md). A drawn chain-link glyph + the two linked short-hashes as the label, and — when bound —
+// series contract). A drawn chain-link glyph + the two linked short-hashes as the label, and — when bound —
 // the warp-core surge (two hot bands born at the link, splitting up + down; ported from podstage.html).
 // Default-show the newest LEDGER_PREVIEW rows; "▾ show N more" expands in place to the full served window
 // (≤ LEDGER_WINDOW = 25), which scrolls. Older rows stay in the file ("+N more in memory.md"). The
@@ -1380,14 +1373,12 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       {/* NB: the scan ring is NOT drawn here — it is centred ON a repository node, so it must paint in the
           topmost overlay layer (below), after the nodes, or the node's opaque rect would cover it. */}
 
-      {/* THREE-TIER (5f §7.4, copied 1-to-1 from the mockup): the OFFICIAL LINE is MAIN (the protected
-          branch) — ALWAYS, in the build-up and the landing — and the worktree forks from it on the right.
-          The feat/fix SOURCE the worktree was branched off appears in the GAP only during landing (the
-          mockup's tear-down reveal), so closeout reads main ◂ feat ◂ worktree. The official-line nodes
-          never relabel/remount across the transition; the feat tier fades in (landingIn). */}
-      <BranchNode pos={POS.codeSource} label="Official line · main" refNode={mainRef(node.codeSource)} pruned={baseStale} />
+      {/* THREE-TIER (5f §7.4): the official line is the resolved integration/source branch from the
+          projection. The worktree forks from it on the right; during landing, the source tier appears
+          in the gap so the closeout path reads integration ◂ source ◂ worktree. */}
+      <BranchNode pos={POS.codeSource} label="Integration line" refNode={node.codeSource} pruned={baseStale} />
       {hasMemory && node.memorySource ? (
-        <BranchNode pos={POS.memorySource} label="Official line · main" refNode={mainRef(node.memorySource)} />
+        <BranchNode pos={POS.memorySource} label="Integration line" refNode={node.memorySource} />
       ) : null}
       <AnimatePresence>
         {showLanding ? (

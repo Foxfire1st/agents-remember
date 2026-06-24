@@ -52,6 +52,8 @@ def contract_md(
     task: str,
     *,
     lifecycle_id: str = "",
+    contract_kind: str = "leaf",
+    leaf_id: str | None = None,
     kind: str = "light-task",
     review: str = "approved",
     closeout: str = "completed",
@@ -59,9 +61,42 @@ def contract_md(
     cleanup: str = "pending",
 ) -> str:
     taskid = task.upper().replace("-", "_")
-    group = f"{task}-ar"
+    leaf = leaf_id or task
+    group = f"{leaf}-ar"
+    task_root = root / "tasks" / repo / task
+    contract_path = (
+        task_root / "series-contract.md"
+        if contract_kind == "series"
+        else task_root / "enclosures" / leaf / "series-contract.md"
+    )
+    worktree_group = (
+        task_root / "enclosures" if contract_kind == "series" else root / "worktrees" / repo / group
+    )
+    code_worktree = (
+        root / "repos" / repo
+        if contract_kind == "series"
+        else root / "worktrees" / repo / group / leaf
+    )
+    memory_lines = [
+        "memory:",
+        "  mode: external",
+        f"  repo_path: {root.as_posix()}/memory-repos/ar-{repo}",
+        "  source_branch: main",
+        f"  work_branch: ar/{task}",
+        f"  base_commit: {SHA}",
+    ]
+    if contract_kind == "series":
+        memory_lines.append(f"  ledger: {root.as_posix()}/memory-repos/ar-{repo}/memory.md")
+    else:
+        memory_lines.extend(
+            [
+                f"  worktree: {root.as_posix()}/worktrees/{repo}/{group}/memory-{leaf}",
+                f"  ledger: {root.as_posix()}/worktrees/{repo}/{group}/memory-{leaf}/memory.md",
+            ]
+        )
     return f"""---
-schema: ar-worktree-contract/v1
+schema: ar-series-contract/v1
+kind: {contract_kind}
 task_id: {taskid}
 task_name: {task}
 repo_name: {repo}
@@ -70,32 +105,28 @@ memory_mode: external
 
 coordination:
   root: {root.as_posix()}
-  task_root: {root.as_posix()}/tasks/{repo}/{task}
-  contract_path: {root.as_posix()}/tasks/{repo}/{task}/contract.md
-  task_artifact: {root.as_posix()}/tasks/{repo}/{task}/task.md
-  worktree_group: {root.as_posix()}/worktrees/{repo}/{group}
+  task_root: {task_root.as_posix()}
+  series_contract_path: {contract_path.as_posix()}
+  task_artifact: {task_root.as_posix()}/task.md
+  worktree_group: {worktree_group.as_posix()}
+  leaf_id: {leaf if contract_kind == "leaf" else ""}
+  parent_contract_path: {task_root.as_posix()}/series-contract.md
 
 code:
   repo_path: {root.as_posix()}/repos/{repo}
   source_branch: main
   work_branch: ar/{task}
   base_commit: {SHA}
-  worktree: {root.as_posix()}/worktrees/{repo}/{group}/{task}
+  worktree: {code_worktree.as_posix()}
 
 lifecycle:
   id: {lifecycle_id}
 
-memory:
-  mode: external
-  repo_path: {root.as_posix()}/memory-repos/ar-{repo}
-  source_branch: main
-  work_branch: ar/{task}
-  base_commit: {SHA}
-  worktree: {root.as_posix()}/worktrees/{repo}/{group}/memory-{task}
-  ledger: {root.as_posix()}/worktrees/{repo}/{group}/memory-{task}/memory.md
+{chr(10).join(memory_lines)}
 
 human_review:
   status: {review}
+  approved_for_commit: no
 
 closeout:
   status: {closeout}
@@ -105,11 +136,18 @@ integration:
   cleanup: {cleanup}
 ---
 
-# Worktree Contract - {taskid}
+# Series Contract - {taskid}
 """
 
 
-def event(kind: str, lc: str, *, trust: str = "observed", actor: str = "system", **data: object) -> dict:
+def contract_path(root: Path, repo: str, task: str, *, leaf_id: str | None = None) -> Path:
+    leaf = leaf_id or task
+    return root / "tasks" / repo / task / "enclosures" / leaf / "series-contract.md"
+
+
+def event(
+    kind: str, lc: str, *, trust: str = "observed", actor: str = "system", **data: object
+) -> dict:
     extra: dict[str, object] = {}
     for key in ("enclosure", "repoId"):
         if key in data:
@@ -142,12 +180,24 @@ _STEP_TITLES = [
 def steps(done: int, total: int, current_in_progress: bool = True) -> list[dict]:
     out: list[dict] = []
     for i in range(total):
-        status = "done" if i < done else ("inProgress" if (i == done and current_in_progress) else "pending")
-        step: dict = {"id": str(i + 1), "title": _STEP_TITLES[i % len(_STEP_TITLES)], "status": status}
+        status = (
+            "done"
+            if i < done
+            else ("inProgress" if (i == done and current_in_progress) else "pending")
+        )
+        step: dict = {
+            "id": str(i + 1),
+            "title": _STEP_TITLES[i % len(_STEP_TITLES)],
+            "status": status,
+        }
         if i == 0:  # show substep nesting on the opening step
             step["substeps"] = [
                 {"id": "1.1", "title": "Read the notes", "status": "done"},
-                {"id": "1.2", "title": "Trust checkpoint", "status": "done" if done > 0 else "inProgress"},
+                {
+                    "id": "1.2",
+                    "title": "Trust checkpoint",
+                    "status": "done" if done > 0 else "inProgress",
+                },
             ]
         out.append(step)
     return out
@@ -206,7 +256,9 @@ def light_doc(repo: str, task: str, lc: str, *, status: str, done: int, total: i
     }
 
 
-def subtask_doc(repo: str, master_slug: str, num: str, name: str, lc: str, *, done: int, total: int) -> dict:
+def subtask_doc(
+    repo: str, master_slug: str, num: str, name: str, lc: str, *, done: int, total: int
+) -> dict:
     return {
         "schema": "ar-task-document/v1",
         "id": f"{master_slug.upper()}_{num}",
@@ -293,12 +345,32 @@ def main(out: Path) -> None:
     # Varied closeout/integration/cleanup so the hangar + phase grouping show a full range.
     statuses = [
         dict(closeout="completed", integration="completed", cleanup="completed"),  # fully landed
-        dict(closeout="completed", integration="completed", cleanup="pending"),  # uncleaned (hangar)
-        dict(closeout="completed", integration="not-started", cleanup="pending"),  # awaiting integrate
-        dict(closeout="not-started", integration="not-started", cleanup="pending", review="pending-review"),
-        dict(closeout="not-started", integration="not-started", cleanup="abandoned", review="pending-review"),
+        dict(
+            closeout="completed", integration="completed", cleanup="pending"
+        ),  # uncleaned (hangar)
+        dict(
+            closeout="completed", integration="not-started", cleanup="pending"
+        ),  # awaiting integrate
+        dict(
+            closeout="not-started",
+            integration="not-started",
+            cleanup="pending",
+            review="pending-review",
+        ),
+        dict(
+            closeout="not-started",
+            integration="not-started",
+            cleanup="abandoned",
+            review="pending-review",
+        ),
     ]
-    repos = ["agents-remember", "agents-remember-md", "device-management", "ctec-firmware", "helpdesk-portal"]
+    repos = [
+        "agents-remember",
+        "agents-remember-md",
+        "device-management",
+        "ctec-firmware",
+        "helpdesk-portal",
+    ]
     paused = 0
     for r, repo in enumerate(repos):
         for i in range(5 if repo != "agents-remember" else 6):  # 26 total
@@ -307,7 +379,9 @@ def main(out: Path) -> None:
             # half the persistent paused get a real lifecycle id + a light task doc (single-task content)
             give_doc = (r + i) % 2 == 0
             lc = f"L-paused-{paused:02d}" if give_doc else ""
-            write_text(out / "tasks" / repo / task / "contract.md", contract_md(out, repo, task, lifecycle_id=lc, **st))
+            write_text(
+                contract_path(out, repo, task), contract_md(out, repo, task, lifecycle_id=lc, **st)
+            )
             if give_doc:
                 write_json(
                     out / "tasks" / repo / task / f"{task}.json",
@@ -316,10 +390,23 @@ def main(out: Path) -> None:
             paused += 1
 
     # --- a multi-task master series (one lifecycle, master doc + subTask slices) --------------
-    series_repo, series_task, series_lc = "agents-remember", "260610_browser-dashboard", "L-series-dashboard"
+    series_repo, series_task, series_lc = (
+        "agents-remember",
+        "260610_browser-dashboard",
+        "L-series-dashboard",
+    )
     write_text(
-        out / "tasks" / series_repo / series_task / "contract.md",
-        contract_md(out, series_repo, series_task, lifecycle_id=series_lc, kind="master", closeout="completed", cleanup="pending"),
+        out / "tasks" / series_repo / series_task / "series-contract.md",
+        contract_md(
+            out,
+            series_repo,
+            series_task,
+            lifecycle_id=series_lc,
+            contract_kind="series",
+            kind="master",
+            closeout="completed",
+            cleanup="pending",
+        ),
     )
     subs = [
         ("01", "lifecycle-event-gate-design", 4, 4),
@@ -328,10 +415,19 @@ def main(out: Path) -> None:
         ("04", "serving-layer", 3, 3),
         ("05", "cockpit-v1", 7, 10),
     ]
-    sub_refs = [{"number": n, "name": nm, "status": "Completed" if d >= t else "inProgress"} for n, nm, d, t in subs]
-    write_json(out / "tasks" / series_repo / series_task / f"{series_task}.json", master_doc(series_repo, series_task, sub_refs))
+    sub_refs = [
+        {"number": n, "name": nm, "status": "Completed" if d >= t else "inProgress"}
+        for n, nm, d, t in subs
+    ]
+    write_json(
+        out / "tasks" / series_repo / series_task / f"{series_task}.json",
+        master_doc(series_repo, series_task, sub_refs),
+    )
     for n, nm, d, t in subs:
-        write_json(out / "tasks" / series_repo / series_task / f"{n}_{nm}.json", subtask_doc(series_repo, series_task, n, nm, series_lc, done=d, total=t))
+        write_json(
+            out / "tasks" / series_repo / series_task / f"{n}_{nm}.json",
+            subtask_doc(series_repo, series_task, n, nm, series_lc, done=d, total=t),
+        )
 
     # --- ~8 event-backed lifecycles (the active/fleeting variety + the attention queue) -------
     logs = out / "logs" / "observer" / "lifecycles"
@@ -346,37 +442,105 @@ def main(out: Path) -> None:
         ("L-blocked-plan", "agents-remember-md", "reframe-research", True),
         ("L-blocked-rebase", "device-management", "build", True),
     ]:
-        enc = (out / "tasks" / repo / f"active-{lc}" / "contract.md").as_posix()
-        write_text(out / "tasks" / repo / f"active-{lc}" / "contract.md", contract_md(out, repo, f"active-{lc}", lifecycle_id=lc, cleanup="pending"))
-        write_json(out / "tasks" / repo / f"active-{lc}" / f"active-{lc}.json", light_doc(repo, f"active-{lc}", lc, status="inProgress", done=2, total=5))
+        enc = contract_path(out, repo, f"active-{lc}").as_posix()
+        write_text(
+            contract_path(out, repo, f"active-{lc}"),
+            contract_md(out, repo, f"active-{lc}", lifecycle_id=lc, cleanup="pending"),
+        )
+        write_json(
+            out / "tasks" / repo / f"active-{lc}" / f"active-{lc}.json",
+            light_doc(repo, f"active-{lc}", lc, status="inProgress", done=2, total=5),
+        )
         evs = [
             event("lifecycle.started", lc, data_phase="request", fleeting=True, phase="request"),
-            event("lifecycle.promoted", lc, trust="approved", actor="developer", scope=repo, enclosure=enc, repoId=repo),
+            event(
+                "lifecycle.promoted",
+                lc,
+                trust="approved",
+                actor="developer",
+                scope=repo,
+                enclosure=enc,
+                repoId=repo,
+            ),
             event("lifecycle.phase-changed", lc, trust="declared", actor="model", phase=phase),
             event("tool.completed", lc, actor="model", tool="grepai_search", tokens=1400),
         ]
         if blocked:
             q = "Approve the plan?" if "plan" in lc else "Rebase on main — conflict. Resolve?"
-            evs.append(event("lifecycle.blocked", lc, actor="model", ask={"kind": "gate", "question": q}))
+            evs.append(
+                event("lifecycle.blocked", lc, actor="model", ask={"kind": "gate", "question": q})
+            )
         log(lc, evs)
 
     # fleeting (no worktree) — bare-bones entries
-    log("L-fleeting-1", [event("lifecycle.started", "L-fleeting-1", data_phase="trust-checkpoint", fleeting=True, phase="trust-checkpoint")])
-    log("L-fleeting-2", [
-        event("lifecycle.started", "L-fleeting-2", fleeting=True, phase="request"),
-        event("lifecycle.phase-changed", "L-fleeting-2", trust="declared", actor="model", phase="reframe-research"),
-        event("tool.completed", "L-fleeting-2", actor="model", tool="cgc_symbol_search", tokens=600),
-    ])
+    log(
+        "L-fleeting-1",
+        [
+            event(
+                "lifecycle.started",
+                "L-fleeting-1",
+                data_phase="trust-checkpoint",
+                fleeting=True,
+                phase="trust-checkpoint",
+            )
+        ],
+    )
+    log(
+        "L-fleeting-2",
+        [
+            event("lifecycle.started", "L-fleeting-2", fleeting=True, phase="request"),
+            event(
+                "lifecycle.phase-changed",
+                "L-fleeting-2",
+                trust="declared",
+                actor="model",
+                phase="reframe-research",
+            ),
+            event(
+                "tool.completed",
+                "L-fleeting-2",
+                actor="model",
+                tool="cgc_symbol_search",
+                tokens=600,
+            ),
+        ],
+    )
     # completed (terminal)
     for lc, repo in [("L-done-1", "ctec-firmware"), ("L-done-2", "helpdesk-portal")]:
-        enc = (out / "tasks" / repo / f"active-{lc}" / "contract.md").as_posix()
-        write_text(out / "tasks" / repo / f"active-{lc}" / "contract.md", contract_md(out, repo, f"active-{lc}", lifecycle_id=lc, closeout="completed", integration="completed", cleanup="completed"))
-        log(lc, [
-            event("lifecycle.started", lc, fleeting=True, phase="request"),
-            event("lifecycle.promoted", lc, trust="approved", actor="developer", scope=repo, enclosure=enc, repoId=repo),
-            event("lifecycle.phase-changed", lc, trust="declared", actor="model", phase="close"),
-            event("lifecycle.ended", lc, actor="developer", trust="approved", outcome="completed"),
-        ])
+        enc = contract_path(out, repo, f"active-{lc}").as_posix()
+        write_text(
+            contract_path(out, repo, f"active-{lc}"),
+            contract_md(
+                out,
+                repo,
+                f"active-{lc}",
+                lifecycle_id=lc,
+                closeout="completed",
+                integration="completed",
+                cleanup="completed",
+            ),
+        )
+        log(
+            lc,
+            [
+                event("lifecycle.started", lc, fleeting=True, phase="request"),
+                event(
+                    "lifecycle.promoted",
+                    lc,
+                    trust="approved",
+                    actor="developer",
+                    scope=repo,
+                    enclosure=enc,
+                    repoId=repo,
+                ),
+                event(
+                    "lifecycle.phase-changed", lc, trust="declared", actor="model", phase="close"
+                ),
+                event(
+                    "lifecycle.ended", lc, actor="developer", trust="approved", outcome="completed"
+                ),
+            ],
+        )
 
     # --- provider current-state (workspace) + per-worktree stacks ----------------------------
     write_json(
@@ -387,13 +551,28 @@ def main(out: Path) -> None:
             "ok": True,
             "instance": {"id": "projects", "scope": "workspace"},
             "providers": {
-                "codegraphcontext-code": {"id": "codegraphcontext-code", "state": "ready", "ok": True, "watcherUp": True, "indexingState": "indexed"},
-                "grepai-memory": {"id": "grepai-memory", "state": "ready", "ok": True, "watcherUp": True, "indexingState": "indexing"},
+                "codegraphcontext-code": {
+                    "id": "codegraphcontext-code",
+                    "state": "ready",
+                    "ok": True,
+                    "watcherUp": True,
+                    "indexingState": "indexed",
+                },
+                "grepai-memory": {
+                    "id": "grepai-memory",
+                    "state": "ready",
+                    "ok": True,
+                    "watcherUp": True,
+                    "indexingState": "indexing",
+                },
             },
         },
     )
     # per-worktree provider stacks (note-03 surface 4) — ready for the per-worktree read fix
-    for repo, task in [("agents-remember", "260610_browser-dashboard"), ("device-management", "active-L-run-research")]:
+    for repo, task in [
+        ("agents-remember", "260610_browser-dashboard"),
+        ("device-management", "active-L-run-research"),
+    ]:
         write_json(
             out / "worktrees" / repo / f"{task}-ar" / "provider-runtime" / "provider-state.json",
             {
@@ -401,36 +580,76 @@ def main(out: Path) -> None:
                 "repoName": repo,
                 "worktreeGroup": (out / "worktrees" / repo / f"{task}-ar").as_posix(),
                 "codeWorktree": (out / "worktrees" / repo / f"{task}-ar" / task).as_posix(),
-                "memoryWorktree": (out / "worktrees" / repo / f"{task}-ar" / f"memory-{task}").as_posix(),
-                "isolatedProviderSettings": {"providers": ["codegraphcontext-code", "grepai-memory"]},
+                "memoryWorktree": (
+                    out / "worktrees" / repo / f"{task}-ar" / f"memory-{task}"
+                ).as_posix(),
+                "isolatedProviderSettings": {
+                    "providers": ["codegraphcontext-code", "grepai-memory"]
+                },
             },
         )
 
     # setup progress (surface 3): one ok, one failed (failed-setup attention)
     write_json(
-        out / "worktrees" / "agents-remember" / "260610_browser-dashboard-ar" / "provider-runtime" / "setup-progress.json",
-        {"schema": "ar-worktree-setup-progress/v1", "state": "ok", "completedPhases": ["seed", "refresh"], "currentPhase": None, "heartbeatAt": ts()},
+        out
+        / "worktrees"
+        / "agents-remember"
+        / "260610_browser-dashboard-ar"
+        / "provider-runtime"
+        / "setup-progress.json",
+        {
+            "schema": "ar-worktree-setup-progress/v1",
+            "state": "ok",
+            "completedPhases": ["seed", "refresh"],
+            "currentPhase": None,
+            "heartbeatAt": ts(),
+        },
     )
     write_json(
-        out / "worktrees" / "device-management" / "active-L-run-research-ar" / "provider-runtime" / "setup-progress.json",
-        {"schema": "ar-worktree-setup-progress/v1", "state": "ready-with-failed-phases", "completedPhases": ["seed"], "failedPhases": ["cgc-index"], "currentPhase": {"provider": "codegraphcontext", "action": "index"}, "heartbeatAt": ts()},
+        out
+        / "worktrees"
+        / "device-management"
+        / "active-L-run-research-ar"
+        / "provider-runtime"
+        / "setup-progress.json",
+        {
+            "schema": "ar-worktree-setup-progress/v1",
+            "state": "ready-with-failed-phases",
+            "completedPhases": ["seed"],
+            "failedPhases": ["cgc-index"],
+            "currentPhase": {"provider": "codegraphcontext", "action": "index"},
+            "heartbeatAt": ts(),
+        },
     )
 
     # --- memory ledgers + drift snapshots (memory mirror + actionable-drift attention) -------
-    for repo, rows in [("agents-remember", 95), ("agents-remember-md", 60), ("device-management", 22)]:
+    for repo, rows in [
+        ("agents-remember", 95),
+        ("agents-remember-md", 60),
+        ("device-management", 22),
+    ]:
         write_text(out / "memory-repos" / f"ar-{repo}" / "memory.md", ledger_md(repo, rows))
-    write_json(out / "logs" / "observer" / "drift" / "agents-remember.json", drift_snapshot("agents-remember", current=372, drifted=4, missing=2))
-    write_json(out / "logs" / "observer" / "drift" / "device-management.json", drift_snapshot("device-management", current=140, drifted=0, missing=0))
+    write_json(
+        out / "logs" / "observer" / "drift" / "agents-remember.json",
+        drift_snapshot("agents-remember", current=372, drifted=4, missing=2),
+    )
+    write_json(
+        out / "logs" / "observer" / "drift" / "device-management.json",
+        drift_snapshot("device-management", current=140, drifted=0, missing=0),
+    )
 
     # --- self-check: every contract + task doc validates -------------------------------------
-    contracts = list(out.glob("tasks/*/*/contract.md"))
+    contracts = list(out.glob("tasks/**/*.md"))
+    contracts = [path for path in contracts if path.name == "series-contract.md"]
     for c in contracts:
         load_contract(c)
     docs = list(out.glob("tasks/*/*/*.json"))
     for d in docs:
         TaskDocument.model_validate(json.loads(d.read_text()))
     print(f"rich sim fixture written to {out}")
-    print(f"  contracts: {len(contracts)}  task docs: {len(docs)}  event logs: {len(list(logs.glob('*/events.jsonl')))}")
+    print(
+        f"  contracts: {len(contracts)}  task docs: {len(docs)}  event logs: {len(list(logs.glob('*/events.jsonl')))}"
+    )
 
 
 if __name__ == "__main__":

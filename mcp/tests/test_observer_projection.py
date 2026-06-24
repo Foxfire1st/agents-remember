@@ -904,13 +904,14 @@ class GateProjectionTests(unittest.TestCase):
     LATER = "2026-06-13T18:05:00+00:00"
 
     def _open(self, *, gate_id: str = "G1", ts: str = T0):
-        return create_gate(
-            kind="closeout-approval", lifecycle_id="LC1", gate_id=gate_id, now=ts
-        )
+        return create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id=gate_id, now=ts)
 
     def test_open_gate_materializes_onto_lifecycle(self) -> None:
         proj = project_workspace(
-            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            [[_started(lifecycle_id="LC1")]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
             gates=[self._open()],
         )
         gate = proj.lifecycles[0].gate
@@ -920,18 +921,28 @@ class GateProjectionTests(unittest.TestCase):
 
     def test_decided_gate_is_not_attached(self) -> None:
         decided = decide_gate(
-            self._open(), decision="approve", by="developer", via="dashboard",
-            note=None, now=self.LATER,
+            self._open(),
+            decision="approve",
+            by="developer",
+            via="dashboard",
+            note=None,
+            now=self.LATER,
         )
         proj = project_workspace(
-            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            [[_started(lifecycle_id="LC1")]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
             gates=[decided],
         )
         self.assertIsNone(proj.lifecycles[0].gate)
 
     def test_latest_open_gate_wins(self) -> None:
         proj = project_workspace(
-            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            [[_started(lifecycle_id="LC1")]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
             gates=[self._open(gate_id="A", ts=T0), self._open(gate_id="B", ts=self.LATER)],
         )
         gate = proj.lifecycles[0].gate
@@ -940,7 +951,10 @@ class GateProjectionTests(unittest.TestCase):
 
     def test_open_gate_adds_attention_item(self) -> None:
         proj = project_workspace(
-            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH,
+            [[_started(lifecycle_id="LC1")]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
             gates=[self._open()],
         )
         item = next(i for i in proj.analytics.attentionQueue if i.kind == "gate-open")
@@ -1286,7 +1300,9 @@ class LedgerCommitMetaTests(unittest.TestCase):
     def test_git_commit_meta_drops_unknown_and_tolerates_bad_input(self) -> None:
         repo, shas = self._repo_with_commits(["only one"])
         # a bogus sha is dropped (no HEAD fallback); the real one still resolves
-        meta = _git_commit_meta(repo.as_posix(), [shas[0], "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"])
+        meta = _git_commit_meta(
+            repo.as_posix(), [shas[0], "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"]
+        )
         self.assertEqual(set(meta), {shas[0]})
         # best-effort: a non-repo path, empty root, or empty commit list -> {}
         self.assertEqual(_git_commit_meta((self.tmp / "nope").as_posix(), shas), {})
@@ -1532,61 +1548,77 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
 
     def _master(self) -> TaskDocument:
-        return TaskDocument.model_validate({
-            "id": "series", "slug": "series", "title": "Series", "kind": "master",
-            "repo": "repo-a", "createdAt": "2026-01-01T00:00",
-            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
-            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
-        })
+        return TaskDocument.model_validate(
+            {
+                "id": "series",
+                "slug": "series",
+                "title": "Series",
+                "kind": "master",
+                "repo": "repo-a",
+                "createdAt": "2026-01-01T00:00",
+                "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+                "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+            }
+        )
 
-    def test_master_without_a_contract_is_skipped(self) -> None:
-        # A master carries no lifecycleId (schema-enforced). With no sibling contract to pair it
-        # to a series lifecycle, it has no dashboard home and is skipped.
+    def test_master_without_a_leaf_lifecycle_is_skipped(self) -> None:
+        # A master carries no lifecycleId (schema-enforced). Master documents live on the
+        # separate series surface, not the leaf lifecycle task-document surface.
         root = self.coord / "tasks" / "repo-a" / "series"
         write_task_doc(root, self._master())
         self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
 
-    def test_master_is_contract_paired_to_series_lifecycle(self) -> None:
-        # Slice 6g: a master inherits the lifecycleId of the contract in its task folder, and
-        # surfaces its series index (subTasks) + ordered render plan (sections).
+    def test_master_stays_on_series_surface(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "series"
         write_task_doc(root, self._master())
-        enclosure = _enclosure(
-            enclosure=(root / "contract.md").as_posix(), lifecycleId="LC-SERIES"
-        )
-        nodes = read_task_documents(self.coord, enclosures=[enclosure], now=FRESH)
-        self.assertEqual(len(nodes), 1)
-        node = nodes[0]
-        self.assertEqual((node.kind, node.lifecycleId), ("master", "LC-SERIES"))
-        self.assertEqual([ref.number for ref in node.subTasks], ["1"])
-        self.assertEqual([section.kind for section in node.sections], ["subTasks"])
+        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+        [series] = read_series_documents(self.coord, now=FRESH)
+        self.assertEqual(series.seriesId, "series")
+        self.assertEqual([ref.number for ref in series.subTasks], ["1"])
+        self.assertEqual([section.kind for section in series.sections], ["subTasks"])
 
-    def test_cross_master_links_resolve_to_lifecycles(self) -> None:
-        # Slice 6g: a parent master whose subTask `file` points at a child master resolves the child's
-        # lifecycle (the "→" jump); the child's `master` ref resolves the parent's (the breadcrumb).
+    def test_nested_masters_stay_on_series_surface(self) -> None:
         parent_dir = self.coord / "tasks" / "repo-a" / "parent"
         child_dir = self.coord / "tasks" / "repo-a" / "child"
-        write_task_doc(parent_dir, TaskDocument.model_validate({
-            "id": "p", "slug": "parent", "title": "Parent", "kind": "master", "repo": "repo-a",
-            "createdAt": "2026-01-01T00:00",
-            "subTasks": [{"number": "06", "name": "Child series", "file": "../child/task.md",
-                          "status": "inProgress"}],
-        }))
-        write_task_doc(child_dir, TaskDocument.model_validate({
-            "id": "c", "slug": "child", "title": "Child", "kind": "master", "repo": "repo-a",
-            "createdAt": "2026-01-01T00:00", "master": "../parent/task.md",
-            "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
-        }))
-        enclosures = [
-            _enclosure(enclosure=(parent_dir / "contract.md").as_posix(), lifecycleId="LC-PARENT"),
-            _enclosure(enclosure=(child_dir / "contract.md").as_posix(), lifecycleId="LC-CHILD"),
-        ]
-        nodes = read_task_documents(self.coord, enclosures=enclosures, now=FRESH)
-        parent = next(n for n in nodes if n.lifecycleId == "LC-PARENT")
-        child = next(n for n in nodes if n.lifecycleId == "LC-CHILD")
-        self.assertEqual(parent.subTasks[0].linkedLifecycleId, "LC-CHILD")
-        self.assertIsNone(parent.masterLifecycleId)
-        self.assertEqual(child.masterLifecycleId, "LC-PARENT")
+        write_task_doc(
+            parent_dir,
+            TaskDocument.model_validate(
+                {
+                    "id": "p",
+                    "slug": "parent",
+                    "title": "Parent",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-01-01T00:00",
+                    "subTasks": [
+                        {
+                            "number": "06",
+                            "name": "Child series",
+                            "file": "../child/task.md",
+                            "status": "inProgress",
+                        }
+                    ],
+                }
+            ),
+        )
+        write_task_doc(
+            child_dir,
+            TaskDocument.model_validate(
+                {
+                    "id": "c",
+                    "slug": "child",
+                    "title": "Child",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-01-01T00:00",
+                    "master": "../parent/task.md",
+                    "subTasks": [{"number": "1", "name": "A", "status": "inProgress"}],
+                }
+            ),
+        )
+        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+        nodes = sorted(read_series_documents(self.coord, now=FRESH), key=lambda node: node.seriesId)
+        self.assertEqual([node.seriesId for node in nodes], ["child", "parent"])
 
     def test_missing_tasks_dir_is_empty(self) -> None:
         self.assertEqual(read_task_documents(self.coord / "nope", enclosures=[], now=FRESH), [])
@@ -1775,7 +1807,9 @@ class EngineProcessTests(unittest.TestCase):
             LedgerRefNode(codeCommit="08e9221a", memoryCommit="d60a0511"),
             LedgerRefNode(codeCommit="600f7fa3", memoryCommit="1e667c6d"),
         ]
-        node = build_engine_processes([_facts(ledger_rows=rows, ledger_row_count=11)], [], [], [])[0]
+        node = build_engine_processes([_facts(ledger_rows=rows, ledger_row_count=11)], [], [], [])[
+            0
+        ]
         self.assertEqual(node.ledgerRows, rows)
         self.assertEqual(node.ledgerRowCount, 11)
 
@@ -1788,9 +1822,15 @@ class EngineProcessTests(unittest.TestCase):
         # 05l Gap B: a cleaned-up/abandoned worktree (runtime gone) drops from the active engine-room
         # so the frontend animates the removal instead of rendering a phantom. cleanup-pending stays --
         # the de-materialise beat still needs a live node to animate.
-        self.assertEqual(len(build_engine_processes([_facts(contract={"cleanup": "pending"})], [], [], [])), 1)
-        self.assertEqual(build_engine_processes([_facts(contract={"cleanup": "completed"})], [], [], []), [])
-        self.assertEqual(build_engine_processes([_facts(contract={"cleanup": "abandoned"})], [], [], []), [])
+        self.assertEqual(
+            len(build_engine_processes([_facts(contract={"cleanup": "pending"})], [], [], [])), 1
+        )
+        self.assertEqual(
+            build_engine_processes([_facts(contract={"cleanup": "completed"})], [], [], []), []
+        )
+        self.assertEqual(
+            build_engine_processes([_facts(contract={"cleanup": "abandoned"})], [], [], []), []
+        )
 
     def test_carryover_done_at_surfaces_on_the_node(self) -> None:
         # 05m: the dashboard reads the carryover milestone off the projected node (5k renders it).
@@ -1810,7 +1850,9 @@ class EngineProcessTests(unittest.TestCase):
         self.assertEqual(node.carryoverDoneAt, "2026-06-21T09:00:00+02:00")
 
     def test_carryover_done_at_defaults_to_none(self) -> None:
-        node = build_engine_processes([_facts(status={"code_worktree_exists": True})], [], [], [])[0]
+        node = build_engine_processes([_facts(status={"code_worktree_exists": True})], [], [], [])[
+            0
+        ]
         self.assertIsNone(node.carryoverDoneAt)
 
     def test_successful_bootstrap_is_observed_and_complete(self) -> None:

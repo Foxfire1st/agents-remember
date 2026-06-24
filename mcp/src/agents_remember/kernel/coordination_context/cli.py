@@ -49,14 +49,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--contract-path",
         type=Path,
-        help="Optional worktree task contract.md path to resolve task/worktree context.",
+        help="Optional worktree task series-contract.md path to resolve task/worktree context.",
     )
     parser.add_argument(
         "--task-name",
         help=(
             "Optional task name used to locate coordination tasks under "
-            "ar-coordination/tasks/<code-repository-name>/<task-name>-ar/contract.md."
+            "ar-coordination/tasks/<code-repository-name>/, excluding 0_archive."
         ),
+    )
+    parser.add_argument(
+        "--parent-task",
+        help="Optional parent task name used only to disambiguate nested active task roots.",
+    )
+    parser.add_argument(
+        "--leaf-id",
+        help="Optional leaf enclosure id used to resolve a specific leaf series-contract.md.",
     )
     parser.add_argument(
         "--worktree-name",
@@ -76,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
             code_repository_root=args.code_repository_root,
             contract_path=args.contract_path,
             task_name=args.task_name,
+            parent_task=args.parent_task,
+            leaf_id=args.leaf_id,
             worktree_name=args.worktree_name,
         )
     except ValueError as error:

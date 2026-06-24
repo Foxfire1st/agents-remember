@@ -165,7 +165,9 @@ class EmissionTests(_AmbientCase):
 
 
 class TtlSweepTests(_AmbientCase):
-    def _seed(self, lifecycle_id: str, *, fleeting: bool, age: timedelta, promoted: bool = False) -> None:
+    def _seed(
+        self, lifecycle_id: str, *, fleeting: bool, age: timedelta, promoted: bool = False
+    ) -> None:
         ts = (datetime.now(UTC) - age).isoformat()
         self.store.append(
             Event(
@@ -254,10 +256,10 @@ class PromoteTests(_AmbientCase):
     def test_promote_makes_persistent_and_records_anchor(self) -> None:
         lc = self.amb.start()
         promoted = self.amb.promote(
-            enclosure="/c/contract.md", repo_id="agents-remember", scope="agents-remember"
+            enclosure="/c/series-contract.md", repo_id="agents-remember", scope="agents-remember"
         )
         self.assertFalse(promoted.fleeting)
-        self.assertEqual(promoted.enclosure, "/c/contract.md")
+        self.assertEqual(promoted.enclosure, "/c/series-contract.md")
         self.assertEqual(promoted.scope, "agents-remember")
         promoted_events = [e for e in self.store.read(lc.id) if e.kind == "lifecycle.promoted"]
         self.assertEqual(len(promoted_events), 1)
@@ -266,30 +268,30 @@ class PromoteTests(_AmbientCase):
     def test_events_after_promotion_carry_the_enclosure_and_repo(self) -> None:
         lc = self.amb.start()
         self.amb.promote(
-            enclosure="/c/contract.md", repo_id="agents-remember", scope="agents-remember"
+            enclosure="/c/series-contract.md", repo_id="agents-remember", scope="agents-remember"
         )
         self.amb.emit_tool("ping", {"tokens": 1, "ok": True})
         tool_event = next(e for e in self.store.read(lc.id) if e.kind == "tool.completed")
-        self.assertEqual(tool_event.enclosure, "/c/contract.md")
+        self.assertEqual(tool_event.enclosure, "/c/series-contract.md")
         self.assertEqual(tool_event.repoId, "agents-remember")
 
     def test_promote_requires_an_active_lifecycle(self) -> None:
         with self.assertRaises(LifecycleError):
-            self.amb.promote(enclosure="/c/contract.md", repo_id="r", scope="r")
+            self.amb.promote(enclosure="/c/series-contract.md", repo_id="r", scope="r")
 
 
 class AttachTests(_AmbientCase):
     def test_attach_with_none_active_adopts_and_resumes(self) -> None:
-        adopted = self.amb.attach("LC-EXISTING", enclosure="/c/contract.md", repo_id="r")
+        adopted = self.amb.attach("LC-EXISTING", enclosure="/c/series-contract.md", repo_id="r")
         self.assertEqual(adopted.id, "LC-EXISTING")
         self.assertEqual((adopted.state, adopted.fleeting), ("running", False))
         resumed = next(e for e in self.store.read("LC-EXISTING") if e.kind == "lifecycle.resumed")
         self.assertEqual(resumed.data["cause"], "adopted")
 
     def test_attach_same_id_is_a_noop(self) -> None:
-        self.amb.attach("LC", enclosure="/c/contract.md", repo_id="r")
+        self.amb.attach("LC", enclosure="/c/series-contract.md", repo_id="r")
         before = len(self.store.read("LC"))
-        same = self.amb.attach("LC", enclosure="/c/contract.md", repo_id="r")
+        same = self.amb.attach("LC", enclosure="/c/series-contract.md", repo_id="r")
         self.assertEqual(same.id, "LC")
         self.assertEqual(len(self.store.read("LC")), before)
 

@@ -76,6 +76,11 @@ class HeaderNote(_Doc):
     value: str = ""
 
 
+class TaskEnclosureRef(_Doc):
+    leafId: str
+    enclosurePath: str
+
+
 class SubTaskRef(_Doc):
     """One slice in a master's series index; ``status`` drives the ✅/🔨/⬜ marker."""
 
@@ -100,9 +105,7 @@ class Section(_Doc):
 
 
 class TaskDocument(_Doc):
-    schema_: Literal["ar-task-document/v1"] = Field(
-        default=TASK_DOCUMENT_SCHEMA, alias="schema"
-    )
+    schema_: Literal["ar-task-document/v1"] = Field(default=TASK_DOCUMENT_SCHEMA, alias="schema")
     id: str
     slug: str
     title: str
@@ -117,7 +120,8 @@ class TaskDocument(_Doc):
     master: str | None = None
     # Extra "**Key:** value" header lines beyond the standard block (e.g. Verified/Source); R4.
     headerNotes: list[HeaderNote] = Field(default_factory=list)
-    contractPath: str | None = None
+    seriesContractPath: str | None = None
+    enclosures: list[TaskEnclosureRef] = Field(default_factory=list)
     lifecycleId: str | None = None
     objective: str = ""
     requirements: list[str] = Field(default_factory=list)
@@ -149,13 +153,9 @@ class TaskDocument(_Doc):
                 )
         else:
             if self.subTasks:
-                raise ValueError(
-                    f"a {self.kind} document has no subTasks (master-only)"
-                )
+                raise ValueError(f"a {self.kind} document has no subTasks (master-only)")
             if any(section.kind != "freeform" for section in self.sections):
-                raise ValueError(
-                    f"a {self.kind} document allows only freeform sections"
-                )
+                raise ValueError(f"a {self.kind} document allows only freeform sections")
             if self.codeExamplesNote is not None and self.codeExamples:
                 raise ValueError(
                     "codeExamplesNote explains why code examples are absent; "

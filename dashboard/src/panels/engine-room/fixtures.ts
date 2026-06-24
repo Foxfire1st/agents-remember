@@ -217,8 +217,9 @@ function engineProcess(
   over: Partial<EngineProcessNode> & Pick<EngineProcessNode, "id" | "taskName" | "repoName">,
 ): EngineProcessNode {
   const group = `/home/dev/Projects/ar-coordination/worktrees/${over.repoName}/${over.id}-ar`;
+  const enclosurePath = `/home/dev/Projects/ar-coordination/tasks/${over.repoName}/${over.id}/enclosures/${over.id}/series-contract.md`;
   return {
-    enclosure: `${group}/contract.md`,
+    enclosure: enclosurePath,
     worktreeGroup: group,
     taskId: over.id.toUpperCase(),
     phase: "worktree-started",
@@ -262,7 +263,7 @@ function engineProcess(
     nextAction: "continue_work",
     summary: "Worktree task started; continue the wrapped workflow before closeout.",
     missingFacts: [],
-    sourceFiles: [`${group}/contract.md`, `${group}/${over.id}`, `${group}/provider-runtime/setup-progress.json`],
+    sourceFiles: [enclosurePath, `${group}/${over.id}`, `${group}/provider-runtime/setup-progress.json`],
     ...over,
   };
 }

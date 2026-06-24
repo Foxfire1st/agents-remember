@@ -32,7 +32,11 @@ def next_guidance(
 
 
 def contract_next_args(contract: WorktreeContract, **extra: object) -> dict[str, object]:
-    return {"contract_path": contract.contract_path.as_posix(), **extra}
+    return {
+        "enclosure_path": contract.contract_path.as_posix(),
+        "contract_path": contract.contract_path.as_posix(),
+        **extra,
+    }
 
 
 def contract_payload(contract: WorktreeContract) -> dict[str, object]:
@@ -225,7 +229,13 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "code_repository_name": contract.repo_name,
         "workflow_kind": contract.workflow_kind,
         "memory_mode": contract.memory_mode,
+        "kind": contract.kind,
+        "leaf_id": contract.leaf_id,
+        "enclosure_path": contract.contract_path.as_posix(),
         "contract_path": contract.contract_path.as_posix(),
+        "parent_contract_path": contract.parent_contract_path.as_posix()
+        if contract.parent_contract_path
+        else "",
         "worktree_group": contract.worktree_group.as_posix(),
         "code_worktree": contract.code_worktree.as_posix(),
         "code_worktree_exists": contract.code_worktree.exists(),

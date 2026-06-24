@@ -39,7 +39,8 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
         "memory_mode": "external",
         "coordination_root": tmp,
         "task_root": tmp,
-        "contract_path": tmp / "contract.md",
+        "contract_path": tmp / "series-contract.md",
+        "leaf_id": "demo",
         "task_artifact": tmp / "task.md",
         "worktree_group": tmp / "grp",
         "code_repo_path": tmp / "code",
@@ -263,7 +264,8 @@ class CleanupChildEdgeTests(unittest.TestCase):
         branches = result.payload["branches"]  # type: ignore[index]
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(sorted(branches), ["code", "memory"])
+        assert isinstance(branches, dict)
+        self.assertEqual(sorted(branches.keys()), ["code", "memory"])
         self.assertEqual(git(code_repo, "branch", "--list", "ar/task").strip(), "")
         self.assertEqual(git(memory_repo, "branch", "--list", "ar/task").strip(), "")
         self.assertIn("feat/dashboard", git(code_repo, "branch", "--list", "feat/dashboard"))

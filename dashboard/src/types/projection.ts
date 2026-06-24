@@ -58,6 +58,9 @@ export interface LifecycleProjection {
 
 export interface EnclosureNode {
   enclosure: string;
+  enclosureId: string;
+  leafId: string;
+  taskRoot: string;
   taskId: string;
   taskName: string;
   repoName: string;

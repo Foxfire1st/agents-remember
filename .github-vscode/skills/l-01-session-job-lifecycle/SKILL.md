@@ -254,10 +254,11 @@ The worktree intent packet names the target repo, build mode, discovered branch 
 On PR-gated repos, the packet must prove that the recorded `source_branch` is pushable and that
 protected targets are reached later through the repo's PR flow.
 
-Worktree granularity = the task unit: a single task gets its own worktree; a master multi-task gets
-**one** worktree for the whole series (never one per sub-task); a chat build gets its own worktree
-without a task artifact. The git-landing decision (direct vs PR-gated) is deferred to the repo's
-`system/git-workflow.md` — read it before landing on a gated branch.
+Worktree granularity = the leaf task unit. A single task gets its own leaf enclosure/worktree. A
+master multi-task owns a root `series-contract.md` and integration branch, while each active leaf
+sub-task gets its own `enclosures/<leaf-id>/series-contract.md`, branch, and worktree. A chat build
+gets its own leaf worktree without a task artifact. The git-landing decision (direct vs PR-gated) is
+deferred to the repo's `system/git-workflow.md` — read it before landing on a gated branch.
 
 ---
 

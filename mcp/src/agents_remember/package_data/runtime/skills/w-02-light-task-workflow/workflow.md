@@ -23,7 +23,7 @@ All light-task artifacts live under the `c-08-ar-coordination-context-resolver` 
 <task-root>/<task-slug>/task.md
 ```
 
-Create this wrapper folder as soon as the task class, name, and workflow variables are clear. That can and should happen before any `c-09-git-worktree-manager` worktree is created. If the task later becomes worktree-backed, the `c-09-git-worktree-manager` skill places `contract.md` beside `task.md` in the same wrapper folder.
+Create this wrapper folder as soon as the task class, name, and workflow variables are clear. That can and should happen before any `c-09-git-worktree-manager` worktree is created. If the task later becomes worktree-backed, the `c-09-git-worktree-manager` skill places its leaf contract at `enclosures/<leaf-id>/series-contract.md` under the wrapper folder.
 
 ### 2. Reuse an existing active task when appropriate
 
@@ -232,15 +232,13 @@ When the work outgrows a single-page plan, escalate to a **master + light sub-ta
 wrapper folder with a master `task.md` (scaffold in `master-template.md`) plus flat, numbered sub-task
 files `NN_<name>.md` in execution order.
 
-Run the series as **one task, one workflow, one worktree**:
+Run the series as **one master integration branch plus leaf enclosure worktrees**:
 
-1. open a single `c-09-git-worktree-manager` worktree for the whole series (never one per sub-task)
-2. implement each sub-task slice, then commit it via its own `c-09-git-worktree-manager` closeout behind an explicit commit
-   gate — multiple commits accumulate on the worktree branch as slices complete
-3. keep the worktree open across slices; the test suite + listed checks run green before each commit
-4. when every sub-task is committed, **integrate + finalize once** with `lifecycle_finalize_task`; the
-   finalizer proves the landed edge, cleans up, and marks the current task plus immediate parent row
-   complete before the master performs the single version bump / release
+1. create or reuse the master root `series-contract.md`; it represents the integration branch and is not itself a worktree
+2. start one leaf enclosure per active sub-task at `enclosures/<leaf-id>/series-contract.md`
+3. implement each sub-task slice in its own worktree, then close it out behind an explicit commit gate
+4. integrate each leaf branch back into the master integration branch and finalize that leaf edge
+5. when every sub-task has landed, the master performs the single version bump / release and lands the integration branch through the repo's normal policy
 
 The master owns only the final release step; sub-tasks never bump the version.
 
@@ -250,8 +248,8 @@ A single light task is the right tool while its implementation plan fits on one 
 outgrows that — broad cross-repo or high-risk changes, or several distinct slices that each need their
 own checklist and commit — escalate to a **master + light sub-task series** (see *Master Task Series*
 above and `master-template.md`) rather than forcing it into one light task. The series is still light
-sub-tasks; it adds a master `task.md` to sequence them, one shared worktree, a commit per slice, and a
-single release at the end.
+sub-tasks; it adds a master `task.md` to sequence them, a master integration branch, leaf enclosure
+worktrees for the active slices, and a single release at the end.
 
 ```
 Developer request
@@ -261,7 +259,7 @@ Developer request
        │
       ├─ task wrapper under `<task-root>/<task-slug>/`
       ├─ `task.md` inside the wrapper
-      ├─ worktree-backed tasks add `contract.md` beside `task.md`
+      ├─ worktree-backed tasks add `enclosures/<leaf-id>/series-contract.md`
       ├─ approval gate before implementation
       └─ live checkbox checklist during execution
        │

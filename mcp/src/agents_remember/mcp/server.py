@@ -160,6 +160,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def resolve_context(
         repo_id: str,
         task_name: str | None = None,
+        parent_task: str | None = None,
+        leaf_id: str | None = None,
         contract_path: str | None = None,
         worktree_name: str | None = None,
         topology: str | None = None,
@@ -171,6 +173,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             repo_id,
             task_name=task_name,
+            parent_task=parent_task,
+            leaf_id=leaf_id,
             contract_path=contract_path,
             worktree_name=worktree_name,
             topology=topology,
@@ -448,6 +452,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str,
         worktree_name: str,
+        leaf_id: str | None = None,
+        parent_task: str | None = None,
         workflow_kind: str = "light-task",
         source_branch: str | None = None,
         work_branch: str | None = None,
@@ -482,6 +488,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id,
             task_name,
             worktree_name,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
             workflow_kind=workflow_kind,
             source_branch=source_branch,
             work_branch=work_branch,
@@ -498,6 +506,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str | None = None,
         contract_path: str | None = None,
+        leaf_id: str | None = None,
+        parent_task: str | None = None,
         on_unsaved: str | None = None,
     ) -> dict[str, Any]:
         """Re-attach to an existing task contract without mutating git, resuming its lifecycle.
@@ -508,6 +518,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
             on_unsaved=on_unsaved,
         )
 
@@ -516,6 +528,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str | None = None,
         contract_path: str | None = None,
+        leaf_id: str | None = None,
+        parent_task: str | None = None,
     ) -> dict[str, Any]:
         """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only.
         While background provider setup runs, the providers block carries the live phase,
@@ -526,6 +540,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
         )
 
     @server.tool()

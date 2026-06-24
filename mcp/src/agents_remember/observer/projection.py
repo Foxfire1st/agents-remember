@@ -124,9 +124,12 @@ class EnclosureNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enclosure: str
+    enclosureId: str = ""
+    leafId: str = ""
     taskId: str
     taskName: str
     repoName: str
+    taskRoot: str = ""
     lifecycleId: str
     worktreeGroup: str
     humanReviewStatus: str

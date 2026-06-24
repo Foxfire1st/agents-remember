@@ -125,7 +125,7 @@ describe("buildEngineRoomModel", () => {
 
   it("exposes worktreeGroup as the enclosure key, stable across a fleeting→real id swap", () => {
     const fleeting = buildEngineRoomModel([node({ id: "start:demo" })], [], []);
-    const real = buildEngineRoomModel([node({ id: "/contract.md" })], [], []);
+    const real = buildEngineRoomModel([node({ id: "/series-contract.md" })], [], []);
     expect(fleeting.processes[0]?.enclosureKey).toBe("/w/r/grp");
     expect(real.processes[0]?.enclosureKey).toBe("/w/r/grp");
     expect(fleeting.processes[0]?.enclosureKey).toBe(real.processes[0]?.enclosureKey);

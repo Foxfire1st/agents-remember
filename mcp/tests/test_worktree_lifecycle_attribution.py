@@ -38,7 +38,7 @@ class AttributeStartTests(_AttributionCase):
     def _started(self, lifecycle_id: str) -> dict[str, Any]:
         return {
             "state": "started",
-            "contract_path": "/c/contract.md",
+            "contract_path": "/c/series-contract.md",
             "lifecycle_id": lifecycle_id,
         }
 
@@ -68,7 +68,7 @@ class AttributeAttachTests(_AttributionCase):
     def _attached(self, lifecycle_id: str) -> dict[str, Any]:
         return {
             "state": "attached",
-            "contract_path": "/c/contract.md",
+            "contract_path": "/c/series-contract.md",
             "lifecycle_id": lifecycle_id,
         }
 
@@ -88,7 +88,9 @@ class AttributeAttachTests(_AttributionCase):
 
     def test_missing_lifecycle_id_is_a_noop(self) -> None:
         lc = self.amb.start()
-        _attribute_attach(self.amb, {"state": "attached", "contract_path": "/c/x.md"}, "repo-a", None)
+        _attribute_attach(
+            self.amb, {"state": "attached", "contract_path": "/c/x.md"}, "repo-a", None
+        )
         self.assertEqual(self.amb.current and self.amb.current.id, lc.id)
 
 

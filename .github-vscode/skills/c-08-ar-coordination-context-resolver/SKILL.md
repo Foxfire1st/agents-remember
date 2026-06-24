@@ -18,8 +18,10 @@ In the normal workflow, pass the code repository name. The `c-08-ar-coordination
 - `settings_path`: optional override for repair cases.
 - `onboarding_root`: optional override when a caller has already resolved the repository onboarding root.
 - `code_repository_root`: optional root directory of the code repository for callers that already have the path. This does not replace `code_repository_name` as the normal agent-facing contract.
-- `contract_path`: optional `contract.md` path for worktree-backed task context.
-- `task_name`: optional task name used to locate `ar-coordination/tasks/<code-repository-name>/<task-name>/contract.md`, with persisted `*-ar` task contract folders still checked. Without `task_name`, `task_root` resolves to the repository task namespace `ar-coordination/tasks/<code-repository-name>/`.
+- `contract_path`: optional `series-contract.md` path for worktree-backed task context.
+- `task_name`: optional task name used to locate an active task root under `ar-coordination/tasks/<code-repository-name>/`, excluding `0_archive/`. Root series contracts live at `<task>/series-contract.md`; leaf worktree contracts live at `<task>/enclosures/<leaf-id>/series-contract.md`. Without `task_name`, `task_root` resolves to the repository task namespace `ar-coordination/tasks/<code-repository-name>/`.
+- `leaf_id`: optional leaf enclosure id when a task has multiple active leaf worktrees.
+- `parent_task`: optional parent task name used only to disambiguate nested task roots with the same task name.
 - `worktree_name`: optional worktree name used to compute the worktree group when no contract exists.
 
 When a sibling `settings.json` exists beside `settings.md`, the `c-08-ar-coordination-context-resolver` skill prefers that JSON file for machine-readable storage, `pathRules`, and `crossRepo` data. `settings.md` remains the human and agent instruction file, and fenced settings in `settings.md` are accepted when JSON is absent.
@@ -70,7 +72,7 @@ Use the Agents Remember MCP resolver tools as the normal installed runtime entry
 point:
 
 ```text
-resolve_context(repo_id="<repo-id>", task_name="<task>", contract_path="<contract.md>", worktree_name="<worktree>", topology="<internal|external>")
+resolve_context(repo_id="<repo-id>", task_name="<task>", parent_task="<parent-task>", leaf_id="<leaf-id>", contract_path="<series-contract.md>", worktree_name="<worktree>", topology="<internal|external>")
 ```
 
 For startup context that also needs provider status or drift summary, request:

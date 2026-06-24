@@ -23,6 +23,8 @@ def worktree_start_tool(
     repo_id: str,
     task_name: str,
     worktree_name: str,
+    leaf_id: str | None = None,
+    parent_task: str | None = None,
     workflow_kind: str = "light-task",
     source_branch: str | None = None,
     work_branch: str | None = None,
@@ -55,6 +57,8 @@ def worktree_start_tool(
         config,
         repo,
         task_name=task_name,
+        leaf_id=leaf_id,
+        parent_task=parent_task,
         worktree_name=worktree_name,
         lifecycle_id=lifecycle_id,
         workflow_kind=workflow_kind,
@@ -103,7 +107,7 @@ def _attribute_start(amb: AmbientLifecycle | None, result: dict[str, Any], repo_
     """
     if amb is None or result.get("state") != "started":
         return
-    enclosure = result.get("contract_path")
+    enclosure = result.get("enclosure_path") or result.get("contract_path")
     if not isinstance(enclosure, str):
         return
     if amb.current is not None:
@@ -127,7 +131,7 @@ def _attribute_attach(
     if amb is None:
         return
     lifecycle_id = result.get("lifecycle_id")
-    enclosure = result.get("contract_path")
+    enclosure = result.get("enclosure_path") or result.get("contract_path")
     if not isinstance(lifecycle_id, str) or not lifecycle_id or not isinstance(enclosure, str):
         return
     decision = coerce_save_decision(on_unsaved) if on_unsaved else None
@@ -140,6 +144,8 @@ def worktree_attach_tool(
     repo_id: str,
     task_name: str | None = None,
     contract_path: str | None = None,
+    leaf_id: str | None = None,
+    parent_task: str | None = None,
     on_unsaved: str | None = None,
 ) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
@@ -147,6 +153,8 @@ def worktree_attach_tool(
         config,
         repo,
         task_name=task_name,
+        leaf_id=leaf_id,
+        parent_task=parent_task,
         contract_path=require_within_coordination(config, contract_path, "contract_path")
         if contract_path
         else None,
@@ -162,12 +170,16 @@ def worktree_status_tool(
     repo_id: str,
     task_name: str | None = None,
     contract_path: str | None = None,
+    leaf_id: str | None = None,
+    parent_task: str | None = None,
 ) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
     args = _worktree_namespace(
         config,
         repo,
         task_name=task_name,
+        leaf_id=leaf_id,
+        parent_task=parent_task,
         contract_path=require_within_coordination(config, contract_path, "contract_path")
         if contract_path
         else None,

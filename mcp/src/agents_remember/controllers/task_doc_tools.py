@@ -27,11 +27,17 @@ from agents_remember.tasks import (
     step_total,
     write_task_doc,
 )
+from agents_remember.worktrees.task_resolver import (
+    TaskResolutionError,
+    is_enclosure_contract,
+    resolve_active_task_root,
+    resolve_leaf_enclosure_contract,
+    series_contract_path,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
     load_contract,
-    task_root_candidates,
 )
 
 VALID_OPERATIONS = (
@@ -58,7 +64,8 @@ _MUTABLE_FIELDS = frozenset(
         "openQuestions",
         "references",
         "lifecycleId",
-        "contractPath",
+        "seriesContractPath",
+        "enclosures",
         "master",
         "codeExamplesNote",
         "statusNote",
@@ -124,14 +131,26 @@ def _resolve(
 ) -> tuple[Path, WorktreeContract | None]:
     if contract_path:
         path = Path(contract_path)
-        return path.parent, _load_contract_opt(path)
+        contract = _load_contract_opt(path)
+        if contract is not None:
+            return contract.task_root, contract
+        task_root = path.parent.parent.parent if is_enclosure_contract(path) else path.parent
+        return task_root, None
     if not task_name:
         raise TaskDocError("task_doc requires either task_name or contract_path")
-    candidates = task_root_candidates(config.coordination_root, repo_id, task_name)
-    for root in candidates:
-        if root.exists():
-            return root, _load_contract_opt(root / "contract.md")
-    return candidates[0], None
+    task_root = resolve_active_task_root(config.coordination_root, repo_id, task_name)
+    contract = _load_contract_opt(series_contract_path(task_root))
+    if contract is not None:
+        return task_root, contract
+    try:
+        leaf_path = resolve_leaf_enclosure_contract(config.coordination_root, repo_id, task_name)
+    except TaskResolutionError as exc:
+        raise TaskDocError(str(exc)) from exc
+    if leaf_path is not None:
+        leaf_contract = _load_contract_opt(leaf_path)
+        if leaf_contract is not None:
+            return leaf_contract.task_root, leaf_contract
+    return task_root, None
 
 
 def _load_contract_opt(contract_path: Path) -> WorktreeContract | None:
@@ -160,9 +179,19 @@ def _create(
     data.setdefault("kind", "light")
     if contract is not None:
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
-        if contract.lifecycle_id and data.get("kind") != "master":
+        if contract.kind == "leaf" and contract.lifecycle_id and data.get("kind") != "master":
             data.setdefault("lifecycleId", contract.lifecycle_id)
-        data.setdefault("contractPath", (task_root / "contract.md").as_posix())
+        data.setdefault("seriesContractPath", series_contract_path(task_root).as_posix())
+        if contract.kind == "leaf":
+            data.setdefault(
+                "enclosures",
+                [
+                    {
+                        "leafId": contract.leaf_id,
+                        "enclosurePath": contract.contract_path.as_posix(),
+                    }
+                ],
+            )
     doc = _validate(data)
     json_path = json_path_for(task_root, doc)
     if json_path.exists():
@@ -336,9 +365,7 @@ def _preview(operation: str, doc: TaskDocument, task_root: Path) -> dict[str, An
         )
     )
     rendered_lines = set(rendered.splitlines())
-    would_lose = any(
-        line.strip() and line not in rendered_lines for line in existing.splitlines()
-    )
+    would_lose = any(line.strip() and line not in rendered_lines for line in existing.splitlines())
     result = _result(operation, doc, json_path_for(task_root, doc), markdown_path)
     result["dryRun"] = True
     result["rendered"] = rendered

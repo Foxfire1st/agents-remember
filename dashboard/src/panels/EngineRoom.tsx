@@ -2,7 +2,12 @@ import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 
 import { css } from "../../styled-system/css";
-import { type EngineStack, engineState as engineRuntime, selectQueue } from "../data/selectors";
+import {
+  type EngineStack,
+  type EngineState,
+  engineState as engineRuntime,
+  selectQueue,
+} from "../data/selectors";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 import type { EngineProcessNode, ProviderNode } from "../types/projection";
@@ -61,20 +66,62 @@ function engineLabel(provider: ProviderNode): string {
   return provider.role === "memory" ? "GrepAI" : "CGC";
 }
 
+interface OfficialEngineGroup {
+  key: string;
+  label: string;
+  runtimeState: EngineState;
+  engines: ProviderNode[];
+}
+
+function officialEngineRepo(provider: ProviderNode): string {
+  return provider.repoId ?? provider.id;
+}
+
+function groupOfficialEngines(engines: ProviderNode[]): OfficialEngineGroup[] {
+  const groups = new Map<string, OfficialEngineGroup>();
+  for (const engine of engines) {
+    const label = engineLabel(engine);
+    const runtimeState = engineRuntime(engine);
+    const key = `${label}:${runtimeState}`;
+    const group = groups.get(key);
+    if (group) {
+      group.engines.push(engine);
+    } else {
+      groups.set(key, { key, label, runtimeState, engines: [engine] });
+    }
+  }
+  return [...groups.values()];
+}
+
+function officialEngineGroupLabel(group: OfficialEngineGroup): string {
+  const name = group.engines.length > 1 ? `${group.engines.length} ${group.label}` : group.label;
+  return `${name} · ${group.runtimeState}`;
+}
+
+function officialEngineGroupTitle(group: OfficialEngineGroup): string {
+  const repos = group.engines.map(officialEngineRepo).sort((a, b) => a.localeCompare(b));
+  return `${officialEngineGroupLabel(group)}\n${repos.join("\n")}`;
+}
+
 function OfficialStrip({ engines }: { engines: ProviderNode[] }) {
+  const groups = groupOfficialEngines(engines);
   return (
     <div className={officialStrip} data-testid="official-strip">
       <span className={sectionLabel}>Official line · workspace</span>
-      {engines.map((engine) => (
-        <span key={engine.id} className={engineChip}>
+      {groups.map((group) => (
+        <span
+          key={group.key}
+          className={engineChip}
+          title={officialEngineGroupTitle(group)}
+          aria-label={officialEngineGroupTitle(group).replaceAll("\n", ", ")}
+          data-testid="official-engine-group"
+        >
           <span
-            className={engineSilhouette({ runtimeState: engineRuntime(engine) })}
+            className={engineSilhouette({ runtimeState: group.runtimeState })}
             role="img"
-            aria-label={`${engineLabel(engine)} engine ${engineRuntime(engine)}`}
+            aria-label={`${group.label} engine ${group.runtimeState}`}
           />
-          <span className={engineChipLabel}>
-            {engineLabel(engine)} · {engineRuntime(engine)}
-          </span>
+          <span className={engineChipLabel}>{officialEngineGroupLabel(group)}</span>
         </span>
       ))}
     </div>

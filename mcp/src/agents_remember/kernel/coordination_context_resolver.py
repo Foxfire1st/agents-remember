@@ -132,6 +132,8 @@ def resolve_coordination_context(
     code_repository_root: Path | None = None,
     contract_path: Path | None = None,
     task_name: str | None = None,
+    parent_task: str | None = None,
+    leaf_id: str | None = None,
     worktree_name: str | None = None,
 ) -> CoordinationContext:
     return _with_facade_agents_repo(
@@ -145,6 +147,8 @@ def resolve_coordination_context(
         code_repository_root,
         contract_path,
         task_name,
+        parent_task,
+        leaf_id,
         worktree_name,
     )
 
@@ -164,6 +168,7 @@ def _with_facade_agents_repo(function, *args, **kwargs):
         return function(*args, **kwargs)
     finally:
         _paths.agents_repo_from_script = original
+
 
 __all__ = [
     "DEFAULT_AR_COORDINATION_ROOT",
