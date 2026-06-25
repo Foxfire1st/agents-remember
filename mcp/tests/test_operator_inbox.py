@@ -139,6 +139,18 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertEqual(consumed_again.consumedAt, T2)
         self.assertEqual(len(self.store.read()), 2)
 
+    def test_delete_removes_entry_snapshots(self) -> None:
+        self.store.append(self._entry("A"))
+        consumed, _ = self.store.consume(
+            "A",
+            now=T2,
+            consumed_by="model",
+            consumed_via="cli",
+        )
+        self.assertEqual(consumed.state, "consumed")
+        self.assertTrue(self.store.delete("A"))
+        self.assertEqual(self.store.read(), [])
+
     def test_consume_missing_entry_raises(self) -> None:
         with self.assertRaises(KeyError):
             self.store.consume("nope", now=T2, consumed_by="model", consumed_via="cli")
@@ -186,6 +198,7 @@ class OperatorInboxToolTests(unittest.TestCase):
         )
         self.assertTrue(consumed["consumedNow"])
         self.assertEqual(consumed["state"], "consumed")
+        self.assertEqual(self.store.read(), [])
 
     def test_poll_without_address_raises(self) -> None:
         with self.assertRaises(ValueError):

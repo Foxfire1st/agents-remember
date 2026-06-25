@@ -20,19 +20,19 @@ import {
   type DeliveryStatus,
 } from "../data/sessions";
 import type { GateNode } from "../types/projection";
+import {
+  askQuestion,
+  diagnosticText,
+  packageResponse,
+  requestText,
+  statusText,
+  type GateResponseStatus,
+} from "./GateResponderText";
+
+export { isWorktreeGateKind } from "./GateResponderText";
 
 type ResponseMode = "no" | "chat";
-type GateResponseStatus =
-  | "idle"
-  | "recording"
-  | "sending"
-  | "delivered"
-  | "inbox"
-  | "unconfirmed"
-  | "inbox-error"
-  | "decision-error"
-  | "stale-gate"
-  | "no-open-gate";
+type GateDecisionVerb = "approve" | "reject" | "cancel";
 
 const MIN_REQUEST_HEIGHT = 480;
 const REQUEST_HEIGHT_MARGIN = 24;
@@ -159,162 +159,8 @@ const area = css({
 const footer = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" });
 const statusNote = css({ color: "amber", fontSize: "0.7rem" });
 
-function pretty(value: Record<string, unknown> | undefined): string {
-  if (!value || Object.keys(value).length === 0) return "{}";
-  return JSON.stringify(value, null, 2);
-}
-
-function humanKey(key: string): string {
-  const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[-_]+/g, " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
-}
-
-function formatValue(value: unknown): string {
-  if (typeof value === "string") return value.trim() || "empty";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    if (value.length === 0) return "none";
-    return value.map((entry) => formatValue(entry)).join(", ");
-  }
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) return "empty object";
-    return entries.map(([key, nested]) => `${humanKey(key)}: ${formatValue(nested)}`).join("; ");
-  }
-  return "not provided";
-}
-
-function pickString(source: Record<string, unknown> | undefined, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = source?.[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return null;
-}
-
-function askQuestion(ask: Record<string, unknown> | undefined): string | null {
-  return pickString(ask, ["question", "prompt", "request", "message"]);
-}
-
-function gateKindLabel(kind: string): string {
-  return humanKey(kind);
-}
-
-const SUMMARY_KEYS = new Set([
-  "question",
-  "prompt",
-  "request",
-  "message",
-  "summary",
-  "objective",
-  "changedPaths",
-  "files",
-  "paths",
-  "commands",
-  "commitMessage",
-  "requiredDecision",
-  "required_decision",
-  "options",
-]);
-
-function contextLines(source: Record<string, unknown> | undefined): string[] {
-  if (!source) return [];
-  const lines: string[] = [];
-  for (const key of ["objective", "summary", "changedPaths", "files", "paths", "commands", "commitMessage", "options"]) {
-    if (source[key] !== undefined) lines.push(`${humanKey(key)}: ${formatValue(source[key])}`);
-  }
-  const extras = Object.entries(source).filter(([key, value]) => !SUMMARY_KEYS.has(key) && value !== undefined && value !== null);
-  for (const [key, value] of extras) lines.push(`${humanKey(key)}: ${formatValue(value)}`);
-  return lines;
-}
-
-function requestText(gateNode: GateNode | undefined, ask: Record<string, unknown> | undefined): string {
-  const lines: string[] = [];
-  const packet = gateNode?.packet;
-  const subject =
-    pickString(packet, ["question", "prompt", "request", "message", "summary"]) ?? askQuestion(ask);
-
-  if (gateNode) {
-    lines.push(`Gate: ${gateKindLabel(gateNode.kind)}`);
-    lines.push(`State: ${humanKey(gateNode.state)}`);
-    if (gateNode.decisions.length > 0) lines.push(`Decision options: ${gateNode.decisions.join(", ")}`);
-  } else {
-    lines.push("Gate: Agent question");
-  }
-  if (subject) {
-    lines.push("", "Request:", subject);
-  }
-
-  const packetContext = contextLines(packet);
-  if (packetContext.length > 0) {
-    lines.push("", "Context:", ...packetContext);
-  }
-  const askContext = contextLines(ask).filter((line) => !packetContext.includes(line));
-  if (askContext.length > 0) {
-    lines.push("", "Ask context:", ...askContext);
-  }
-  if (!subject && packetContext.length === 0 && askContext.length === 0) {
-    lines.push("", "No additional request details were supplied.");
-  }
-  return lines.join("\n");
-}
-
-function diagnosticText(gateNode: GateNode | undefined, ask: Record<string, unknown> | undefined): string {
-  const blocks: string[] = [];
-  if (gateNode) {
-    blocks.push(["Gate packet:", pretty(gateNode.packet)].join("\n"));
-  }
-  if (ask) blocks.push(["Ask payload:", pretty(ask)].join("\n"));
-  return blocks.join("\n\n");
-}
-
-function packageResponse(
-  lifecycleId: string,
-  gateNode: GateNode | undefined,
-  ask: Record<string, unknown> | undefined,
-  response: string,
-): string {
-  return [
-    `Dashboard response for lifecycle ${lifecycleId}`,
-    gateNode ? `Gate: ${gateNode.kind} (${gateNode.state})` : "Gate: ask",
-    "",
-    response.trim(),
-    "",
-    "--- request summary ---",
-    requestText(gateNode, ask),
-  ].join("\n");
-}
-
-function statusText(status: GateResponseStatus, label: string | undefined, recordedDecision: boolean): string {
-  if (status === "recording") return "Recording decision...";
-  if (status === "sending") return recordedDecision ? "Notifying agent..." : "Sending...";
-  if (status === "delivered") {
-    const sent = label ? `sent to ${label}` : "sent";
-    return recordedDecision ? `Decision recorded; ${sent}.` : label ? `Sent to ${label}.` : "Sent.";
-  }
-  if (status === "inbox") {
-    return recordedDecision ? "Decision recorded; queued agent notice." : "Queued in external inbox.";
-  }
-  if (status === "unconfirmed") {
-    return recordedDecision ? "Decision recorded; couldn't confirm agent notice. Retry?" : "Couldn't confirm delivery. Retry?";
-  }
-  if (status === "inbox-error") {
-    return recordedDecision
-      ? "Decision recorded; couldn't queue agent notice. Retry?"
-      : "Couldn't queue external inbox response. Retry?";
-  }
-  if (status === "stale-gate") return "This gate was replaced by a newer request.";
-  if (status === "no-open-gate") return "No open gate exists for this task.";
-  if (status === "decision-error") return "Couldn't record the decision. Retry?";
-  return "";
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-export function isWorktreeGateKind(kind: string): boolean {
-  return /closeout|push|integration|cleanup/.test(kind);
 }
 
 export function GateResponder({
@@ -368,16 +214,23 @@ export function GateResponder({
 
   const label = gateNode ? `${gateNode.kind} · ${gateNode.state}` : (askQuestion(ask) ?? "awaiting input");
 
-  const notifyAgent = async (response: string) => {
+  const resetAndClose = () => {
+    setOpen(false);
+    setMode(null);
+    setDraft("");
+    setStatus("idle");
+  };
+
+  const notifyAgent = async (response: string): Promise<boolean> => {
     const text = response.trim();
-    if (!text) return;
+    if (!text) return false;
     const target = findSessionForLifecycle(lifecycleId);
     setStatus("sending");
     const packaged = packageResponse(lifecycleId, gateNode, ask, text);
     if (target) {
       const result: DeliveryStatus = await deliverToSession(target.id, packaged);
       setStatus(result === "delivered" ? "delivered" : "unconfirmed");
-      return;
+      return result === "delivered";
     }
     const result = await postOperatorInbox({
       lifecycleId,
@@ -386,9 +239,10 @@ export function GateResponder({
       response: text,
     });
     setStatus(result === "posted" ? "inbox" : "inbox-error");
+    return result === "posted";
   };
 
-  const recordDecision = async (verb: "approve" | "reject", note?: string): Promise<boolean> => {
+  const recordDecision = async (verb: GateDecisionVerb, note?: string): Promise<boolean> => {
     if (!gateNode) return true;
     setStatus("recording");
     const result = await postGateDecision(lifecycleId, verb, { gateId: gateNode.id, note });
@@ -415,7 +269,10 @@ export function GateResponder({
     setMode(null);
     setRecordedDecision(false);
     const recorded = await recordDecision("approve");
-    if (recorded) await notifyAgent("Approved by developer in dashboard.");
+    if (recorded) {
+      const notified = await notifyAgent("Approved by developer in dashboard.");
+      if (notified) resetAndClose();
+    }
   });
 
   const reject = () => void runAction(async () => {
@@ -424,7 +281,8 @@ export function GateResponder({
     setRecordedDecision(false);
     const recorded = await recordDecision("reject", reason);
     if (recorded) {
-      await notifyAgent(`Rejected by developer in dashboard.\n\nReason:\n${reason}`);
+      const notified = await notifyAgent(`Rejected by developer in dashboard.\n\nReason:\n${reason}`);
+      if (notified) resetAndClose();
     }
   });
 
@@ -432,7 +290,14 @@ export function GateResponder({
     const text = draft.trim();
     if (!text) return;
     setRecordedDecision(false);
-    await notifyAgent(text);
+    if (await notifyAgent(text)) resetAndClose();
+  });
+
+  const dismiss = () => void runAction(async () => {
+    setMode(null);
+    setRecordedDecision(false);
+    const recorded = await recordDecision("cancel", "Dismissed by developer in dashboard.");
+    if (recorded) resetAndClose();
   });
 
   const openDraft = (nextMode: ResponseMode) => {
@@ -565,6 +430,14 @@ export function GateResponder({
               data-testid="gate-respond-chat"
             >
               Chat
+            </Button>
+            <Button
+              className={respondButton}
+              onPress={dismiss}
+              isDisabled={busy || !gateNode}
+              data-testid="gate-respond-dismiss"
+            >
+              Dismiss
             </Button>
           </div>
           {mode ? (

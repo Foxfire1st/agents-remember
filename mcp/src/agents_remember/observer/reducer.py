@@ -32,6 +32,7 @@ from agents_remember.observer.lifecycle_state import (
 )
 from agents_remember.observer.projection import (
     ActionAvailability,
+    AgentPickupNode,
     Analytics,
     AttentionItem,
     CommitRefNode,
@@ -99,6 +100,7 @@ def project_workspace(
     setup_progress: list[SetupProgressNode] | None = None,
     route_coverage: list[RouteCoverageNode] | None = None,
     tool_reports: list[ToolReportNode] | None = None,
+    agent_pickups: list[AgentPickupNode] | None = None,
     ledgers: list[LedgerNode] | None = None,
     task_documents: list[TaskDocNode] | None = None,
     series: list[SeriesNode] | None = None,
@@ -138,6 +140,7 @@ def project_workspace(
         setup_progress=setup_progress or [],
         route_coverage=route_coverage or [],
         tool_reports=tool_reports or [],
+        agent_pickups=agent_pickups or [],
         ledgers=ledgers or [],
         task_documents=task_documents or [],
         series=series or [],
@@ -417,6 +420,7 @@ def build_analytics(
     setup_progress: list[SetupProgressNode],
     route_coverage: list[RouteCoverageNode],
     tool_reports: list[ToolReportNode],
+    agent_pickups: list[AgentPickupNode] | None = None,
     ledgers: list[LedgerNode],
     task_documents: list[TaskDocNode] | None = None,
     series: list[SeriesNode] | None = None,
@@ -432,6 +436,7 @@ def build_analytics(
         setupProgress=setup_progress,
         routeCoverage=route_coverage,
         toolReports=tool_reports,
+        agentPickups=agent_pickups or [],
         ledgers=ledgers,
         taskDocuments=task_documents or [],
         series=series or [],
@@ -585,6 +590,7 @@ def _gate_attention(gates: list[GateRecord]) -> list[AttentionItem]:
             title=f"Gate — {gate.kind}",
             detail="awaiting your decision",
             lifecycleId=gate.lifecycleId,
+            gateId=gate.id,
         )
         for gate in gates
         if gate.state == "open"

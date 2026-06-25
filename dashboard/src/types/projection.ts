@@ -261,9 +261,21 @@ export interface AttentionItem {
   detail?: string;
   waitSeconds?: number; // server-computed age (never render time)
   lifecycleId?: string; // cross-refs into the structural tree → queue↔tree coupling
+  gateId?: string;
   enclosure?: string;
   repoId?: string;
   providerId?: string;
+}
+
+export interface AgentPickupNode {
+  id: string;
+  entryId: string;
+  lifecycleId?: string;
+  agentId?: string;
+  gateId?: string;
+  state: "waiting-for-agent" | "check-chat" | string;
+  ageSeconds?: number;
+  ttlSeconds: number;
 }
 
 // --- engine room process map (slice 5e) --------------------------------------
@@ -381,6 +393,7 @@ export interface Analytics {
   setupProgress: SetupProgressNode[];
   routeCoverage: RouteCoverageNode[];
   toolReports: ToolReportNode[];
+  agentPickups?: AgentPickupNode[];
   ledgers: LedgerNode[];
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];

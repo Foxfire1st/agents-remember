@@ -170,6 +170,32 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(result["state"], "rejected")
         self.assertEqual(result["decisionNote"], "Needs another pass.")
 
+    def test_cancel_deletes_gate_and_pending_inbox_entries(self) -> None:
+        gate_id = self._create("agent-question")
+        self.inbox.append(
+            create_operator_inbox_entry(
+                entry_id="I1",
+                now=T2,
+                lifecycle_id="L1",
+                agent_id=None,
+                gate_id=gate_id,
+                ask="Continue?",
+                response="Never mind.",
+                created_by="developer",
+                created_via="dashboard",
+            )
+        )
+
+        decided = gates.gate_decide_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=gate_id, lifecycle_id="L1", decision="cancel",
+            decided_by="developer", decided_via="dashboard",
+        )
+
+        self.assertEqual(decided["state"], "cancelled")
+        self.assertNotIn(gate_id, self.store.current("L1"))
+        self.assertEqual(self.inbox.read(), [])
+
     def test_wait_times_out_while_open(self) -> None:
         gate_id = self._create("agent-question")
         clock = iter([0.0, 0.0, 99.0])  # deadline calc, first check, past-deadline check
@@ -231,6 +257,19 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(result["state"], "rejected")
         self.assertEqual(result["decisionNote"], "Needs another pass.")
         self.assertEqual(result["entryCount"], 0)
+        self.assertNotIn(gate_id, self.store.current("L1"))
+
+    def test_response_wait_deleted_gate_returns_cancelled(self) -> None:
+        result = gates.gate_response_wait_payload(
+            None,  # type: ignore[arg-type]
+            gate_id="deleted",
+            lifecycle_id="L1",
+            timeout_seconds=10.0,
+            sleep=lambda _s: None,
+        )
+
+        self.assertFalse(result["timedOut"])
+        self.assertEqual(result["state"], "cancelled")
 
     def test_list_returns_folded_gates(self) -> None:
         gate_id = self._create()

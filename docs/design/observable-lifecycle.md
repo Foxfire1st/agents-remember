@@ -192,17 +192,19 @@ subsystems; until then they are derivable from `tool.*`. The fleeting→persiste
   through one path-resolution layer so a synced coordination repo can later take over the
   durable tiers without touching call sites.
 
-### 2.4 Retention (three tiers)
+### 2.4 Retention (four tiers)
 
 | Tier | Contents | Policy |
 | --- | --- | --- |
-| Forever | lifecycle skeleton (started/promoted/ended), **all gate records** | never reaped — the approval audit is an invariant |
-| Rolling raw | dense `tool.*`/`span.*`/heartbeats | never pruned while the lifecycle is open; after closure: archived compressed, pruned past a configurable grace window |
-| Derived aggregates | rollups (tokens/day, events/hour, health series) | tiny, kept forever — trend charts survive raw pruning |
+| Durable work records | task docs, series docs, contracts, ledger rows, lifecycle skeleton needed to explain active/completed work | retained by the task/worktree lifecycle, not by transient UI interaction logs |
+| Interaction records | gates, dashboard Chat/operator-inbox entries, attention-queue gate rows | short-lived; visible rows disappear on developer response/dismiss/clear, agent pickup consumes inbox entries, and untouched rows are pruned by a 24h TTL |
+| Rolling raw | dense `tool.*`/`span.*`/heartbeats and event-river telemetry | never pruned while needed to project active work; closed/telemetry tails are bounded by an explicit cleanup window instead of growing silently forever |
+| Derived aggregates | rollups (tokens/day, events/hour, health series) | compact; retained only when they are intentionally useful after raw pruning |
 
-A dormant fleeting lifecycle reaped by TTL is the exception to the Forever tier: it has no
-gates and no persistent skeleton, so its whole log is **pruned** (§1.5) rather than
-retained — nothing audit-critical is lost.
+A dormant fleeting lifecycle reaped by TTL has no persistent task/work record, so its
+whole log is **pruned** (§1.5). Approval facts that must outlive a click are copied into
+the durable work record that consumes them (for example the closeout contract/ledger
+state); the gate row itself is still interaction data.
 
 ### 2.5 The observer and its projections
 
@@ -228,7 +230,7 @@ No frontend reimplements lifecycle assembly; the projection API is client-agnost
 | `openedBy` | tool-opened (e.g. `worktree_closeout_preview`) or block-ask |
 | `ask?` | prompt, options (question/decision kinds) |
 | `resolution` | value/answer + who/when/from where |
-| `history[]` | append-only; every flip attributed |
+| `history[]` | append-only while active; compacted away once consumed/applied/dismissed or past interaction TTL |
 
 `superseded`: re-running the opening tool supersedes its predecessor's pending gate — the
 commit-message-only iteration path (re-running closeout preview so the dashboard shows the
@@ -253,12 +255,15 @@ get weaker.
 A model is not a process: between turns nothing exists to push to, so "push" can only mean
 arranging the harness's own re-invocation.
 
-- **L0 — the gate record.** Durable truth; no layer above can lose an approval.
+- **L0 — the active gate record.** Durable during handoff; after the consuming tool
+  applies it, or `gate_response_wait`/`operator_inbox_consume` receives it, the
+  interaction record can be compacted away.
 - **L1 — passive pull.** Envelope enrichment: open / recently-resolved gate state stamped
   into every tool response in the ambient lifecycle. Universal across harnesses.
-- **L2 — active pull.** Poll `worktree_status`; an optional **bounded `waitSeconds`**
-  lets the server hold the response until the gate flips or a short timeout passes — never
-  a true long-poll (a held stdio call serves nothing else on that connection).
+- **L2 — active pull.** `gate_response_wait` owns the normal wait window: a single
+  call polls gate and inbox state every five seconds for up to five minutes. Callers
+  consume returned inbox entries after reading them; they do not wrap the normal path
+  in their own re-call loop.
 - **L3 — push-equivalent.** **`agents-remember gate-wait`**, a CLI file-watcher whose
   *exit* is the notification. The blocked model backgrounds it and ends its turn;
   harnesses that re-invoke the model on background-task completion get real push the moment

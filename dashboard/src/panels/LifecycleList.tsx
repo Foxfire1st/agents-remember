@@ -29,7 +29,8 @@ import {
 } from "../data/taskIdentity";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
-import type { EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
+import type { AgentPickupNode, EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
+import { AgentPickupIndicator } from "./AgentPickupIndicator";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
@@ -177,6 +178,7 @@ export function LifecycleList({
   const analytics = useDashboard((s) => s.analytics);
   const docs = analytics?.taskDocuments ?? [];
   const series = analytics?.series ?? [];
+  const agentPickups = analytics?.agentPickups ?? [];
   const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
   const rows = operationRows({
     lifecycles: Object.values(lifecycles),
@@ -185,6 +187,7 @@ export function LifecycleList({
     enclosuresByLifecycle,
     docs,
     series,
+    agentPickups,
   });
   const groups = groupRows(rows, pivot);
   const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
@@ -248,6 +251,7 @@ export function LifecycleList({
                       {item.label}
                     </span>
                     <span className={rowSec}>{secondary}</span>
+                    <AgentPickupIndicator pickup={item.pickup} />
                     {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
                     <span className={rowMeta}>
                       {item.meta}
@@ -271,6 +275,7 @@ interface OperationRowsInput {
   enclosuresByLifecycle: Map<string, EnclosureNode>;
   docs: TaskDocNode[];
   series: SeriesNode[];
+  agentPickups: AgentPickupNode[];
 }
 
 interface OperationRow {
@@ -283,6 +288,7 @@ interface OperationRow {
   variant: string;
   meta: string;
   gate: string;
+  pickup?: AgentPickupNode;
   createdAt: string;
   fallbackOrder: string;
   parentKey?: string;
@@ -301,6 +307,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   const representedLifecycleIds = new Set<string>();
   const docPaths = new Set(input.docs.map((doc) => doc.docPath));
   const docsByLifecycle = groupDocs(input.docs);
+  const pickupsByLifecycle = groupPickups(input.agentPickups);
   const enclosureList = Object.values(input.enclosures);
   const activeEnclosureList = enclosureList.filter(isActiveEnclosure);
   const activeEnclosures = Object.fromEntries(
@@ -314,14 +321,14 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     if (!isRootTaskDoc(doc) && !enclosure) continue;
     const lifecycle = runtimeForDoc(doc, input.lifecycleById, enclosureList);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(docRow(doc, lifecycle, input.series, docPaths));
+    rows.push(docRow(doc, lifecycle, input.series, docPaths, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
   }
 
   for (const series of input.series) {
     if (docPaths.has(series.docPath)) continue;
     const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(seriesRow(series, lifecycle));
+    rows.push(seriesRow(series, lifecycle, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
   }
 
   for (const lifecycle of input.lifecycles) {
@@ -333,7 +340,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       activeEnclosuresByLifecycle,
     );
     if (!enclosure) continue;
-    rows.push(lifecycleRow(lifecycle, docs, enclosure));
+    rows.push(lifecycleRow(lifecycle, docs, enclosure, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
   }
 
   return rows.sort(compareRows);
@@ -344,6 +351,7 @@ function docRow(
   lifecycle: LifecycleProjection | undefined,
   seriesList: SeriesNode[],
   masterDocPaths: Set<string>,
+  pickup: AgentPickupNode | undefined,
 ): OperationRow {
   const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : topLevelStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
@@ -369,6 +377,7 @@ function docRow(
     variant,
     meta: rowMetaText(progressHint(progress), doc.status, lifecycle?.staleSeconds),
     gate,
+    pickup,
     createdAt: doc.createdAt ?? "",
     fallbackOrder: doc.docPath,
     parentKey: taskDocParentKey(doc, seriesList, masterDocPaths),
@@ -378,7 +387,11 @@ function docRow(
   };
 }
 
-function seriesRow(series: SeriesNode, lifecycle: LifecycleProjection | undefined): OperationRow {
+function seriesRow(
+  series: SeriesNode,
+  lifecycle: LifecycleProjection | undefined,
+  pickup: AgentPickupNode | undefined,
+): OperationRow {
   const repo = series.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? series.status;
   const variant = lifecycle?.state ?? statusVariant(series.status);
@@ -404,6 +417,7 @@ function seriesRow(series: SeriesNode, lifecycle: LifecycleProjection | undefine
       lifecycle?.staleSeconds,
     ),
     gate,
+    pickup,
     createdAt: series.createdAt ?? "",
     fallbackOrder: series.docPath,
     depth: 0,
@@ -416,6 +430,7 @@ function lifecycleRow(
   lifecycle: LifecycleProjection,
   docs: TaskDocNode[],
   enclosure: EnclosureNode | undefined,
+  pickup: AgentPickupNode | undefined,
 ): OperationRow {
   const label = taskLabel(lifecycle, docs, enclosure);
   const repo = lifecycle.repoId ?? "—";
@@ -439,6 +454,7 @@ function lifecycleRow(
     variant: lifecycle.state,
     meta: rowMetaText(taskHint(docs), "", lifecycle.staleSeconds),
     gate,
+    pickup,
     createdAt: lifecycle.startedAt,
     fallbackOrder: lifecycle.id,
     depth: 0,
@@ -524,6 +540,25 @@ function groupDocs(docs: TaskDocNode[]): Map<string, TaskDocNode[]> {
     else byLifecycle.set(doc.lifecycleId, [doc]);
   }
   return byLifecycle;
+}
+
+function groupPickups(pickups: AgentPickupNode[]): Map<string, AgentPickupNode[]> {
+  const byLifecycle = new Map<string, AgentPickupNode[]>();
+  for (const pickup of pickups) {
+    if (!pickup.lifecycleId) continue;
+    const list = byLifecycle.get(pickup.lifecycleId);
+    if (list) list.push(pickup);
+    else byLifecycle.set(pickup.lifecycleId, [pickup]);
+  }
+  return byLifecycle;
+}
+
+function pickupForLifecycle(
+  lifecycle: LifecycleProjection | undefined,
+  byLifecycle: Map<string, AgentPickupNode[]>,
+): AgentPickupNode | undefined {
+  if (!lifecycle) return undefined;
+  return byLifecycle.get(lifecycle.id)?.[0];
 }
 
 function taskHint(docs: TaskDocNode[]): string {

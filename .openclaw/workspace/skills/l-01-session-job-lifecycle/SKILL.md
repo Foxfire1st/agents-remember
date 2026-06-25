@@ -62,12 +62,14 @@ choreography at each junction:
      is (the junction); the `packet` carries the question/proposal and the report
      facts the dashboard displays. The two are different axes — a durable junction
      kind plus an ambient answer-kind — and both fire at the junction.
-2. **Wait.** `gate_response_wait(gate_id, lifecycle_id=…, timeout_seconds=…)`,
-   re-called until it stops timing out, holds at the junction until the
-   developer decides or sends a dashboard Chat response. If it returns inbox
-   `entries`, read them, call `operator_inbox_consume(entry_id=…)` for each
-   handled entry, and react to the message. If it returns a terminal gate
-   `state`, react to that decision and its `decisionNote`.
+2. **Wait.** After sending the report prose in chat,
+   `gate_response_wait(gate_id, lifecycle_id=…)` holds at the junction until
+   the developer decides or sends a dashboard Chat response. The tool owns the
+   normal five-minute wait window and five-second polling cadence; do not wrap it
+   in a caller loop for the normal dashboard path. If it returns inbox `entries`,
+   read them, call `operator_inbox_consume(entry_id=…)` for each handled entry,
+   and react to the message. If it returns a terminal gate `state`, react to
+   that decision and its `decisionNote`.
 3. **Resolve — the developer, never the agent.** The developer approves, rejects,
    or requests revision from the dashboard (a developer-attributed decision), or
    sends a dashboard Chat message that does **not** decide the gate. The agent

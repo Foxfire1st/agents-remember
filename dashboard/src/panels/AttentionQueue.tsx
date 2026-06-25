@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from "motion/react";
+import { useState } from "react";
 
 import { css, cva } from "../../styled-system/css";
+import { postGateDecision } from "../data/actions";
 import { fmtWait, selectQueue } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import { Dot } from "../grammar/Dot";
@@ -33,6 +35,8 @@ const item = cva({
   },
 });
 const bodyCol = css({ flex: "1", minWidth: "0" });
+const head = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" });
+const heading = css({ margin: "0" });
 const itemTitle = css({ fontWeight: "600" });
 const detail = css({ color: "ink", opacity: "0.85", fontSize: "0.82rem" });
 const meta = css({ color: "muted", fontSize: "0.75rem", letterSpacing: "0.04em" });
@@ -43,6 +47,20 @@ const ghost = css({
   borderStyle: "none",
   cursor: "pointer",
   textAlign: "left",
+});
+const clearButton = css({
+  font: "inherit",
+  fontSize: "0.7rem",
+  color: "amber",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "amber",
+  borderRadius: "2px",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.16rem",
+  cursor: "pointer",
+  _disabled: { opacity: 0.5, cursor: "default" },
 });
 
 const EMPTY_TASK_DOCS: readonly TaskDocNode[] = [];
@@ -66,10 +84,40 @@ function detailForAttention(item: AttentionItem, doc: TaskDocNode | undefined): 
 export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
   const queue = useDashboard(selectQueue);
   const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  const [clearing, setClearing] = useState(false);
+  const gateItems = queue.filter((item) => item.kind === "gate-open" && item.lifecycleId && item.gateId);
+  const clearGates = () => {
+    if (clearing || gateItems.length === 0) return;
+    setClearing(true);
+    void Promise.all(
+      gateItems.map((item) =>
+        postGateDecision(item.lifecycleId ?? "", "cancel", {
+          gateId: item.gateId,
+          note: "Cleared from attention queue.",
+        }),
+      ),
+    ).finally(() => setClearing(false));
+  };
+  const panelHead = (
+    <div className={head}>
+      <h2 className={heading}>Attention · {queue.length} waiting</h2>
+      {gateItems.length > 0 ? (
+        <button
+          type="button"
+          className={clearButton}
+          onClick={clearGates}
+          disabled={clearing}
+          data-testid="attn-clear"
+        >
+          {clearing ? "Clearing" : "Clear"}
+        </button>
+      ) : null}
+    </div>
+  );
   return (
     <Panel
       testid="attention-queue"
-      title={`Attention · ${queue.length} waiting`}
+      head={panelHead}
       className={sizing}
     >
       {queue.length === 0 ? (

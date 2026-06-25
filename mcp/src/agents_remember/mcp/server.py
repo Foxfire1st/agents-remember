@@ -6,6 +6,9 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
+from agents_remember.controlplane.interaction_retention import (
+    GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
+)
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
 
 from .compact_content import install_compact_content
@@ -971,11 +974,12 @@ def create_server(config: McpRuntimeConfig) -> Any:
         gate_id: str,
         lifecycle_id: str | None = None,
         agent_id: str | None = None,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Bounded wait for either the gate leaving open or a pending dashboard Chat
         inbox entry for this gate. Returns inbox entries without consuming them; after
-        reading an entry, call operator_inbox_consume. Re-call while timedOut=true."""
+        reading an entry, call operator_inbox_consume. Defaults to one five-minute
+        wait window; callers do not need to re-call for the normal dashboard path."""
         return gate_response_wait_payload(
             config,
             gate_id=gate_id,

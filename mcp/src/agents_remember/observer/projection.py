@@ -256,6 +256,21 @@ class SetupProgressNode(BaseModel):
     failedPhases: list[str] = Field(default_factory=list)
 
 
+class AgentPickupNode(BaseModel):
+    """A pending dashboard response waiting for an agent to consume it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    entryId: str
+    lifecycleId: str | None = None
+    agentId: str | None = None
+    gateId: str | None = None
+    state: str
+    ageSeconds: float | None = None
+    ttlSeconds: float
+
+
 class RouteCoverageNode(BaseModel):
     """One onboarding route's coverage, from its ``overview.index.json`` (3b, surface 10)."""
 
@@ -527,6 +542,7 @@ class AttentionItem(BaseModel):
     detail: str | None = None
     waitSeconds: float | None = None
     lifecycleId: str | None = None
+    gateId: str | None = None
     enclosure: str | None = None
     repoId: str | None = None
     providerId: str | None = None
@@ -730,6 +746,7 @@ class Analytics(BaseModel):
     setupProgress: list[SetupProgressNode] = Field(default_factory=list)
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
+    agentPickups: list[AgentPickupNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
     taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)

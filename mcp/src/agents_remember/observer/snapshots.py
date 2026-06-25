@@ -21,6 +21,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.interaction_retention import (
+    AGENT_PICKUP_TTL_SECONDS,
+    pickup_age_seconds,
+    pickup_state,
+)
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
@@ -36,6 +42,7 @@ from agents_remember.observer.paths import (
 )
 from agents_remember.observer.projection import (
     LEDGER_WINDOW,
+    AgentPickupNode,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
@@ -180,7 +187,7 @@ def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
     )
 
 
-def read_gates(coordination_root: Path) -> list[GateRecord]:
+def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[GateRecord]:
     """Every lifecycle's current (folded) gate set + the workspace log (slice 6c).
 
     Reads the gate logs co-located with the event store under ``observer_logs_root``
@@ -189,6 +196,10 @@ def read_gates(coordination_root: Path) -> list[GateRecord]:
     """
     root = observer_logs_root(coordination_root)
     store = GateStore(root)
+    if now is not None:
+        for lifecycle_id in store.lifecycle_ids():
+            with contextlib.suppress(OSError, ValueError):
+                store.compact(lifecycle_id, now=now)
     gates: list[GateRecord] = []
     lifecycles_dir = root / "lifecycles"
     if lifecycles_dir.is_dir():
@@ -200,6 +211,31 @@ def read_gates(coordination_root: Path) -> list[GateRecord]:
     with contextlib.suppress(OSError, ValueError):
         gates.extend(store.current(None).values())
     return gates
+
+
+def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentPickupNode]:
+    """Pending dashboard responses waiting for agent-side inbox consumption."""
+    store = OperatorInboxStore(observer_logs_root(coordination_root))
+    with contextlib.suppress(OSError, ValueError):
+        store.compact(now=now)
+    pickups: list[AgentPickupNode] = []
+    with contextlib.suppress(OSError, ValueError):
+        for entry in store.current().values():
+            if entry.state != "pending":
+                continue
+            pickups.append(
+                AgentPickupNode(
+                    id=f"pickup:{entry.id}",
+                    entryId=entry.id,
+                    lifecycleId=entry.lifecycleId,
+                    agentId=entry.agentId,
+                    gateId=entry.gateId,
+                    state=pickup_state(entry, now=now),
+                    ageSeconds=pickup_age_seconds(entry, now=now),
+                    ttlSeconds=AGENT_PICKUP_TTL_SECONDS,
+                )
+            )
+    return sorted(pickups, key=lambda item: item.ageSeconds or 0.0, reverse=True)
 
 
 def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFacts]:

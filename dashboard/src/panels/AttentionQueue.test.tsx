@@ -1,10 +1,13 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { postGateDecision } from "../data/actions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
 import type { AttentionItem, TaskDocNode } from "../types/projection";
 import { AttentionQueue } from "./AttentionQueue";
+
+vi.mock("../data/actions", () => ({ postGateDecision: vi.fn() }));
 
 // §9 (slice 5f S6/S3): a pre-contract blocked start is a server-computed attention item. The queue
 // renders it generically by severity, so the same alarm the agent raises in chat reaches the cockpit.
@@ -41,6 +44,7 @@ const taskDoc: TaskDocNode = {
 afterEach(() => {
   cleanup();
   dashboardStore.getState().reset();
+  vi.clearAllMocks();
 });
 
 describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
@@ -75,6 +79,7 @@ describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
             title: "Gate - closeout-approval",
             detail: "awaiting your decision",
             lifecycleId: "LC19",
+            gateId: "G19",
           },
         ],
       },
@@ -83,5 +88,39 @@ describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
     const { getByText } = render(<AttentionQueue onSelect={() => {}} />);
     expect(getByText("Task 19: Gate interaction polish")).toBeTruthy();
     expect(getByText("Gate - closeout-approval · awaiting your decision")).toBeTruthy();
+  });
+
+  it("clears queued gate items through cancel decisions", async () => {
+    vi.mocked(postGateDecision).mockResolvedValue("recorded");
+    const base = GALLERY.find((entry) => entry.name === "engine-fleet")?.projection;
+    if (!base?.analytics) throw new Error("fixture missing analytics");
+    dashboardStore.getState().applySnapshot({
+      ...base,
+      analytics: {
+        ...base.analytics,
+        attentionQueue: [
+          {
+            id: "gate:G19",
+            kind: "gate-open",
+            severity: "warn",
+            lane: "lifecycle",
+            title: "Gate - closeout-approval",
+            detail: "awaiting your decision",
+            lifecycleId: "LC19",
+            gateId: "G19",
+          },
+        ],
+      },
+    });
+
+    const { getByTestId } = render(<AttentionQueue onSelect={() => {}} />);
+    fireEvent.click(getByTestId("attn-clear"));
+
+    await waitFor(() =>
+      expect(postGateDecision).toHaveBeenCalledWith("LC19", "cancel", {
+        gateId: "G19",
+        note: "Cleared from attention queue.",
+      }),
+    );
   });
 });

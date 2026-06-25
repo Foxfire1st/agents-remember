@@ -79,7 +79,7 @@ afterEach(() => {
 describe("GateResponder", () => {
   it("records Yes on the current gate and notifies the hosted chat", async () => {
     sessionStore.getState().add("Claude Code", "s1", "LC1");
-    const { getByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
+    const { getByTestId, queryByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
 
     fireEvent.click(getByTestId("gate-respond-open"));
     expect(getByTestId("gate-request").textContent).toContain("Changed paths: 3");
@@ -97,11 +97,11 @@ describe("GateResponder", () => {
         expect.stringContaining("Approved by developer in dashboard."),
       ),
     );
-    expect(getByTestId("gate-respond-status").textContent).toContain("Decision recorded; sent");
+    await waitFor(() => expect(queryByTestId("gate-respond-dialog")).toBeNull());
   });
 
   it("records Yes and queues an agent notice when no hosted session is attached", async () => {
-    const { getByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
+    const { getByTestId, queryByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
 
     fireEvent.click(getByTestId("gate-respond-open"));
     expect(getByTestId("gate-route").textContent).toContain("External inbox for LC1");
@@ -115,7 +115,7 @@ describe("GateResponder", () => {
         response: "Approved by developer in dashboard.",
       }),
     );
-    expect(getByTestId("gate-respond-status").textContent).toContain("Decision recorded; queued agent notice");
+    await waitFor(() => expect(queryByTestId("gate-respond-dialog")).toBeNull());
     expect(deliverToSession).not.toHaveBeenCalled();
   });
 
@@ -161,6 +161,23 @@ describe("GateResponder", () => {
       }),
     );
     expect(postGateDecision).not.toHaveBeenCalled();
+  });
+
+  it("dismisses the current gate without notifying the agent", async () => {
+    const { getByTestId, queryByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
+
+    fireEvent.click(getByTestId("gate-respond-open"));
+    fireEvent.click(getByTestId("gate-respond-dismiss"));
+
+    await waitFor(() =>
+      expect(postGateDecision).toHaveBeenCalledWith("LC1", "cancel", {
+        gateId: "G1",
+        note: "Dismissed by developer in dashboard.",
+      }),
+    );
+    await waitFor(() => expect(queryByTestId("gate-respond-dialog")).toBeNull());
+    expect(postOperatorInbox).not.toHaveBeenCalled();
+    expect(deliverToSession).not.toHaveBeenCalled();
   });
 
   it.each(PREVIEW_GATES)("renders a readable $name request preview", ({ gate, expected }) => {

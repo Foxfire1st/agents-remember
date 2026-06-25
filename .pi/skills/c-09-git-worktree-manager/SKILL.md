@@ -103,7 +103,7 @@ two-turn report→action chat protocol, not instead of it:
 ```text
 lifecycle_block(kind="decision", prompt="<the intent ask>", options=["approve", "revise"])
 gate_create(kind="worktree-intent", packet={ ...the intent packet facts... })
-gate_response_wait(gate_id="<id>", timeout_seconds=30)   # re-call until timedOut=false; consume returned inbox entries
+gate_response_wait(gate_id="<id>")   # one normal 5-minute wait window; consume returned inbox entries
 ```
 
 The developer approves from the dashboard (a developer-attributed decision) or in

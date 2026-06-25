@@ -42,6 +42,7 @@ from agents_remember.observer.lifecycle_state import (
 from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
     ActionAvailability,
+    AgentPickupNode,
     Analytics,
     DriftSnapshotNode,
     EnclosureNode,
@@ -91,6 +92,7 @@ __all__ = [
     "TTL_SECONDS",
     "ActionAvailability",
     "Actor",
+    "AgentPickupNode",
     "AmbientLifecycle",
     "Analytics",
     "Clock",

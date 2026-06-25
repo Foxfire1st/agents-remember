@@ -67,6 +67,8 @@ from agents_remember.serving.sim import (
 from agents_remember.serving.static import dashboard_static_dir
 
 _TS = "2026-06-14T10:00:00Z"
+_FRESH_GATE_TS = "2999-01-01T10:00:00+00:00"
+_FRESH_GATE_TS_LATER = "2999-01-01T10:05:00+00:00"
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "sim"
 
 
@@ -315,7 +317,7 @@ class ActionGateTests(unittest.TestCase):
     def test_api_action_approve_records_developer_decision(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="G1", now=_TS)
+            create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS)
         )
         app = create_app(_config(self.tmp), interval=100)
         with TestClient(app) as client:
@@ -334,14 +336,14 @@ class ActionGateTests(unittest.TestCase):
     def test_api_action_with_stale_gate_id_is_409(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="A", now=_TS)
+            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="A", now=_FRESH_GATE_TS)
         )
         store.append(
             create_gate(
                 kind="closeout-approval",
                 lifecycle_id="L1",
                 gate_id="B",
-                now="2026-06-18T10:05:00+00:00",
+                now=_FRESH_GATE_TS_LATER,
             )
         )
         app = create_app(_config(self.tmp), interval=100)
@@ -358,6 +360,21 @@ class ActionGateTests(unittest.TestCase):
             response = client.post("/api/actions/approve", json={"target": "L1"})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["status"], "no-open-gate")
+
+    def test_api_action_cancel_deletes_gate(self) -> None:
+        store = GateStore(observer_logs_root(self.tmp))
+        store.append(
+            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS)
+        )
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/cancel",
+                json={"target": "L1", "gateId": "G1", "note": "Dismissed."},
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["gate"]["state"], "cancelled")
+        self.assertEqual(store.current("L1"), {})
 
     def test_api_operator_inbox_records_developer_response(self) -> None:
         app = create_app(_config(self.tmp), interval=100)
@@ -385,6 +402,24 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(entries[0].response, "Yes, proceed.")
         self.assertEqual(entries[0].createdBy, "developer")
         self.assertEqual(entries[0].createdVia, "dashboard")
+
+    def test_api_operator_inbox_dismiss_deletes_entry(self) -> None:
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            posted = client.post(
+                "/api/operator-inbox",
+                json={
+                    "lifecycleId": "L1",
+                    "gateId": "G1",
+                    "ask": "Continue?",
+                    "response": "Yes, proceed.",
+                },
+            )
+            entry_id = posted.json()["entryId"]
+            response = client.post(f"/api/operator-inbox/{entry_id}/dismiss")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "dismissed")
+        self.assertEqual(OperatorInboxStore(observer_logs_root(self.tmp)).read(), [])
 
     def test_api_operator_inbox_requires_address(self) -> None:
         app = create_app(_config(self.tmp), interval=100)

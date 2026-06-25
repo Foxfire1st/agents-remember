@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
 from pathlib import Path
 
+from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     OperatorInboxVia,
@@ -91,3 +94,50 @@ class OperatorInboxStore:
         )
         self.append(consumed)
         return consumed, True
+
+    def delete(self, entry_id: str) -> bool:
+        """Physically remove one inbox entry id from the shared inbox log."""
+        records = self.read()
+        kept = [record for record in records if record.id != entry_id]
+        if len(kept) == len(records):
+            return False
+        self._replace(kept)
+        return True
+
+    def delete_by_gate(self, gate_id: str) -> int:
+        """Physically remove pending or historical entries tied to one gate."""
+        records = self.read()
+        kept = [record for record in records if record.gateId != gate_id]
+        if len(kept) == len(records):
+            return 0
+        self._replace(kept)
+        return len(records) - len(kept)
+
+    def compact(self, *, now: datetime) -> int:
+        """Prune consumed or expired interaction entries from the inbox log."""
+        records = self.read()
+        if not records:
+            return 0
+        keep_ids = inbox_keep_ids(records, now=now)
+        kept = [record for record in records if record.id in keep_ids]
+        if len(kept) == len(records):
+            return 0
+        self._replace(kept)
+        return len(records) - len(kept)
+
+    def _replace(self, records: list[OperatorInboxEntry]) -> None:
+        path = self.log_path()
+        if not records:
+            path.unlink(missing_ok=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.tmp")
+        tmp.write_text(
+            "\n".join(
+                record.model_dump_json(by_alias=True, exclude_none=True)
+                for record in records
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, path)

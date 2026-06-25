@@ -20,6 +20,11 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from agents_remember.controlplane.interaction_retention import (
+    GATE_RESPONSE_WAIT_POLL_SECONDS,
+    GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
+    delete_after_wait,
+)
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
@@ -60,6 +65,21 @@ def _decision_payload(gate: GateRecord) -> dict[str, Any]:
         "decidedVia": gate.decidedVia,
         "decisionNote": gate.decisionNote,
     }
+
+
+def _cancelled_wait_payload(operation: str, gate_id: str) -> dict[str, Any]:
+    return _tool_payload(
+        operation,
+        {
+            "ok": True,
+            "operation": operation,
+            "gateId": gate_id,
+            "state": "cancelled",
+            "timedOut": False,
+            "entryCount": 0,
+            "entries": [],
+        },
+    )
 
 
 def gate_create_payload(
@@ -129,6 +149,9 @@ def gate_decide_payload(
         now=now_iso(),
     )
     store.append(updated)
+    if decision == "cancel":
+        store.delete(updated.id, lifecycle_id)
+        _inbox_store(config).delete_by_gate(updated.id)
     return _tool_payload(
         "gate_decide",
         {
@@ -187,6 +210,9 @@ def gate_decide_for_lifecycle(
         now=now_iso(),
     )
     store.append(updated)
+    if decision == "cancel":
+        store.delete(updated.id, lifecycle_id)
+        _inbox_store(config).delete_by_gate(updated.id)
     return _tool_payload(
         "gate_decide",
         {
@@ -255,16 +281,16 @@ def gate_response_wait_payload(
     gate_id: str,
     lifecycle_id: str | None,
     agent_id: str | None = None,
-    timeout_seconds: float = 30.0,
-    poll_seconds: float = 1.0,
+    timeout_seconds: float = GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
+    poll_seconds: float = GATE_RESPONSE_WAIT_POLL_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Bounded wait for either a gate decision or a dashboard Chat inbox entry.
 
-    This is an explicit polling helper, not a background task: callers re-invoke
-    it while waiting, and consume returned inbox entries with
-    ``operator_inbox_consume`` after reading them.
+    The helper owns the normal wait window: one call polls every five seconds
+    for up to five minutes by default. Returned inbox entries are not consumed;
+    call ``operator_inbox_consume`` after reading each handled entry.
     """
     gate_store = _store(config)
     inbox_store = _inbox_store(config)
@@ -272,7 +298,7 @@ def gate_response_wait_payload(
     while True:
         gate = gate_store.current(lifecycle_id).get(gate_id)
         if gate is None:
-            raise KeyError(f"no gate {gate_id!r} on lifecycle {lifecycle_id!r}")
+            return _cancelled_wait_payload("gate_response_wait", gate_id)
         entries: list[OperatorInboxEntry] = []
         if lifecycle_id is not None or agent_id is not None:
             entries = [
@@ -281,7 +307,7 @@ def gate_response_wait_payload(
                 if entry.gateId in (None, gate_id)
             ]
         if gate.state != "open" or entries:
-            return _tool_payload(
+            payload = _tool_payload(
                 "gate_response_wait",
                 {
                     "ok": True,
@@ -294,6 +320,9 @@ def gate_response_wait_payload(
                     **_decision_payload(gate),
                 },
             )
+            if gate.state != "open" and delete_after_wait(gate):
+                gate_store.delete(gate.id, lifecycle_id)
+            return payload
         if monotonic() >= deadline:
             return _tool_payload(
                 "gate_response_wait",

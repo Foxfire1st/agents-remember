@@ -58,8 +58,10 @@ from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
+from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
@@ -383,6 +385,17 @@ def create_app(
         except ValueError as exc:
             return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
         return JSONResponse(content=payload, status_code=200)
+
+    @app.post("/api/operator-inbox/{entry_id}/dismiss")
+    def api_operator_inbox_dismiss(entry_id: str) -> Response:
+        removed = OperatorInboxStore(observer_root(config)).delete(entry_id)
+        if not removed:
+            return JSONResponse(
+                content={"status": "not-found", "entryId": entry_id}, status_code=404
+            )
+        return JSONResponse(
+            content={"status": "dismissed", "entryId": entry_id}, status_code=200
+        )
 
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:

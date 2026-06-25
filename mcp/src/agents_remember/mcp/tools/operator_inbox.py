@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from agents_remember.controlplane.operator_inbox_records import (
@@ -50,7 +51,9 @@ def operator_inbox_post_payload(
         created_by=created_by,
         created_via=created_via,
     )
-    _store(config).append(entry)
+    store = _store(config)
+    store.append(entry)
+    store.compact(now=datetime.now(UTC))
     return _tool_payload(
         "operator_inbox_post",
         {
@@ -92,12 +95,14 @@ def operator_inbox_consume_payload(
     consumed_by: str,
     consumed_via: OperatorInboxVia,
 ) -> dict[str, Any]:
-    entry, consumed_now = _store(config).consume(
+    store = _store(config)
+    entry, consumed_now = store.consume(
         entry_id,
         now=now_iso(),
         consumed_by=consumed_by,
         consumed_via=consumed_via,
     )
+    store.delete(entry.id)
     return _tool_payload(
         "operator_inbox_consume",
         {

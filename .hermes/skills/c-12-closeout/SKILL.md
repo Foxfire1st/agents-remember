@@ -69,7 +69,7 @@ How it binds:
    ```text
    lifecycle_block(kind="decision", prompt="<the commit ask>", options=["approve", "revise"])
    gate_create(kind="closeout-approval", lifecycle_id="<id>", packet={ ...preview facts... })
-   gate_response_wait(gate_id="<id>", lifecycle_id="<id>", timeout_seconds=30)   # re-call until timedOut=false; consume returned inbox entries
+   gate_response_wait(gate_id="<id>", lifecycle_id="<id>")   # one normal 5-minute wait window; consume returned inbox entries
    ```
 
 2. The developer approves (or rejects / requests revision) from the dashboard.
