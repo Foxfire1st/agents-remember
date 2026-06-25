@@ -14,6 +14,7 @@ from typing import Any, NoReturn
 # point that touches grepai modules first.
 from agents_remember.providers.context_common import ContextProviderError
 from agents_remember.providers.grepai.context import ensure_grepai_runtime_layout
+from agents_remember.providers.grepai.context.constants import GREPAI_POSTGRES_DEFAULT_PORT
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_project,
     grepai_compose_render,
@@ -376,9 +377,10 @@ def grepai_backend_host_port(
     if existing is not None:
         return existing
     configured_port = backend["postgresHostPort"]
+    preferred_port = int(GREPAI_POSTGRES_DEFAULT_PORT)
     if args.dry_run:
-        return 5432 if str(configured_port) == "auto" else int(configured_port)
-    return allocate_host_port(backend["postgresHost"], configured_port, 5432)
+        return preferred_port if str(configured_port) == "auto" else int(configured_port)
+    return allocate_host_port(backend["postgresHost"], configured_port, preferred_port)
 
 
 def grepai_backend_dry_run_result(

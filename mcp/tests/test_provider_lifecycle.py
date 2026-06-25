@@ -350,6 +350,10 @@ class ProviderLifecycleParserTests(unittest.TestCase):
         self.assertEqual(result["embedder"]["commands"][0]["command"][-3:], ["up", "-d", "ollama"])
         self.assertEqual(result["backend"]["compose"]["overrideMode"], "stdin")
         self.assertEqual(result["embedder"]["compose"]["overrideMode"], "stdin")
+        self.assertEqual(result["backend"]["ports"]["postgres"]["hostPort"], 61432)
+        self.assertEqual(result["backend"]["ports"]["postgres"]["containerPort"], 5432)
+        self.assertEqual(result["embedder"]["ports"]["http"]["hostPort"], 61434)
+        self.assertEqual(result["embedder"]["ports"]["http"]["containerPort"], 11434)
         self.assertEqual(
             result["backend"]["migration"]["network"]["networkName"], "ar-grepai-memory"
         )
