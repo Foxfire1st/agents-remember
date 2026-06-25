@@ -45,6 +45,8 @@ class ActionRequest(BaseModel):
 
     target: str
     actor: Actor = "developer"
+    gateId: str | None = None
+    note: str | None = None
 
 
 # The gate-decision verbs the dashboard can POST (slice 6b); distinct from the
@@ -63,6 +65,8 @@ class GateDecisionIntent:
 
     lifecycle_id: str
     decision: str
+    gate_id: str | None = None
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,20 +102,40 @@ def evaluate_action(
     *,
     actor: str,
     now: str,
+    gate_id: str | None = None,
+    note: str | None = None,
 ) -> ActionOutcome:
     """Map (action, target) onto a status + body; gate-decision verbs carry an intent (6b)."""
     if action in GATE_DECISION_ACTIONS:
-        intent = {
+        if action == "reject" and not (note or "").strip():
+            return ActionOutcome(
+                400,
+                {
+                    "status": "missing-rejection-reason",
+                    "detail": "reject decisions require a reason",
+                    "target": target,
+                },
+            )
+        intent: dict[str, Any] = {
             "actor": actor,
             "source": "dashboard",
             "ts": now,
             "action": action,
             "target": target,
         }
+        if gate_id is not None:
+            intent["gateId"] = gate_id
+        if note is not None:
+            intent["note"] = note
         return ActionOutcome(
             202,
             {"status": "received", "detail": "gate decision recorded", "intent": intent},
-            gate_decision=GateDecisionIntent(lifecycle_id=target, decision=action),
+            gate_decision=GateDecisionIntent(
+                lifecycle_id=target,
+                decision=action,
+                gate_id=gate_id,
+                note=note,
+            ),
         )
     actions = _find_actions(projection, target)
     if actions is None:

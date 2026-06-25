@@ -37,6 +37,22 @@ class GateWaitResponse(ToolResponse):
     gateId: str
     state: GateState
     timedOut: bool
+    decidedBy: str | None = None
+    decidedVia: str | None = None
+    decisionNote: str | None = None
+
+
+class GateResponseWaitResponse(ToolResponse):
+    """``gate_response_wait``: gate decision or pending operator inbox response."""
+
+    gateId: str
+    state: GateState
+    timedOut: bool
+    entryCount: int
+    entries: list[dict[str, Any]]
+    decidedBy: str | None = None
+    decidedVia: str | None = None
+    decisionNote: str | None = None
 
 
 class GateListResponse(ToolResponse):

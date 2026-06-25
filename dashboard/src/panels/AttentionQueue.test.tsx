@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
-import type { AttentionItem } from "../types/projection";
+import type { AttentionItem, TaskDocNode } from "../types/projection";
 import { AttentionQueue } from "./AttentionQueue";
 
 // §9 (slice 5f S6/S3): a pre-contract blocked start is a server-computed attention item. The queue
@@ -17,7 +17,31 @@ const blockedStart: AttentionItem = {
   detail: "no exact ledger mapping for selected code base commit",
 };
 
-afterEach(cleanup);
+const taskDoc: TaskDocNode = {
+  id: "19",
+  lifecycleId: "LC19",
+  repository: "agents-remember",
+  title: "Gate interaction polish",
+  status: "inProgress",
+  kind: "subTask",
+  stepsDone: 1,
+  stepsTotal: 4,
+  docPath: "/tasks/agents-remember/260610_browser-dashboard/19_gate-interaction-polish.json",
+  steps: [],
+  objective: "Make gate responses human-usable.",
+  requirements: [],
+  codeExamples: [],
+  decisions: [],
+  openQuestions: [],
+  references: [],
+  subTasks: [],
+  sections: [],
+};
+
+afterEach(() => {
+  cleanup();
+  dashboardStore.getState().reset();
+});
 
 describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
   it("renders a §9 blocked-start attention item", () => {
@@ -32,5 +56,32 @@ describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
     const items = getAllByTestId("attn-item");
     expect(items.some((el) => el.textContent?.includes("Worktree start blocked"))).toBe(true);
     expect(getByText("no exact ledger mapping for selected code base commit")).not.toBeNull();
+  });
+
+  it("renders lifecycle attention through the bound task document when available", () => {
+    const base = GALLERY.find((entry) => entry.name === "engine-fleet")?.projection;
+    if (!base?.analytics) throw new Error("fixture missing analytics");
+    dashboardStore.getState().applySnapshot({
+      ...base,
+      analytics: {
+        ...base.analytics,
+        taskDocuments: [taskDoc],
+        attentionQueue: [
+          {
+            id: "blocked-gate:LC19",
+            kind: "blocked-gate",
+            severity: "warn",
+            lane: "lifecycle",
+            title: "Gate - closeout-approval",
+            detail: "awaiting your decision",
+            lifecycleId: "LC19",
+          },
+        ],
+      },
+    });
+
+    const { getByText } = render(<AttentionQueue onSelect={() => {}} />);
+    expect(getByText("Task 19: Gate interaction polish")).toBeTruthy();
+    expect(getByText("Gate - closeout-approval · awaiting your decision")).toBeTruthy();
   });
 });

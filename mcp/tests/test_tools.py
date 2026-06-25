@@ -306,6 +306,7 @@ class McpToolTests(unittest.TestCase):
             "memory_carryover_apply",
             "codex_benchmark_prepare",
             "codex_benchmark_run",
+            "gate_response_wait",
             "operator_inbox_post",
             "operator_inbox_poll",
             "operator_inbox_consume",

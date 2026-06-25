@@ -273,11 +273,38 @@ class ActionGateTests(unittest.TestCase):
         self.addCleanup(self._dir.cleanup)
 
     def test_evaluate_action_emits_gate_intent_for_verbs(self) -> None:
-        outcome = evaluate_action(_projection(), "approve", "L1", actor="developer", now=_TS)
+        outcome = evaluate_action(
+            _projection(),
+            "approve",
+            "L1",
+            actor="developer",
+            now=_TS,
+            gate_id="G1",
+            note="Looks good.",
+        )
         self.assertEqual(outcome.status_code, 202)
         self.assertEqual(
-            outcome.gate_decision, GateDecisionIntent(lifecycle_id="L1", decision="approve")
+            outcome.gate_decision,
+            GateDecisionIntent(
+                lifecycle_id="L1",
+                decision="approve",
+                gate_id="G1",
+                note="Looks good.",
+            ),
         )
+
+    def test_evaluate_action_requires_rejection_reason(self) -> None:
+        outcome = evaluate_action(
+            _projection(),
+            "reject",
+            "L1",
+            actor="developer",
+            now=_TS,
+            gate_id="G1",
+        )
+        self.assertEqual(outcome.status_code, 400)
+        self.assertEqual(outcome.body["status"], "missing-rejection-reason")
+        self.assertIsNone(outcome.gate_decision)
 
     def test_evaluate_action_transition_keeps_4b_skeleton(self) -> None:
         # a non-gate action on an unknown target stays the 4b no-mutation skeleton
@@ -292,13 +319,38 @@ class ActionGateTests(unittest.TestCase):
         )
         app = create_app(_config(self.tmp), interval=100)
         with TestClient(app) as client:
-            response = client.post("/api/actions/approve", json={"target": "L1"})
+            response = client.post(
+                "/api/actions/reject",
+                json={"target": "L1", "gateId": "G1", "note": "Needs another pass."},
+            )
         self.assertEqual(response.status_code, 202)
         gate = response.json()["gate"]
-        self.assertEqual(gate["state"], "approved")
+        self.assertEqual(gate["state"], "rejected")
         self.assertEqual(gate["decidedBy"], "developer")  # un-forgeable vs. the agent's model path
         self.assertEqual(gate["decidedVia"], "dashboard")
-        self.assertEqual(store.current("L1")["G1"].state, "approved")
+        self.assertEqual(store.current("L1")["G1"].state, "rejected")
+        self.assertEqual(store.current("L1")["G1"].decisionNote, "Needs another pass.")
+
+    def test_api_action_with_stale_gate_id_is_409(self) -> None:
+        store = GateStore(observer_logs_root(self.tmp))
+        store.append(
+            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="A", now=_TS)
+        )
+        store.append(
+            create_gate(
+                kind="closeout-approval",
+                lifecycle_id="L1",
+                gate_id="B",
+                now="2026-06-18T10:05:00+00:00",
+            )
+        )
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post("/api/actions/approve", json={"target": "L1", "gateId": "A"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "stale-gate")
+        self.assertEqual(store.current("L1")["A"].state, "open")
+        self.assertEqual(store.current("L1")["B"].state, "open")
 
     def test_api_action_approve_without_open_gate_is_409(self) -> None:
         app = create_app(_config(self.tmp), interval=100)

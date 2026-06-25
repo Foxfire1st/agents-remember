@@ -152,6 +152,11 @@ def decide_gate(
     )
 
 
+def expire_gate(gate: GateRecord, *, now: str) -> GateRecord:
+    """A new snapshot expiring an open gate that was replaced by a newer gate."""
+    return gate.model_copy(update={"ts": now, "state": "expired"})
+
+
 def apply_gate(gate: GateRecord, *, now: str) -> GateRecord:
     """A new snapshot marking an approved gate consumed by its mutating tool. Pure.
 

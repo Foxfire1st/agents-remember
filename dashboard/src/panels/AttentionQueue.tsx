@@ -5,6 +5,7 @@ import { fmtWait, selectQueue } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
+import type { AttentionItem, TaskDocNode } from "../types/projection";
 
 // The home-screen attention queue (note 06): the server-ranked list of what needs the human,
 // rebuilt from mc2's renderAttn UX. "Open" jumps to the item's lifecycle in the detail view — the
@@ -44,8 +45,27 @@ const ghost = css({
   textAlign: "left",
 });
 
+const EMPTY_TASK_DOCS: readonly TaskDocNode[] = [];
+
+function taskForAttention(item: AttentionItem, docs: readonly TaskDocNode[]): TaskDocNode | undefined {
+  if (!item.lifecycleId) return undefined;
+  const matches = docs.filter((doc) => doc.lifecycleId === item.lifecycleId);
+  return matches.find((doc) => doc.kind !== "master") ?? matches[0];
+}
+
+function titleForAttention(item: AttentionItem, doc: TaskDocNode | undefined): string {
+  if (!doc) return item.title;
+  return doc.id ? `Task ${doc.id}: ${doc.title}` : doc.title;
+}
+
+function detailForAttention(item: AttentionItem, doc: TaskDocNode | undefined): string | undefined {
+  if (!doc) return item.detail;
+  return [item.title, item.detail].filter(Boolean).join(" · ");
+}
+
 export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
   const queue = useDashboard(selectQueue);
+  const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
   return (
     <Panel
       testid="attention-queue"
@@ -59,6 +79,9 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
           <AnimatePresence initial={false}>
             {queue.map((q) => {
               const lifecycleId = q.lifecycleId;
+              const doc = taskForAttention(q, docs);
+              const displayTitle = titleForAttention(q, doc);
+              const displayDetail = detailForAttention(q, doc);
               return (
                 <motion.li
                   key={q.id}
@@ -71,8 +94,8 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
                 >
                   <Dot variant={q.severity} />
                   <div className={bodyCol}>
-                    <div className={itemTitle}>{q.title}</div>
-                    {q.detail ? <div className={detail}>{q.detail}</div> : null}
+                    <div className={itemTitle}>{displayTitle}</div>
+                    {displayDetail ? <div className={detail}>{displayDetail}</div> : null}
                     <div className={meta}>
                       {q.lane} · {fmtWait(q.waitSeconds)}
                     </div>

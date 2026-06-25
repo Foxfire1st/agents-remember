@@ -282,6 +282,9 @@ def _gate_payloads(config) -> dict[str, dict]:
         "gate_wait": tools.gate_wait_payload(
             config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
         ),
+        "gate_response_wait": tools.gate_response_wait_payload(
+            config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
+        ),
         "gate_list": tools.gate_list_payload(config, lifecycle_id="gate-demo"),
     }
 

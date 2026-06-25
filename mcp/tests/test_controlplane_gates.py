@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.controlplane.enforcement import evaluate_closeout_gate
+from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord, apply_gate, create_gate, decide_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.tools import gates
@@ -76,10 +78,15 @@ class GateToolTests(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.store = GateStore(Path(tmp.name))
+        self.root = Path(tmp.name)
+        self.store = GateStore(self.root)
+        self.inbox = OperatorInboxStore(self.root)
         patcher = mock.patch.object(gates, "_store", return_value=self.store)
         self.addCleanup(patcher.stop)
         patcher.start()
+        inbox_patcher = mock.patch.object(gates, "_inbox_store", return_value=self.inbox)
+        self.addCleanup(inbox_patcher.stop)
+        inbox_patcher.start()
 
     def _create(self, kind: str = "closeout-approval") -> str:
         created = gates.gate_create_payload(
@@ -100,6 +107,22 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(decided["state"], "approved")
         self.assertEqual(decided["decidedBy"], "model")
         self.assertEqual(decided["decidedVia"], "cli")
+
+    def test_create_expires_previous_open_lifecycle_gate(self) -> None:
+        first = self._create("agent-question")
+        second = self._create("closeout-approval")
+        current = self.store.current("L1")
+        self.assertEqual(current[first].state, "expired")
+        self.assertEqual(current[second].state, "open")
+
+        result = gates.gate_wait_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=first,
+            lifecycle_id="L1",
+            sleep=lambda _s: None,
+        )
+        self.assertFalse(result["timedOut"])
+        self.assertEqual(result["state"], "expired")
 
     def test_decide_unknown_decision_raises(self) -> None:
         gate_id = self._create("alarm-ack")
@@ -132,6 +155,21 @@ class GateToolTests(unittest.TestCase):
         self.assertFalse(result["timedOut"])
         self.assertEqual(result["state"], "approved")
 
+    def test_wait_returns_decision_note(self) -> None:
+        gate_id = self._create("agent-question")
+        gates.gate_decide_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=gate_id, lifecycle_id="L1", decision="reject",
+            decided_by="developer", decided_via="dashboard", note="Needs another pass.",
+        )
+        result = gates.gate_wait_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=gate_id, lifecycle_id="L1", sleep=lambda _s: None,
+        )
+        self.assertFalse(result["timedOut"])
+        self.assertEqual(result["state"], "rejected")
+        self.assertEqual(result["decisionNote"], "Needs another pass.")
+
     def test_wait_times_out_while_open(self) -> None:
         gate_id = self._create("agent-question")
         clock = iter([0.0, 0.0, 99.0])  # deadline calc, first check, past-deadline check
@@ -142,6 +180,57 @@ class GateToolTests(unittest.TestCase):
         )
         self.assertTrue(result["timedOut"])
         self.assertEqual(result["state"], "open")
+
+    def test_response_wait_returns_matching_inbox_entry_without_consuming(self) -> None:
+        gate_id = self._create("agent-question")
+        self.inbox.append(
+            create_operator_inbox_entry(
+                entry_id="I1",
+                now=T2,
+                lifecycle_id="L1",
+                agent_id=None,
+                gate_id=gate_id,
+                ask="Continue?",
+                response="Use a clearer commit message first.",
+                created_by="developer",
+                created_via="dashboard",
+            )
+        )
+
+        result = gates.gate_response_wait_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=gate_id,
+            lifecycle_id="L1",
+            timeout_seconds=10.0,
+            sleep=lambda _s: None,
+        )
+
+        self.assertFalse(result["timedOut"])
+        self.assertEqual(result["state"], "open")
+        self.assertEqual(result["entryCount"], 1)
+        self.assertEqual(result["entries"][0]["response"], "Use a clearer commit message first.")
+        self.assertEqual(len(self.inbox.list_pending(lifecycle_id="L1", agent_id=None)), 1)
+
+    def test_response_wait_returns_gate_decision_and_note(self) -> None:
+        gate_id = self._create("agent-question")
+        gates.gate_decide_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=gate_id, lifecycle_id="L1", decision="reject",
+            decided_by="developer", decided_via="dashboard", note="Needs another pass.",
+        )
+
+        result = gates.gate_response_wait_payload(
+            None,  # type: ignore[arg-type]
+            gate_id=gate_id,
+            lifecycle_id="L1",
+            timeout_seconds=10.0,
+            sleep=lambda _s: None,
+        )
+
+        self.assertFalse(result["timedOut"])
+        self.assertEqual(result["state"], "rejected")
+        self.assertEqual(result["decisionNote"], "Needs another pass.")
+        self.assertEqual(result["entryCount"], 0)
 
     def test_list_returns_folded_gates(self) -> None:
         gate_id = self._create()
@@ -166,6 +255,41 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(result["state"], "approved")
         self.assertEqual(result["decidedBy"], "developer")
         self.assertEqual(self.store.current("L1")["B"].state, "approved")
+
+    def test_decide_for_lifecycle_can_target_current_gate_and_note(self) -> None:
+        self.store.append(
+            create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="A", now=T1)
+        )
+        result = gates.gate_decide_for_lifecycle(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            decision="reject",
+            decided_by="developer",
+            decided_via="dashboard",
+            expected_gate_id="A",
+            note="Needs another pass.",
+        )
+        self.assertEqual(result["gateId"], "A")
+        decided = self.store.current("L1")["A"]
+        self.assertEqual(decided.state, "rejected")
+        self.assertEqual(decided.decisionNote, "Needs another pass.")
+
+    def test_decide_for_lifecycle_rejects_stale_expected_gate(self) -> None:
+        self.store.append(
+            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="A", now=T1)
+        )
+        self.store.append(
+            create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="B", now=T2)
+        )
+        with self.assertRaisesRegex(KeyError, "current open gate"):
+            gates.gate_decide_for_lifecycle(
+                None,  # type: ignore[arg-type]
+                lifecycle_id="L1",
+                decision="approve",
+                decided_by="developer",
+                decided_via="dashboard",
+                expected_gate_id="A",
+            )
 
     def test_decide_for_lifecycle_no_open_gate_raises(self) -> None:
         with self.assertRaises(KeyError):

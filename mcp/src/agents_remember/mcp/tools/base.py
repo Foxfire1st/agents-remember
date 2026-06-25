@@ -58,6 +58,7 @@ PUBLIC_TOOLS = (
     "gate_create",
     "gate_decide",
     "gate_wait",
+    "gate_response_wait",
     "gate_list",
     "operator_inbox_post",
     "operator_inbox_poll",

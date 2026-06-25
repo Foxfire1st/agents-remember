@@ -24,6 +24,7 @@ from .tools import (
     gate_create_payload,
     gate_decide_payload,
     gate_list_payload,
+    gate_response_wait_payload,
     gate_wait_payload,
     grepai_search_payload,
     grepai_trace_payload,
@@ -962,6 +963,24 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             gate_id=gate_id,
             lifecycle_id=lifecycle_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @server.tool()
+    def gate_response_wait(
+        gate_id: str,
+        lifecycle_id: str | None = None,
+        agent_id: str | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Bounded wait for either the gate leaving open or a pending dashboard Chat
+        inbox entry for this gate. Returns inbox entries without consuming them; after
+        reading an entry, call operator_inbox_consume. Re-call while timedOut=true."""
+        return gate_response_wait_payload(
+            config,
+            gate_id=gate_id,
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
             timeout_seconds=timeout_seconds,
         )
 

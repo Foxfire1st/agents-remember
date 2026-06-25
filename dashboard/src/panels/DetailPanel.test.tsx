@@ -413,7 +413,7 @@ describe("DetailPanel gate respond (task 11)", () => {
     expect(getByTestId("gate-respond-open")).toBeTruthy();
     expect(queryByTestId("gate-approve")).toBeNull();
     fireEvent.click(getByTestId("gate-respond-open"));
-    expect(getByTestId("gate-request").textContent).toContain("changedPaths");
+    expect(getByTestId("gate-request").textContent).toContain("Changed paths");
   });
 
   it("renders the proto-gate ask through the same respond surface", () => {

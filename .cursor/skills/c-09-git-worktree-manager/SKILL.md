@@ -103,7 +103,7 @@ two-turn report→action chat protocol, not instead of it:
 ```text
 lifecycle_block(kind="decision", prompt="<the intent ask>", options=["approve", "revise"])
 gate_create(kind="worktree-intent", packet={ ...the intent packet facts... })
-gate_wait(gate_id="<id>", timeout_seconds=30)   # re-call until timedOut=false
+gate_response_wait(gate_id="<id>", timeout_seconds=30)   # re-call until timedOut=false; consume returned inbox entries
 ```
 
 The developer approves from the dashboard (a developer-attributed decision) or in
@@ -194,7 +194,8 @@ Raise the integration junction with the `integration-approval` gate kind per the
 report→action chat protocol: deliver the integration preview, then
 `lifecycle_block(kind="decision", prompt=…)` **and**
 `gate_create(kind="integration-approval", packet={ ...the integration plan... })`,
-then `gate_wait` until the developer decides (dashboard or chat). The agent never
+then `gate_response_wait` until the developer decides or sends a dashboard Chat
+response. Consume returned inbox entries after reading them. The agent never
 self-approves — a model-attributed `gate_decide` is not a developer approval. Once
 the developer has approved, the agent **always** sends `lifecycle_resume()` to
 clear the block, then runs `worktree_integrate`.
@@ -223,7 +224,8 @@ Raise the cleanup junction with the `cleanup-approval` gate kind per the
 report→action chat protocol: run `lifecycle_finalize_task(..., dry_run=true)`, relay the landed-commit proof, cleanup plan, and task-document updates, ask whether to finalize the task, then
 `lifecycle_block(kind="decision", prompt=…)` **and**
 `gate_create(kind="cleanup-approval", packet={ ...what cleanup removes... })`, then
-`gate_wait` until the developer decides. A model-attributed `gate_decide` is never
+`gate_response_wait` until the developer decides or sends a dashboard Chat response.
+Consume returned inbox entries after reading them. A model-attributed `gate_decide` is never
 a developer approval. Once the developer has approved, the agent **always** sends
 `lifecycle_resume()` to clear the block, then runs `lifecycle_finalize_task`.
 

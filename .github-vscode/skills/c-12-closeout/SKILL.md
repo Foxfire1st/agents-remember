@@ -69,7 +69,7 @@ How it binds:
    ```text
    lifecycle_block(kind="decision", prompt="<the commit ask>", options=["approve", "revise"])
    gate_create(kind="closeout-approval", lifecycle_id="<id>", packet={ ...preview facts... })
-   gate_wait(gate_id="<id>", lifecycle_id="<id>", timeout_seconds=30)   # re-call until timedOut=false
+   gate_response_wait(gate_id="<id>", lifecycle_id="<id>", timeout_seconds=30)   # re-call until timedOut=false; consume returned inbox entries
    ```
 
 2. The developer approves (or rejects / requests revision) from the dashboard.
@@ -89,8 +89,9 @@ Rules:
 
 1. **Never self-approve.** An agent calling `gate_decide(decision="approve")`
    records a `model`-attributed approval, which enforcement rejects. Wait for the
-   developer's dashboard decision via `gate_wait`; never pass your own judgment off
-   as commit approval.
+   developer's dashboard decision or Chat response via `gate_response_wait`;
+   consume returned inbox entries after reading them, and never pass your own
+   judgment off as commit approval.
 2. **Opening a gate is opt-in and deliberate.** Open a `closeout-approval` gate
    **only** when a developer is driving approval from the dashboard. Do **not**
    open one in a pure-chat session with no cockpit watching — an `open` gate blocks

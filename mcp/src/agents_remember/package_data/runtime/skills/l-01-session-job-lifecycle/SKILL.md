@@ -62,14 +62,17 @@ choreography at each junction:
      is (the junction); the `packet` carries the question/proposal and the report
      facts the dashboard displays. The two are different axes — a durable junction
      kind plus an ambient answer-kind — and both fire at the junction.
-2. **Wait.** `gate_wait(gate_id, timeout_seconds=…)`, re-called until it stops
-   timing out, holds at the junction until the developer decides — through the
-   dashboard or with a chat answer.
+2. **Wait.** `gate_response_wait(gate_id, lifecycle_id=…, timeout_seconds=…)`,
+   re-called until it stops timing out, holds at the junction until the
+   developer decides or sends a dashboard Chat response. If it returns inbox
+   `entries`, read them, call `operator_inbox_consume(entry_id=…)` for each
+   handled entry, and react to the message. If it returns a terminal gate
+   `state`, react to that decision and its `decisionNote`.
 3. **Resolve — the developer, never the agent.** The developer approves, rejects,
-   or requests revision from the dashboard (a developer-attributed decision) or
-   answers in chat. The agent must **never self-approve**: an agent's own
-   `gate_decide` is recorded model-attributed and never counts as developer
-   approval.
+   or requests revision from the dashboard (a developer-attributed decision), or
+   sends a dashboard Chat message that does **not** decide the gate. The agent
+   must **never self-approve**: an agent's own `gate_decide` is recorded
+   model-attributed and never counts as developer approval.
 4. **Clear.** Once the developer's answer has reached the agent, the agent
    **always** sends `lifecycle_resume()` to move the lifecycle out of `blocked`,
    then proceeds — commit, or do the requested fixes. A chat "approved" does not
@@ -110,7 +113,7 @@ worktree contract.
 | --- | --- | --- |
 | Trust Checkpoint passes (managed repo) | `lifecycle_start` | Begin a **fleeting** lifecycle (guarded: one per session; takes no id). |
 | Entering each phase | `lifecycle_phase` | Move the orthogonal phase axis (`request`/`trust-checkpoint`/`reframe-research`/`decide`/`build`/`close`). |
-| At a gate (reframe, plan, commit, …) | `lifecycle_block` (+ ask) **and** `gate_create(kind=…)`, then `gate_wait`, then `lifecycle_resume` after the developer decides | Raise the ambient + durable kind-typed wait carrying the ask, then clear it on resolution (see Gate Choreography). |
+| At a gate (reframe, plan, commit, …) | `lifecycle_block` (+ ask) **and** `gate_create(kind=…)`, then `gate_response_wait`, then `lifecycle_resume` after the developer decides or sends a handled Chat response | Raise the ambient + durable kind-typed wait carrying the ask, poll both the gate decision and inbox, then clear it on resolution (see Gate Choreography). |
 | `worktree_start` (Decide → Build) | *(promotion — automatic)* | The fleeting lifecycle becomes **persistent**, anchored in the contract; no separate signal. |
 | Resuming an existing task | `worktree_attach` | Re-adopts the contract's lifecycle (contract-resolved); the model passes no id. |
 | Leaving unsaved fleeting work | `switch_lifecycle` (`on_unsaved=save`\|`discard`) | The save gate: promote it or abandon it — never dropped silently. |
@@ -229,7 +232,7 @@ precondition in Phase 4.
 **Plan gate:** stop and wait for explicit developer approval before changing any code. No
 implementation begins before this approval. Raise this junction with the
 `plan-approval` gate kind per the Gate Choreography — `lifecycle_block` (ask) +
-`gate_create(kind="plan-approval", packet={ …the plan… })`, `gate_wait`, then
+`gate_create(kind="plan-approval", packet={ …the plan… })`, `gate_response_wait`, then
 `lifecycle_resume` once the developer approves — and clear it before any edit.
 
 ---
@@ -303,7 +306,7 @@ Land the work. **Implementation approval is not commit approval.**
    developer-attributed `closeout-approval` gate is the un-forgeable record of approval, and
    `worktree_closeout_apply` refuses unless it is approved by the developer — an agent self-approval
    never satisfies it. The `c-12-closeout` skill owns the opt-in gate choreography (`gate_create` /
-   `gate_wait`); gateless lifecycles keep this chat commit gate unchanged.
+   `gate_response_wait`); gateless lifecycles keep this chat commit gate unchanged.
 3. On approval, the `c-09-git-worktree-manager` skill owns the external-memory invariant in order: commit code → refresh affected
    onboarding metadata to the new code commit → run memory quality control → commit memory content →
    update and commit the ledger.
@@ -312,7 +315,7 @@ Land the work. **Implementation approval is not commit approval.**
    source branch, open the PR, wait for green checks, and merge per the repo convention. Never push a
    protected branch directly. The agent does not push on its own authority — raise the `push-approval`
    gate kind at the push junction (`lifecycle_block` + `gate_create(kind="push-approval", packet=…)`,
-   `gate_wait`), and only push after the developer approves and the agent has sent `lifecycle_resume`.
+   `gate_response_wait`), and only push after the developer approves and the agent has sent `lifecycle_resume`.
    The `c-09-git-worktree-manager` skill raises the matching `integration-approval` and
    `cleanup-approval` gates at its landing tail.
 5. **Map the ledger to the landed commit.** A PR merge usually lands a **merge commit** on top of the

@@ -33,6 +33,7 @@ from agents_remember.models.gates import (
     GateCreateResponse,
     GateDecideResponse,
     GateListResponse,
+    GateResponseWaitResponse,
     GateWaitResponse,
 )
 from agents_remember.models.lifecycle import (
@@ -137,6 +138,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "gate_create": GateCreateResponse,
     "gate_decide": GateDecideResponse,
     "gate_wait": GateWaitResponse,
+    "gate_response_wait": GateResponseWaitResponse,
     "gate_list": GateListResponse,
     "operator_inbox_post": OperatorInboxPostResponse,
     "operator_inbox_poll": OperatorInboxPollResponse,

@@ -20,12 +20,16 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
     DECISION_STATES,
     DecidedVia,
+    GateRecord,
     coerce_gate_kind,
     create_gate,
     decide_gate,
+    expire_gate,
 )
 from agents_remember.controlplane.store import GateStore
 from agents_remember.observer import observer_root
@@ -42,6 +46,22 @@ def _store(config: McpRuntimeConfig) -> GateStore:
     return GateStore(observer_root(config))
 
 
+def _inbox_store(config: McpRuntimeConfig) -> OperatorInboxStore:
+    return OperatorInboxStore(observer_root(config))
+
+
+def _entry_payload(entry: OperatorInboxEntry) -> dict[str, Any]:
+    return entry.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def _decision_payload(gate: GateRecord) -> dict[str, Any]:
+    return {
+        "decidedBy": gate.decidedBy,
+        "decidedVia": gate.decidedVia,
+        "decisionNote": gate.decisionNote,
+    }
+
+
 def gate_create_payload(
     config: McpRuntimeConfig,
     *,
@@ -52,17 +72,23 @@ def gate_create_payload(
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
 ) -> dict[str, Any]:
+    now = now_iso()
+    store = _store(config)
+    if lifecycle_id is not None:
+        for current in store.current(lifecycle_id).values():
+            if current.state == "open":
+                store.append(expire_gate(current, now=now))
     gate = create_gate(
         kind=coerce_gate_kind(kind),
         lifecycle_id=lifecycle_id,
         gate_id=new_ulid(),
-        now=now_iso(),
+        now=now,
         enclosure=enclosure,
         repo_id=repo_id,
         packet=packet,
         required_decision=required_decision,
     )
-    _store(config).append(gate)
+    store.append(gate)
     return _tool_payload(
         "gate_create",
         {
@@ -123,6 +149,7 @@ def gate_decide_for_lifecycle(
     decision: str,
     decided_by: str,
     decided_via: DecidedVia,
+    expected_gate_id: str | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
     """Decide the lifecycle's latest still-open gate -- the dashboard's write path.
@@ -140,10 +167,17 @@ def gate_decide_for_lifecycle(
             f"unknown gate decision {decision!r}; expected one of {sorted(DECISION_STATES)}"
         )
     store = _store(config)
-    open_gates = [gate for gate in store.current(lifecycle_id).values() if gate.state == "open"]
+    current = store.current(lifecycle_id)
+    open_gates = [gate for gate in current.values() if gate.state == "open"]
     if not open_gates:
         raise KeyError(f"no open gate on lifecycle {lifecycle_id!r}")
     gate = max(open_gates, key=lambda candidate: candidate.ts)
+    if expected_gate_id is not None and gate.id != expected_gate_id:
+        expected = current.get(expected_gate_id)
+        state = expected.state if expected is not None else "missing"
+        raise KeyError(
+            f"gate {expected_gate_id!r} is {state}; current open gate is {gate.id!r}"
+        )
     updated = decide_gate(
         gate,
         decision=decision,
@@ -197,6 +231,7 @@ def gate_wait_payload(
                     "gateId": gate.id,
                     "state": gate.state,
                     "timedOut": False,
+                    **_decision_payload(gate),
                 },
             )
         if monotonic() >= deadline:
@@ -208,6 +243,69 @@ def gate_wait_payload(
                     "gateId": gate.id,
                     "state": gate.state,
                     "timedOut": True,
+                    **_decision_payload(gate),
+                },
+            )
+        sleep(poll_seconds)
+
+
+def gate_response_wait_payload(
+    config: McpRuntimeConfig,
+    *,
+    gate_id: str,
+    lifecycle_id: str | None,
+    agent_id: str | None = None,
+    timeout_seconds: float = 30.0,
+    poll_seconds: float = 1.0,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Bounded wait for either a gate decision or a dashboard Chat inbox entry.
+
+    This is an explicit polling helper, not a background task: callers re-invoke
+    it while waiting, and consume returned inbox entries with
+    ``operator_inbox_consume`` after reading them.
+    """
+    gate_store = _store(config)
+    inbox_store = _inbox_store(config)
+    deadline = monotonic() + timeout_seconds
+    while True:
+        gate = gate_store.current(lifecycle_id).get(gate_id)
+        if gate is None:
+            raise KeyError(f"no gate {gate_id!r} on lifecycle {lifecycle_id!r}")
+        entries: list[OperatorInboxEntry] = []
+        if lifecycle_id is not None or agent_id is not None:
+            entries = [
+                entry
+                for entry in inbox_store.list_pending(lifecycle_id=lifecycle_id, agent_id=agent_id)
+                if entry.gateId in (None, gate_id)
+            ]
+        if gate.state != "open" or entries:
+            return _tool_payload(
+                "gate_response_wait",
+                {
+                    "ok": True,
+                    "operation": "gate_response_wait",
+                    "gateId": gate.id,
+                    "state": gate.state,
+                    "timedOut": False,
+                    "entryCount": len(entries),
+                    "entries": [_entry_payload(entry) for entry in entries],
+                    **_decision_payload(gate),
+                },
+            )
+        if monotonic() >= deadline:
+            return _tool_payload(
+                "gate_response_wait",
+                {
+                    "ok": True,
+                    "operation": "gate_response_wait",
+                    "gateId": gate.id,
+                    "state": gate.state,
+                    "timedOut": True,
+                    "entryCount": 0,
+                    "entries": [],
+                    **_decision_payload(gate),
                 },
             )
         sleep(poll_seconds)

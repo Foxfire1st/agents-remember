@@ -22,6 +22,7 @@ from .gates import (
     gate_create_payload,
     gate_decide_payload,
     gate_list_payload,
+    gate_response_wait_payload,
     gate_wait_payload,
 )
 from .lifecycle import (
@@ -92,6 +93,7 @@ __all__ = [
     "gate_create_payload",
     "gate_decide_payload",
     "gate_list_payload",
+    "gate_response_wait_payload",
     "gate_wait_payload",
     "grepai_search_payload",
     "grepai_trace_payload",

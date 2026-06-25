@@ -327,7 +327,13 @@ def create_app(
         if snapshot is None:
             raise HTTPException(status_code=503, detail="projection not ready")
         outcome = evaluate_action(
-            snapshot, action, request.target, actor=request.actor, now=now_iso()
+            snapshot,
+            action,
+            request.target,
+            actor=request.actor,
+            now=now_iso(),
+            gate_id=request.gateId,
+            note=request.note,
         )
         if outcome.gate_decision is not None:
             # The one durable side effect: record the operator's gate decision as
@@ -340,11 +346,14 @@ def create_app(
                     decision=outcome.gate_decision.decision,
                     decided_by="developer",
                     decided_via="dashboard",
+                    expected_gate_id=outcome.gate_decision.gate_id,
+                    note=outcome.gate_decision.note,
                 )
             except KeyError as exc:
+                status = "stale-gate" if outcome.gate_decision.gate_id else "no-open-gate"
                 return JSONResponse(
                     content={
-                        "status": "no-open-gate",
+                        "status": status,
                         "detail": str(exc),
                         "target": request.target,
                     },
