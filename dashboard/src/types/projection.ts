@@ -211,7 +211,8 @@ export interface TaskSectionNode {
 }
 
 export interface TaskDocNode {
-  lifecycleId: string;
+  id: string;
+  lifecycleId?: string;
   repository: string;
   title: string;
   status: string;
@@ -240,6 +241,7 @@ export interface SeriesNode {
   repository: string;
   title: string;
   status: string;
+  createdAt?: string;
   objective: string;
   subTasks: TaskSubTaskRefNode[];
   doneCount: number;

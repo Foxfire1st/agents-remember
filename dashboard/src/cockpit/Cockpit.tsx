@@ -6,6 +6,7 @@ import { selectQueue } from "../data/selectors";
 import type { ConnState } from "../data/store";
 import { dashboardStore, useDashboard } from "../data/store";
 import { connectEvents, connectState } from "../data/stream";
+import { lifecycleIdForSelection, lifecycleSelectionKey } from "../data/taskIdentity";
 import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
 import { Chats } from "../panels/Chats";
@@ -179,7 +180,7 @@ export function CockpitShell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const animate = useShouldAnimate();
   const selectedLifecycleId = useDashboard((s) =>
-    selectedId ? s.lifecycles[selectedId]?.id : undefined,
+    lifecycleIdForSelection(selectedId, s.lifecycles, s.analytics),
   );
 
   // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
@@ -189,7 +190,11 @@ export function CockpitShell() {
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
   const open = (id: string) => {
-    setSelectedId(id);
+    setSelectedId(
+      id.startsWith("taskdoc:") || id.startsWith("series:") || id.startsWith("lifecycle:")
+        ? id
+        : lifecycleSelectionKey(id),
+    );
     setView("operations");
   };
 

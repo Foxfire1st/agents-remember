@@ -1542,11 +1542,14 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         )
         self.assertEqual(nodes[0].createdAt, "2026-01-01T00:00")
 
-    def test_skips_docs_without_lifecycle_and_non_task_json(self) -> None:
+    def test_projects_docs_without_lifecycle_and_skips_non_task_json(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "demo"
         write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # no lifecycleId
         (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
-        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        self.assertEqual(len(nodes), 1)
+        self.assertIsNone(nodes[0].lifecycleId)
+        self.assertEqual(nodes[0].docPath, (root / "03c_x.json").as_posix())
 
     def test_leaf_contract_alone_is_not_a_task_document(self) -> None:
         contract = default_contract(
@@ -1569,6 +1572,38 @@ class TaskDocumentsReaderTests(unittest.TestCase):
             [],
         )
 
+    def test_resolves_leaf_doc_lifecycle_from_matching_enclosure_leaf_id(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        leaf_id = "17_task-reader-top-progress-and-master-content"
+        contract = default_contract(
+            task_name="demo",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=self.coord / "repos" / "repo-a",
+            code_source_branch="ar/demo",
+            code_work_branch="ar/demo-leaf",
+            code_base_commit="abc123",
+            worktree_name=leaf_id,
+            leaf_id=leaf_id,
+            lifecycle_id="LC-LEAF",
+        )
+        write_contract(contract.contract_path, contract)
+        write_task_doc(
+            root,
+            self._doc(
+                slug=leaf_id,
+                kind="subTask",
+                steps=[{"id": "S1", "title": "a", "status": "inProgress"}],
+            ),
+        )
+
+        [node] = read_task_documents(self.coord, enclosures=read_enclosures(self.coord), now=FRESH)
+
+        self.assertEqual(node.lifecycleId, "LC-LEAF")
+        self.assertEqual(node.docPath, (root / f"{leaf_id}.json").as_posix())
+
     def _master(self) -> TaskDocument:
         return TaskDocument.model_validate(
             {
@@ -1583,17 +1618,19 @@ class TaskDocumentsReaderTests(unittest.TestCase):
             }
         )
 
-    def test_master_without_a_leaf_lifecycle_is_skipped(self) -> None:
-        # A master carries no lifecycleId (schema-enforced). Master documents live on the
-        # separate series surface, not the leaf lifecycle task-document surface.
+    def test_master_without_a_lifecycle_projects_as_task_document(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "series"
         write_task_doc(root, self._master())
-        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+        [node] = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        self.assertIsNone(node.lifecycleId)
+        self.assertEqual(node.kind, "master")
+        self.assertEqual(node.title, "Series")
 
     def test_master_stays_on_series_surface(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "series"
         write_task_doc(root, self._master())
-        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+        [task_node] = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        self.assertEqual(task_node.kind, "master")
         [series] = read_series_documents(self.coord, now=FRESH)
         self.assertEqual(series.seriesId, "series")
         self.assertEqual([ref.number for ref in series.subTasks], ["1"])
@@ -1638,15 +1675,31 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                 }
             ),
         )
-        self.assertEqual(read_task_documents(self.coord, enclosures=[], now=FRESH), [])
+        task_nodes = sorted(
+            read_task_documents(self.coord, enclosures=[], now=FRESH),
+            key=lambda node: node.title,
+        )
+        self.assertEqual([node.title for node in task_nodes], ["Child", "Parent"])
         nodes = sorted(read_series_documents(self.coord, now=FRESH), key=lambda node: node.seriesId)
         self.assertEqual([node.seriesId for node in nodes], ["child", "parent"])
 
     def test_missing_tasks_dir_is_empty(self) -> None:
         self.assertEqual(read_task_documents(self.coord / "nope", enclosures=[], now=FRESH), [])
 
+    def test_archived_task_documents_are_not_projected(self) -> None:
+        active = self.coord / "tasks" / "repo-a" / "active"
+        archived = self.coord / "tasks" / "repo-a" / "0_archive" / "archived"
+        write_task_doc(active, self._doc(slug="active", status="Completed"))
+        write_task_doc(archived, self._doc(slug="archived", status="Completed"))
+
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+
+        self.assertEqual([node.title for node in nodes], ["Demo"])
+        self.assertEqual(nodes[0].status, "Completed")
+
     def test_build_analytics_includes_task_documents(self) -> None:
         node = TaskDocNode(
+            id="1",
             lifecycleId="LC1",
             repository="repo-a",
             title="t",

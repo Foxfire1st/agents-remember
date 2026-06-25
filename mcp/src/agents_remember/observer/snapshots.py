@@ -584,12 +584,14 @@ def read_ledger(memory_root: Path, code_root: Path | None = None) -> LedgerNode 
 def read_task_documents(
     coordination_root: Path, *, enclosures: list[EnclosureNode], now: datetime
 ) -> list[TaskDocNode]:
-    """Surface 7 (slices 3c + 6g): per-lifecycle task-document progress.
+    """Surface 7 (slices 3c + 6g): active task-document reader content.
 
     Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
-    source of truth, never the rendered markdown. A ``light``/``subTask`` doc keys
-    on its own ``lifecycleId``. Documents with no resolvable lifecycle, non-task
-    JSON, and malformed files are skipped.
+    source of truth, never the rendered markdown. ``lifecycleId`` is optional
+    runtime context: a ``light``/``subTask`` doc uses its own lifecycle id or the
+    lifecycle of its matching leaf enclosure when present, but planning docs are
+    still projected before an enclosure exists. Master docs are projected here as
+    task documents and still projected on the series surface for compatibility.
     """
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
@@ -604,6 +606,18 @@ def read_task_documents(
         for enclosure in enclosures
         if enclosure.lifecycleId and enclosure.taskRoot
     }
+    lifecycle_by_root_doc = {
+        Path(enclosure.taskRoot).resolve(): enclosure.lifecycleId
+        for enclosure in enclosures
+        if enclosure.lifecycleId
+        and enclosure.taskRoot
+        and enclosure.lifecycleId in {enclosure.taskId, enclosure.taskName}
+    }
+    lifecycle_by_leaf_doc = {
+        (Path(enclosure.taskRoot).resolve(), enclosure.leafId): enclosure.lifecycleId
+        for enclosure in enclosures
+        if enclosure.lifecycleId and enclosure.taskRoot and enclosure.leafId
+    }
     nodes: list[TaskDocNode] = []
     for path in _iter_task_json(tasks_root):
         payload = _read_json(path)
@@ -613,11 +627,15 @@ def read_task_documents(
             doc = TaskDocument.model_validate(payload)
         except ValueError:
             continue
+        lifecycle_id: str | None = None
         if doc.kind == "master":
-            continue
-        lifecycle_id = doc.lifecycleId or _doc_enclosure_lifecycle(doc, lifecycle_by_enclosure)
-        if not lifecycle_id:  # an unpaired master, or a slice not yet bound to a durable worktree
-            continue
+            lifecycle_id = lifecycle_by_root_doc.get(path.parent.resolve())
+        else:
+            lifecycle_id = (
+                doc.lifecycleId
+                or _doc_enclosure_lifecycle(doc, lifecycle_by_enclosure)
+                or lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem))
+            )
         nodes.append(_task_doc_node(doc, lifecycle_id, path, lifecycle_by_dir, now))
     return nodes
 
@@ -636,11 +654,11 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
     """Series surface (R1): per-master series progress, keyed by the task FOLDER.
 
     Reads each ``ar-task-document/v1`` JSON with ``kind == "master"`` under
-    ``tasks/<repo>/<task>/`` -- the disjoint counterpart of :func:`read_task_documents`.
-    Masters carry no ``lifecycleId`` (schema-enforced), so the lifecycle reader skips them
-    and this one selects them: a doc lands in exactly one reader. The master is a checklist
-    -- each subtask is one checkbox and ``doneCount`` counts the *declared* ``Completed``
-    subtasks, authoritative over a slice's own internal steps.
+    ``tasks/<repo>/<task>/``. Masters are also projected by :func:`read_task_documents`
+    so direct task-document selection can render them; this companion surface keeps the
+    folder-keyed series checklist where each subtask is one checkbox and ``doneCount``
+    counts the *declared* ``Completed`` subtasks, authoritative over a slice's own internal
+    steps.
     """
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
@@ -662,6 +680,7 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
                 repository=doc.repo,
                 title=doc.title,
                 status=doc.status,
+                createdAt=doc.createdAt,
                 objective=doc.objective,
                 subTasks=_series_subtask_nodes(path, doc),
                 doneCount=series_done(doc),
@@ -737,7 +756,7 @@ def _ref_lifecycle(
 
 def _task_doc_node(
     doc: TaskDocument,
-    lifecycle_id: str,
+    lifecycle_id: str | None,
     path: Path,
     lifecycle_by_dir: dict[Path, str],
     now: datetime,
@@ -750,6 +769,7 @@ def _task_doc_node(
     base_dir = path.parent
     parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
     return TaskDocNode(
+        id=doc.id,
         lifecycleId=lifecycle_id,
         repository=doc.repo,
         title=doc.title,

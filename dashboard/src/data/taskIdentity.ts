@@ -1,4 +1,61 @@
-import type { EnclosureNode, LifecycleProjection, TaskDocNode } from "../types/projection";
+import type {
+  Analytics,
+  EnclosureNode,
+  LifecycleProjection,
+  TaskDocNode,
+} from "../types/projection";
+
+export type TaskSelection =
+  | { kind: "taskdoc"; docPath: string }
+  | { kind: "series"; seriesId: string }
+  | { kind: "lifecycle"; lifecycleId: string };
+
+const TASKDOC_PREFIX = "taskdoc:";
+const SERIES_PREFIX = "series:";
+const LIFECYCLE_PREFIX = "lifecycle:";
+
+export const taskDocSelectionKey = (docPath: string): string => `${TASKDOC_PREFIX}${docPath}`;
+export const seriesSelectionKey = (seriesId: string): string => `${SERIES_PREFIX}${seriesId}`;
+export const lifecycleSelectionKey = (lifecycleId: string): string =>
+  `${LIFECYCLE_PREFIX}${lifecycleId}`;
+
+export function parseTaskSelection(
+  selectedId: string | null,
+  lifecycles: Record<string, LifecycleProjection>,
+  analytics: Analytics | null | undefined,
+): TaskSelection | null {
+  if (!selectedId) return null;
+  if (selectedId.startsWith(TASKDOC_PREFIX)) {
+    return { kind: "taskdoc", docPath: selectedId.slice(TASKDOC_PREFIX.length) };
+  }
+  if (selectedId.startsWith(SERIES_PREFIX)) {
+    return { kind: "series", seriesId: selectedId.slice(SERIES_PREFIX.length) };
+  }
+  if (selectedId.startsWith(LIFECYCLE_PREFIX)) {
+    return { kind: "lifecycle", lifecycleId: selectedId.slice(LIFECYCLE_PREFIX.length) };
+  }
+  if (lifecycles[selectedId]) return { kind: "lifecycle", lifecycleId: selectedId };
+  if (analytics?.series.some((series) => series.seriesId === selectedId)) {
+    return { kind: "series", seriesId: selectedId };
+  }
+  if (analytics?.taskDocuments.some((doc) => doc.docPath === selectedId)) {
+    return { kind: "taskdoc", docPath: selectedId };
+  }
+  return null;
+}
+
+export function lifecycleIdForSelection(
+  selectedId: string | null,
+  lifecycles: Record<string, LifecycleProjection>,
+  analytics: Analytics | null | undefined,
+): string | undefined {
+  const selection = parseTaskSelection(selectedId, lifecycles, analytics);
+  if (selection?.kind === "lifecycle") return selection.lifecycleId;
+  if (selection?.kind === "taskdoc") {
+    return analytics?.taskDocuments.find((doc) => doc.docPath === selection.docPath)?.lifecycleId;
+  }
+  return undefined;
+}
 
 export function groupEnclosuresByLifecycle(enclosures: EnclosureNode[]): Map<string, EnclosureNode> {
   const byLifecycle = new Map<string, EnclosureNode>();

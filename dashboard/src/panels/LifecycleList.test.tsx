@@ -1,11 +1,12 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import type {
   Analytics,
   EnclosureNode,
   LifecycleProjection,
+  SeriesNode,
   TaskDocNode,
   WorkspaceProjection,
 } from "../types/projection";
@@ -58,8 +59,9 @@ function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure
   } satisfies EnclosureNode;
 }
 
-function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "lifecycleId" | "title">) {
+function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "title">) {
   return {
+    id: "doc",
     repository: "agents-remember",
     status: "inProgress",
     kind: "subTask",
@@ -77,6 +79,22 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "lifecycleId" | 
     sections: [],
     ...over,
   } satisfies TaskDocNode;
+}
+
+function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesId">) {
+  return {
+    repository: "agents-remember",
+    title: "Browser Dashboard Series",
+    status: "inProgress",
+    objective: "",
+    subTasks: [],
+    doneCount: 0,
+    totalCount: 0,
+    sections: [],
+    decisions: [],
+    docPath: "/tasks/260610_browser-dashboard/task.json",
+    ...over,
+  } satisfies SeriesNode;
 }
 
 function seed(projection: WorkspaceProjection) {
@@ -110,7 +128,8 @@ afterEach(() => {
 });
 
 describe("LifecycleList task labels", () => {
-  it("shows the leaf enclosure name for a promoted fleeting lifecycle", () => {
+  it("limits sidebar rows to root docs, enclosure-matched leaves, and enclosure fallbacks", () => {
+    const onSelect = vi.fn();
     seed(
       projection({
         lifecycles: [
@@ -121,9 +140,20 @@ describe("LifecycleList task labels", () => {
             enclosure: "/contracts/15",
           }),
           lifecycle({
-            id: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+            id: "LC-16",
             repoId: "agents-remember",
             enclosure: "/contracts/16",
+          }),
+          lifecycle({
+            id: "LC-EMPTY",
+            repoId: "agents-remember",
+            enclosure: "/contracts/empty",
+          }),
+          lifecycle({
+            id: "LC-ABANDONED",
+            state: "abandoned",
+            phase: "reframe-research",
+            fleeting: true,
           }),
         ],
         enclosures: [
@@ -134,31 +164,134 @@ describe("LifecycleList task labels", () => {
           }),
           enclosure({
             enclosure: "/contracts/16",
-            lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+            lifecycleId: "LC-16",
             leafId: "16_engine-room-stack-entry-height",
+            cleanup: "completed",
+          }),
+          enclosure({
+            enclosure: "/contracts/empty",
+            lifecycleId: "LC-EMPTY",
+            leafId: "empty-state-backdrop-zoom-stability",
           }),
         ],
         analytics: {
           ...EMPTY_ANALYTICS,
           taskDocuments: [
             taskDoc({
+              kind: "master",
               lifecycleId: "260610_BROWSER-DASHBOARD",
-              title: "Lifecycle + Event + Gate Design",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+            taskDoc({
+              id: "15",
+              lifecycleId: "260610_BROWSER-DASHBOARD",
+              title: "Parallel Leaf Enclosure Workflow",
+              docPath: "/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
+            }),
+            taskDoc({
+              id: "16",
+              lifecycleId: "LC-16",
+              title: "Engine Room Stack Entry Height",
+              docPath: "/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json",
             }),
             taskDoc({
               lifecycleId: "260610_BROWSER-DASHBOARD",
-              title: "Parallel Leaf Enclosure Workflow",
+              title: "Lifecycle + Event + Gate Design",
+              docPath: "/tasks/260610_browser-dashboard/01_lifecycle-event-gate-design.json",
+            }),
+            taskDoc({
+              lifecycleId: undefined,
+              title: "Plan Before Worktree",
+              docPath: "/tasks/260610_browser-dashboard/19_plan-before-worktree.json",
+              status: "planning",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "15",
+                  name: "Parallel Leaf Enclosure Workflow",
+                  file: "15_parallel-leaf-enclosure-workflow.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-20T09:00:00+00:00",
+                },
+                {
+                  number: "16",
+                  name: "Engine Room Stack Entry Height",
+                  file: "16_engine-room-stack-entry-height.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-21T09:00:00+00:00",
+                },
+              ],
             }),
           ],
         },
       }),
     );
 
-    const { getByText, queryByText } = render(<LifecycleList selectedId={null} onSelect={() => {}} />);
+    const { getByText, queryByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
 
-    expect(getByText("260610_browser-dashboard")).toBeTruthy();
-    expect(getByText("16_engine-room-stack-entry-height")).toBeTruthy();
-    expect(queryByText("01KVW2FE8MQK6QCQQP0J4SEK3C")).toBeNull();
+    expect(getByText("Tasks · 3")).toBeTruthy();
+    expect(getByText("Browser Dashboard Series")).toBeTruthy();
+    expect(getByText("15. Parallel Leaf Enclosure Workflow")).toBeTruthy();
+    expect(queryByText("16. Engine Room Stack Entry Height")).toBeNull();
+    expect(getByText("empty-state-backdrop-zoom-stability")).toBeTruthy();
+    expect(queryByText("Lifecycle + Event + Gate Design")).toBeNull();
+    expect(queryByText("Plan Before Worktree")).toBeNull();
+    expect(queryByText("LC-ABANDONED")).toBeNull();
+    expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='1']")).toBeTruthy();
+    expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
+      "taskdoc:/tasks/260610_browser-dashboard/task.json",
+    );
+
+    fireEvent.click(getByText("Browser Dashboard Series"));
+    expect(onSelect).toHaveBeenCalledWith("taskdoc:/tasks/260610_browser-dashboard/task.json");
+    fireEvent.click(getByText("15. Parallel Leaf Enclosure Workflow"));
+    expect(onSelect).toHaveBeenCalledWith(
+      "taskdoc:/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
+    );
+
+    fireEvent.click(getByText("BY PHASE"));
+    expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='0']")).toBeTruthy();
+  });
+
+  it("keeps standalone root task documents visible without listing loose leaf docs", () => {
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "light",
+              title: "Standalone Planning Task",
+              docPath: "/tasks/repo-a/plan/task.json",
+              createdAt: "2026-06-20T09:00:00+00:00",
+              status: "planning",
+            }),
+            taskDoc({
+              title: "Loose Leaf Plan",
+              docPath: "/tasks/repo-a/plan/01_plan.json",
+              createdAt: "2026-06-21T09:00:00+00:00",
+              status: "planning",
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText, queryByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+
+    expect(getByText("Standalone Planning Task")).toBeTruthy();
+    expect(queryByText("Loose Leaf Plan")).toBeNull();
+    fireEvent.click(getByText("Standalone Planning Task"));
+    expect(onSelect).toHaveBeenCalledWith("taskdoc:/tasks/repo-a/plan/task.json");
   });
 
   it("exposes the full long task title and row context on title hover", () => {
@@ -182,6 +315,13 @@ describe("LifecycleList task labels", () => {
             },
           }),
         ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/long-title",
+            lifecycleId: "01KVWK7Z8PQZ7BV9T6QPXFHM3B",
+            leafId: "01",
+          }),
+        ],
         analytics: {
           ...EMPTY_ANALYTICS,
           taskDocuments: [
@@ -200,6 +340,12 @@ describe("LifecycleList task labels", () => {
     const { getByText } = render(<LifecycleList selectedId={null} onSelect={() => {}} />);
 
     const title = getByText(longTitle);
+    const row = title.closest("[role='option']");
+    expect(row?.className).toContain("min-w_0");
+    expect(row?.className).toContain("max-w_100%");
+    expect(row?.lastElementChild?.className).toContain("tov_ellipsis");
+    expect(row?.lastElementChild?.className).not.toContain("ml_auto");
+    expect(title.className).toContain("flex_1_1_0");
     expect(title.getAttribute("title")).toContain(`Title: ${longTitle}`);
     expect(title.getAttribute("title")).toContain("Lifecycle: 01KVWK7Z8PQZ7BV9T6QPXFHM3B");
     expect(title.getAttribute("title")).toContain("State: blocked");

@@ -410,17 +410,18 @@ class TaskSectionNode(BaseModel):
 
 
 class TaskDocNode(BaseModel):
-    """A task document's progress, keyed by lifecycle (slice 3c, surface 7).
+    """A task document's progress and reader content (slice 3c, surface 7).
 
     Read from the JSON-primary ``ar-task-document/v1`` document, so the dashboard
-    can show what a lifecycle is doing without opening files on disk. Bounded to
-    the dashboard's needs: the per-step detail stays in the document file, and
-    documents not yet bound to a lifecycle are omitted by the reader.
+    can show what a task is doing without opening files on disk. ``lifecycleId``
+    is runtime attachment, not the admission ticket: planning documents can be
+    projected before an enclosure or lifecycle exists.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    lifecycleId: str
+    id: str
+    lifecycleId: str | None = None
     repository: str
     title: str
     status: str
@@ -481,13 +482,12 @@ class SeriesSectionNode(BaseModel):
 class SeriesNode(BaseModel):
     """A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).
 
-    The master is the series-aggregation entity: it carries no ``lifecycleId``
-    (schema-enforced), so the lifecycle-keyed :class:`TaskDocNode` reader never includes it
-    and a folder-keyed reader projects it here instead. The master is a checklist -- each
-    subtask is one checkbox and ``doneCount`` counts the *declared* ``Completed`` subtasks,
-    authoritative over a slice's own internal steps. Carries the full master render (subTasks
-    + sections + decisions) so the dashboard *is* the reader, symmetric to :class:`TaskDocNode`
-    for a leaf.
+    The master is also projected as a :class:`TaskDocNode` for direct document selection.
+    ``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master
+    checklist where each subtask is one checkbox and ``doneCount`` counts the *declared*
+    ``Completed`` subtasks, authoritative over a slice's own internal steps. Carries the
+    full master render (subTasks + sections + decisions) so older clients can still render
+    the series reader.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -496,6 +496,7 @@ class SeriesNode(BaseModel):
     repository: str
     title: str
     status: str
+    createdAt: str = ""
     objective: str = ""
     subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
     doneCount: int = 0
