@@ -12,12 +12,13 @@ export interface GateDecisionOptions {
 }
 
 export async function postGateDecision(
-  lifecycleId: string,
+  lifecycleId: string | null | undefined,
   verb: string,
   options: GateDecisionOptions = {},
 ): Promise<GateDecisionStatus> {
   try {
-    const body: Record<string, string> = { target: lifecycleId };
+    const body: Record<string, string> = {};
+    if (lifecycleId) body.target = lifecycleId;
     if (options.gateId) body.gateId = options.gateId;
     if (options.note) body.note = options.note;
     const res = await fetch(`/api/actions/${verb}`, {

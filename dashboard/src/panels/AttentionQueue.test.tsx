@@ -123,4 +123,37 @@ describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
       }),
     );
   });
+
+  it("clears stale gate items that have no lifecycle id", async () => {
+    vi.mocked(postGateDecision).mockResolvedValue("recorded");
+    const base = GALLERY.find((entry) => entry.name === "engine-fleet")?.projection;
+    if (!base?.analytics) throw new Error("fixture missing analytics");
+    dashboardStore.getState().applySnapshot({
+      ...base,
+      analytics: {
+        ...base.analytics,
+        attentionQueue: [
+          {
+            id: "gate:G-stale",
+            kind: "gate-open",
+            severity: "warn",
+            lane: "lifecycle",
+            title: "Gate - agent-question",
+            detail: "awaiting your decision",
+            gateId: "G-stale",
+          },
+        ],
+      },
+    });
+
+    const { getByTestId } = render(<AttentionQueue onSelect={() => {}} />);
+    fireEvent.click(getByTestId("attn-clear"));
+
+    await waitFor(() =>
+      expect(postGateDecision).toHaveBeenCalledWith(null, "cancel", {
+        gateId: "G-stale",
+        note: "Cleared from attention queue.",
+      }),
+    );
+  });
 });

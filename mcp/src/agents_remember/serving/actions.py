@@ -43,7 +43,7 @@ class ActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    target: str
+    target: str | None = None
     actor: Actor = "developer"
     gateId: str | None = None
     note: str | None = None
@@ -63,7 +63,7 @@ class GateDecisionIntent:
     decision -- the pure evaluator never touches the store.
     """
 
-    lifecycle_id: str
+    lifecycle_id: str | None
     decision: str
     gate_id: str | None = None
     note: str | None = None
@@ -98,7 +98,7 @@ def _find_actions(
 def evaluate_action(
     projection: WorkspaceProjection,
     action: str,
-    target: str,
+    target: str | None,
     *,
     actor: str,
     now: str,
@@ -116,13 +116,23 @@ def evaluate_action(
                     "target": target,
                 },
             )
+        if target is None and not (action == "cancel" and gate_id):
+            return ActionOutcome(
+                400,
+                {
+                    "status": "missing-target",
+                    "detail": "gate decisions require a lifecycle target unless cancelling a gate id",
+                    "action": action,
+                },
+            )
         intent: dict[str, Any] = {
             "actor": actor,
             "source": "dashboard",
             "ts": now,
             "action": action,
-            "target": target,
         }
+        if target is not None:
+            intent["target"] = target
         if gate_id is not None:
             intent["gateId"] = gate_id
         if note is not None:
@@ -136,6 +146,11 @@ def evaluate_action(
                 gate_id=gate_id,
                 note=note,
             ),
+        )
+    if target is None:
+        return ActionOutcome(
+            400,
+            {"status": "missing-target", "detail": "action requires a target", "action": action},
         )
     actions = _find_actions(projection, target)
     if actions is None:

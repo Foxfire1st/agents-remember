@@ -37,8 +37,10 @@ from agents_remember.controlplane.records import (
     expire_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.observer.ambient import ambient
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
+from agents_remember.observer.lifecycle_state import LifecycleError
 from agents_remember.observer.ulid import new_ulid
 
 from .base import _tool_payload
@@ -53,6 +55,18 @@ def _store(config: McpRuntimeConfig) -> GateStore:
 
 def _inbox_store(config: McpRuntimeConfig) -> OperatorInboxStore:
     return OperatorInboxStore(observer_root(config))
+
+
+def _resolve_gate_lifecycle_id(lifecycle_id: str | None) -> str:
+    if lifecycle_id is not None:
+        if lifecycle_id.strip():
+            return lifecycle_id
+        raise ValueError("gate_create lifecycle_id must be non-empty when supplied")
+    amb = ambient()
+    current = amb.current if amb is not None else None
+    if current is None:
+        raise LifecycleError("gate_create requires an active lifecycle or explicit lifecycle_id")
+    return current.id
 
 
 def _entry_payload(entry: OperatorInboxEntry) -> dict[str, Any]:
@@ -94,13 +108,13 @@ def gate_create_payload(
 ) -> dict[str, Any]:
     now = now_iso()
     store = _store(config)
-    if lifecycle_id is not None:
-        for current in store.current(lifecycle_id).values():
-            if current.state == "open":
-                store.append(expire_gate(current, now=now))
+    gate_lifecycle_id = _resolve_gate_lifecycle_id(lifecycle_id)
+    for current in store.current(gate_lifecycle_id).values():
+        if current.state == "open":
+            store.append(expire_gate(current, now=now))
     gate = create_gate(
         kind=coerce_gate_kind(kind),
-        lifecycle_id=lifecycle_id,
+        lifecycle_id=gate_lifecycle_id,
         gate_id=new_ulid(),
         now=now,
         enclosure=enclosure,

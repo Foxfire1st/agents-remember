@@ -28,6 +28,26 @@ describe("postGateDecision", () => {
     });
   });
 
+  it("omits target for gate-id-only cancel", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 202 }));
+    vi.stubGlobal("fetch", fetch);
+
+    const status = await postGateDecision(null, "cancel", {
+      gateId: "G1",
+      note: "Cleared from attention queue.",
+    });
+
+    expect(status).toBe("recorded");
+    expect(fetch).toHaveBeenCalledWith("/api/actions/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gateId: "G1",
+        note: "Cleared from attention queue.",
+      }),
+    });
+  });
+
   it("distinguishes stale gates from missing open gates", async () => {
     vi.stubGlobal(
       "fetch",

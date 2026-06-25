@@ -97,6 +97,31 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(created["state"], "open")
         return created["gateId"]
 
+    def test_create_without_lifecycle_uses_active_ambient(self) -> None:
+        with mock.patch.object(
+            gates,
+            "ambient",
+            return_value=SimpleNamespace(current=SimpleNamespace(id="L-ACTIVE")),
+        ):
+            created = gates.gate_create_payload(
+                None,  # type: ignore[arg-type]
+                kind="agent-question",
+                lifecycle_id=None,
+            )
+
+        self.assertEqual(created["lifecycleId"], "L-ACTIVE")
+        self.assertEqual(len(self.store.current("L-ACTIVE")), 1)
+        self.assertEqual(self.store.current(None), {})
+
+    def test_create_without_lifecycle_requires_active_ambient(self) -> None:
+        with mock.patch.object(gates, "ambient", return_value=None):
+            with self.assertRaisesRegex(Exception, "active lifecycle"):
+                gates.gate_create_payload(
+                    None,  # type: ignore[arg-type]
+                    kind="agent-question",
+                    lifecycle_id=None,
+                )
+
     def test_create_then_decide_records_attribution(self) -> None:
         gate_id = self._create()
         decided = gates.gate_decide_payload(

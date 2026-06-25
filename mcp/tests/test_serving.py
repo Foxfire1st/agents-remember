@@ -308,6 +308,27 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(outcome.body["status"], "missing-rejection-reason")
         self.assertIsNone(outcome.gate_decision)
 
+    def test_evaluate_action_allows_gate_id_only_cancel(self) -> None:
+        outcome = evaluate_action(
+            _projection(),
+            "cancel",
+            None,
+            actor="developer",
+            now=_TS,
+            gate_id="G1",
+            note="Cleared from attention queue.",
+        )
+        self.assertEqual(outcome.status_code, 202)
+        self.assertEqual(
+            outcome.gate_decision,
+            GateDecisionIntent(
+                lifecycle_id=None,
+                decision="cancel",
+                gate_id="G1",
+                note="Cleared from attention queue.",
+            ),
+        )
+
     def test_evaluate_action_transition_keeps_4b_skeleton(self) -> None:
         # a non-gate action on an unknown target stays the 4b no-mutation skeleton
         outcome = evaluate_action(_projection(), "integrate", "nope", actor="developer", now=_TS)
@@ -375,6 +396,21 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.json()["gate"]["state"], "cancelled")
         self.assertEqual(store.current("L1"), {})
+
+    def test_api_action_cancel_deletes_workspace_gate_by_id_only(self) -> None:
+        store = GateStore(observer_logs_root(self.tmp))
+        store.append(
+            create_gate(kind="agent-question", lifecycle_id=None, gate_id="G1", now=_FRESH_GATE_TS)
+        )
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/cancel",
+                json={"gateId": "G1", "note": "Cleared from attention queue."},
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["gate"]["state"], "cancelled")
+        self.assertEqual(store.current(None), {})
 
     def test_api_operator_inbox_records_developer_response(self) -> None:
         app = create_app(_config(self.tmp), interval=100)

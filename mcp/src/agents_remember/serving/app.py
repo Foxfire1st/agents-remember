@@ -59,7 +59,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle
+from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
@@ -342,15 +342,34 @@ def create_app(
             # developer-attributed -- un-forgeable vs. the agent's model-attributed
             # path, and what server-side closeout enforcement (slice 6b) consumes.
             try:
-                gate = gate_decide_for_lifecycle(
-                    config,
-                    lifecycle_id=outcome.gate_decision.lifecycle_id,
-                    decision=outcome.gate_decision.decision,
-                    decided_by="developer",
-                    decided_via="dashboard",
-                    expected_gate_id=outcome.gate_decision.gate_id,
-                    note=outcome.gate_decision.note,
-                )
+                if outcome.gate_decision.lifecycle_id is None:
+                    if outcome.gate_decision.gate_id is None:
+                        return JSONResponse(
+                            content={
+                                "status": "missing-gate-id",
+                                "detail": "gate-id-only decisions require gateId",
+                            },
+                            status_code=400,
+                        )
+                    gate = gate_decide_payload(
+                        config,
+                        gate_id=outcome.gate_decision.gate_id,
+                        lifecycle_id=None,
+                        decision=outcome.gate_decision.decision,
+                        decided_by="developer",
+                        decided_via="dashboard",
+                        note=outcome.gate_decision.note,
+                    )
+                else:
+                    gate = gate_decide_for_lifecycle(
+                        config,
+                        lifecycle_id=outcome.gate_decision.lifecycle_id,
+                        decision=outcome.gate_decision.decision,
+                        decided_by="developer",
+                        decided_via="dashboard",
+                        expected_gate_id=outcome.gate_decision.gate_id,
+                        note=outcome.gate_decision.note,
+                    )
             except KeyError as exc:
                 status = "stale-gate" if outcome.gate_decision.gate_id else "no-open-gate"
                 return JSONResponse(

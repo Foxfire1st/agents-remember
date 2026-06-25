@@ -85,13 +85,16 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
   const queue = useDashboard(selectQueue);
   const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
   const [clearing, setClearing] = useState(false);
-  const gateItems = queue.filter((item) => item.kind === "gate-open" && item.lifecycleId && item.gateId);
+  const gateItems = queue.filter(
+    (item): item is AttentionItem & { gateId: string } =>
+      item.kind === "gate-open" && Boolean(item.gateId),
+  );
   const clearGates = () => {
     if (clearing || gateItems.length === 0) return;
     setClearing(true);
     void Promise.all(
       gateItems.map((item) =>
-        postGateDecision(item.lifecycleId ?? "", "cancel", {
+        postGateDecision(item.lifecycleId ?? null, "cancel", {
           gateId: item.gateId,
           note: "Cleared from attention queue.",
         }),
