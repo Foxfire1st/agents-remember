@@ -40,12 +40,13 @@ records the developer's explicit commit approval. Agents must not treat
 implementation approval, a previous "looks good", or their own judgment as
 commit approval.
 
-The relay is its own turn, per the `l-01-session-job-lifecycle` skill gate
-protocol: deliver the preview facts and proposed messages as plain output
-ending with the approval question, and never invoke `worktree_closeout_apply`
-— or any approval-prompting mechanism — in the same turn as the relay. A
-report attached to its own approval prompt is a report the developer never
-sees.
+The relay follows the `l-01-session-job-lifecycle` skill gate protocol: run the
+preview/dry-run first, deliver the preview facts and proposed messages as plain
+chat output ending with the approval question, then raise `lifecycle_gate` when
+using the dashboard gate surface. Never invoke `worktree_closeout_apply` before
+the developer response is handled and the lifecycle is cleared with
+`lifecycle_resume()`. A report attached to a hidden approval prompt is a report
+the developer never sees.
 
 ## Server-Side Gate Enforcement
 
@@ -57,7 +58,7 @@ mutating tool — not a UI button — is the security boundary.
 `closeout-approval` **is** the commit gate — closeout is the single
 commit-of-record for code, memory, and ledger, so there is no separate
 `commit-approval` kind; every commit routes through this gate. The dashboard
-junction uses `lifecycle_gate` on top of the two-turn relay above.
+junction uses the preview/dry-run -> chat report -> `lifecycle_gate` order above.
 
 How it binds:
 

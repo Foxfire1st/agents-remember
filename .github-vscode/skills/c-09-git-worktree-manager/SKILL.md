@@ -96,8 +96,8 @@ visible: leaf work branches integrate into the pushable integration/source branc
 recorded by their enclosure; protected targets are reached later through the
 repo's PR flow.
 
-Raise the intent junction with `lifecycle_gate` in addition to the two-turn
-report→action chat protocol, not instead of it:
+Run the applicable dry-run/preflight first, report the intent packet in chat,
+then raise the intent junction with `lifecycle_gate`:
 
 ```text
 lifecycle_gate(
@@ -190,9 +190,10 @@ moved since task start.
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
 
-Raise the integration junction with `lifecycle_gate(kind="integration-approval",
-ask=..., packet={ ...the integration plan... })`, on top of the two-turn
-report→action chat protocol. The agent never self-approves — a model-attributed
+Run `worktree_integrate(..., dry_run=true)` first, report the preview in chat,
+then raise the integration junction with
+`lifecycle_gate(kind="integration-approval", ask=..., packet={ ...the integration plan... })`.
+The agent never self-approves — a model-attributed
 decision is not a developer approval. Once the developer response is handled, the
 agent **always** sends `lifecycle_resume()` to clear the block, then runs
 `worktree_integrate`.
@@ -216,9 +217,12 @@ After successful integration, complete any repo-specific landing tail first: pus
 
 Lifecycle finalization is explicitly human-gated and runs only after closeout, integration, and any PR/carryover tail are complete. It proves the current parent-child branch edge, then removes the recorded code and memory worktrees, deletes local task branches only when Git can prove they are merged, removes empty worktree group folders when safe, records `cleanup: completed` in the contract, and updates task documents.
 
-Raise the cleanup junction with `lifecycle_gate(kind="cleanup-approval",
-ask=..., packet={ ...what cleanup removes... })`, alongside the two-turn
-report→action chat protocol: run `lifecycle_finalize_task(..., dry_run=true)`, relay the landed-commit proof, cleanup plan, and task-document updates, then ask whether to finalize the task. A model-attributed decision is never a developer approval. Once the developer response is handled, the agent **always** sends `lifecycle_resume()` to clear the block, then runs `lifecycle_finalize_task`.
+Run `lifecycle_finalize_task(..., dry_run=true)` first, relay the landed-commit
+proof, cleanup plan, and task-document updates in chat, then raise the cleanup
+junction with `lifecycle_gate(kind="cleanup-approval", ask=..., packet={ ...what cleanup removes... })`.
+A model-attributed decision is never a developer approval. Once the developer
+response is handled, the agent **always** sends `lifecycle_resume()` to clear
+the block, then runs `lifecycle_finalize_task`.
 
 `lifecycle_finalize_task` proves one immediate edge: the contract's landed code
 commit (`integrated_code_commit` when present, otherwise `code_commit`) must be an

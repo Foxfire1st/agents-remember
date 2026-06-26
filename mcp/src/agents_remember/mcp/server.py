@@ -900,8 +900,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         required_decision: list[str] | None = None,
     ) -> dict[str, Any]:
         """Public lifecycle-gate junction for agents. Creates the durable typed gate,
-        blocks the active lifecycle with the developer-facing ask, and initializes the
-        wait/response state in one operation. kind is the dashboard junction
+        blocks the active lifecycle with the developer-facing ask, and waits for the
+        developer decision or gate-specific response in one operation. kind is the dashboard junction
         (plan-approval, worktree-intent, closeout-approval, etc.); ask.kind is the
         answer shape (decision, question, conflict). Do not add a separate wait call
         as live gate choreography."""

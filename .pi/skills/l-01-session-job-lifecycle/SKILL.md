@@ -25,17 +25,21 @@ or build-mode decisions proceed.
                                                    +-- research-only (e.g. investigation, code questions...)
 ```
 
-## Gate Protocol — Report Turn, Then Action Turn
+## Gate Protocol — Dry-run action => "Report" Action => "Raise" Action
 
-Every lifecycle gate — reframe agreement, plan gate, worktree intent, commit
-approval, push approval, integration, cleanup/finalization — is **two turns, never one**:
+Every lifecycle gate/turn-end — reframe agreement, plan gate, worktree intent, commit
+approval, push approval, integration, cleanup/finalization, regular turn-end — is **two actions, never one**:
 
-1. **Report turn.** Deliver the complete gate report as plain assistant output
+1. **Dry-run action.** Run applicable MCP tools in `dry-run` for the gate. If dry run succeeds,
+   proceed with the report action. If dry run fails, try to ammend the issue first before reporting failure.
+2. **Report action.** Deliver the complete gate report as plain assistant output
    (the reframe, the plan, the intent packet, or the closeout relay with
    preview facts, quality results, proposed commit messages, and
-   attestations), and end the turn with the approval question as the last
-   line of prose.
-2. **Action turn.** Invoke the gated tool `lifecycle_gate`.
+   attestations), add the approval question as the last
+   line of prose. Do not end the turn until `lifecycle_gate` is being invoked!
+3. **Raise action.** Invoke the gated tool `lifecycle_gate` to bring the approval request to the developer.
+
+Use the `dry-run` step to verify that the planned tool call will succeed for example closeout`
 
 The report turn must not contain anything that can raise an approval mechanism
 over the text: no structured question widget, no mutating tool call, no
@@ -43,7 +47,10 @@ permission-triggering operation. Harnesses render approval prompts over or
 instead of same-turn prose, so a report attached to its own approval prompt is
 a report the developer never sees.
 
-Junction → durable gate `kind` (these are the kinds the dashboard renders; name
+Your turn only ends after raising the `lifecycle_gate`. The developer cannot
+see your response before using the tool. Which means you cannot complete the task.
+
+Junction → Dry-run → Report → durable gate `kind` (these are the kinds the dashboard renders; name
 the right one per junction):
 
 | Junction                         | Durable gate `kind`                                          | Skill that raises it                                       |
@@ -74,15 +81,15 @@ resumable across chat deaths (design `docs/design/observable-lifecycle.md`). The
 model **never handles a lifecycle id** — identity is server-side, anchored in the
 worktree contract.
 
-| When (phase)                           | Signal                                                                                                                                                                  | Why                                                                                                                                                       |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Trust Checkpoint passes (managed repo) | `lifecycle_start`                                                                                                                                                       | Begin a **fleeting** lifecycle (guarded: one per session; takes no id).                                                                                   |
-| Entering each phase                    | `lifecycle_phase`                                                                                                                                                       | Move the orthogonal phase axis (`request`/`trust-checkpoint`/`reframe-research`/`decide`/`build`/`close`).                                                |
-| At a gate (reframe, plan, commit, …)   | `lifecycle_gate(kind=<junction-kind>, ask=…, packet=…)`, then `lifecycle_resume` after the developer decides or sends a handled Chat response | Create the durable gate, block the lifecycle with the ask, initialize the wait state, then clear the lifecycle once the developer response is handled. |
-| `worktree_start` (Decide → Build)      | _(promotion — automatic)_                                                                                                                                               | The fleeting lifecycle becomes **persistent**, anchored in the contract; no separate signal.                                                              |
-| Resuming an existing task              | `worktree_attach`                                                                                                                                                       | Re-adopts the contract's lifecycle (contract-resolved); the model passes no id.                                                                           |
-| Leaving unsaved fleeting work          | `switch_lifecycle` (`on_unsaved=save`\|`discard`)                                                                                                                       | The save gate: promote it or abandon it — never dropped silently.                                                                                         |
-| Close                                  | `lifecycle_end` (`completed`\|`abandoned`)                                                                                                                              | The terminal record.                                                                                                                                      |
+| When (phase)                           | Signal                                                                                                                                        | Why                                                                                                                                                                                                                 |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trust Checkpoint passes (managed repo) | `lifecycle_start`                                                                                                                             | Begin a **fleeting** lifecycle (guarded: one per session; takes no id).                                                                                                                                             |
+| Entering each phase                    | `lifecycle_phase`                                                                                                                             | Move the orthogonal phase axis (`request`/`trust-checkpoint`/`reframe-research`/`decide`/`build`/`close`).                                                                                                          |
+| At a gate (reframe, plan, commit, …)   | `lifecycle_gate(kind=<junction-kind>, ask=…, packet=…)`, then `lifecycle_resume` after the developer decides or sends a handled Chat response | Create the durable gate, block the lifecycle with the ask, and keep the tool call waiting until a developer decision or gate-specific inbox response exists; then clear the lifecycle once the response is handled. |
+| `worktree_start` (Decide → Build)      | _(promotion — automatic)_                                                                                                                     | The fleeting lifecycle becomes **persistent**, anchored in the contract; no separate signal.                                                                                                                        |
+| Resuming an existing task              | `worktree_attach`                                                                                                                             | Re-adopts the contract's lifecycle (contract-resolved); the model passes no id.                                                                                                                                     |
+| Leaving unsaved fleeting work          | `switch_lifecycle` (`on_unsaved=save`\|`discard`)                                                                                             | The save gate: promote it or abandon it — never dropped silently.                                                                                                                                                   |
+| Close                                  | `lifecycle_end` (`completed`\|`abandoned`)                                                                                                    | The terminal record.                                                                                                                                                                                                |
 
 Rules: `lifecycle_start` is guarded (one active lifecycle, no id). `paused` is
 **system-owned** — there is no pause signal. A tool call outside any lifecycle is

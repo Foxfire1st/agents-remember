@@ -275,12 +275,31 @@ def _gate_payloads(config) -> dict[str, dict]:
         )
     )
     try:
-        tools.lifecycle_start_payload()
+        started = tools.lifecycle_start_payload()
+
+        def approve_lifecycle_gate(_seconds: float) -> None:
+            open_gates = [
+                gate
+                for gate in tools.gate_list_payload(
+                    config, lifecycle_id=started["lifecycleId"]
+                )["gates"]
+                if gate["state"] == "open"
+            ]
+            tools.gate_decide_payload(
+                config,
+                gate_id=open_gates[0]["id"],
+                lifecycle_id=started["lifecycleId"],
+                decision="approve",
+                decided_by="developer",
+                decided_via="dashboard",
+            )
+
         lifecycle_gate = tools.lifecycle_gate_payload(
             config,
             kind="agent-question",
             ask={"kind": "question", "prompt": "Continue?", "options": ["yes", "no"]},
             packet={"summary": "demo gate"},
+            sleep=approve_lifecycle_gate,
         )
     finally:
         reset_ambient()

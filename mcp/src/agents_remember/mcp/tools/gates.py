@@ -8,7 +8,8 @@ onto the active lifecycle like any other tool).
 ``gate_create_payload``, ``gate_wait_payload``, and
 ``gate_response_wait_payload`` remain lower-level compatibility builders for
 internal callers and tests. The agent-facing MCP junction is
-``lifecycle_gate``.
+``lifecycle_gate``; its public default blocks until a developer decision or a
+gate-specific inbox response is available.
 
 Attribution rule: the MCP server registers ``gate_decide`` with
 ``decided_by="model"`` / ``decided_via="cli"`` -- the agent records its own
@@ -151,6 +152,10 @@ def lifecycle_gate_payload(
     repo_id: str | None = None,
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
+    timeout_seconds: float | None = None,
+    poll_seconds: float = GATE_RESPONSE_WAIT_POLL_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     amb = require_ambient()
     current = amb.current
@@ -201,20 +206,36 @@ def lifecycle_gate_payload(
     )
     store.append(gate)
     blocked = amb.block(kind=ask_kind, prompt=prompt, options=options)
+    wait_result = gate_response_wait_payload(
+        config,
+        gate_id=gate.id,
+        lifecycle_id=blocked.id,
+        timeout_seconds=timeout_seconds,
+        poll_seconds=poll_seconds,
+        allow_ungated_entries=False,
+        sleep=sleep,
+        monotonic=monotonic,
+    )
     wait = {
-        "state": "initialized",
-        "gateId": gate.id,
+        "state": wait_result["state"],
+        "gateId": wait_result["gateId"],
         "lifecycleId": blocked.id,
-        "timeoutSeconds": GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
-        "pollSeconds": GATE_RESPONSE_WAIT_POLL_SECONDS,
+        "timedOut": wait_result["timedOut"],
+        "entryCount": wait_result.get("entryCount", 0),
+        "entries": wait_result.get("entries", []),
+        "timeoutSeconds": timeout_seconds,
+        "pollSeconds": poll_seconds,
     }
+    for key in ("decidedBy", "decidedVia", "decisionNote"):
+        if wait_result.get(key) is not None:
+            wait[key] = wait_result[key]
     payload: dict[str, Any] = {
         "ok": True,
         "operation": "lifecycle_gate",
         "gate": {
             "id": gate.id,
             "kind": gate.kind,
-            "state": gate.state,
+            "state": wait_result["state"],
             "lifecycleId": gate.lifecycleId,
         },
         "lifecycle": {
@@ -388,20 +409,22 @@ def gate_response_wait_payload(
     gate_id: str,
     lifecycle_id: str | None,
     agent_id: str | None = None,
-    timeout_seconds: float = GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
     poll_seconds: float = GATE_RESPONSE_WAIT_POLL_SECONDS,
+    allow_ungated_entries: bool = True,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Bounded wait for either a gate decision or a dashboard Chat inbox entry.
 
-    The helper owns the normal wait window: one call polls every five seconds
-    for up to five minutes by default. Returned inbox entries are not consumed;
-    call ``operator_inbox_consume`` after reading each handled entry.
+    The lower-level helper owns the compatibility wait window: one call polls
+    every five seconds for up to five minutes by default. Pass
+    ``timeout_seconds=None`` for a blocking wait. Returned inbox entries are not
+    consumed; call ``operator_inbox_consume`` after reading each handled entry.
     """
     gate_store = _store(config)
     inbox_store = _inbox_store(config)
-    deadline = monotonic() + timeout_seconds
+    deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
     while True:
         gate = gate_store.current(lifecycle_id).get(gate_id)
         if gate is None:
@@ -411,7 +434,8 @@ def gate_response_wait_payload(
             entries = [
                 entry
                 for entry in inbox_store.list_pending(lifecycle_id=lifecycle_id, agent_id=agent_id)
-                if entry.gateId in (None, gate_id)
+                if entry.gateId == gate_id
+                or (allow_ungated_entries and entry.gateId is None)
             ]
         if gate.state != "open" or entries:
             payload = _tool_payload(
@@ -430,7 +454,7 @@ def gate_response_wait_payload(
             if gate.state != "open" and delete_after_wait(gate):
                 gate_store.delete(gate.id, lifecycle_id)
             return payload
-        if monotonic() >= deadline:
+        if deadline is not None and monotonic() >= deadline:
             return _tool_payload(
                 "gate_response_wait",
                 {

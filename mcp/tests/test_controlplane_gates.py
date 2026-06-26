@@ -155,13 +155,14 @@ class GateToolTests(unittest.TestCase):
         self.assertFalse(result["timedOut"])
         self.assertEqual(result["state"], "expired")
 
-    def test_lifecycle_gate_creates_gate_blocks_and_initializes_wait(self) -> None:
+    def test_lifecycle_gate_creates_gate_blocks_and_waits_until_timeout(self) -> None:
         first = self._create("agent-question")
         blocked = SimpleNamespace(id="L1", state="blocked", phase="build")
         lifecycle = SimpleNamespace(
             current=SimpleNamespace(id="L1", state="running"),
             block=mock.Mock(return_value=blocked),
         )
+        clock = iter([0.0, 0.0])
 
         with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
             result = gates.lifecycle_gate_payload(
@@ -170,13 +171,17 @@ class GateToolTests(unittest.TestCase):
                 ask={"kind": "decision", "prompt": "Approve?", "options": ["approve", "revise"]},
                 lifecycle_id="L1",
                 packet={"summary": "plan"},
+                timeout_seconds=0.0,
+                sleep=lambda _s: None,
+                monotonic=lambda: next(clock),
             )
 
         self.assertEqual(result["operation"], "lifecycle_gate")
         self.assertEqual(result["gate"]["kind"], "plan-approval")
         self.assertEqual(result["gate"]["state"], "open")
         self.assertEqual(result["lifecycle"]["state"], "blocked")
-        self.assertEqual(result["wait"]["state"], "initialized")
+        self.assertEqual(result["wait"]["state"], "open")
+        self.assertTrue(result["wait"]["timedOut"])
         self.assertEqual(result["wait"]["gateId"], result["gate"]["id"])
         self.assertEqual(result["ask"]["kind"], "decision")
         lifecycle.block.assert_called_once_with(
@@ -185,6 +190,95 @@ class GateToolTests(unittest.TestCase):
         current = self.store.current("L1")
         self.assertEqual(current[first].state, "expired")
         self.assertEqual(current[result["gate"]["id"]].state, "open")
+
+    def test_lifecycle_gate_default_returns_after_developer_decision(self) -> None:
+        blocked = SimpleNamespace(id="L1", state="blocked", phase="build")
+        lifecycle = SimpleNamespace(
+            current=SimpleNamespace(id="L1", state="running"),
+            block=mock.Mock(return_value=blocked),
+        )
+
+        def approve_on_sleep(_seconds: float) -> None:
+            open_gates = [
+                gate for gate in self.store.current("L1").values() if gate.state == "open"
+            ]
+            self.assertEqual(len(open_gates), 1)
+            self.store.append(
+                decide_gate(
+                    open_gates[0],
+                    decision="approve",
+                    by="developer",
+                    via="dashboard",
+                    note="approved from dashboard",
+                    now=T2,
+                )
+            )
+
+        with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
+            result = gates.lifecycle_gate_payload(
+                None,  # type: ignore[arg-type]
+                kind="plan-approval",
+                ask={"kind": "decision", "prompt": "Approve?", "options": ["approve"]},
+                lifecycle_id="L1",
+                sleep=approve_on_sleep,
+            )
+
+        self.assertEqual(result["gate"]["state"], "approved")
+        self.assertFalse(result["wait"]["timedOut"])
+        self.assertEqual(result["wait"]["state"], "approved")
+        self.assertEqual(result["wait"]["decidedBy"], "developer")
+        self.assertEqual(result["wait"]["decisionNote"], "approved from dashboard")
+
+    def test_lifecycle_gate_ignores_ungated_lifecycle_inbox_entry(self) -> None:
+        self.inbox.append(
+            create_operator_inbox_entry(
+                entry_id="I1",
+                now=T1,
+                lifecycle_id="L1",
+                agent_id=None,
+                gate_id=None,
+                ask="Previous prompt",
+                response="Previous response",
+                created_by="developer",
+                created_via="dashboard",
+            )
+        )
+        blocked = SimpleNamespace(id="L1", state="blocked", phase="build")
+        lifecycle = SimpleNamespace(
+            current=SimpleNamespace(id="L1", state="running"),
+            block=mock.Mock(return_value=blocked),
+        )
+        sleeps: list[float] = []
+
+        def approve_on_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            open_gates = [
+                gate for gate in self.store.current("L1").values() if gate.state == "open"
+            ]
+            self.assertEqual(len(open_gates), 1)
+            self.store.append(
+                decide_gate(
+                    open_gates[0],
+                    decision="approve",
+                    by="developer",
+                    via="dashboard",
+                    note=None,
+                    now=T2,
+                )
+            )
+
+        with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
+            result = gates.lifecycle_gate_payload(
+                None,  # type: ignore[arg-type]
+                kind="plan-approval",
+                ask={"kind": "decision", "prompt": "Approve?", "options": ["approve"]},
+                lifecycle_id="L1",
+                sleep=approve_on_sleep,
+            )
+
+        self.assertEqual(sleeps, [5.0])
+        self.assertEqual(result["gate"]["state"], "approved")
+        self.assertEqual(result["wait"]["entries"], [])
 
     def test_lifecycle_gate_rejects_explicit_lifecycle_mismatch(self) -> None:
         lifecycle = SimpleNamespace(current=SimpleNamespace(id="L1", state="running"))
@@ -212,6 +306,9 @@ class GateToolTests(unittest.TestCase):
             kind="plan-approval",
             ask={"kind": "decision", "prompt": "Approve?", "options": ["approve"]},
             packet={"summary": "plan"},
+            timeout_seconds=0.0,
+            sleep=lambda _s: None,
+            monotonic=lambda: 0.0,
         )
 
         lifecycle_id = started["lifecycleId"]
