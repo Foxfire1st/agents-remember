@@ -8,13 +8,14 @@ Three layers, mirroring the host's one impure seam:
 * **Real PTY** -- a spawner that unwraps the tmux argv and runs the bare harness on a real
   :func:`pty.openpty` master drives write/read/resize/exit against the kernel (no tmux needed).
 * **tmux integration** -- one end-to-end test through the real default spawner, skipped when
-  ``tmux`` is unavailable (CI-safe, per the slice plan).
+  ``tmux`` or a tmux-usable terminal capability is unavailable (CI-safe, per the slice plan).
 """
 
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import importlib
 import os
 import select
 import shutil
@@ -42,6 +43,25 @@ from agents_remember.serving.terminal import (
 _HAS_TMUX = shutil.which("tmux") is not None
 _HAS_CAT = shutil.which("cat") is not None
 _HAS_TRUE = shutil.which("true") is not None
+
+
+def _term_supports_clear() -> bool:
+    """Whether tmux can initialize against the current terminal database."""
+    term = os.environ.get("TERM")
+    if not term:
+        return False
+    try:
+        curses = importlib.import_module("curses")
+    except ImportError:
+        return False
+    try:
+        curses.setupterm()
+    except curses.error:
+        return False
+    return curses.tigetstr("clear") is not None
+
+
+_HAS_TMUX_TERMINAL = _HAS_TMUX and _term_supports_clear()
 
 
 class _FakeChild:
@@ -309,7 +329,10 @@ class TerminalHostSuspendScopingTests(unittest.TestCase):
             self.host.write("ghost", b"\x1a\x1a")
 
 
-@unittest.skipUnless(_HAS_TMUX, "needs tmux for the end-to-end persistence path")
+@unittest.skipUnless(
+    _HAS_TMUX_TERMINAL,
+    "needs tmux and a TERM entry with clear capability for the end-to-end persistence path",
+)
 class TerminalHostTmuxIntegrationTests(unittest.TestCase):
     """The full default spawner: a real tmux-wrapped PTY running a marker-printing child."""
 
