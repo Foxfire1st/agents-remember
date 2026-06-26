@@ -558,6 +558,7 @@ class ControllerTests(unittest.TestCase):
         fields: dict[str, Any] | None = None,
         step: dict[str, Any] | None = None,
         decision: dict[str, Any] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         return task_doc_tool(
             self.cfg,
@@ -568,6 +569,7 @@ class ControllerTests(unittest.TestCase):
             fields=fields,
             step=step,
             decision=decision,
+            dry_run=dry_run,
         )
 
     def test_create_writes_both_files(self) -> None:
@@ -677,6 +679,92 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertTrue(lossy["wouldLose"])
         self.assertIn("keep me", str(lossy["diff"]))
+
+    def test_replace_rewrites_structural_fields_and_decisions(self) -> None:
+        created = self._create(
+            objective="old",
+            steps=[{"id": "S1", "title": "Old step", "status": "done"}],
+            codeExamples=[
+                {
+                    "id": "E1",
+                    "title": "Old example",
+                    "distinctChange": "old",
+                    "why": "old",
+                }
+            ],
+            decisions=[{"at": "t1", "decision": "old", "rationale": "old"}],
+        )
+        json_path = Path(str(created["docPath"]))
+        result = self._call(
+            "replace",
+            fields={
+                "id": "3C",
+                "slug": "03c_x",
+                "title": "Smoke reset",
+                "kind": "subTask",
+                "repo": "agents-remember",
+                "type": "Code",
+                "createdAt": "2026-01-01T00:00",
+                "objective": "new",
+                "steps": [{"id": "S2", "title": "New step", "status": "pending"}],
+                "codeExamples": [
+                    {
+                        "id": "E2",
+                        "title": "New example",
+                        "distinctChange": "new",
+                        "why": "new",
+                    }
+                ],
+                "decisions": [],
+            },
+        )
+        self.assertEqual(result["operation"], "task_doc.replace")
+        doc = read_task_doc(json_path)
+        self.assertEqual(doc.title, "Smoke reset")
+        self.assertEqual([step.id for step in doc.steps], ["S2"])
+        self.assertEqual([example.id for example in doc.codeExamples], ["E2"])
+        self.assertEqual(doc.decisions, [])
+
+    def test_replace_dry_run_does_not_mutate_existing_files(self) -> None:
+        created = self._create(objective="old")
+        json_path = Path(str(created["docPath"]))
+        md_path = Path(str(created["renderedPath"]))
+        before_json = json_path.read_text(encoding="utf-8")
+        before_md = md_path.read_text(encoding="utf-8")
+        result = self._call(
+            "replace",
+            fields={
+                "id": "3C",
+                "slug": "03c_x",
+                "title": "Smoke",
+                "kind": "subTask",
+                "repo": "agents-remember",
+                "type": "Code",
+                "createdAt": "2026-01-01T00:00",
+                "objective": "replacement preview",
+            },
+            dry_run=True,
+        )
+        self.assertTrue(result["dryRun"])
+        self.assertIn("replacement preview", str(result["rendered"]))
+        self.assertEqual(json_path.read_text(encoding="utf-8"), before_json)
+        self.assertEqual(md_path.read_text(encoding="utf-8"), before_md)
+
+    def test_replace_rejects_document_path_change(self) -> None:
+        self._create()
+        with self.assertRaises(TaskDocError):
+            self._call(
+                "replace",
+                fields={
+                    "id": "3C",
+                    "slug": "different",
+                    "title": "Moved",
+                    "kind": "subTask",
+                    "repo": "agents-remember",
+                    "type": "Code",
+                    "createdAt": "2026-01-01T00:00",
+                },
+            )
 
     def test_set_step_inserts_then_updates_without_duplicating(self) -> None:
         self._create(steps=[{"id": "S1", "title": "One", "status": "pending"}])

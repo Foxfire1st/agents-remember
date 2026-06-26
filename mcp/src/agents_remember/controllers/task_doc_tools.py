@@ -42,6 +42,7 @@ from agents_remember.worktrees.worktree_contract import (
 
 VALID_OPERATIONS = (
     "create",
+    "replace",
     "set_status",
     "set_step",
     "set_subtask",
@@ -52,7 +53,7 @@ VALID_OPERATIONS = (
 )
 
 # set_field may only touch these (scalars + flat string lists); structural edits
-# go through create / set_step / append_decision.
+# go through create / replace / set_step / append_decision.
 _MUTABLE_FIELDS = frozenset(
     {
         "title",
@@ -106,6 +107,9 @@ def task_doc_tool(
 
     if operation == "create":
         doc = _create(payload_fields, contract, task_root)
+    elif operation == "replace":
+        json_path = _existing_json(task_root, slug)
+        doc = _replace(payload_fields, contract, task_root, json_path)
     else:
         doc = _apply(
             operation,
@@ -175,6 +179,33 @@ def _create(
     contract: WorktreeContract | None,
     task_root: Path,
 ) -> TaskDocument:
+    doc = _build_doc(fields, contract, task_root)
+    json_path = json_path_for(task_root, doc)
+    if json_path.exists():
+        raise TaskDocError(f"task document already exists: {json_path}; use an update operation")
+    return doc
+
+
+def _replace(
+    fields: dict[str, Any],
+    contract: WorktreeContract | None,
+    task_root: Path,
+    existing_json_path: Path,
+) -> TaskDocument:
+    doc = _build_doc(fields, contract, task_root)
+    replacement_json_path = json_path_for(task_root, doc)
+    if replacement_json_path != existing_json_path:
+        raise TaskDocError(
+            "replace cannot change the task document path; keep the same slug/kind or create a new document"
+        )
+    return doc
+
+
+def _build_doc(
+    fields: dict[str, Any],
+    contract: WorktreeContract | None,
+    task_root: Path,
+) -> TaskDocument:
     data = dict(fields)
     data.setdefault("kind", "light")
     if contract is not None:
@@ -192,11 +223,7 @@ def _create(
                     }
                 ],
             )
-    doc = _validate(data)
-    json_path = json_path_for(task_root, doc)
-    if json_path.exists():
-        raise TaskDocError(f"task document already exists: {json_path}; use an update operation")
-    return doc
+    return _validate(data)
 
 
 def _apply(
