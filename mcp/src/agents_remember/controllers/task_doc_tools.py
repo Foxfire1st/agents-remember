@@ -25,8 +25,9 @@ from agents_remember.tasks import (
     render_markdown,
     step_done,
     step_total,
-    write_task_doc,
+    write_task_docs,
 )
+from agents_remember.tasks.master_sync import MasterSyncError, MasterSyncPlan, plan_master_sync
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
     is_enclosure_contract,
@@ -121,10 +122,17 @@ def task_doc_tool(
             section=section,
         )
 
+    try:
+        master_sync = plan_master_sync(task_root, doc)
+    except MasterSyncError as exc:
+        raise TaskDocError(str(exc)) from exc
     if dry_run:
-        return _preview(operation, doc, task_root)
-    json_path, markdown_path = write_task_doc(task_root, doc)
-    return _result(operation, doc, json_path, markdown_path)
+        return _preview(operation, doc, task_root, master_sync=master_sync)
+    docs: list[TaskDocument] = [doc]
+    if master_sync.changed and master_sync.master is not None:
+        docs.append(master_sync.master)
+    json_path, markdown_path = write_task_docs(task_root, docs)[0]
+    return _result(operation, doc, json_path, markdown_path, master_sync=master_sync)
 
 
 def _resolve(
@@ -356,8 +364,10 @@ def _result(
     doc: TaskDocument,
     json_path: Path,
     markdown_path: Path,
+    *,
+    master_sync: MasterSyncPlan | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "ok": True,
         "operation": f"task_doc.{operation}",
         "taskId": doc.id,
@@ -370,9 +380,19 @@ def _result(
         "stepsDone": step_done(doc),
         "stepsTotal": step_total(doc),
     }
+    sync_payload = _master_sync_payload(master_sync, preview=False)
+    if sync_payload is not None:
+        result["masterSync"] = sync_payload
+    return result
 
 
-def _preview(operation: str, doc: TaskDocument, task_root: Path) -> dict[str, Any]:
+def _preview(
+    operation: str,
+    doc: TaskDocument,
+    task_root: Path,
+    *,
+    master_sync: MasterSyncPlan | None = None,
+) -> dict[str, Any]:
     """Render the would-be document without writing -- the dry-run safety preview.
 
     Returns the same shape as a real op plus the rendered markdown, a unified diff against the
@@ -380,6 +400,25 @@ def _preview(operation: str, doc: TaskDocument, task_root: Path) -> dict[str, An
     reproduce (the signal that adopting this JSON would drop hand-authored content). ``renderedPath``
     is where it *would* write; nothing is written.
     """
+    preview = _render_preview(task_root, doc)
+    result = _result(
+        operation,
+        doc,
+        json_path_for(task_root, doc),
+        preview["markdownPath"],
+        master_sync=master_sync,
+    )
+    result["dryRun"] = True
+    result["rendered"] = preview["rendered"]
+    result["diff"] = preview["diff"]
+    result["wouldLose"] = preview["wouldLose"]
+    sync_payload = _master_sync_payload(master_sync, preview=True)
+    if sync_payload is not None:
+        result["masterSync"] = sync_payload
+    return result
+
+
+def _render_preview(task_root: Path, doc: TaskDocument) -> dict[str, Any]:
     rendered = render_markdown(doc)
     markdown_path = markdown_path_for(task_root, doc)
     existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
@@ -392,10 +431,42 @@ def _preview(operation: str, doc: TaskDocument, task_root: Path) -> dict[str, An
         )
     )
     rendered_lines = set(rendered.splitlines())
-    would_lose = any(line.strip() and line not in rendered_lines for line in existing.splitlines())
-    result = _result(operation, doc, json_path_for(task_root, doc), markdown_path)
-    result["dryRun"] = True
-    result["rendered"] = rendered
-    result["diff"] = diff
-    result["wouldLose"] = would_lose
-    return result
+    return {
+        "markdownPath": markdown_path,
+        "rendered": rendered,
+        "diff": diff,
+        "wouldLose": any(
+            line.strip() and line not in rendered_lines for line in existing.splitlines()
+        ),
+    }
+
+
+def _master_sync_payload(
+    master_sync: MasterSyncPlan | None, *, preview: bool
+) -> dict[str, Any] | None:
+    if (
+        master_sync is None
+        or master_sync.status == "none"
+        or master_sync.master is None
+        or master_sync.master_json_path is None
+    ):
+        return None
+    master_root = master_sync.master_json_path.parent
+    markdown_path = markdown_path_for(master_root, master_sync.master)
+    status = master_sync.status
+    if preview and status == "created":
+        status = "would-create"
+    elif preview and status == "updated":
+        status = "would-update"
+    payload: dict[str, Any] = {
+        "status": status,
+        "masterDocPath": master_sync.master_json_path.as_posix(),
+        "renderedPath": markdown_path.as_posix(),
+        "subtaskNumber": master_sync.subtask_number,
+    }
+    if preview:
+        rendered = _render_preview(master_root, master_sync.master)
+        payload["rendered"] = rendered["rendered"]
+        payload["diff"] = rendered["diff"]
+        payload["wouldLose"] = rendered["wouldLose"]
+    return payload

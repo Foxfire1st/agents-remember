@@ -516,6 +516,7 @@ class SeriesNode(BaseModel):
     subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
     doneCount: int = 0
     totalCount: int = 0
+    seriesTokenTotal: int = 0
     sections: list[SeriesSectionNode] = Field(default_factory=list)
     decisions: list[TaskDecisionNode] = Field(default_factory=list)
     docPath: str

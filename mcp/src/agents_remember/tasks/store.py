@@ -33,13 +33,28 @@ def read_task_doc(json_path: Path) -> TaskDocument:
 
 
 def write_task_doc(task_root: Path, doc: TaskDocument) -> tuple[Path, Path]:
-    json_path = json_path_for(task_root, doc)
-    markdown_path = markdown_path_for(task_root, doc)
+    return write_task_docs(task_root, [doc])[0]
+
+
+def write_task_docs(task_root: Path, docs: list[TaskDocument]) -> list[tuple[Path, Path]]:
+    """Write several task docs after every JSON/render payload is prepared."""
     task_root.mkdir(parents=True, exist_ok=True)
-    payload = doc.model_dump_json(by_alias=True, exclude_none=True, indent=2)
-    _atomic_write(json_path, f"{payload}\n")
-    _atomic_write(markdown_path, render_markdown(doc))
-    return json_path, markdown_path
+    writes: list[tuple[Path, str]] = []
+    paths: list[tuple[Path, Path]] = []
+    seen: set[Path] = set()
+    for doc in docs:
+        json_path = json_path_for(task_root, doc)
+        markdown_path = markdown_path_for(task_root, doc)
+        if json_path in seen or markdown_path in seen:
+            raise ValueError(f"duplicate task document write target: {json_path}")
+        seen.update({json_path, markdown_path})
+        payload = doc.model_dump_json(by_alias=True, exclude_none=True, indent=2)
+        writes.append((json_path, f"{payload}\n"))
+        writes.append((markdown_path, render_markdown(doc)))
+        paths.append((json_path, markdown_path))
+    for path, text in writes:
+        _atomic_write(path, text)
+    return paths
 
 
 def _atomic_write(path: Path, text: str) -> None:

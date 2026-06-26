@@ -8,7 +8,23 @@ itself (``tasks.TaskDocument``) is the persisted contract and is deliberately
 
 from __future__ import annotations
 
+from pydantic import BaseModel, ConfigDict
+
 from agents_remember.models.base import ToolResponse
+
+
+class TaskDocMasterSync(BaseModel):
+    """Optional master-row sync result for a leaf task_doc write."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    masterDocPath: str
+    renderedPath: str
+    subtaskNumber: str | None = None
+    rendered: str | None = None
+    diff: str | None = None
+    wouldLose: bool = False
 
 
 class TaskDocResponse(ToolResponse):
@@ -28,3 +44,4 @@ class TaskDocResponse(ToolResponse):
     rendered: str | None = None
     diff: str | None = None
     wouldLose: bool = False
+    masterSync: TaskDocMasterSync | None = None

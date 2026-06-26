@@ -246,6 +246,7 @@ export interface SeriesNode {
   subTasks: TaskSubTaskRefNode[];
   doneCount: number;
   totalCount: number;
+  seriesTokenTotal: number;
   sections: TaskSectionNode[];
   decisions: TaskDecisionNode[];
   docPath: string;

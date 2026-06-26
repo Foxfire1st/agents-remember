@@ -46,6 +46,7 @@ from agents_remember.observer.projection import (
     LedgerRefNode,
     ProviderNode,
     SeriesNode,
+    SeriesSubTaskNode,
     SetupProgressNode,
     SidecarStaleNode,
     TaskDocNode,
@@ -410,6 +411,83 @@ class WorkspaceTests(unittest.TestCase):
             ),
             ("r/t", False, True, "close", ""),
         )
+
+    def test_series_token_total_sums_linked_leaf_lifecycles(self) -> None:
+        logs = [
+            [
+                _started(lifecycle_id="LC1", ts=T0),
+                _event(
+                    "tool.completed",
+                    lifecycle_id="LC1",
+                    ts="2026-06-13T18:00:05+00:00",
+                    tool="task_doc",
+                    tokens=100,
+                    ok=True,
+                ),
+            ],
+            [
+                _started(lifecycle_id="LC2", ts=T0),
+                _event(
+                    "tool.completed",
+                    lifecycle_id="LC2",
+                    ts="2026-06-13T18:00:06+00:00",
+                    tool="read_ar_files",
+                    tokens=50,
+                    ok=True,
+                ),
+            ],
+        ]
+        task_documents = [
+            TaskDocNode(
+                id="1",
+                lifecycleId="LC1",
+                repository="repo-a",
+                title="Leaf A",
+                status="inProgress",
+                kind="subTask",
+                docPath="/tasks/repo-a/series/01_a.json",
+            ),
+            TaskDocNode(
+                id="2",
+                lifecycleId="LC2",
+                repository="repo-a",
+                title="Leaf B",
+                status="inProgress",
+                kind="subTask",
+                docPath="/tasks/repo-a/series/02_b.json",
+            ),
+        ]
+        series = [
+            SeriesNode(
+                seriesId="series",
+                repository="repo-a",
+                title="Series",
+                status="inProgress",
+                docPath="/tasks/repo-a/series/task.json",
+                subTasks=[
+                    SeriesSubTaskNode(
+                        number="1", name="Leaf A", file="01_a.md", status="inProgress"
+                    ),
+                    SeriesSubTaskNode(
+                        number="2", name="Leaf B", file="02_b.md", status="inProgress"
+                    ),
+                    SeriesSubTaskNode(
+                        number="3", name="Missing doc", file="03_c.md", status="planning"
+                    ),
+                ],
+            )
+        ]
+
+        proj = project_workspace(
+            logs,
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+            task_documents=task_documents,
+            series=series,
+        )
+
+        self.assertEqual(proj.analytics.series[0].seriesTokenTotal, 150)
 
     def test_persistent_synthesis_skips_enclosure_with_event_lifecycle(self) -> None:
         # An enclosure already represented by an event-backed lifecycle is not duplicated.

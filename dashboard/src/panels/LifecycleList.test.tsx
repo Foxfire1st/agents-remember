@@ -90,6 +90,7 @@ function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesId">) {
     subTasks: [],
     doneCount: 0,
     totalCount: 0,
+    seriesTokenTotal: 0,
     sections: [],
     decisions: [],
     docPath: "/tasks/260610_browser-dashboard/task.json",

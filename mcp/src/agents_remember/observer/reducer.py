@@ -58,6 +58,7 @@ from agents_remember.observer.projection import (
     ToolReportNode,
     WorkspaceProjection,
 )
+from agents_remember.observer.series_tokens import attach_series_token_totals
 from agents_remember.observer.timeutil import STALE_AFTER_SECONDS, TTL_SECONDS, age_seconds
 
 _STATES: frozenset[str] = frozenset(get_args(State))
@@ -134,6 +135,8 @@ def project_workspace(
         setup_progress or [],
         engine_start_progress or [],
     )
+    task_docs = task_documents or []
+    series_nodes = attach_series_token_totals(series or [], task_docs, lifecycles)
     analytics = build_analytics(
         drift_snapshots=drift_snapshots or [],
         sidecar_staleness=sidecars,
@@ -143,8 +146,8 @@ def project_workspace(
         tool_reports=tool_reports or [],
         agent_pickups=agent_pickups or [],
         ledgers=ledgers or [],
-        task_documents=task_documents or [],
-        series=series or [],
+        task_documents=task_docs,
+        series=series_nodes,
         attention_queue=build_attention_queue(
             lifecycles,
             providers,

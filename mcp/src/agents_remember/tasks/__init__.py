@@ -35,6 +35,7 @@ from .store import (
     markdown_path_for,
     read_task_doc,
     write_task_doc,
+    write_task_docs,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "step_done",
     "step_total",
     "write_task_doc",
+    "write_task_docs",
 ]

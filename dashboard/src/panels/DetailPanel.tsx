@@ -239,6 +239,8 @@ const taskdoc = css({ display: "grid", gap: "0.75rem" });
 const taskdocHead = css({ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" });
 const taskdocTitle = css({ fontWeight: "600" });
 const taskdocStatus = css({ color: "cyan", fontSize: "0.8rem" });
+const masterTokens = css({ display: "flex", alignItems: "center", gap: "0.5rem", color: "cyan", fontSize: "0.78rem" });
+const masterTokenValue = css({ fontWeight: "600" });
 const taskdocSection = css({ display: "grid", gap: "0.3rem" });
 const taskdocH = css({
   margin: "0",
@@ -370,7 +372,12 @@ export function DetailPanel({
           openDoc ? (
             <TaskReader doc={openDoc} />
           ) : (
-            <MasterOverview doc={selectedTaskDoc} sliceDocs={sliceDocs} onOpen={setOpenSlug} onJump={jump} />
+            <MasterOverview
+              doc={masterDocWithSeriesTokens(selectedTaskDoc, analytics?.series ?? [])}
+              sliceDocs={sliceDocs}
+              onOpen={setOpenSlug}
+              onJump={jump}
+            />
           )
         ) : (
           <TaskReader doc={selectedTaskDoc} />
@@ -527,7 +534,12 @@ export function DetailPanel({
           onJump={jump}
         />
       ) : master ? (
-        <MasterOverview doc={master} sliceDocs={slices} onOpen={setOpenSlug} onJump={jump} />
+        <MasterOverview
+          doc={masterDocWithSeriesTokens(master, analytics?.series ?? [])}
+          sliceDocs={slices}
+          onOpen={setOpenSlug}
+          onJump={jump}
+        />
       ) : (
         <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} />
       )}
@@ -579,8 +591,16 @@ const topLevelStepProgress = (doc: TaskDocNode): { done: number; total: number }
 
 type MasterDocView = Pick<
   TaskDocNode,
-  "kind" | "title" | "status" | "objective" | "subTasks" | "sections" | "decisions" | "masterLifecycleId"
->;
+  | "kind"
+  | "title"
+  | "status"
+  | "objective"
+  | "subTasks"
+  | "sections"
+  | "decisions"
+  | "masterLifecycleId"
+  | "docPath"
+> & { seriesTokenTotal?: number };
 
 const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   kind: "master",
@@ -590,6 +610,13 @@ const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   subTasks: seriesNode.subTasks,
   sections: seriesNode.sections,
   decisions: seriesNode.decisions,
+  docPath: seriesNode.docPath,
+  seriesTokenTotal: seriesNode.seriesTokenTotal,
+});
+
+const masterDocWithSeriesTokens = (doc: TaskDocNode, seriesList: SeriesNode[]): MasterDocView => ({
+  ...doc,
+  seriesTokenTotal: seriesList.find((seriesNode) => seriesNode.docPath === doc.docPath)?.seriesTokenTotal,
 });
 
 // The lifecycle's bound task documents (6g). A `master` (contract-paired, no lifecycleId of its
@@ -640,6 +667,7 @@ function MasterOverview({
         <span className={taskdocTitle}>{doc.title}</span>
         <span className={taskdocStatus}>{doc.status}</span>
       </div>
+      <MasterTokenSummary total={doc.seriesTokenTotal} />
       {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
       {doc.subTasks.length > 0 ? (
@@ -662,6 +690,16 @@ function MasterOverview({
           onJump={onJump}
         />
       ))}
+    </div>
+  );
+}
+
+function MasterTokenSummary({ total }: { total: number | undefined }) {
+  if (total === undefined) return null;
+  return (
+    <div className={masterTokens} aria-label={`${total} aggregate series tokens`}>
+      <span className={label}>series tokens</span>
+      <span className={masterTokenValue}>{total.toLocaleString()} tok</span>
     </div>
   );
 }

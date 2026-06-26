@@ -50,6 +50,7 @@ function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesId">): S
     subTasks: [],
     doneCount: 0,
     totalCount: 0,
+    seriesTokenTotal: 0,
     sections: [],
     decisions: [],
     docPath: `/t/${over.seriesId}/task.json`,
@@ -100,6 +101,7 @@ function seedSeries(
     seriesId: "series",
     title: "My Series",
     objective: "Series objective text",
+    seriesTokenTotal: 1500,
     docPath: "/t/series/task.json",
     subTasks: [
       {
@@ -669,6 +671,15 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(container.querySelector("th")?.textContent).toBe("Slice");
     expect(container.querySelector("strong")?.textContent).toBe("strong");
     expect(queryByText(/\| Slice \| Status \|/)).toBeNull(); // raw markdown is gone
+  });
+
+  it("renders aggregate series tokens on the master reader", () => {
+    seedSeries();
+    const { getByLabelText, getByText } = render(<DetailPanel selectedId="series" />);
+
+    expect(getByText("series tokens")).toBeTruthy();
+    expect(getByText("1,500 tok")).toBeTruthy();
+    expect(getByLabelText("1500 aggregate series tokens")).toBeTruthy();
   });
 
   it("orders master leaves by creation time and displays task-specific numbers", () => {

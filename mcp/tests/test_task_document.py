@@ -551,6 +551,26 @@ class ControllerTests(unittest.TestCase):
             fields=payload,
         )
 
+    def _create_parent_master(self, **fields: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": "series",
+            "slug": "series",
+            "title": "Series",
+            "kind": "master",
+            "repo": "agents-remember",
+            "type": "Master (Code)",
+            "createdAt": "2026-01-01T00:00",
+            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+        }
+        payload.update(fields)
+        return task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="3c-x",
+            fields=payload,
+        )
+
     def _call(
         self,
         operation: str,
@@ -578,6 +598,72 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual((result["stepsDone"], result["stepsTotal"]), (0, 1))
         self.assertTrue(Path(str(result["docPath"])).exists())
         self.assertTrue(Path(str(result["renderedPath"])).exists())
+        self.assertNotIn("masterSync", result)
+
+    def test_leaf_create_syncs_parent_master_row(self) -> None:
+        self._create_parent_master()
+        result = self._create(master="task.md")
+
+        sync = result["masterSync"]
+        self.assertEqual(sync["status"], "created")
+        master = read_task_doc(Path(str(sync["masterDocPath"])))
+        self.assertEqual(len(master.subTasks), 1)
+        [row] = master.subTasks
+        self.assertEqual(row.number, "3C")
+        self.assertEqual(row.name, "Smoke")
+        self.assertEqual(row.file, "03c_x.md")
+        self.assertEqual(row.status, "planning")
+        self.assertEqual(row.scope, "")
+
+    def test_leaf_updates_preserve_manual_master_scope(self) -> None:
+        self._create_parent_master()
+        self._create(master="task.md")
+        task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="set_subtask",
+            task_name="3c-x",
+            subtask={"number": "3C", "scope": "keep this prose"},
+        )
+
+        result = self._call("set_field", fields={"title": "Renamed", "status": "inProgress"})
+
+        self.assertEqual(result["masterSync"]["status"], "updated")
+        master = read_task_doc(Path(str(result["masterSync"]["masterDocPath"])))
+        [row] = master.subTasks
+        self.assertEqual(row.name, "Renamed")
+        self.assertEqual(row.status, "inProgress")
+        self.assertEqual(row.scope, "keep this prose")
+
+    def test_leaf_step_progress_derives_master_row_status(self) -> None:
+        self._create_parent_master()
+        self._create(
+            master="task.md",
+            steps=[{"id": "S1", "title": "One", "status": "pending"}],
+        )
+
+        blocked = self._call("set_step", step={"id": "S1", "title": "One", "status": "blocked"})
+        master = read_task_doc(Path(str(blocked["masterSync"]["masterDocPath"])))
+        self.assertEqual(master.subTasks[0].status, "inProgress")
+
+        done = self._call("set_step", step={"id": "S1", "title": "One", "status": "done"})
+        master = read_task_doc(Path(str(done["masterSync"]["masterDocPath"])))
+        self.assertEqual(master.subTasks[0].status, "Completed")
+
+    def test_leaf_dry_run_includes_master_sync_preview_without_writing(self) -> None:
+        self._create_parent_master()
+        self._create(master="task.md")
+        master_path = self.coord / "tasks" / "agents-remember" / "3c-x" / "task.json"
+        before = master_path.read_text(encoding="utf-8")
+
+        result = self._call("set_field", fields={"title": "Preview Rename"}, dry_run=True)
+
+        sync = result["masterSync"]
+        self.assertEqual(sync["status"], "would-update")
+        self.assertIn("Preview Rename", sync["rendered"])
+        self.assertIn("Preview Rename", sync["diff"])
+        self.assertIsInstance(sync["wouldLose"], bool)
+        self.assertEqual(master_path.read_text(encoding="utf-8"), before)
 
     def test_create_rejects_duplicate(self) -> None:
         self._create()
