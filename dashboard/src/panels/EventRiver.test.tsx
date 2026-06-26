@@ -216,6 +216,28 @@ describe("EventRiver readable activity feed", () => {
     expect(item?.textContent).not.toContain("lc-1");
   });
 
+  it("uses task document labels when event history no longer has a live lifecycle row", () => {
+    dashboardStore.setState({
+      analytics: analyticsWithTaskDocuments([
+        taskDoc({
+          docPath: "20_event-river-readable-activity-feed.json",
+          lifecycleId: "lc-completed",
+        }),
+      ]),
+      events: [
+        ev({
+          kind: "tool.completed",
+          lifecycleId: "lc-completed",
+          data: { tool: "worktree_cleanup", ok: true },
+        }),
+      ],
+    });
+    const { getByText } = render(<EventRiver />);
+    const item = getByText("Cleaned up task worktree").closest("[data-testid='river-item']");
+    expect(item?.textContent).toContain("Event River Readable Activity Feed");
+    expect(item?.textContent).not.toContain("lc-completed");
+  });
+
   it("hides lifecycle heartbeat rows from the default river while keeping other rows", () => {
     dashboardStore.setState({
       events: [

@@ -1,6 +1,7 @@
 import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
+  taskDocumentLabel,
   taskDocsForLifecycle,
   taskLabel,
 } from "../data/taskIdentity";
@@ -10,6 +11,7 @@ import type {
   EnclosureNode,
   LifecycleProjection,
   Phase,
+  TaskDocNode,
 } from "../types/projection";
 
 export type EventVisibility = "normal" | "quiet" | "hidden";
@@ -28,6 +30,7 @@ export interface EventSummaryContext {
   enclosures: Record<string, EnclosureNode>;
   enclosuresByLifecycle: Map<string, EnclosureNode>;
   lifecycles: Record<string, LifecycleProjection>;
+  taskDocsByLifecycle: Map<string, TaskDocNode[]>;
 }
 
 interface LifecycleContext {
@@ -103,6 +106,7 @@ export function buildEventSummaryContext(
     enclosures,
     enclosuresByLifecycle: groupEnclosuresByLifecycle(Object.values(enclosures)),
     lifecycles,
+    taskDocsByLifecycle: groupTaskDocsByLifecycle(analytics?.taskDocuments ?? []),
   };
 }
 
@@ -309,11 +313,21 @@ function lifecycleContext(
         repoId: lifecycle.repoId,
       };
     }
+    if (event.enclosure && context.enclosures[event.enclosure]) {
+      const enclosure = context.enclosures[event.enclosure];
+      return {
+        enclosure: event.enclosure,
+        label: enclosure.leafId || enclosure.taskName || event.enclosure,
+        lifecycleId: event.lifecycleId,
+        repoId: enclosure.repoName,
+      };
+    }
+    const directDocs = context.taskDocsByLifecycle.get(event.lifecycleId) ?? [];
     return {
       enclosure: event.enclosure,
-      label: event.enclosure ?? event.lifecycleId,
+      label: taskDocumentLabel(directDocs, event.enclosure ?? event.lifecycleId),
       lifecycleId: event.lifecycleId,
-      repoId: event.repoId,
+      repoId: event.repoId ?? directDocs[0]?.repository,
     };
   }
   if (event.enclosure && context.enclosures[event.enclosure]) {
@@ -326,6 +340,20 @@ function lifecycleContext(
     };
   }
   return { enclosure: event.enclosure, repoId: event.repoId };
+}
+
+function groupTaskDocsByLifecycle(taskDocuments: TaskDocNode[]): Map<string, TaskDocNode[]> {
+  const byLifecycle = new Map<string, TaskDocNode[]>();
+  for (const doc of taskDocuments) {
+    if (!doc.lifecycleId) continue;
+    const existing = byLifecycle.get(doc.lifecycleId);
+    if (existing) {
+      existing.push(doc);
+    } else {
+      byLifecycle.set(doc.lifecycleId, [doc]);
+    }
+  }
+  return byLifecycle;
 }
 
 function rawDiagnosticTitle(event: ObserverEvent): string {

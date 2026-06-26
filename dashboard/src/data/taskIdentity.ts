@@ -90,10 +90,7 @@ export function taskLabel(
       lifecycleLabelFallback(lifecycle.id)
     );
   }
-  const masterDoc = directDocs.find((doc) => doc.kind === "master");
-  if (masterDoc?.title) return masterDoc.title;
-  if (directDocs.length === 1 && directDocs[0].title) return directDocs[0].title;
-  return lifecycleLabelFallback(lifecycle.id);
+  return taskDocumentLabel(directDocs, lifecycleLabelFallback(lifecycle.id));
 }
 
 export function taskDocsForLifecycle(
@@ -101,6 +98,13 @@ export function taskDocsForLifecycle(
   allDocs: TaskDocNode[],
 ): TaskDocNode[] {
   return allDocs.filter((doc) => doc.lifecycleId === lifecycle.id);
+}
+
+export function taskDocumentLabel(directDocs: TaskDocNode[], fallback: string): string {
+  const masterDoc = directDocs.find((doc) => doc.kind === "master");
+  if (masterDoc?.title) return masterDoc.title;
+  if (directDocs.length === 1 && directDocs[0].title) return directDocs[0].title;
+  return fallback;
 }
 
 function lifecycleLabelFallback(id: string): string {
