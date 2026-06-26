@@ -3,10 +3,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import type { ObserverEvent } from "../types/event";
+import type {
+  Analytics,
+  EnclosureNode,
+  LifecycleProjection,
+  TaskDocNode,
+} from "../types/projection";
 import { EventRiver } from "./EventRiver";
 
 afterEach(cleanup);
-beforeEach(() => dashboardStore.setState({ events: [] }));
+beforeEach(() =>
+  dashboardStore.setState({
+    analytics: null,
+    enclosures: {},
+    events: [],
+    lifecycles: {},
+  }),
+);
 
 function ev(partial: Partial<ObserverEvent> & { kind: string }): ObserverEvent {
   return {
@@ -19,9 +32,85 @@ function ev(partial: Partial<ObserverEvent> & { kind: string }): ObserverEvent {
   } as ObserverEvent;
 }
 
-// 07b v1: read.packet is the river's one per-kind treatment — "Read: <basename>", the read's repo in
-// the meta, and the full path(s) on hover. Everything else stays generic.
-describe("EventRiver read.packet row (07b)", () => {
+function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): LifecycleProjection {
+  const { id, ...rest } = partial;
+  return {
+    actions: [],
+    fleeting: false,
+    id,
+    inferred: false,
+    lastEventTs: "2026-06-23T10:11:12+00:00",
+    phase: "build",
+    startedAt: "2026-06-23T10:00:00+00:00",
+    state: "running",
+    tokenSeries: [],
+    tokens: 0,
+    ...rest,
+  };
+}
+
+function enclosure(partial: Partial<EnclosureNode> & { enclosure: string }): EnclosureNode {
+  const { enclosure: enclosurePath, ...rest } = partial;
+  return {
+    actions: [],
+    cleanup: "pending",
+    closeoutStatus: "not-started",
+    enclosure: enclosurePath,
+    enclosureId: enclosurePath,
+    humanReviewStatus: "pending-review",
+    integrationStatus: "not-started",
+    leafId: "20_event-river-readable-activity-feed",
+    lifecycleId: "lc-1",
+    repoName: "agents-remember",
+    taskId: "260610_BROWSER-DASHBOARD",
+    taskName: "260610_browser-dashboard",
+    taskRoot: "tasks/agents-remember/260610_browser-dashboard",
+    worktreeGroup: "260610-browser-dashboard-s20-ar",
+    ...rest,
+  };
+}
+
+function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNode {
+  const { docPath, ...rest } = partial;
+  return {
+    codeExamples: [],
+    decisions: [],
+    docPath,
+    id: "20",
+    kind: "subTask",
+    objective: "",
+    openQuestions: [],
+    references: [],
+    repository: "agents-remember",
+    requirements: [],
+    sections: [],
+    status: "planning",
+    steps: [],
+    stepsDone: 0,
+    stepsTotal: 21,
+    subTasks: [],
+    title: "Event River Readable Activity Feed",
+    ...rest,
+  };
+}
+
+function analyticsWithTaskDocuments(taskDocuments: TaskDocNode[]): Analytics {
+  return {
+    attentionQueue: [],
+    driftSnapshots: [],
+    engineProcesses: [],
+    ledgers: [],
+    routeCoverage: [],
+    series: [],
+    setupProgress: [],
+    setupSummaries: [],
+    stalestSidecars: [],
+    taskDocuments,
+    toolReports: [],
+  };
+}
+
+describe("EventRiver readable activity feed", () => {
   it("renders 'Read: <basename>' with the repo, and the full path on hover", () => {
     const full = "mcp/src/agents_remember/kernel/coordination_context/contracts.py";
     dashboardStore.setState({
@@ -63,9 +152,85 @@ describe("EventRiver read.packet row (07b)", () => {
     expect(title).toContain("c/three.py");
   });
 
-  it("renders other kinds generically (no read treatment)", () => {
-    dashboardStore.setState({ events: [ev({ kind: "tool.completed", lifecycleId: "lc-1" })] });
+  it("translates tool.completed rows with friendly tool copy, result state, tokens, and agent actor copy", () => {
+    dashboardStore.setState({
+      events: [
+        ev({
+          kind: "tool.completed",
+          lifecycleId: "lc-1",
+          data: { tool: "context_packet", ok: true, tokens: 1234 },
+        }),
+      ],
+    });
     const { getByText } = render(<EventRiver />);
-    expect(getByText("tool.completed")).not.toBeNull();
+    expect(getByText("Checked workspace context")).not.toBeNull();
+    const item = getByText("Checked workspace context").closest("[data-testid='river-item']");
+    expect(item?.textContent).toContain("agent");
+    expect(item?.textContent).toContain("observed");
+    expect(item?.textContent).toContain("ok");
+    expect(item?.textContent).toContain("1,234 tokens");
+  });
+
+  it("shows the destination phase for lifecycle.phase-changed", () => {
+    dashboardStore.setState({
+      events: [ev({ kind: "lifecycle.phase-changed", data: { phase: "close" } })],
+    });
+    const { getByText } = render(<EventRiver />);
+    expect(getByText("Moved to Close")).not.toBeNull();
+  });
+
+  it("renders blocked lifecycle rows around the actual ask prompt", () => {
+    dashboardStore.setState({
+      events: [
+        ev({
+          kind: "lifecycle.blocked",
+          data: { ask: { kind: "decision", prompt: "Approve the plan?" } },
+        }),
+      ],
+    });
+    const { getByText } = render(<EventRiver />);
+    expect(getByText("Waiting: Approve the plan?")).not.toBeNull();
+    const item = getByText("Waiting: Approve the plan?").closest("[data-testid='river-item']");
+    expect(item?.textContent).toContain("Decision request");
+  });
+
+  it("uses task labels from lifecycle enclosures instead of raw lifecycle ids", () => {
+    const lc = lifecycle({ enclosure: "enc-1", id: "lc-1", repoId: "agents-remember" });
+    dashboardStore.setState({
+      analytics: analyticsWithTaskDocuments([
+        taskDoc({ docPath: "20_event-river-readable-activity-feed.json", lifecycleId: "lc-1" }),
+      ]),
+      enclosures: { "enc-1": enclosure({ enclosure: "enc-1", lifecycleId: "lc-1" }) },
+      events: [
+        ev({
+          kind: "tool.completed",
+          lifecycleId: "lc-1",
+          data: { tool: "worktree_attach", ok: true },
+        }),
+      ],
+      lifecycles: { "lc-1": lc },
+    });
+    const { getByText } = render(<EventRiver />);
+    const item = getByText("Attached to task").closest("[data-testid='river-item']");
+    expect(item?.textContent).toContain("20_event-river-readable-activity-feed");
+    expect(item?.textContent).not.toContain("lc-1");
+  });
+
+  it("hides lifecycle heartbeat rows from the default river while keeping other rows", () => {
+    dashboardStore.setState({
+      events: [
+        ev({ kind: "lifecycle.heartbeat", data: { phase: "build", state: "running" } }),
+        ev({ kind: "lifecycle.phase-changed", data: { phase: "build" } }),
+      ],
+    });
+    const { getByText, queryByText } = render(<EventRiver />);
+    expect(queryByText("Heartbeat")).toBeNull();
+    expect(getByText("Moved to Build")).not.toBeNull();
+  });
+
+  it("falls back honestly to unknown raw event kinds", () => {
+    dashboardStore.setState({ events: [ev({ kind: "custom.unhandled", lifecycleId: "lc-1" })] });
+    const { getByText } = render(<EventRiver />);
+    expect(getByText("custom.unhandled")).not.toBeNull();
   });
 });

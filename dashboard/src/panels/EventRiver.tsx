@@ -2,6 +2,14 @@ import { css, cva } from "../../styled-system/css";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 import type { ObserverEvent } from "../types/event";
+import {
+  actorLabel,
+  buildEventSummaryContext,
+  formatEventTime,
+  summarizeEvent,
+  trustLabel,
+  type EventSummary,
+} from "./eventSummary";
 
 // The Event River (right rail): the raw observer feed with trust provenance. Newest first; the
 // trust class is the colour, so the feed never pretends `declared` is `observed`. Fed by the raw
@@ -29,19 +37,29 @@ const row = cva({
   },
 });
 const kind = css({ fontSize: "0.76rem", fontWeight: "600" });
-const meta = css({ fontSize: "0.68rem", color: "muted", letterSpacing: "0.02em" });
+const meta = css({ fontSize: "0.68rem", color: "muted", letterSpacing: "0" });
 
 export function EventRiver() {
   const events = useDashboard((s) => s.events);
-  const recent = events.slice(-60).reverse();
+  const lifecycles = useDashboard((s) => s.lifecycles);
+  const enclosures = useDashboard((s) => s.enclosures);
+  const analytics = useDashboard((s) => s.analytics);
+  const summaryContext = buildEventSummaryContext(lifecycles, enclosures, analytics);
+  const recent = events
+    .slice(-60)
+    .reverse()
+    .map((event) => ({ event, summary: summarizeEvent(event, summaryContext) }))
+    .filter(({ summary }) => summary.visibility !== "hidden");
   return (
     <Panel testid="event-river" title={`Event river · ${events.length}`} className={sizing}>
-      {recent.length === 0 ? (
+      {events.length === 0 ? (
         <p className="muted">No events yet.</p>
+      ) : recent.length === 0 ? (
+        <p className="muted">No displayable events.</p>
       ) : (
         <ul className={list}>
-          {recent.map((event) => (
-            <EventRow key={event.id} event={event} />
+          {recent.map(({ event, summary }) => (
+            <EventRow key={event.id} event={event} summary={summary} />
           ))}
         </ul>
       )}
@@ -49,37 +67,21 @@ export function EventRiver() {
   );
 }
 
-function EventRow({ event }: { event: ObserverEvent }) {
-  const time = event.ts ? event.ts.slice(11, 19) : "—"; // defensive: never crash the feed
-  const read = readPacketSummary(event);
-  const ref = read?.repo || event.lifecycleId || event.repoId || event.enclosure || "";
+function EventRow({ event, summary }: { event: ObserverEvent; summary: EventSummary }) {
+  const time = formatEventTime(event.ts);
+  const metaParts = [
+    actorLabel(event.actor),
+    trustLabel(event.trust),
+    summary.context,
+    ...summary.meta,
+    time,
+  ].filter(Boolean);
   return (
     <li className={row({ trust: event.trust })} data-testid="river-item">
-      <div className={kind} title={read?.title}>
-        {read?.label ?? event.kind}
+      <div className={kind} title={summary.title}>
+        {summary.label}
       </div>
-      <div className={meta}>
-        {event.trust} · {event.actor}
-        {ref ? ` · ${ref}` : ""} · {time}
-      </div>
+      <div className={meta}>{metaParts.join(" · ")}</div>
     </li>
   );
-}
-
-// read.packet → "Read: <basename>" (+ "+N more" for a batch), the full path(s) on hover, and the
-// read's repo (data.repoId — the repo the files belong to). The river is otherwise generic; this is
-// the one per-kind treatment, kept defensive so a malformed packet never crashes the feed.
-function readPacketSummary(
-  event: ObserverEvent,
-): { label: string; title: string; repo: string } | null {
-  if (event.kind !== "read.packet") return null;
-  const data = event.data ?? {};
-  const files = Array.isArray(data.files) ? (data.files as Array<{ path?: unknown }>) : [];
-  const paths = files
-    .map((f) => (typeof f?.path === "string" ? f.path : ""))
-    .filter((p) => p.length > 0);
-  const repo = typeof data.repoId === "string" ? data.repoId : "";
-  const firstName = paths.length > 0 ? (paths[0].split("/").pop() ?? paths[0]) : "(no file)";
-  const label = paths.length > 1 ? `Read: ${firstName} +${paths.length - 1} more` : `Read: ${firstName}`;
-  return { label, title: paths.join("\n"), repo };
 }
