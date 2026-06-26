@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionStore } from "../data/sessions";
@@ -13,6 +13,7 @@ vi.mock("./Terminal", () => ({
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
 });
 
@@ -86,5 +87,114 @@ describe("Chats session-tab persistence (6e-4)", () => {
     fireEvent.click(await findByTestId("chats-attach-lifecycle"));
 
     expect(sessionStore.getState().sessions[0]?.lifecycleId).toBe("LC1");
+  });
+
+  it("hydrates durable sessions from the backend and mounts the restored active terminal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                sessions: [
+                  {
+                    id: "s1",
+                    label: "Terminal 1",
+                    kind: "terminal",
+                    cwd: "/ws",
+                    tmuxName: "ar-s1",
+                    createdAt: "2026-06-26T00:00:00Z",
+                    lastAttachedAt: "2026-06-26T00:00:00Z",
+                    status: "running",
+                  },
+                ],
+              }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+
+    const { findByTestId, getByTestId } = render(<Chats />);
+
+    expect(await findByTestId("term-s1")).not.toBeNull();
+    expect(getByTestId("chats-terminal-layer-s1").style.display).toBe("flex");
+    expect(sessionStore.getState().activeId).toBe("s1");
+  });
+
+  it("renders an exited restored session as status, not a terminal attachment", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                sessions: [
+                  {
+                    id: "s1",
+                    label: "Terminal 1",
+                    kind: "terminal",
+                    cwd: "/ws",
+                    tmuxName: "ar-s1",
+                    createdAt: "2026-06-26T00:00:00Z",
+                    lastAttachedAt: "2026-06-26T00:00:00Z",
+                    status: "exited",
+                  },
+                ],
+              }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+
+    const { findByTestId, queryByTestId } = render(<Chats />);
+
+    expect(await findByTestId("chats-session-status-s1")).not.toBeNull();
+    expect(queryByTestId("term-s1")).toBeNull();
+  });
+
+  it("detaches a session locally without calling the terminate endpoint", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("no backend"));
+    vi.stubGlobal("fetch", fetchMock);
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByLabelText } = render(<Chats />);
+    fireEvent.click(await findByLabelText("Detach Terminal 1"));
+
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/terminal/s1/terminate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("terminates a session through the backend before removing it locally", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/terminal/s1/terminate")) return Promise.resolve({ ok: true });
+        return Promise.reject(new Error("no backend"));
+      }),
+    );
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByLabelText } = render(<Chats />);
+    fireEvent.click(await findByLabelText("Terminate Terminal 1"));
+
+    await waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));
   });
 });

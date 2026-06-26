@@ -4,10 +4,12 @@ import {
   bracketedPaste,
   connectTerminal,
   fetchHarnesses,
+  fetchTerminalSessions,
   openTerminalSession,
   parseTerminalControl,
   sanitizeForInjection,
   submitAndConfirm,
+  terminateTerminalSession,
   terminalSocketUrl,
   uploadSessionImage,
   type TerminalSink,
@@ -201,14 +203,20 @@ describe("connectTerminal", () => {
 });
 
 describe("openTerminalSession", () => {
-  it("POSTs the kind to the session route and returns true on ok", async () => {
+  it("POSTs the kind and catalog metadata to the session route and returns true on ok", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
-    const ok = await openTerminalSession("t 1", "terminal");
+    const ok = await openTerminalSession("t 1", "terminal", "", undefined, {
+      label: "Terminal 1",
+      lifecycleId: "LC1",
+    });
     expect(ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/t%201",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ kind: "terminal" }) }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ kind: "terminal", label: "Terminal 1", lifecycleId: "LC1" }),
+      }),
     );
     vi.unstubAllGlobals();
   });
@@ -230,6 +238,60 @@ describe("openTerminalSession", () => {
       "/api/terminal/s1",
       expect.objectContaining({ body: JSON.stringify({ kind: "harness", harness: "claude" }) }),
     );
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("fetchTerminalSessions", () => {
+  it("returns the durable terminal sessions the endpoint reports", async () => {
+    const sessions = [
+      {
+        id: "s1",
+        label: "Terminal 1",
+        kind: "terminal",
+        cwd: "/ws",
+        tmuxName: "ar-s1",
+        createdAt: "2026-06-26T00:00:00Z",
+        lastAttachedAt: "2026-06-26T00:00:00Z",
+        status: "running",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ sessions }) }),
+    );
+    expect(await fetchTerminalSessions()).toEqual(sessions);
+    vi.unstubAllGlobals();
+  });
+
+  it("returns [] on a non-ok response, a missing key, or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await fetchTerminalSessions()).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
+    expect(await fetchTerminalSessions()).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await fetchTerminalSessions()).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("terminateTerminalSession", () => {
+  it("POSTs to the terminate route and returns true on ok", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await terminateTerminalSession("s 1")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/s%201/terminate",
+      expect.objectContaining({ method: "POST" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("returns false on a non-ok response or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await terminateTerminalSession("s1")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await terminateTerminalSession("s1")).toBe(false);
     vi.unstubAllGlobals();
   });
 });

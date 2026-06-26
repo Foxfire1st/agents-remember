@@ -225,6 +225,27 @@ export interface HarnessInfo {
   detected: boolean;
 }
 
+export type TerminalSessionStatus = "running" | "exited" | "terminated";
+
+export interface TerminalSessionInfo {
+  id: string;
+  label: string;
+  kind: TerminalOpenKind;
+  harness?: string;
+  lifecycleId?: string;
+  cwd: string;
+  tmuxName: string;
+  createdAt: string;
+  lastAttachedAt: string;
+  status: TerminalSessionStatus;
+  terminatedAt?: string;
+}
+
+interface OpenTerminalOptions {
+  label?: string;
+  lifecycleId?: string;
+}
+
 /**
  * Ask the server which supported harnesses are installed (slice 6e-2b `GET /api/harnesses`). Returns
  * `[]` on any failure — the dev bench has no backend, so the Chats strip just shows ＋ Terminal.
@@ -235,6 +256,17 @@ export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
     if (!response.ok) return [];
     const body = (await response.json()) as { harnesses?: HarnessInfo[] };
     return body.harnesses ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchTerminalSessions(base = ""): Promise<TerminalSessionInfo[]> {
+  try {
+    const response = await fetch(`${base}/api/terminal/sessions`);
+    if (!response.ok) return [];
+    const body = (await response.json()) as { sessions?: TerminalSessionInfo[] };
+    return Array.isArray(body.sessions) ? body.sessions : [];
   } catch {
     return [];
   }
@@ -251,12 +283,30 @@ export async function openTerminalSession(
   kind: TerminalOpenKind = "terminal",
   base = "",
   harness?: string,
+  options: OpenTerminalOptions = {},
 ): Promise<boolean> {
   try {
+    const body = {
+      kind,
+      ...(harness ? { harness } : {}),
+      ...(options.label ? { label: options.label } : {}),
+      ...(options.lifecycleId ? { lifecycleId: options.lifecycleId } : {}),
+    };
     const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(harness ? { kind, harness } : { kind }),
+      body: JSON.stringify(body),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function terminateTerminalSession(sessionId: string, base = ""): Promise<boolean> {
+  try {
+    const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}/terminate`, {
+      method: "POST",
     });
     return response.ok;
   } catch {

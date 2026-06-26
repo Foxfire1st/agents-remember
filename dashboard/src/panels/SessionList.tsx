@@ -4,9 +4,9 @@ import { css } from "../../styled-system/css";
 import type { OpenSession } from "../data/sessions";
 
 // The session switcher (slice 6e-2c): the open terminal/chat sessions as a left-rail list, replacing
-// the old horizontal tab strip. A React Aria GridList — not a ListBox — because each row carries a
-// focusable close ✕: ListBox rows are single focus stops, so a nested button would be keyboard-
-// unreachable, while GridList gives arrow-nav between rows AND keyboard access to the per-row close.
+// the old horizontal tab strip. A React Aria GridList — not a ListBox — because each row carries
+// focusable action buttons: ListBox rows are single focus stops, so nested buttons would be keyboard-
+// unreachable, while GridList gives arrow-nav between rows AND keyboard access to the per-row actions.
 // Single selection IS the active session (selectedKeys ↔ onSelect, mirroring LifecycleList); the look
 // is Panda's `_selected`/`_focusVisible` state conditions (coding-guidelines: React Aria owns
 // behavior, Panda owns looks), and the row's selected colour cascades to the label so selection state
@@ -41,12 +41,13 @@ const label = css({
   font: "inherit",
   fontSize: "0.74rem",
   flex: "1",
+  minWidth: "0",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   paddingBlock: "0.25rem",
 });
-const lifecycle = css({
+const badge = css({
   maxWidth: "5rem",
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -60,14 +61,45 @@ const lifecycle = css({
   borderRadius: "2px",
   paddingInline: "0.25rem",
 });
-const close = css({
+const statusBadge = css({
+  flexShrink: 0,
+  fontSize: "0.64rem",
+  color: "muted",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.25rem",
+});
+const actions = css({
+  display: "flex",
+  alignItems: "stretch",
+  flexShrink: 0,
+  borderLeftWidth: "1px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "grid",
+});
+const actionButton = css({
   font: "inherit",
-  fontSize: "0.7rem",
+  fontSize: "0.62rem",
   color: "muted",
   background: "transparent",
   border: "none",
   cursor: "pointer",
   paddingInline: "0.3rem",
+  minWidth: "1.6rem",
+  _hover: { color: "alarm" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
+const terminateButton = css({
+  font: "inherit",
+  fontSize: "0.62rem",
+  color: "alarm",
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  paddingInline: "0.3rem",
+  minWidth: "1.6rem",
   _hover: { color: "alarm" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
@@ -76,12 +108,14 @@ export function SessionList({
   sessions,
   activeId,
   onSelect,
-  onClose,
+  onDetach,
+  onTerminate,
 }: {
   sessions: OpenSession[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  onClose: (id: string) => void;
+  onDetach: (id: string) => void;
+  onTerminate: (id: string) => void;
 }) {
   return (
     <GridList
@@ -103,14 +137,26 @@ export function SessionList({
           data-testid={`chats-session-${session.id}`}
         >
           <span className={label}>{session.label}</span>
-          {session.lifecycleId ? <span className={lifecycle}>{session.lifecycleId}</span> : null}
-          <Button
-            className={close}
-            aria-label={`Close ${session.label}`}
-            onPress={() => onClose(session.id)}
-          >
-            ✕
-          </Button>
+          {session.lifecycleId ? <span className={badge}>{session.lifecycleId}</span> : null}
+          {session.status && session.status !== "running" ? (
+            <span className={statusBadge}>{session.status}</span>
+          ) : null}
+          <span className={actions}>
+            <Button
+              className={actionButton}
+              aria-label={`Detach ${session.label}`}
+              onPress={() => onDetach(session.id)}
+            >
+              ✕
+            </Button>
+            <Button
+              className={terminateButton}
+              aria-label={`Terminate ${session.label}`}
+              onPress={() => onTerminate(session.id)}
+            >
+              End
+            </Button>
+          </span>
         </GridListItem>
       )}
     </GridList>

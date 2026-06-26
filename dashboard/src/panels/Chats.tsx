@@ -3,12 +3,20 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { css } from "../../styled-system/css";
 import {
   createSession,
+  fromTerminalSessionInfo,
   registerConnection,
   sendToSession,
   sessionStore,
   useSessions,
 } from "../data/sessions";
-import { bracketedPaste, fetchHarnesses, sanitizeForInjection, type HarnessInfo } from "../data/terminal";
+import {
+  bracketedPaste,
+  fetchHarnesses,
+  fetchTerminalSessions,
+  sanitizeForInjection,
+  terminateTerminalSession,
+  type HarnessInfo,
+} from "../data/terminal";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
 import { SessionComposer } from "./SessionComposer";
 import { SessionList } from "./SessionList";
@@ -122,6 +130,37 @@ const empty = css({
   color: "muted",
   fontSize: "0.82rem",
 });
+const statusPanel = css({
+  display: "flex",
+  flex: "1",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "muted",
+  fontSize: "0.82rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  background: "bg",
+});
+
+const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
+
+function readLastActiveSessionId(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastActiveSessionId(id: string | null): void {
+  try {
+    if (id) window.localStorage.setItem(LAST_ACTIVE_SESSION_KEY, id);
+    else window.localStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
+  } catch {
+    // localStorage can be unavailable in private contexts; it is only a UI preference.
+  }
+}
 
 /** Placeholder harness glyph: a rounded box with a monogram, `currentColor` so it tracks the button. */
 function HarnessIcon({ id }: { id: string }) {
@@ -163,6 +202,23 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void fetchTerminalSessions().then((list) => {
+      if (!active || list.length === 0) return;
+      sessionStore
+        .getState()
+        .hydrate(list.map(fromTerminalSessionInfo), readLastActiveSessionId());
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    writeLastActiveSessionId(activeId);
+  }, [activeId]);
+
   const startSession = (label: string, kind: "terminal" | "harness", harness?: string) =>
     selectedLifecycleId
       ? createSession(label, kind, harness, selectedLifecycleId)
@@ -171,6 +227,12 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
   const attachActive = () => {
     if (!activeSession || activeSession.lifecycleId || !selectedLifecycleId) return;
     sessionStore.getState().setLifecycle(activeSession.id, selectedLifecycleId);
+  };
+
+  const terminateSession = async (id: string) => {
+    if (await terminateTerminalSession(id)) {
+      sessionStore.getState().close(id);
+    }
   };
 
   return (
@@ -220,7 +282,8 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
               sessions={sessions}
               activeId={activeId}
               onSelect={(id) => sessionStore.getState().setActive(id)}
-              onClose={(id) => sessionStore.getState().close(id)}
+              onDetach={(id) => sessionStore.getState().close(id)}
+              onTerminate={(id) => void terminateSession(id)}
             />
           </aside>
         )}
@@ -235,12 +298,18 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
                   aria-hidden={session.id !== activeId}
                   data-testid={`chats-terminal-layer-${session.id}`}
                 >
-                  <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
-                    <Terminal
-                      sessionId={session.id}
-                      onConnection={(conn) => registerConnection(session.id, conn)}
-                    />
-                  </Suspense>
+                  {(session.status ?? "running") === "running" ? (
+                    <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
+                      <Terminal
+                        sessionId={session.id}
+                        onConnection={(conn) => registerConnection(session.id, conn)}
+                      />
+                    </Suspense>
+                  ) : (
+                    <div className={statusPanel} data-testid={`chats-session-status-${session.id}`}>
+                      session {session.status}
+                    </div>
+                  )}
                 </div>
               ))}
               <SessionComposer

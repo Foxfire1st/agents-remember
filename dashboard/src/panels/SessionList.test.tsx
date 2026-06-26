@@ -12,11 +12,17 @@ const sessions: OpenSession[] = [
 ];
 
 // SessionList is the slice-6e-2c session switcher (a React Aria GridList). It is pure + presentational
-// (no backend, no xterm), so — unlike the Chats render-only tests — it can drive selection + close.
+// (no backend, no xterm), so — unlike the Chats render-only tests — it can drive selection + actions.
 describe("SessionList (6e-2c)", () => {
   it("renders a row per session and marks the active one as selected", () => {
     const { getByTestId } = render(
-      <SessionList sessions={sessions} activeId="b" onSelect={() => {}} onClose={() => {}} />,
+      <SessionList
+        sessions={sessions}
+        activeId="b"
+        onSelect={() => {}}
+        onDetach={() => {}}
+        onTerminate={() => {}}
+      />,
     );
     expect(getByTestId("chats-session-a").getAttribute("data-selected")).toBeNull();
     expect(getByTestId("chats-session-b").getAttribute("data-selected")).not.toBeNull();
@@ -28,29 +34,72 @@ describe("SessionList (6e-2c)", () => {
         sessions={[{ id: "a", label: "Terminal 1", lifecycleId: "LC1" }]}
         activeId="a"
         onSelect={() => {}}
-        onClose={() => {}}
+        onDetach={() => {}}
+        onTerminate={() => {}}
       />,
     );
     expect(getByTestId("chats-session-a").textContent).toContain("LC1");
   });
 
+  it("renders a status tag for sessions that are no longer running", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[{ id: "a", label: "Terminal 1", status: "exited" }]}
+        activeId="a"
+        onSelect={() => {}}
+        onDetach={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    expect(getByTestId("chats-session-a").textContent).toContain("exited");
+  });
+
   it("selecting a row reports the new active id", () => {
     const onSelect = vi.fn();
     const { getByTestId } = render(
-      <SessionList sessions={sessions} activeId="a" onSelect={onSelect} onClose={() => {}} />,
+      <SessionList
+        sessions={sessions}
+        activeId="a"
+        onSelect={onSelect}
+        onDetach={() => {}}
+        onTerminate={() => {}}
+      />,
     );
     fireEvent.click(getByTestId("chats-session-b"));
     expect(onSelect).toHaveBeenCalledWith("b");
   });
 
-  it("the row ✕ closes that session without switching to it", () => {
+  it("the row detach action removes that session without switching to it", () => {
     const onSelect = vi.fn();
-    const onClose = vi.fn();
+    const onDetach = vi.fn();
     const { getByLabelText } = render(
-      <SessionList sessions={sessions} activeId="a" onSelect={onSelect} onClose={onClose} />,
+      <SessionList
+        sessions={sessions}
+        activeId="a"
+        onSelect={onSelect}
+        onDetach={onDetach}
+        onTerminate={() => {}}
+      />,
     );
-    fireEvent.click(getByLabelText("Close Claude Code 2"));
-    expect(onClose).toHaveBeenCalledWith("b");
+    fireEvent.click(getByLabelText("Detach Claude Code 2"));
+    expect(onDetach).toHaveBeenCalledWith("b");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("the row terminate action reports the destructive action separately", () => {
+    const onSelect = vi.fn();
+    const onTerminate = vi.fn();
+    const { getByLabelText } = render(
+      <SessionList
+        sessions={sessions}
+        activeId="a"
+        onSelect={onSelect}
+        onDetach={() => {}}
+        onTerminate={onTerminate}
+      />,
+    );
+    fireEvent.click(getByLabelText("Terminate Claude Code 2"));
+    expect(onTerminate).toHaveBeenCalledWith("b");
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

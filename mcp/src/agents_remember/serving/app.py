@@ -74,6 +74,12 @@ from agents_remember.serving.harnesses import (
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    TerminalCatalogEntry,
+    TerminalSessionKind,
+    terminal_catalog_path,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -228,7 +234,8 @@ class TerminalOpenRequest(BaseModel):
 
     kind: str = "terminal"
     harness: str | None = None
-    lifecycle_id: str | None = None
+    label: str | None = None
+    lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
 
 
 class OperatorInboxPostRequest(BaseModel):
@@ -271,6 +278,59 @@ def resolve_terminal_launch(
     raise ValueError(f"unknown terminal kind: {kind!r}")
 
 
+def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: str) -> str:
+    if kind == "terminal":
+        return "Terminal"
+    return harness or fallback
+
+
+def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
+    return entry.to_json()
+
+
+def _refresh_catalog_entries(
+    catalog: TerminalCatalog, host: TerminalHost
+) -> list[TerminalCatalogEntry]:
+    refreshed: list[TerminalCatalogEntry] = []
+    for entry in catalog.list():
+        session = host.get(entry.id)
+        stale_running = entry.status == "running" and (
+            (session is not None and not session.is_alive)
+            or (session is None and not host.has_session(entry.tmux_name))
+        )
+        if stale_running:
+            updated = catalog.mark_exited(entry.id) or entry.with_status("exited")
+            refreshed.append(updated)
+        else:
+            refreshed.append(entry)
+    return refreshed
+
+
+def _rehydrate_terminal_session(
+    *,
+    catalog: TerminalCatalog,
+    host: TerminalHost,
+    session_id: str,
+    attached_at: str,
+) -> TerminalSession | None:
+    entry = catalog.get(session_id)
+    if entry is None or entry.status != "running":
+        return None
+    if not host.has_session(entry.tmux_name):
+        catalog.mark_exited(session_id)
+        return None
+    session = host.open(
+        session_id,
+        cwd=entry.cwd,
+        command=entry.command,
+        lifecycle_id=entry.lifecycle_id,
+        name=entry.tmux_name,
+        suspend_unsafe=entry.kind == "harness",
+    )
+    catalog.mark_attached(session_id, attached_at)
+    return session
+
+
 def create_app(
     config: McpRuntimeConfig,
     *,
@@ -278,6 +338,7 @@ def create_app(
     now: Callable[[], datetime] | None = None,
     before_tick: Callable[[datetime], object] | None = None,
     terminal_host: TerminalHost | None = None,
+    terminal_catalog: TerminalCatalog | None = None,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
@@ -287,6 +348,7 @@ def create_app(
     """
     projector = Projector(config, interval=interval, now=now, before_tick=before_tick)
     host = terminal_host if terminal_host is not None else TerminalHost()
+    catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -425,13 +487,32 @@ def create_app(
         await websocket.accept()
         session_obj = host.get(session)
         if session_obj is None:
-            await websocket.close(code=4404)
-            return
+            session_obj = _rehydrate_terminal_session(
+                catalog=catalog,
+                host=host,
+                session_id=session,
+                attached_at=now_iso(),
+            )
+            if session_obj is None:
+                await websocket.close(code=4404)
+                return
+        else:
+            catalog.mark_attached(session, now_iso())
         try:
             await _bridge_terminal(websocket, host, session_obj)
         finally:
+            if not session_obj.is_alive:
+                catalog.mark_exited(session)
             with contextlib.suppress(RuntimeError):
                 await websocket.close()
+
+    @app.get("/api/terminal/sessions")
+    def api_terminal_sessions() -> dict[str, Any]:
+        return {
+            "sessions": [
+                _catalog_payload(entry) for entry in _refresh_catalog_entries(catalog, host)
+            ]
+        }
 
     @app.get("/api/harnesses")
     def api_harnesses() -> dict[str, Any]:
@@ -462,6 +543,7 @@ def create_app(
             return JSONResponse(
                 content={"status": "bad-kind", "detail": str(exc)}, status_code=400
             )
+        kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
         opened = host.open(
             session,
             cwd=cwd,
@@ -471,12 +553,52 @@ def create_app(
             # shell keeps Ctrl-Z so its job control works (slice 6f hardening).
             suspend_unsafe=request.kind == "harness",
         )
+        attached_at = now_iso()
+        existing = catalog.get(session)
+        label = request.label or (existing.label if existing else _terminal_label(kind, request.harness, session))
+        entry = TerminalCatalogEntry(
+            id=opened.sid,
+            label=label,
+            kind=kind,
+            harness=request.harness,
+            lifecycle_id=request.lifecycle_id,
+            cwd=opened.cwd,
+            tmux_name=opened.tmux_name,
+            command=tuple(command),
+            created_at=existing.created_at if existing is not None else attached_at,
+            last_attached_at=attached_at,
+            status="running",
+        )
+        catalog.upsert(entry)
         return JSONResponse(
             content={
                 "session": opened.sid,
+                "label": entry.label,
                 "kind": request.kind,
                 "harness": request.harness,
+                "lifecycleId": request.lifecycle_id,
                 "cwd": str(opened.cwd),
+                "tmuxName": opened.tmux_name,
+                "status": "running",
+            },
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/terminate")
+    def api_terminal_terminate(session: str) -> Response:
+        entry = catalog.get(session)
+        live = host.get(session)
+        if entry is None and live is None:
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        host.terminate(session, tmux_name=entry.tmux_name if entry is not None else None)
+        terminated_at = now_iso()
+        updated = catalog.mark_terminated(session, terminated_at)
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "terminated",
+                "terminatedAt": terminated_at,
+                **({"tmuxName": updated.tmux_name} if updated is not None else {}),
             },
             status_code=200,
         )
@@ -495,10 +617,10 @@ def create_app(
         # keyed by an unguessable client UUID, so cross-origin/CSRF writes can't target a real session;
         # an Origin/Host allowlist for all write routes is folded into the documented remote-auth story.
         session_obj = host.get(session)
-        if session_obj is None:
+        entry = catalog.get(session)
+        cwd = session_obj.cwd if session_obj is not None else (entry.cwd if entry else None)
+        if cwd is None:
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        if session_obj.cwd is None:
-            return JSONResponse(content={"status": "no-cwd"}, status_code=409)
         declared = request.headers.get("content-length")
         if declared is not None and declared.isdigit() and int(declared) > _MAX_IMAGE_BYTES + 4096:
             return JSONResponse(content={"status": "too-large"}, status_code=413)  # fast reject
@@ -510,7 +632,7 @@ def create_app(
             return JSONResponse(content={"status": "too-large"}, status_code=413)
         if not body or not _looks_like_image(body, ext):
             return JSONResponse(content={"status": "bad-type"}, status_code=400)  # empty / not an image
-        dest = session_obj.cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
+        dest = cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
         return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)

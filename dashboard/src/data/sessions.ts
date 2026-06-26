@@ -7,6 +7,9 @@ import {
   sanitizeForInjection,
   submitAndConfirm,
   type TerminalConnection,
+  type TerminalOpenKind,
+  type TerminalSessionInfo,
+  type TerminalSessionStatus,
 } from "./terminal";
 
 // The open terminal/chat sessions (slice 6e hardening): the session registry as a module-level store
@@ -18,7 +21,10 @@ import {
 export interface OpenSession {
   id: string;
   label: string;
+  kind?: TerminalOpenKind;
+  harness?: string;
   lifecycleId?: string;
+  status?: TerminalSessionStatus;
 }
 
 interface SessionState {
@@ -27,15 +33,38 @@ interface SessionState {
   count: number;
   /** Append a session labelled `{prefix} {n}`, bump the ordinal, and make it active. */
   add: (prefix: string, id: string, lifecycleId?: string) => void;
+  /** Insert or replace a known server-owned session, optionally making it active. */
+  upsert: (session: OpenSession, activate?: boolean) => void;
+  /** Hydrate the store from server-owned session rows. */
+  hydrate: (sessions: OpenSession[], preferredActiveId?: string | null) => void;
   /** Drop a session; clear `activeId` if it was the one removed (the tmux session persists). */
   close: (id: string) => void;
+  setStatus: (id: string, status: TerminalSessionStatus) => void;
   setActive: (id: string) => void;
   /** Attach a hosted session to one lifecycle; latest attachment owns that lifecycle route. */
   setLifecycle: (id: string, lifecycleId: string | null) => void;
 }
 
 function clearLifecycle(session: OpenSession): OpenSession {
-  return { id: session.id, label: session.label };
+  const next = { ...session };
+  delete next.lifecycleId;
+  return next;
+}
+
+function inferOrdinal(label: string): number | null {
+  const match = label.match(/\s(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function maxOrdinal(sessions: OpenSession[]): number {
+  return sessions.reduce((max, session) => {
+    const ordinal = inferOrdinal(session.label);
+    return ordinal === null ? max : Math.max(max, ordinal);
+  }, 0);
+}
+
+function isLiveSession(session: OpenSession): boolean {
+  return session.status !== "exited" && session.status !== "terminated";
 }
 
 export const sessionStore = createStore<SessionState>((set) => ({
@@ -59,10 +88,53 @@ export const sessionStore = createStore<SessionState>((set) => ({
         activeId: id,
       };
     }),
+  upsert: (session, activate = true) =>
+    set((state) => {
+      const nextSessions = [
+        ...state.sessions
+          .filter((current) => current.id !== session.id)
+          .map((current) =>
+            session.lifecycleId && current.lifecycleId === session.lifecycleId
+              ? clearLifecycle(current)
+              : current,
+          ),
+        session,
+      ];
+      return {
+        sessions: nextSessions,
+        count: Math.max(state.count, maxOrdinal([session])),
+        activeId: activate ? session.id : state.activeId,
+      };
+    }),
+  hydrate: (sessions, preferredActiveId) =>
+    set((state) => {
+      const live = sessions.filter(isLiveSession);
+      const preferred = preferredActiveId && live.some((session) => session.id === preferredActiveId);
+      const retainedActive = state.activeId && live.some((session) => session.id === state.activeId);
+      return {
+        sessions,
+        count: Math.max(state.count, maxOrdinal(sessions)),
+        activeId: preferred
+          ? preferredActiveId
+          : retainedActive
+            ? state.activeId
+            : (live[0]?.id ?? sessions[0]?.id ?? null),
+      };
+    }),
   close: (id) =>
     set((state) => ({
       sessions: state.sessions.filter((session) => session.id !== id),
       activeId: state.activeId === id ? null : state.activeId,
+    })),
+  setStatus: (id, status) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === id ? { ...session, status } : session,
+      ),
+      activeId:
+        state.activeId === id && status !== "running"
+          ? (state.sessions.find((session) => session.id !== id && isLiveSession(session))?.id ?? null)
+          : state.activeId,
     })),
   setActive: (id) => set({ activeId: id }),
   setLifecycle: (id, lifecycleId) =>
@@ -81,7 +153,20 @@ export const useSessions = <T>(selector: (state: SessionState) => T): T =>
   useStore(sessionStore, selector);
 
 export function findSessionForLifecycle(lifecycleId: string): OpenSession | undefined {
-  return sessionStore.getState().sessions.find((session) => session.lifecycleId === lifecycleId);
+  return sessionStore
+    .getState()
+    .sessions.find((session) => session.lifecycleId === lifecycleId && isLiveSession(session));
+}
+
+export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession {
+  return {
+    id: info.id,
+    label: info.label,
+    kind: info.kind,
+    ...(info.harness ? { harness: info.harness } : {}),
+    ...(info.lifecycleId ? { lifecycleId: info.lifecycleId } : {}),
+    status: info.status,
+  };
 }
 
 // --- Live connections (slice 6f): the per-session `TerminalConnection` registry, exposed cockpit-wide
@@ -185,8 +270,19 @@ export async function createSession(
   lifecycleId?: string,
 ): Promise<string> {
   const id = crypto.randomUUID();
+  const label = `${prefix} ${sessionStore.getState().count + 1}`;
   // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
-  await openTerminalSession(id, kind, "", harness);
-  sessionStore.getState().add(prefix, id, lifecycleId);
+  await openTerminalSession(id, kind, "", harness, { label, lifecycleId });
+  sessionStore.getState().upsert(
+    {
+      id,
+      label,
+      kind,
+      ...(harness ? { harness } : {}),
+      ...(lifecycleId ? { lifecycleId } : {}),
+      status: "running",
+    },
+    true,
+  );
   return id;
 }

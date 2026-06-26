@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import socket
 import sys
 import tempfile
 import unittest
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
@@ -38,6 +38,11 @@ from agents_remember.serving.app import (
     resolve_terminal_launch,
 )
 from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    TerminalCatalogEntry,
+    TerminalSessionStatus,
+)
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -59,6 +64,29 @@ def _which(*installed: str) -> Callable[[str], str | None]:
     return which
 
 
+def _catalog_entry(
+    session_id: str,
+    *,
+    cwd: Path,
+    status: TerminalSessionStatus = "running",
+    tmux_name: str | None = None,
+    command: Sequence[str] = ("bash",),
+) -> TerminalCatalogEntry:
+    return TerminalCatalogEntry(
+        id=session_id,
+        label=f"Terminal {session_id}",
+        kind="terminal",
+        harness=None,
+        lifecycle_id=None,
+        cwd=cwd,
+        tmux_name=tmux_name or f"ar-{session_id}",
+        command=tuple(command),
+        created_at="2026-06-26T00:00:00Z",
+        last_attached_at="2026-06-26T00:00:00Z",
+        status=status,
+    )
+
+
 class _RecordingHost:
     """Captures `write`/`resize` calls for the frame-parser unit tests."""
 
@@ -76,10 +104,24 @@ class _RecordingHost:
 class _FakeSession:
     """A terminal-session stand-in: the fields `_bridge_terminal` reads."""
 
-    def __init__(self, sid: str, master_fd: int, cwd: Path | None = None) -> None:
+    def __init__(
+        self,
+        sid: str,
+        master_fd: int,
+        *,
+        cwd: Path | None = None,
+        tmux_name: str | None = None,
+        command: Sequence[str] = ("bash",),
+        lifecycle_id: str | None = None,
+        suspend_unsafe: bool = False,
+    ) -> None:
         self.sid = sid
         self.master_fd = master_fd
         self.cwd = cwd
+        self.tmux_name = tmux_name or f"ar-{sid}"
+        self.command = tuple(command)
+        self.lifecycle_id = lifecycle_id
+        self.suspend_unsafe = suspend_unsafe
         self.alive = True
 
     @property
@@ -102,6 +144,8 @@ class _FakeTerminalHost:
         self.session = _FakeSession(sid, self._master.fileno(), cwd=cwd)
         self.resizes: list[tuple[int, int]] = []
         self.opened: list[dict[str, object]] = []
+        self.probe_names: set[str] = set()
+        self.terminated: list[str] = []
         self.shutdown_called = False
 
     def get(self, sid: str) -> _FakeSession | None:
@@ -114,18 +158,41 @@ class _FakeTerminalHost:
         cwd: Path,
         command: Sequence[str],
         lifecycle_id: str | None = None,
+        name: str | None = None,
         suspend_unsafe: bool = False,
-    ) -> SimpleNamespace:
+    ) -> _FakeSession:
         self.opened.append(
             {
                 "sid": sid,
                 "cwd": cwd,
                 "command": list(command),
                 "lifecycle_id": lifecycle_id,
+                "name": name,
                 "suspend_unsafe": suspend_unsafe,
             }
         )
-        return SimpleNamespace(sid=sid, cwd=cwd)
+        self.session = _FakeSession(
+            sid,
+            self._master.fileno(),
+            cwd=cwd,
+            tmux_name=name or f"ar-{sid}",
+            command=command,
+            lifecycle_id=lifecycle_id,
+            suspend_unsafe=suspend_unsafe,
+        )
+        self.probe_names.add(self.session.tmux_name)
+        return self.session
+
+    def has_session(self, tmux_name: str) -> bool:
+        return tmux_name in self.probe_names
+
+    def terminate(self, sid: str, *, tmux_name: str | None = None) -> None:
+        target = tmux_name or (self.session.tmux_name if sid == self.session.sid else None)
+        if target is not None:
+            self.terminated.append(target)
+            self.probe_names.discard(target)
+        if sid == self.session.sid:
+            self.session.alive = False
 
     def read_nonblocking(self, _sid: str, max_bytes: int = 65536) -> bytes:
         try:
@@ -198,8 +265,12 @@ class TerminalWebSocketTests(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
         self.host = _FakeTerminalHost(cwd=self.tmp)
+        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
         self.app = create_app(
-            _config(self.tmp), interval=100, terminal_host=cast(TerminalHost, self.host)
+            _config(self.tmp),
+            interval=100,
+            terminal_host=cast(TerminalHost, self.host),
+            terminal_catalog=self.catalog,
         )
 
     def tearDown(self) -> None:
@@ -253,17 +324,95 @@ class TerminalWebSocketTests(unittest.TestCase):
 
     def test_post_open_spawns_shell_at_workspace_root(self) -> None:
         with TestClient(self.app) as client:
-            response = client.post("/api/terminal/term-1", json={"kind": "terminal"})
+            response = client.post(
+                "/api/terminal/term-1",
+                json={"kind": "terminal", "label": "Terminal 1", "lifecycleId": "LC1"},
+            )
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["session"], "term-1")
         self.assertEqual(body["kind"], "terminal")
+        self.assertEqual(body["label"], "Terminal 1")
+        self.assertEqual(body["lifecycleId"], "LC1")
+        self.assertEqual(body["tmuxName"], "ar-term-1")
+        self.assertEqual(body["status"], "running")
         self.assertEqual(len(self.host.opened), 1)
         opened = self.host.opened[0]
         self.assertEqual(opened["sid"], "term-1")
         self.assertEqual(opened["cwd"], self.tmp)  # workspace_root (== _config's tmp)
         self.assertEqual(len(cast(list, opened["command"])), 1)  # the shell argv
+        self.assertEqual(opened["lifecycle_id"], "LC1")
         self.assertFalse(opened["suspend_unsafe"])  # a shell keeps Ctrl-Z (job control)
+        entry = self.catalog.get("term-1")
+        assert entry is not None
+        self.assertEqual(entry.label, "Terminal 1")
+        self.assertEqual(entry.lifecycle_id, "LC1")
+        self.assertEqual(entry.status, "running")
+
+    def test_get_terminal_sessions_lists_catalog_entries(self) -> None:
+        with TestClient(self.app) as client:
+            client.post("/api/terminal/term-1", json={"kind": "terminal", "label": "Terminal 1"})
+            response = client.get("/api/terminal/sessions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["sessions"][0],
+            {
+                "id": "term-1",
+                "label": "Terminal 1",
+                "kind": "terminal",
+                "cwd": str(self.tmp),
+                "tmuxName": "ar-term-1",
+                "command": [os.environ.get("SHELL") or "/bin/bash"],
+                "createdAt": response.json()["sessions"][0]["createdAt"],
+                "lastAttachedAt": response.json()["sessions"][0]["lastAttachedAt"],
+                "status": "running",
+            },
+        )
+
+    def test_websocket_rehydrates_missing_host_from_catalog_when_tmux_exists(self) -> None:
+        self.catalog.upsert(
+            _catalog_entry("restored", cwd=self.tmp, tmux_name="ar-restored", command=("bash",))
+        )
+        self.host.probe_names.add("ar-restored")
+        with TestClient(self.app) as client, client.websocket_connect(
+            "/api/terminal/restored"
+        ) as ws:
+            self.host.feed(b"restored-output")
+            self.assertEqual(ws.receive_bytes(), b"restored-output")
+        self.assertEqual(self.host.opened[0]["sid"], "restored")
+        self.assertEqual(self.host.opened[0]["name"], "ar-restored")
+        entry = self.catalog.get("restored")
+        assert entry is not None
+        self.assertEqual(entry.status, "running")
+
+    def test_websocket_marks_stale_catalog_session_exited(self) -> None:
+        self.catalog.upsert(_catalog_entry("stale", cwd=self.tmp, tmux_name="ar-stale"))
+        with TestClient(self.app) as client, client.websocket_connect(
+            "/api/terminal/stale"
+        ) as ws, self.assertRaises(WebSocketDisconnect) as ctx:
+            ws.receive_text()
+        self.assertEqual(ctx.exception.code, 4404)
+        entry = self.catalog.get("stale")
+        assert entry is not None
+        self.assertEqual(entry.status, "exited")
+
+    def test_get_terminal_sessions_marks_stale_tmux_rows_exited(self) -> None:
+        self.catalog.upsert(_catalog_entry("stale", cwd=self.tmp, tmux_name="ar-stale"))
+        with TestClient(self.app) as client:
+            response = client.get("/api/terminal/sessions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sessions"][0]["status"], "exited")
+
+    def test_terminate_marks_catalog_and_kills_tmux(self) -> None:
+        with TestClient(self.app) as client:
+            client.post("/api/terminal/term-1", json={"kind": "terminal", "label": "Terminal 1"})
+            response = client.post("/api/terminal/term-1/terminate")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "terminated")
+        self.assertEqual(self.host.terminated, ["ar-term-1"])
+        entry = self.catalog.get("term-1")
+        assert entry is not None
+        self.assertEqual(entry.status, "terminated")
 
     def test_post_open_rejects_unknown_kind(self) -> None:
         with TestClient(self.app) as client:
@@ -285,16 +434,22 @@ class TerminalWebSocketTests(unittest.TestCase):
     def test_post_open_harness_spawns_registry_argv_at_workspace_root(self) -> None:
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
             response = client.post(
-                "/api/terminal/h-1", json={"kind": "harness", "harness": "claude"}
+                "/api/terminal/h-1",
+                json={"kind": "harness", "harness": "claude", "label": "Claude Code 1"},
             )
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual((body["kind"], body["harness"]), ("harness", "claude"))
+        self.assertEqual(body["label"], "Claude Code 1")
         self.assertEqual(len(self.host.opened), 1)
         opened = self.host.opened[0]
         self.assertEqual(opened["command"], ["claude"])  # server-resolved argv, never wire-supplied
         self.assertEqual(opened["cwd"], self.tmp)  # workspace_root
         self.assertTrue(opened["suspend_unsafe"])  # a bare-pane harness gets the Ctrl-Z strip
+        entry = self.catalog.get("h-1")
+        assert entry is not None
+        self.assertEqual(entry.kind, "harness")
+        self.assertEqual(entry.harness, "claude")
 
     def test_post_open_harness_rejects_uninstalled(self) -> None:
         with patch("shutil.which", _which()), TestClient(self.app) as client:
@@ -320,8 +475,12 @@ class TerminalImageEndpointTests(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
         self.host = _FakeTerminalHost(cwd=self.tmp)
+        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
         self.app = create_app(
-            _config(self.tmp), interval=100, terminal_host=cast(TerminalHost, self.host)
+            _config(self.tmp),
+            interval=100,
+            terminal_host=cast(TerminalHost, self.host),
+            terminal_catalog=self.catalog,
         )
 
     def tearDown(self) -> None:
@@ -408,6 +567,20 @@ class TerminalImageEndpointTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["status"], "unknown-session")
+
+    def test_saves_under_catalog_cwd_after_dashboard_restart(self) -> None:
+        restored_cwd = self.tmp / "restored"
+        restored_cwd.mkdir()
+        self.catalog.upsert(_catalog_entry("restored", cwd=restored_cwd, tmux_name="ar-restored"))
+        png = b"\x89PNG\r\n\x1a\n" + b"catalog-body"
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/restored/image", files={"file": ("shot.png", png, "image/png")}
+            )
+        self.assertEqual(response.status_code, 200)
+        path = Path(response.json()["path"])
+        self.assertTrue(path.is_relative_to(restored_cwd.resolve()))
+        self.assertEqual(path.read_bytes(), png)
 
 
 class ResolveTerminalLaunchTests(unittest.TestCase):

@@ -155,7 +155,13 @@ class BuildCommandTests(unittest.TestCase):
 class TerminalHostRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.spawner = _FakeSpawner()
-        self.host = TerminalHost(spawn=self.spawner)
+        self.existing_tmux: set[str] = set()
+        self.killed_tmux: list[str] = []
+        self.host = TerminalHost(
+            spawn=self.spawner,
+            tmux_probe=self.existing_tmux.__contains__,
+            tmux_killer=self.killed_tmux.append,
+        )
         self.tmp = Path(tempfile.mkdtemp())
 
     def tearDown(self) -> None:
@@ -210,6 +216,22 @@ class TerminalHostRegistryTests(unittest.TestCase):
         session = self.host.open("lc1", cwd=self.tmp, command=["cat"], name="custom")
         self.assertEqual(session.tmux_name, "custom")
         self.assertEqual(self.spawner.calls[0][4], "custom")
+
+    def test_has_session_uses_tmux_probe(self) -> None:
+        self.existing_tmux.add("ar-lc1")
+        self.assertTrue(self.host.has_session("ar-lc1"))
+        self.assertFalse(self.host.has_session("ar-missing"))
+
+    def test_terminate_kills_tmux_and_unregisters(self) -> None:
+        self.host.open("lc1", cwd=self.tmp, command=["cat"])
+        self.host.terminate("lc1")
+        self.assertEqual(self.killed_tmux, ["ar-lc1"])
+        self.assertIsNone(self.host.get("lc1"))
+        self.assertEqual(self.host.sessions(), [])
+
+    def test_terminate_unknown_uses_supplied_tmux_name(self) -> None:
+        self.host.terminate("ghost", tmux_name="ar-ghost")
+        self.assertEqual(self.killed_tmux, ["ar-ghost"])
 
 
 @unittest.skipUnless(_HAS_CAT, "needs `cat` for a real PTY child")

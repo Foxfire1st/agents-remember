@@ -83,6 +83,43 @@ class PtyProcess:
 Spawner = Callable[[Sequence[str], Path], PtyProcess]
 """Spawn ``argv`` in ``cwd`` attached to a fresh PTY; returns the master fd + controls."""
 
+TmuxProbe = Callable[[str], bool]
+"""Return whether a tmux session name currently exists."""
+
+TmuxKiller = Callable[[str], None]
+"""Kill a tmux session name if it still exists."""
+
+
+def _tmux_has_session(name: str) -> bool:
+    """Whether tmux currently knows ``name``.
+
+    This separate probe is required for durable rehydrate: ``tmux new-session -A`` would create a fresh
+    session when ``name`` is gone, which would falsely report a stale catalog row as resumed.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", name],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_TERMINATE_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def _tmux_kill_session(name: str) -> None:
+    """Kill tmux session ``name``; no-op when tmux or the session is absent."""
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(
+            ["tmux", "kill-session", "-t", name],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_TERMINATE_TIMEOUT,
+        )
+
 
 @dataclass
 class TerminalSession:
@@ -190,8 +227,16 @@ class TerminalHost:
     The WebSocket endpoint (slice 6d-2) is the live driver; the visual (xterm.js) is slice 6e.
     """
 
-    def __init__(self, *, spawn: Spawner | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        spawn: Spawner | None = None,
+        tmux_probe: TmuxProbe | None = None,
+        tmux_killer: TmuxKiller | None = None,
+    ) -> None:
         self._spawn: Spawner = spawn or _spawn_pty
+        self._tmux_probe: TmuxProbe = tmux_probe or _tmux_has_session
+        self._tmux_killer: TmuxKiller = tmux_killer or _tmux_kill_session
         self._sessions: dict[str, TerminalSession] = {}
 
     def open(
@@ -239,6 +284,10 @@ class TerminalHost:
         """Every registered session (registry view)."""
         return list(self._sessions.values())
 
+    def has_session(self, tmux_name: str) -> bool:
+        """Whether the persistent tmux session exists outside the in-process registry."""
+        return self._tmux_probe(tmux_name)
+
     def for_lifecycle(self, lifecycle_id: str) -> list[TerminalSession]:
         """Sessions correlated to ``lifecycle_id`` (the lifecycle/worktree spine)."""
         return [s for s in self._sessions.values() if s.lifecycle_id == lifecycle_id]
@@ -285,6 +334,15 @@ class TerminalHost:
         :meth:`open` with the same name re-attaches the still-running harness.
         """
         session = self._sessions.pop(sid, None)
+        if session is not None:
+            self._discard(session)
+
+    def terminate(self, sid: str, *, tmux_name: str | None = None) -> None:
+        """Explicitly kill a dashboard-owned tmux session and drop any local client."""
+        session = self._sessions.pop(sid, None)
+        target = session.tmux_name if session is not None else tmux_name
+        if target is not None:
+            self._tmux_killer(target)
         if session is not None:
             self._discard(session)
 
