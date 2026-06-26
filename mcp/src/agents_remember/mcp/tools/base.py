@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.models.tokens import finalize_payload_tokens
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer.ambient import ambient
 
 TRANSPORT = "stdio"
@@ -48,17 +48,14 @@ PUBLIC_TOOLS = (
     "codex_benchmark_prepare",
     "codex_benchmark_run",
     "lifecycle_start",
-    "lifecycle_block",
     "lifecycle_resume",
     "lifecycle_end",
     "switch_lifecycle",
     "lifecycle_phase",
     "lifecycle_finalize_task",
     "task_doc",
-    "gate_create",
+    "lifecycle_gate",
     "gate_decide",
-    "gate_wait",
-    "gate_response_wait",
     "gate_list",
     "operator_inbox_post",
     "operator_inbox_poll",
@@ -68,7 +65,7 @@ RESERVED_TOOLS: tuple[str, ...] = ()
 
 
 def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    model = PUBLIC_TOOL_RESPONSE_MODELS[tool_name]
+    model = TOOL_RESPONSE_MODELS[tool_name]
     dumped = model.model_validate(payload).model_dump(mode="json", exclude_none=True)
     finalized = finalize_payload_tokens(dumped)
     # The choke point: tag every tool call onto the active lifecycle by

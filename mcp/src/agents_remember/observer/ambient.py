@@ -532,8 +532,8 @@ def build_ask(
 ) -> dict[str, Any] | None:
     """The structured ask carried on a block, or ``None`` when none was given.
 
-    Single source for the ask shape: ``lifecycle_block`` records it on the
-    event and echoes it on the response from this one builder.
+    Single source for the ask shape used by ``lifecycle_gate`` and the retained
+    lower-level lifecycle-block compatibility builder.
     """
     ask = {"kind": kind, "prompt": prompt, "options": options}
     pruned = {key: value for key, value in ask.items() if value is not None}

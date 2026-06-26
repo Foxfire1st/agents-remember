@@ -29,7 +29,7 @@ class LifecycleStartResponse(LifecycleResponse):
 
 
 class LifecycleBlockResponse(LifecycleResponse):
-    """``lifecycle_block``: blocked, with the optional ask echoed back."""
+    """Internal compatibility ``lifecycle_block`` payload."""
 
     ask: dict[str, Any] | None = None
 

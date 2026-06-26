@@ -5,6 +5,11 @@ append-only gate log, and returns the modeled response through ``_tool_payload``
 -- so a gate action is itself an attributed tool call (the choke point tags it
 onto the active lifecycle like any other tool).
 
+``gate_create_payload``, ``gate_wait_payload``, and
+``gate_response_wait_payload`` remain lower-level compatibility builders for
+internal callers and tests. The agent-facing MCP junction is
+``lifecycle_gate``.
+
 Attribution rule: the MCP server registers ``gate_decide`` with
 ``decided_by="model"`` / ``decided_via="cli"`` -- the agent records its own
 decisions honestly and *cannot* claim to be the developer. The dashboard serving
@@ -18,7 +23,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agents_remember.controlplane.interaction_retention import (
     GATE_RESPONSE_WAIT_POLL_SECONDS,
@@ -37,8 +42,8 @@ from agents_remember.controlplane.records import (
     expire_gate,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.ambient import ambient
 from agents_remember.observer import observer_root
+from agents_remember.observer.ambient import ambient, build_ask, require_ambient
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.lifecycle_state import LifecycleError
 from agents_remember.observer.ulid import new_ulid
@@ -134,6 +139,94 @@ def gate_create_payload(
             "lifecycleId": gate.lifecycleId,
         },
     )
+
+
+def lifecycle_gate_payload(
+    config: McpRuntimeConfig,
+    *,
+    kind: str,
+    ask: dict[str, Any] | None = None,
+    lifecycle_id: str | None = None,
+    enclosure: str | None = None,
+    repo_id: str | None = None,
+    packet: dict[str, Any] | None = None,
+    required_decision: list[str] | None = None,
+) -> dict[str, Any]:
+    amb = require_ambient()
+    current = amb.current
+    if current is None:
+        raise LifecycleError("lifecycle_gate requires an active lifecycle")
+    if lifecycle_id is not None and lifecycle_id != current.id:
+        raise LifecycleError(
+            f"lifecycle_gate lifecycle_id {lifecycle_id!r} does not match active "
+            f"lifecycle {current.id!r}"
+        )
+    if current.state != "running":
+        raise LifecycleError(
+            f"cannot lifecycle_gate from state {current.state!r}; only running lifecycles gate"
+        )
+
+    ask_payload = ask or {}
+    ask_kind_raw = ask_payload.get("kind")
+    prompt_raw = ask_payload.get("prompt")
+    options_raw = ask_payload.get("options")
+    if ask_kind_raw is not None and not isinstance(ask_kind_raw, str):
+        raise ValueError("lifecycle_gate ask.kind must be a string when supplied")
+    if prompt_raw is not None and not isinstance(prompt_raw, str):
+        raise ValueError("lifecycle_gate ask.prompt must be a string when supplied")
+    if options_raw is not None and (
+        not isinstance(options_raw, list)
+        or any(not isinstance(option, str) for option in options_raw)
+    ):
+        raise ValueError("lifecycle_gate ask.options must be a list of strings when supplied")
+    ask_kind = cast(str | None, ask_kind_raw)
+    prompt = cast(str | None, prompt_raw)
+    options = cast(list[str] | None, options_raw)
+    structured_ask = build_ask(ask_kind, prompt, options)
+
+    now = now_iso()
+    store = _store(config)
+    for open_gate in store.current(current.id).values():
+        if open_gate.state == "open":
+            store.append(expire_gate(open_gate, now=now))
+    gate = create_gate(
+        kind=coerce_gate_kind(kind),
+        lifecycle_id=current.id,
+        gate_id=new_ulid(),
+        now=now,
+        enclosure=enclosure,
+        repo_id=repo_id,
+        packet=packet,
+        required_decision=required_decision,
+    )
+    store.append(gate)
+    blocked = amb.block(kind=ask_kind, prompt=prompt, options=options)
+    wait = {
+        "state": "initialized",
+        "gateId": gate.id,
+        "lifecycleId": blocked.id,
+        "timeoutSeconds": GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
+        "pollSeconds": GATE_RESPONSE_WAIT_POLL_SECONDS,
+    }
+    payload: dict[str, Any] = {
+        "ok": True,
+        "operation": "lifecycle_gate",
+        "gate": {
+            "id": gate.id,
+            "kind": gate.kind,
+            "state": gate.state,
+            "lifecycleId": gate.lifecycleId,
+        },
+        "lifecycle": {
+            "id": blocked.id,
+            "state": blocked.state,
+            "phase": blocked.phase,
+        },
+        "wait": wait,
+    }
+    if structured_ask is not None:
+        payload["ask"] = structured_ask
+    return _tool_payload("lifecycle_gate", payload)
 
 
 def gate_decide_payload(

@@ -6,9 +6,6 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
-from agents_remember.controlplane.interaction_retention import (
-    GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
-)
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
 
 from .compact_content import install_compact_content
@@ -24,16 +21,13 @@ from .tools import (
     codex_benchmark_run_payload,
     context_packet_payload,
     drift_check_payload,
-    gate_create_payload,
     gate_decide_payload,
     gate_list_payload,
-    gate_response_wait_payload,
-    gate_wait_payload,
     grepai_search_payload,
     grepai_trace_payload,
-    lifecycle_block_payload,
     lifecycle_end_payload,
     lifecycle_finalize_task_payload,
+    lifecycle_gate_payload,
     lifecycle_phase_payload,
     lifecycle_resume_payload,
     lifecycle_start_payload,
@@ -825,17 +819,6 @@ def create_server(config: McpRuntimeConfig) -> Any:
         return lifecycle_start_payload()
 
     @server.tool()
-    def lifecycle_block(
-        kind: str | None = None,
-        prompt: str | None = None,
-        options: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """Mark the active lifecycle blocked (waiting on a gate or a human answer). Optionally
-        carry a structured ask: kind ('question'|'decision'|'conflict'), a prompt, and
-        enumerable options. Resolve it with lifecycle_resume."""
-        return lifecycle_block_payload(kind=kind, prompt=prompt, options=options)
-
-    @server.tool()
     def lifecycle_resume() -> dict[str, Any]:
         """Resume the active lifecycle from blocked back to running once the gate or question
         that blocked it is resolved."""
@@ -907,24 +890,25 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
-    def gate_create(
+    def lifecycle_gate(
         kind: str,
+        ask: dict[str, Any] | None = None,
         lifecycle_id: str | None = None,
         enclosure: str | None = None,
         repo_id: str | None = None,
         packet: dict[str, Any] | None = None,
         required_decision: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Open a durable control-plane gate on a lifecycle: a decision point that needs
-        the human/operator (closeout approval, an answer, an alarm ack). Append-only and
-        attributed; returns the gate id. Read the gate set with gate_list, block on it with
-        gate_wait. kind: plan-approval | worktree-intent | closeout-approval | push-approval |
-        integration-approval | cleanup-approval | agent-question | provider-retry | alarm-ack
-        (closeout-approval is the commit gate — there is no separate commit-approval). Creating a gate
-        does not itself enforce anything (mutating tools obeying gate state is a later slice)."""
-        return gate_create_payload(
+        """Public lifecycle-gate junction for agents. Creates the durable typed gate,
+        blocks the active lifecycle with the developer-facing ask, and initializes the
+        wait/response state in one operation. kind is the dashboard junction
+        (plan-approval, worktree-intent, closeout-approval, etc.); ask.kind is the
+        answer shape (decision, question, conflict). Do not add a separate wait call
+        as live gate choreography."""
+        return lifecycle_gate_payload(
             config,
             kind=kind,
+            ask=ask,
             lifecycle_id=lifecycle_id,
             enclosure=enclosure,
             repo_id=repo_id,
@@ -953,41 +937,6 @@ def create_server(config: McpRuntimeConfig) -> Any:
             decided_by="model",
             decided_via="cli",
             note=note,
-        )
-
-    @server.tool()
-    def gate_wait(
-        gate_id: str,
-        lifecycle_id: str | None = None,
-        timeout_seconds: float = 30.0,
-    ) -> dict[str, Any]:
-        """Block until a gate leaves the open state, or timeout_seconds elapses (bounded
-        poll). Returns the gate's state and whether it timed out. Use where an agent reaches
-        a gate and waits for the operator's decision."""
-        return gate_wait_payload(
-            config,
-            gate_id=gate_id,
-            lifecycle_id=lifecycle_id,
-            timeout_seconds=timeout_seconds,
-        )
-
-    @server.tool()
-    def gate_response_wait(
-        gate_id: str,
-        lifecycle_id: str | None = None,
-        agent_id: str | None = None,
-        timeout_seconds: float = GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
-    ) -> dict[str, Any]:
-        """Bounded wait for either the gate leaving open or a pending dashboard Chat
-        inbox entry for this gate. Returns inbox entries without consuming them; after
-        reading an entry, call operator_inbox_consume. Defaults to one five-minute
-        wait window; callers do not need to re-call for the normal dashboard path."""
-        return gate_response_wait_payload(
-            config,
-            gate_id=gate_id,
-            lifecycle_id=lifecycle_id,
-            agent_id=agent_id,
-            timeout_seconds=timeout_seconds,
         )
 
     @server.tool()

@@ -24,6 +24,7 @@ from .gates import (
     gate_list_payload,
     gate_response_wait_payload,
     gate_wait_payload,
+    lifecycle_gate_payload,
 )
 from .lifecycle import (
     lifecycle_block_payload,
@@ -76,6 +77,10 @@ from .worktree import (
     worktree_sync_payload,
 )
 
+# The split gate/block/wait payload builders are retained for internal
+# compatibility and tests. ``create_server`` advertises ``lifecycle_gate`` as the
+# public agent-facing gate junction.
+
 __all__ = [
     "PUBLIC_TOOLS",
     "RESERVED_TOOLS",
@@ -100,6 +105,7 @@ __all__ = [
     "lifecycle_block_payload",
     "lifecycle_end_payload",
     "lifecycle_finalize_task_payload",
+    "lifecycle_gate_payload",
     "lifecycle_phase_payload",
     "lifecycle_resume_payload",
     "lifecycle_start_payload",

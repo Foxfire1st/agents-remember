@@ -1,4 +1,4 @@
-"""Registry that maps public MCP tools to declared response models.
+"""Registry that maps MCP tool payload builders to declared response models.
 
 Response-model convention (one place, deliberately two tiers):
 
@@ -35,6 +35,7 @@ from agents_remember.models.gates import (
     GateListResponse,
     GateResponseWaitResponse,
     GateWaitResponse,
+    LifecycleGateResponse,
 )
 from agents_remember.models.lifecycle import (
     LifecycleBlockResponse,
@@ -89,7 +90,17 @@ from agents_remember.models.worktree import (
     WorktreeSyncResponse,
 )
 
-PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+INTERNAL_COMPAT_TOOL_NAMES = frozenset(
+    {
+        "lifecycle_block",
+        "gate_create",
+        "gate_wait",
+        "gate_response_wait",
+    }
+)
+"""Lower-level compatibility payload builders, not advertised MCP tools."""
+
+TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "ping": PingResponse,
     "server_info": ServerInfoResponse,
     "context_packet": ContextPacketV2,
@@ -135,6 +146,7 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "lifecycle_phase": LifecyclePhaseResponse,
     "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
+    "lifecycle_gate": LifecycleGateResponse,
     "gate_create": GateCreateResponse,
     "gate_decide": GateDecideResponse,
     "gate_wait": GateWaitResponse,
@@ -143,4 +155,10 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "operator_inbox_post": OperatorInboxPostResponse,
     "operator_inbox_poll": OperatorInboxPollResponse,
     "operator_inbox_consume": OperatorInboxConsumeResponse,
+}
+
+PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+    name: model
+    for name, model in TOOL_RESPONSE_MODELS.items()
+    if name not in INTERNAL_COMPAT_TOOL_NAMES
 }

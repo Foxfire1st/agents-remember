@@ -56,20 +56,20 @@ mutating tool — not a UI button — is the security boundary.
 
 `closeout-approval` **is** the commit gate — closeout is the single
 commit-of-record for code, memory, and ledger, so there is no separate
-`commit-approval` kind; every commit routes through this gate. The choreography
-follows the `l-01-session-job-lifecycle` skill's Gate Choreography (raise → wait →
-clear) on top of the two-turn relay above.
+`commit-approval` kind; every commit routes through this gate. The dashboard
+junction uses `lifecycle_gate` on top of the two-turn relay above.
 
 How it binds:
 
-1. To route approval through the dashboard, **raise** the gate at the closeout
-   point — the ambient block (carrying the ask) plus the durable kind-typed record
-   — and block on the developer:
+1. To route approval through the dashboard, raise the closeout junction with the
+   durable gate kind, developer-facing ask, and preview packet in one operation:
 
    ```text
-   lifecycle_block(kind="decision", prompt="<the commit ask>", options=["approve", "revise"])
-   gate_create(kind="closeout-approval", lifecycle_id="<id>", packet={ ...preview facts... })
-   gate_response_wait(gate_id="<id>", lifecycle_id="<id>")   # one normal 5-minute wait window; consume returned inbox entries
+   lifecycle_gate(
+     kind="closeout-approval",
+     ask={"kind": "decision", "prompt": "<the commit ask>", "options": ["approve", "revise"]},
+     packet={ ...preview facts... },
+   )
    ```
 
 2. The developer approves (or rejects / requests revision) from the dashboard.
@@ -87,11 +87,9 @@ How it binds:
 
 Rules:
 
-1. **Never self-approve.** An agent calling `gate_decide(decision="approve")`
-   records a `model`-attributed approval, which enforcement rejects. Wait for the
-   developer's dashboard decision or Chat response via `gate_response_wait`;
-   consume returned inbox entries after reading them, and never pass your own
-   judgment off as commit approval.
+1. **Never self-approve.** A model-attributed approval is rejected by
+   enforcement. Wait for the developer's dashboard decision or Chat response, and
+   never pass your own judgment off as commit approval.
 2. **Opening a gate is opt-in and deliberate.** Open a `closeout-approval` gate
    **only** when a developer is driving approval from the dashboard. Do **not**
    open one in a pure-chat session with no cockpit watching — an `open` gate blocks
@@ -174,9 +172,9 @@ must be clean before creating the memory content commit.
 
 Push behavior is not automatic. Closeout commits code, memory, and ledger only;
 it never pushes. Pushing the integration branch is part of the landing tail the
-`c-09-git-worktree-manager` skill owns, gated by the `push-approval` gate kind per
-the `l-01-session-job-lifecycle` skill's Gate Choreography — raise, wait for the
-developer's decision, then `lifecycle_resume` before any push.
+`c-09-git-worktree-manager` skill owns, gated by
+`lifecycle_gate(kind="push-approval", ...)` and followed by `lifecycle_resume`
+before any push once the developer response is handled.
 
 Closeout does not mark the task `Completed`. After closeout, integration, any
 PR-gated merge/pull, and memory carryover are done, use

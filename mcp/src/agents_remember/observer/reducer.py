@@ -119,10 +119,11 @@ def project_workspace(
         enclosure.model_copy(update={"actions": enclosure_actions(enclosure)})
         for enclosure in enclosures
     ]
-    # A persistent lifecycle exists as long as its worktree (note 01): every worktree-backed
-    # enclosure with no event-backed lifecycle projects as PAUSED, so dormant worktrees appear as
-    # the lifecycles they are -- not as nothing. (A runtime that emits no events leaves this as the
-    # whole tree.) Fleeting + active lifecycles still come from the logs above.
+    lifecycles = _current_event_backed_lifecycles(enriched, lifecycles)
+    # A persistent lifecycle exists as long as its worktree (note 01): every current
+    # worktree-backed enclosure with no event-backed lifecycle projects as PAUSED, so dormant
+    # worktrees appear as the lifecycles they are -- not as nothing. Fleeting + active promotion
+    # lifecycles still come from the logs above.
     lifecycles = lifecycles + _persistent_lifecycles(enriched, lifecycles)
     lifecycles = _attach_gates(lifecycles, gates or [])
     sidecars = sidecar_staleness or []
@@ -166,6 +167,40 @@ def project_workspace(
 
 
 # --- persistent lifecycles from worktree enclosures (note 01) ----------------
+
+
+def _current_event_backed_lifecycles(
+    enclosures: list[EnclosureNode], lifecycles: list[LifecycleProjection]
+) -> list[LifecycleProjection]:
+    """Keep only event-backed lifecycles that still have a valid live anchor."""
+    by_enclosure = {enclosure.enclosure: enclosure for enclosure in enclosures}
+    return [
+        lifecycle
+        for lifecycle in lifecycles
+        if _event_backed_lifecycle_is_current(lifecycle, by_enclosure)
+    ]
+
+
+def _event_backed_lifecycle_is_current(
+    lifecycle: LifecycleProjection, enclosures: dict[str, EnclosureNode]
+) -> bool:
+    if lifecycle.fleeting:
+        return True
+    if not lifecycle.enclosure:
+        return _missing_enclosure_is_still_materializing(lifecycle)
+    enclosure = enclosures.get(lifecycle.enclosure)
+    if enclosure is None:
+        return _missing_enclosure_is_still_materializing(lifecycle)
+    return not enclosure.lifecycleId or enclosure.lifecycleId == lifecycle.id
+
+
+def _missing_enclosure_is_still_materializing(lifecycle: LifecycleProjection) -> bool:
+    return (
+        lifecycle.state not in TERMINAL_STATES
+        and not lifecycle.inferred
+        and lifecycle.staleSeconds is not None
+        and lifecycle.staleSeconds <= STALE_AFTER_SECONDS
+    )
 
 
 def _persistent_lifecycles(

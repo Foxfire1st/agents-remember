@@ -48,7 +48,7 @@ lifecycle there is no "off-task digression" left for a model-driven pause to mea
 | --- | --- | --- | --- | --- |
 | — | running | `lifecycle_start` (guarded) | model / declared | `lifecycle.started` |
 | — | running | `switch_lifecycle` / `worktree_attach` into target | system / observed | `lifecycle.resumed` (`adopted`) |
-| running | blocked | `lifecycle_block` (bare or with ask) | model / declared | `lifecycle.blocked` |
+| running | blocked | `lifecycle_gate` (with ask) | model / declared | `lifecycle.blocked` |
 | running | paused | switch-away (persistent lifecycle) | system / observed | `lifecycle.paused` (`switched-away`) |
 | running | paused | dormancy inference: heartbeats stale | system / inferred | `lifecycle.paused` (`quiet`) |
 | running | completed \| abandoned | `lifecycle_end` | model / declared | `lifecycle.ended` (`outcome`) |
@@ -68,13 +68,13 @@ written event**: by definition no live owner remains to write it, so readers *pr
 through the save gate first: save ⇒ promote (then the switch-away pauses it); decline ⇒
 deliberate discard (`lifecycle.ended`, outcome `abandoned`).
 
-### 1.3 Signals (the complete model-facing surface — six)
+### 1.3 Signals (the complete model-facing surface)
 
 | Signal | Effect | Notes |
 | --- | --- | --- |
 | `lifecycle_start` | mint + `running` | **Guarded**: rejected with a reminder naming the active lifecycle while one is active in the session. Takes no identifier. |
-| `lifecycle_block` | `blocked` | Optional structured **ask** (`kind: question \| decision \| conflict`, prompt, options). With ask ⇒ server materializes a gate/request record; bare ⇒ auto-associates with the most recently opened gate in the lifecycle. |
-| `lifecycle_resume` | `running` | Clears `blocked` once the gate resolved. Re-adoption of `paused` lifecycles is system-driven via switch/attach, never this signal. |
+| `lifecycle_gate` | `blocked` | The public gate junction. It opens the durable typed gate, records the structured **ask** (`kind: question \| decision \| conflict`, prompt, options) on `lifecycle.blocked`, and initializes wait/response state in one operation. |
+| `lifecycle_resume` | `running` | Clears `blocked` once the gate response has been handled. Re-adoption of `paused` lifecycles is system-driven via switch/attach, never this signal. |
 | `lifecycle_end` | `completed` \| `abandoned` | `completed` = the human declared done; `abandoned` otherwise. |
 | `switch_lifecycle` | transition | The **only** id-carrying signal (a worktree reference, contract-resolved). Creates new, or resumes existing. Leaving fleeting ⇒ save gate; leaving persistent running ⇒ auto-pause. |
 | `lifecycle_phase` | phase change | Orthogonal axis (§1.4). |
@@ -224,11 +224,11 @@ No frontend reimplements lifecycle assembly; the projection API is client-agnost
 | Field | Notes |
 | --- | --- |
 | `id` | ULID |
-| `kind` | `commit \| question \| decision \| conflict \| alarm` (open enum) |
+| `kind` | Dashboard junction: `plan-approval \| worktree-intent \| closeout-approval \| push-approval \| integration-approval \| cleanup-approval \| agent-question \| provider-retry \| alarm-ack` |
 | `state` | `pending → approved \| rejected \| answered \| acknowledged \| superseded` |
 | `lifecycleId`, `enclosure?` | attribution anchors |
 | `openedBy` | tool-opened (e.g. `worktree_closeout_preview`) or block-ask |
-| `ask?` | prompt, options (question/decision kinds) |
+| `ask?` | Prompt, options, and answer-shape kind (`question`, `decision`, `conflict`) |
 | `resolution` | value/answer + who/when/from where |
 | `history[]` | append-only while active; compacted away once consumed/applied/dismissed or past interaction TTL |
 
@@ -238,8 +238,9 @@ current blocker text) without dropping back to the build phase. (Code changes, b
 contrast, *do* return the lifecycle to the build phase.)
 
 Two opening doors only: **tools** open gates server-side (the commit gate at closeout
-preview — no model involvement), and **`lifecycle_block` with an ask** materializes
-question/decision/conflict records. Alarms are system-opened.
+preview — no model involvement), and **`lifecycle_gate`** materializes
+agent/developer wait points with the gate kind and ask shape kept separate. Alarms are
+system-opened.
 
 ### 3.2 Enforcement
 
@@ -256,12 +257,12 @@ A model is not a process: between turns nothing exists to push to, so "push" can
 arranging the harness's own re-invocation.
 
 - **L0 — the active gate record.** Durable during handoff; after the consuming tool
-  applies it, or `gate_response_wait`/`operator_inbox_consume` receives it, the
-  interaction record can be compacted away.
+  applies it, or the response channel marks it consumed, the interaction record can be
+  compacted away.
 - **L1 — passive pull.** Envelope enrichment: open / recently-resolved gate state stamped
   into every tool response in the ambient lifecycle. Universal across harnesses.
-- **L2 — active pull.** `gate_response_wait` owns the normal wait window: a single
-  call polls gate and inbox state every five seconds for up to five minutes. Callers
+- **L2 — active pull.** `lifecycle_gate` initializes the wait window: gate and inbox
+  state are checked on a bounded cadence behind the unified gate channel. Callers
   consume returned inbox entries after reading them; they do not wrap the normal path
   in their own re-call loop.
 - **L3 — push-equivalent.** **`agents-remember gate-wait`**, a CLI file-watcher whose
@@ -270,9 +271,9 @@ arranging the harness's own re-invocation.
   the dashboard click lands. Where a harness cannot wake on background completion, the turn
   ends honestly and L1/L2 resume on the next poke.
 
-Taught behavior at a gate: signal `block` → start `gate-wait` in the background where
-supported → end the turn. Unblock is an explicit `lifecycle_resume` (with the inferred
-fallback of §1.2).
+Taught behavior at a gate: report the gate packet in prose, then on the next turn call
+`lifecycle_gate` once and end honestly until the developer response is handled. Unblock
+is an explicit `lifecycle_resume` (with the inferred fallback of §1.2).
 
 ---
 

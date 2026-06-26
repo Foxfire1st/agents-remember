@@ -306,12 +306,19 @@ class McpToolTests(unittest.TestCase):
             "memory_carryover_apply",
             "codex_benchmark_prepare",
             "codex_benchmark_run",
-            "gate_response_wait",
+            "lifecycle_gate",
             "operator_inbox_post",
             "operator_inbox_poll",
             "operator_inbox_consume",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
+        for retired in (
+            "lifecycle_block",
+            "gate_create",
+            "gate_wait",
+            "gate_response_wait",
+        ):
+            self.assertNotIn(retired, PUBLIC_TOOLS)
         self.assertNotIn("cgc_query", PUBLIC_TOOLS)
         self.assertNotIn("benchmark_prepare", PUBLIC_TOOLS)
         self.assertNotIn("benchmark_run", PUBLIC_TOOLS)

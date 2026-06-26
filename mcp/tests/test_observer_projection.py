@@ -421,6 +421,174 @@ class WorkspaceTests(unittest.TestCase):
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
 
+    def test_stale_persistent_lifecycle_without_enclosure_is_removed(self) -> None:
+        proj = project_workspace(
+            [
+                [
+                    _started(lifecycle_id="LC1", ts=T0),
+                    _event(
+                        "lifecycle.promoted",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:05+00:00",
+                        trust="observed",
+                        actor="system",
+                        enclosure="/deleted.md",
+                        repo_id="repo-a",
+                    ),
+                ]
+            ],
+            enclosures=[],
+            providers=[],
+            now=STALE,
+        )
+        self.assertEqual(proj.lifecycles, [])
+        self.assertEqual(proj.metrics.lifecycleCount, 0)
+
+    def test_terminal_persistent_lifecycle_without_enclosure_is_removed(self) -> None:
+        proj = project_workspace(
+            [
+                [
+                    _started(lifecycle_id="LC1", ts=T0),
+                    _event(
+                        "lifecycle.promoted",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:05+00:00",
+                        trust="observed",
+                        actor="system",
+                        enclosure="/deleted.md",
+                        repo_id="repo-a",
+                    ),
+                    _event(
+                        "lifecycle.ended",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:10+00:00",
+                        outcome="completed",
+                    ),
+                ]
+            ],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual(proj.lifecycles, [])
+        self.assertEqual(proj.metrics.lifecycleCount, 0)
+
+    def test_fresh_promotion_window_without_enclosure_is_kept(self) -> None:
+        proj = project_workspace(
+            [
+                [
+                    _started(lifecycle_id="LC1", ts=T0),
+                    _event(
+                        "lifecycle.promoted",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:05+00:00",
+                        trust="observed",
+                        actor="system",
+                        enclosure="/incoming.md",
+                        repo_id="repo-a",
+                    ),
+                ]
+            ],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
+
+    def test_fresh_blocked_promotion_window_without_enclosure_is_kept(self) -> None:
+        proj = project_workspace(
+            [
+                [
+                    _started(lifecycle_id="LC1", ts=T0),
+                    _event(
+                        "lifecycle.promoted",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:05+00:00",
+                        trust="observed",
+                        actor="system",
+                        enclosure="/incoming.md",
+                        repo_id="repo-a",
+                    ),
+                    _event(
+                        "lifecycle.blocked",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:20+00:00",
+                        ask={"kind": "decision", "prompt": "Approve?"},
+                    ),
+                ]
+            ],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([(lc.id, lc.state) for lc in proj.lifecycles], [("LC1", "blocked")])
+
+    def test_reowned_enclosure_removes_old_event_lifecycle(self) -> None:
+        logs = [
+            [
+                _started(lifecycle_id="OLD", ts=T0),
+                _event(
+                    "lifecycle.promoted",
+                    lifecycle_id="OLD",
+                    ts="2026-06-13T18:00:05+00:00",
+                    trust="observed",
+                    actor="system",
+                    enclosure="/c.md",
+                    repo_id="repo-a",
+                ),
+            ],
+            [
+                _started(lifecycle_id="NEW", ts=T0),
+                _event(
+                    "lifecycle.promoted",
+                    lifecycle_id="NEW",
+                    ts="2026-06-13T18:00:05+00:00",
+                    trust="observed",
+                    actor="system",
+                    enclosure="/c.md",
+                    repo_id="repo-a",
+                ),
+            ],
+        ]
+        proj = project_workspace(
+            logs,
+            enclosures=[_enclosure(enclosure="/c.md", lifecycleId="NEW")],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.id for lc in proj.lifecycles], ["NEW"])
+
+    def test_fleeting_lifecycle_does_not_need_enclosure(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1", ts=T0, fleeting=True)]],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
+
+    def test_legacy_blank_lifecycle_enclosure_keeps_event_lifecycle(self) -> None:
+        proj = project_workspace(
+            [
+                [
+                    _started(lifecycle_id="LC1", ts=T0),
+                    _event(
+                        "lifecycle.promoted",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:05+00:00",
+                        trust="observed",
+                        actor="system",
+                        enclosure="/c.md",
+                        repo_id="repo-a",
+                    ),
+                ]
+            ],
+            enclosures=[_enclosure(enclosure="/c.md", lifecycleId="")],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
+
     def test_dormant_persistent_worktree_stays_out_of_the_attention_queue(self) -> None:
         # A synthesized paused persistent worktree (no events) is the hangar's job, not the queue.
         proj = project_workspace([], enclosures=[_enclosure()], providers=[], now=FRESH)

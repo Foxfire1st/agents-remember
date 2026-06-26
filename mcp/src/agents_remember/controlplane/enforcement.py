@@ -64,7 +64,7 @@ def evaluate_closeout_gate(gates: Mapping[str, GateRecord]) -> CloseoutGuard:
         return CloseoutGuard(
             False,
             f"closeout gate {gate.id} is open; await the developer's decision "
-            "(gate_wait) -- do not self-approve",
+            "through the lifecycle gate channel -- do not self-approve",
             gate.id,
         )
     if gate.state == "applied":

@@ -1,4 +1,4 @@
-"""Dev-time conformance tests for public MCP tool response contracts.
+"""Dev-time conformance tests for MCP tool response contracts.
 
 Production code already validates every tool payload against its registered model
 in ``agents_remember.mcp.tools._tool_payload`` (``model_validate(...).model_dump(
@@ -6,8 +6,9 @@ mode="json", exclude_none=True)``). Strict models use ``extra="forbid"`` so
 controller drift fails loudly at runtime. These tests move that guarantee into the
 suite so drift is caught at dev time instead of in a live call.
 
-For every public tool we obtain a *representative* response payload by invoking the
-real ``*_payload`` builder against a temporary fixture workspace, then assert:
+For every response-modeled tool payload builder we obtain a *representative*
+response payload by invoking the real ``*_payload`` builder against a temporary
+fixture workspace, then assert:
 
 * the payload validates against the registered model with no error, and
 * round-tripping the payload through the model does not fabricate keys.
@@ -35,7 +36,7 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.mcp import tools
 from agents_remember.mcp.config import load_config
 from agents_remember.models.base import FlexibleResponseModel
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
@@ -221,6 +222,8 @@ def _lifecycle_payloads(root: Path) -> dict[str, dict]:
 
     The signals require an installed ambient; a long heartbeat keeps the capture
     deterministic, and the ambient is reset afterward so other suites see none.
+    ``lifecycle_block`` stays here as lower-level compatibility coverage; it is
+    not an advertised public MCP tool.
     """
     install_ambient(
         AmbientLifecycle(EventStore(root / "logs" / "observer"), heartbeat_seconds=3600)
@@ -264,12 +267,30 @@ def _task_doc_payloads(root: Path) -> dict[str, dict]:
 
 
 def _gate_payloads(config) -> dict[str, dict]:
-    """Control-plane gate substrate: create a gate, then decide / wait / list it."""
+    """Control-plane gate substrate, including lower-level compatibility builders."""
+    install_ambient(
+        AmbientLifecycle(
+            EventStore(config.coordination_root / "logs" / "observer"),
+            heartbeat_seconds=3600,
+        )
+    )
+    try:
+        tools.lifecycle_start_payload()
+        lifecycle_gate = tools.lifecycle_gate_payload(
+            config,
+            kind="agent-question",
+            ask={"kind": "question", "prompt": "Continue?", "options": ["yes", "no"]},
+            packet={"summary": "demo gate"},
+        )
+    finally:
+        reset_ambient()
+
     created = tools.gate_create_payload(
         config, kind="closeout-approval", lifecycle_id="gate-demo"
     )
     gate_id = created["gateId"]
     return {
+        "lifecycle_gate": lifecycle_gate,
         "gate_create": created,
         "gate_decide": tools.gate_decide_payload(
             config,
@@ -356,11 +377,11 @@ class ToolResponseConformanceTests(unittest.TestCase):
         for path in cls._temp_dirs:
             shutil.rmtree(path, ignore_errors=True)
 
-    def test_every_public_tool_has_a_representative_payload(self) -> None:
-        self.assertEqual(set(self.payloads), set(PUBLIC_TOOL_RESPONSE_MODELS))
+    def test_every_modeled_tool_has_a_representative_payload(self) -> None:
+        self.assertEqual(set(self.payloads), set(TOOL_RESPONSE_MODELS))
 
     def test_representative_payloads_conform_to_registered_models(self) -> None:
-        for tool_name, model in PUBLIC_TOOL_RESPONSE_MODELS.items():
+        for tool_name, model in TOOL_RESPONSE_MODELS.items():
             with self.subTest(tool=tool_name):
                 payload = self.payloads[tool_name]
                 # (a) The representative payload validates against the model.
@@ -384,7 +405,7 @@ class ToolResponseConformanceTests(unittest.TestCase):
                 )
 
     def test_strict_response_models_forbid_extra_fields(self) -> None:
-        for tool_name, model in PUBLIC_TOOL_RESPONSE_MODELS.items():
+        for tool_name, model in TOOL_RESPONSE_MODELS.items():
             with self.subTest(tool=tool_name):
                 # The response-model taxonomy decides strictness: anything not
                 # built on FlexibleResponseModel is a strict contract and must

@@ -42,6 +42,7 @@ def lifecycle_block_payload(
     prompt: str | None = None,
     options: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Lower-level compatibility builder; public agent gates use ``lifecycle_gate``."""
     state = require_ambient().block(kind=kind, prompt=prompt, options=options)
     payload: dict[str, Any] = {
         "ok": True,

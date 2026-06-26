@@ -14,12 +14,21 @@ from agents_remember.models.base import ToolResponse
 
 
 class GateCreateResponse(ToolResponse):
-    """``gate_create``: a freshly opened gate."""
+    """Internal compatibility ``gate_create`` payload: a freshly opened gate."""
 
     gateId: str
     kind: GateKind
     state: GateState
     lifecycleId: str | None = None
+
+
+class LifecycleGateResponse(ToolResponse):
+    """``lifecycle_gate``: the unified public lifecycle-gate junction."""
+
+    gate: dict[str, Any]
+    lifecycle: dict[str, Any]
+    wait: dict[str, Any]
+    ask: dict[str, Any] | None = None
 
 
 class GateDecideResponse(ToolResponse):
@@ -32,7 +41,7 @@ class GateDecideResponse(ToolResponse):
 
 
 class GateWaitResponse(ToolResponse):
-    """``gate_wait``: the gate's state when the wait returned, and whether it timed out."""
+    """Internal compatibility ``gate_wait`` payload."""
 
     gateId: str
     state: GateState
@@ -43,7 +52,7 @@ class GateWaitResponse(ToolResponse):
 
 
 class GateResponseWaitResponse(ToolResponse):
-    """``gate_response_wait``: gate decision or pending operator inbox response."""
+    """Internal compatibility ``gate_response_wait`` payload."""
 
     gateId: str
     state: GateState

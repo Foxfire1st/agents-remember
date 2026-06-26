@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -14,7 +15,10 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord, apply_gate, create_gate, decide_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.tools import gates
+from agents_remember.mcp.tools.lifecycle import lifecycle_start_payload
+from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, reset_ambient
 from agents_remember.observer.paths import observer_logs_root
+from agents_remember.observer.reducer import project_workspace
 from agents_remember.worktrees.modules import closeout as closeout_mod
 
 T1 = "2026-06-18T10:00:00+00:00"
@@ -114,13 +118,15 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(self.store.current(None), {})
 
     def test_create_without_lifecycle_requires_active_ambient(self) -> None:
-        with mock.patch.object(gates, "ambient", return_value=None):
-            with self.assertRaisesRegex(Exception, "active lifecycle"):
-                gates.gate_create_payload(
-                    None,  # type: ignore[arg-type]
-                    kind="agent-question",
-                    lifecycle_id=None,
-                )
+        with (
+            mock.patch.object(gates, "ambient", return_value=None),
+            self.assertRaisesRegex(Exception, "active lifecycle"),
+        ):
+            gates.gate_create_payload(
+                None,  # type: ignore[arg-type]
+                kind="agent-question",
+                lifecycle_id=None,
+            )
 
     def test_create_then_decide_records_attribution(self) -> None:
         gate_id = self._create()
@@ -148,6 +154,82 @@ class GateToolTests(unittest.TestCase):
         )
         self.assertFalse(result["timedOut"])
         self.assertEqual(result["state"], "expired")
+
+    def test_lifecycle_gate_creates_gate_blocks_and_initializes_wait(self) -> None:
+        first = self._create("agent-question")
+        blocked = SimpleNamespace(id="L1", state="blocked", phase="build")
+        lifecycle = SimpleNamespace(
+            current=SimpleNamespace(id="L1", state="running"),
+            block=mock.Mock(return_value=blocked),
+        )
+
+        with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
+            result = gates.lifecycle_gate_payload(
+                None,  # type: ignore[arg-type]
+                kind="plan-approval",
+                ask={"kind": "decision", "prompt": "Approve?", "options": ["approve", "revise"]},
+                lifecycle_id="L1",
+                packet={"summary": "plan"},
+            )
+
+        self.assertEqual(result["operation"], "lifecycle_gate")
+        self.assertEqual(result["gate"]["kind"], "plan-approval")
+        self.assertEqual(result["gate"]["state"], "open")
+        self.assertEqual(result["lifecycle"]["state"], "blocked")
+        self.assertEqual(result["wait"]["state"], "initialized")
+        self.assertEqual(result["wait"]["gateId"], result["gate"]["id"])
+        self.assertEqual(result["ask"]["kind"], "decision")
+        lifecycle.block.assert_called_once_with(
+            kind="decision", prompt="Approve?", options=["approve", "revise"]
+        )
+        current = self.store.current("L1")
+        self.assertEqual(current[first].state, "expired")
+        self.assertEqual(current[result["gate"]["id"]].state, "open")
+
+    def test_lifecycle_gate_rejects_explicit_lifecycle_mismatch(self) -> None:
+        lifecycle = SimpleNamespace(current=SimpleNamespace(id="L1", state="running"))
+
+        with (
+            mock.patch.object(gates, "require_ambient", return_value=lifecycle),
+            self.assertRaisesRegex(Exception, "does not match active lifecycle"),
+        ):
+            gates.lifecycle_gate_payload(
+                None,  # type: ignore[arg-type]
+                kind="plan-approval",
+                lifecycle_id="other",
+            )
+
+        self.assertEqual(self.store.current("L1"), {})
+
+    def test_lifecycle_gate_projects_blocked_ask_and_current_gate(self) -> None:
+        events = EventStore(self.root)
+        install_ambient(AmbientLifecycle(events, heartbeat_seconds=3600))
+        self.addCleanup(reset_ambient)
+        started = lifecycle_start_payload()
+
+        result = gates.lifecycle_gate_payload(
+            None,  # type: ignore[arg-type]
+            kind="plan-approval",
+            ask={"kind": "decision", "prompt": "Approve?", "options": ["approve"]},
+            packet={"summary": "plan"},
+        )
+
+        lifecycle_id = started["lifecycleId"]
+        projection = project_workspace(
+            [events.read(lifecycle_id)],
+            enclosures=[],
+            providers=[],
+            now=datetime.now(UTC),
+            gates=list(self.store.current(lifecycle_id).values()),
+        )
+        lifecycle = projection.lifecycles[0]
+        self.assertEqual(lifecycle.state, "blocked")
+        self.assertEqual(
+            lifecycle.ask,
+            {"kind": "decision", "prompt": "Approve?", "options": ["approve"]},
+        )
+        assert lifecycle.gate is not None
+        self.assertEqual((lifecycle.gate.id, lifecycle.gate.kind), (result["gate"]["id"], "plan-approval"))
 
     def test_decide_unknown_decision_raises(self) -> None:
         gate_id = self._create("alarm-ack")
