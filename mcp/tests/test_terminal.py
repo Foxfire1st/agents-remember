@@ -157,15 +157,21 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.spawner = _FakeSpawner()
         self.existing_tmux: set[str] = set()
         self.killed_tmux: list[str] = []
+        self.created_tmux: list[tuple[str, Path, tuple[str, ...]]] = []
         self.host = TerminalHost(
             spawn=self.spawner,
             tmux_probe=self.existing_tmux.__contains__,
             tmux_killer=self.killed_tmux.append,
+            tmux_creator=self._create_tmux,
         )
         self.tmp = Path(tempfile.mkdtemp())
 
     def tearDown(self) -> None:
         self.host.shutdown()
+
+    def _create_tmux(self, name: str, cwd: Path, command: Sequence[str]) -> None:
+        self.created_tmux.append((name, cwd, tuple(command)))
+        self.existing_tmux.add(name)
 
     def test_open_builds_tmux_command_and_registers(self) -> None:
         session = self.host.open(
@@ -185,6 +191,42 @@ class TerminalHostRegistryTests(unittest.TestCase):
         second = self.host.open("lc1", cwd=self.tmp, command=["cat"])
         self.assertIs(first, second)
         self.assertEqual(len(self.spawner.calls), 1)
+
+    def test_attach_creates_unregistered_per_connection_clients(self) -> None:
+        durable = self.host.open("lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1")
+        first = self.host.attach(
+            "lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1", name=durable.tmux_name
+        )
+        second = self.host.attach(
+            "lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1", name=durable.tmux_name
+        )
+
+        self.assertIsNot(first, durable)
+        self.assertIsNot(second, first)
+        self.assertEqual(self.host.sessions(), [durable])
+        self.host.close_session(first)
+        self.assertIs(self.host.get("lc1"), durable)
+        self.assertTrue(second.is_alive)
+
+    def test_ensure_creates_detached_tmux_without_registered_client(self) -> None:
+        binding = self.host.ensure("lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1")
+
+        self.assertEqual(binding.sid, "lc1")
+        self.assertEqual(binding.tmux_name, "ar-lc1")
+        self.assertEqual(binding.cwd, self.tmp)
+        self.assertEqual(binding.command, ("cat",))
+        self.assertEqual(binding.lifecycle_id, "LC-1")
+        self.assertEqual(self.created_tmux, [("ar-lc1", self.tmp, ("cat",))])
+        self.assertIsNone(self.host.get("lc1"))
+        self.assertEqual(self.host.sessions(), [])
+
+    def test_ensure_is_idempotent_when_tmux_session_exists(self) -> None:
+        self.existing_tmux.add("ar-lc1")
+
+        binding = self.host.ensure("lc1", cwd=self.tmp, command=["cat"])
+
+        self.assertEqual(binding.tmux_name, "ar-lc1")
+        self.assertEqual(self.created_tmux, [])
 
     def test_open_replaces_dead_session(self) -> None:
         first = self.host.open("lc1", cwd=self.tmp, command=["cat"])

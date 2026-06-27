@@ -20,7 +20,6 @@ describe("SessionList (6e-2c)", () => {
         sessions={sessions}
         activeId="b"
         onSelect={() => {}}
-        onDetach={() => {}}
         onTerminate={() => {}}
       />,
     );
@@ -34,7 +33,6 @@ describe("SessionList (6e-2c)", () => {
         sessions={[{ id: "a", label: "Terminal 1", lifecycleId: "LC1" }]}
         activeId="a"
         onSelect={() => {}}
-        onDetach={() => {}}
         onTerminate={() => {}}
       />,
     );
@@ -47,7 +45,6 @@ describe("SessionList (6e-2c)", () => {
         sessions={[{ id: "a", label: "Terminal 1", status: "exited" }]}
         activeId="a"
         onSelect={() => {}}
-        onDetach={() => {}}
         onTerminate={() => {}}
       />,
     );
@@ -61,29 +58,11 @@ describe("SessionList (6e-2c)", () => {
         sessions={sessions}
         activeId="a"
         onSelect={onSelect}
-        onDetach={() => {}}
         onTerminate={() => {}}
       />,
     );
     fireEvent.click(getByTestId("chats-session-b"));
     expect(onSelect).toHaveBeenCalledWith("b");
-  });
-
-  it("the row detach action removes that session without switching to it", () => {
-    const onSelect = vi.fn();
-    const onDetach = vi.fn();
-    const { getByLabelText } = render(
-      <SessionList
-        sessions={sessions}
-        activeId="a"
-        onSelect={onSelect}
-        onDetach={onDetach}
-        onTerminate={() => {}}
-      />,
-    );
-    fireEvent.click(getByLabelText("Detach Claude Code 2"));
-    expect(onDetach).toHaveBeenCalledWith("b");
-    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("the row terminate action reports the destructive action separately", () => {
@@ -94,7 +73,6 @@ describe("SessionList (6e-2c)", () => {
         sessions={sessions}
         activeId="a"
         onSelect={onSelect}
-        onDetach={() => {}}
         onTerminate={onTerminate}
       />,
     );

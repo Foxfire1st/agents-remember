@@ -163,6 +163,28 @@ def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
                 host.resize(session, cols=cols, rows=rows)
 
 
+def _apply_terminal_session_input(
+    host: TerminalHost, session: TerminalSession, text: str
+) -> None:
+    """Apply one client text frame to a concrete PTY client."""
+    try:
+        message = json.loads(text)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(message, dict):
+        return
+    if message.get("type") == "stdin":
+        data = message.get("data")
+        if isinstance(data, str):
+            with contextlib.suppress(OSError):
+                host.write_session(session, data.encode())
+    elif message.get("type") == "resize":
+        cols, rows = message.get("cols"), message.get("rows")
+        if isinstance(cols, int) and isinstance(rows, int):
+            with contextlib.suppress(OSError):
+                host.resize_session(session, cols=cols, rows=rows)
+
+
 async def _terminal_to_socket(
     websocket: WebSocket, outbound: asyncio.Queue[bytes | None]
 ) -> None:
@@ -177,12 +199,12 @@ async def _terminal_to_socket(
 
 
 async def _socket_to_terminal(
-    websocket: WebSocket, host: TerminalHost, session: str
+    websocket: WebSocket, host: TerminalHost, session: TerminalSession
 ) -> None:
     """Forward browser frames (``stdin`` / ``resize``) to the PTY until the socket closes."""
     with contextlib.suppress(WebSocketDisconnect):
         async for text in websocket.iter_text():
-            _apply_terminal_input(host, session, text)
+            _apply_terminal_session_input(host, session, text)
 
 
 async def _bridge_terminal(
@@ -198,22 +220,31 @@ async def _bridge_terminal(
     loop = asyncio.get_running_loop()
     outbound: asyncio.Queue[bytes | None] = asyncio.Queue()
     fd = session.master_fd
+    reader_active = True
+
+    def _remove_reader() -> None:
+        nonlocal reader_active
+        if not reader_active:
+            return
+        reader_active = False
+        with contextlib.suppress(RuntimeError):
+            loop.remove_reader(fd)
 
     def _on_readable() -> None:
-        data = host.read_nonblocking(session.sid)
+        data = host.read_session(session)
         if data:
             outbound.put_nowait(data)
         elif not session.is_alive:
-            loop.remove_reader(fd)
+            _remove_reader()
             outbound.put_nowait(None)
 
     loop.add_reader(fd, _on_readable)
     out_task = asyncio.create_task(_terminal_to_socket(websocket, outbound))
-    in_task = asyncio.create_task(_socket_to_terminal(websocket, host, session.sid))
+    in_task = asyncio.create_task(_socket_to_terminal(websocket, host, session))
     try:
         await asyncio.wait({out_task, in_task}, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        loop.remove_reader(fd)
+        _remove_reader()
         out_task.cancel()
         in_task.cancel()
         await asyncio.gather(out_task, in_task, return_exceptions=True)
@@ -306,7 +337,7 @@ def _refresh_catalog_entries(
     return refreshed
 
 
-def _rehydrate_terminal_session(
+def _attach_terminal_session(
     *,
     catalog: TerminalCatalog,
     host: TerminalHost,
@@ -319,7 +350,7 @@ def _rehydrate_terminal_session(
     if not host.has_session(entry.tmux_name):
         catalog.mark_exited(session_id)
         return None
-    session = host.open(
+    session = host.attach(
         session_id,
         cwd=entry.cwd,
         command=entry.command,
@@ -485,24 +516,22 @@ def create_app(
         # slice); an unknown id is refused with a private close code. Same localhost posture
         # as the rest of the app (the host spawns a fixed argv, never a wire-supplied command).
         await websocket.accept()
-        session_obj = host.get(session)
+        session_obj = _attach_terminal_session(
+            catalog=catalog,
+            host=host,
+            session_id=session,
+            attached_at=now_iso(),
+        )
         if session_obj is None:
-            session_obj = _rehydrate_terminal_session(
-                catalog=catalog,
-                host=host,
-                session_id=session,
-                attached_at=now_iso(),
-            )
-            if session_obj is None:
-                await websocket.close(code=4404)
-                return
-        else:
-            catalog.mark_attached(session, now_iso())
+            await websocket.close(code=4404)
+            return
         try:
             await _bridge_terminal(websocket, host, session_obj)
         finally:
             if not session_obj.is_alive:
                 catalog.mark_exited(session)
+            else:
+                host.close_session(session_obj)
             with contextlib.suppress(RuntimeError):
                 await websocket.close()
 
@@ -544,7 +573,7 @@ def create_app(
                 content={"status": "bad-kind", "detail": str(exc)}, status_code=400
             )
         kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
-        opened = host.open(
+        opened = host.ensure(
             session,
             cwd=cwd,
             command=command,

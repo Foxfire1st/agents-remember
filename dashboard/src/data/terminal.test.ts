@@ -5,6 +5,7 @@ import {
   connectTerminal,
   fetchHarnesses,
   fetchTerminalSessions,
+  fetchTerminalSessionsOrNull,
   openTerminalSession,
   parseTerminalControl,
   sanitizeForInjection,
@@ -271,6 +272,16 @@ describe("fetchTerminalSessions", () => {
     expect(await fetchTerminalSessions()).toEqual([]);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await fetchTerminalSessions()).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves empty success but returns null for fetch failures when requested", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ sessions: [] }) }));
+    expect(await fetchTerminalSessionsOrNull()).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await fetchTerminalSessionsOrNull()).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await fetchTerminalSessionsOrNull()).toBeNull();
     vi.unstubAllGlobals();
   });
 });

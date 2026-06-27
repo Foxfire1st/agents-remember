@@ -15,9 +15,9 @@ import {
 // The open terminal/chat sessions (slice 6e hardening): the session registry as a module-level store
 // — shared, testable client state, the same pattern as the observer projection store (`data/store.ts`)
 // but deliberately kept separate from it (ephemeral UI state, not projected truth). Terminal
-// *persistence* across a cockpit view switch is owned elsewhere — `Cockpit` keeps <Chats> mounted
-// (hidden via CSS) so the xterm instance + its buffer + the live WebSocket survive — so this store
-// only has to hold which sessions exist and which one is active.
+// *persistence* across cockpit refresh/view/session switches is owned by the backend catalog + tmux.
+// The store only has to hold which sessions exist and which one is active; <Chats> attaches the active
+// session's visible terminal and lets inactive rows reattach when selected.
 export interface OpenSession {
   id: string;
   label: string;
@@ -27,17 +27,73 @@ export interface OpenSession {
   status?: TerminalSessionStatus;
 }
 
+type SessionCatalogChangeReason = "create" | "terminate";
+
+interface SessionCatalogChangeMessage {
+  type: "terminal-catalog-changed";
+  source: string;
+  reason: SessionCatalogChangeReason;
+  sessionId?: string;
+}
+
+const SESSION_CATALOG_CHANNEL = "ar-dashboard:terminal-catalog";
+const TAB_SOURCE = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+function openCatalogChannel(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === "undefined") return null;
+  return new BroadcastChannel(SESSION_CATALOG_CHANNEL);
+}
+
+function isSessionCatalogChangeMessage(data: unknown): data is SessionCatalogChangeMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const message = data as Partial<SessionCatalogChangeMessage>;
+  return (
+    message.type === "terminal-catalog-changed" &&
+    typeof message.source === "string" &&
+    (message.reason === "create" || message.reason === "terminate") &&
+    (message.sessionId === undefined || typeof message.sessionId === "string")
+  );
+}
+
+export function notifySessionCatalogChanged(
+  reason: SessionCatalogChangeReason,
+  sessionId?: string,
+): void {
+  const channel = openCatalogChannel();
+  if (!channel) return;
+  channel.postMessage({
+    type: "terminal-catalog-changed",
+    source: TAB_SOURCE,
+    reason,
+    ...(sessionId ? { sessionId } : {}),
+  });
+  channel.close();
+}
+
+export function subscribeSessionCatalogChanges(
+  callback: (reason: SessionCatalogChangeReason, sessionId?: string) => void,
+): () => void {
+  const channel = openCatalogChannel();
+  if (!channel) return () => {};
+  channel.onmessage = (event) => {
+    if (!isSessionCatalogChangeMessage(event.data) || event.data.source === TAB_SOURCE) return;
+    callback(event.data.reason, event.data.sessionId);
+  };
+  return () => channel.close();
+}
+
 interface SessionState {
   sessions: OpenSession[];
   activeId: string | null;
+  /** Highest live ordinal, retained for coarse store inspection. */
   count: number;
-  /** Append a session labelled `{prefix} {n}`, bump the ordinal, and make it active. */
+  /** Append a session labelled with the lowest available `{prefix} {n}` and make it active. */
   add: (prefix: string, id: string, lifecycleId?: string) => void;
   /** Insert or replace a known server-owned session, optionally making it active. */
   upsert: (session: OpenSession, activate?: boolean) => void;
   /** Hydrate the store from server-owned session rows. */
   hydrate: (sessions: OpenSession[], preferredActiveId?: string | null) => void;
-  /** Drop a session; clear `activeId` if it was the one removed (the tmux session persists). */
+  /** Drop a local row; clear `activeId` if it was the one removed. */
   close: (id: string) => void;
   setStatus: (id: string, status: TerminalSessionStatus) => void;
   setActive: (id: string) => void;
@@ -56,9 +112,14 @@ function inferOrdinal(label: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-function maxOrdinal(sessions: OpenSession[]): number {
-  return sessions.reduce((max, session) => {
-    const ordinal = inferOrdinal(session.label);
+function inferPrefix(label: string): string | null {
+  const match = label.match(/^(.*)\s\d+$/);
+  return match ? match[1] : null;
+}
+
+function maxOrdinal(labels: string[]): number {
+  return labels.reduce((max, label) => {
+    const ordinal = inferOrdinal(label);
     return ordinal === null ? max : Math.max(max, ordinal);
   }, 0);
 }
@@ -67,24 +128,48 @@ function isLiveSession(session: OpenSession): boolean {
   return session.status !== "exited" && session.status !== "terminated";
 }
 
+function liveLabels(sessions: OpenSession[]): string[] {
+  return sessions.filter(isLiveSession).map((session) => session.label);
+}
+
+function trackedOrdinal(sessions: OpenSession[]): number {
+  return maxOrdinal(liveLabels(sessions));
+}
+
+function nextSessionLabel(prefix: string, sessions: OpenSession[]): string {
+  const used = new Set<number>();
+  for (const label of liveLabels(sessions)) {
+    if (inferPrefix(label) !== prefix) continue;
+    const ordinal = inferOrdinal(label);
+    if (ordinal !== null) used.add(ordinal);
+  }
+  let ordinal = 1;
+  while (used.has(ordinal)) ordinal += 1;
+  return `${prefix} ${ordinal}`;
+}
+
 export const sessionStore = createStore<SessionState>((set) => ({
   sessions: [],
   activeId: null,
   count: 0,
   add: (prefix, id, lifecycleId) =>
     set((state) => {
-      const ordinal = state.count + 1;
-      const next = { id, label: `${prefix} ${ordinal}`, ...(lifecycleId ? { lifecycleId } : {}) };
+      const next = {
+        id,
+        label: nextSessionLabel(prefix, state.sessions),
+        ...(lifecycleId ? { lifecycleId } : {}),
+      };
+      const sessions = [
+        ...state.sessions.map((session) =>
+          lifecycleId && session.lifecycleId === lifecycleId
+            ? clearLifecycle(session)
+            : session,
+        ),
+        next,
+      ];
       return {
-        count: ordinal,
-        sessions: [
-          ...state.sessions.map((session) =>
-            lifecycleId && session.lifecycleId === lifecycleId
-              ? clearLifecycle(session)
-              : session,
-          ),
-          next,
-        ],
+        count: trackedOrdinal(sessions),
+        sessions,
         activeId: id,
       };
     }),
@@ -97,12 +182,12 @@ export const sessionStore = createStore<SessionState>((set) => ({
             session.lifecycleId && current.lifecycleId === session.lifecycleId
               ? clearLifecycle(current)
               : current,
-          ),
+        ),
         session,
       ];
       return {
         sessions: nextSessions,
-        count: Math.max(state.count, maxOrdinal([session])),
+        count: trackedOrdinal(nextSessions),
         activeId: activate ? session.id : state.activeId,
       };
     }),
@@ -113,7 +198,7 @@ export const sessionStore = createStore<SessionState>((set) => ({
       const retainedActive = state.activeId && live.some((session) => session.id === state.activeId);
       return {
         sessions,
-        count: Math.max(state.count, maxOrdinal(sessions)),
+        count: trackedOrdinal(sessions),
         activeId: preferred
           ? preferredActiveId
           : retainedActive
@@ -122,20 +207,28 @@ export const sessionStore = createStore<SessionState>((set) => ({
       };
     }),
   close: (id) =>
-    set((state) => ({
-      sessions: state.sessions.filter((session) => session.id !== id),
-      activeId: state.activeId === id ? null : state.activeId,
-    })),
+    set((state) => {
+      const sessions = state.sessions.filter((session) => session.id !== id);
+      return {
+        sessions,
+        count: trackedOrdinal(sessions),
+        activeId: state.activeId === id ? null : state.activeId,
+      };
+    }),
   setStatus: (id, status) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
+    set((state) => {
+      const sessions = state.sessions.map((session) =>
         session.id === id ? { ...session, status } : session,
-      ),
-      activeId:
-        state.activeId === id && status !== "running"
-          ? (state.sessions.find((session) => session.id !== id && isLiveSession(session))?.id ?? null)
-          : state.activeId,
-    })),
+      );
+      return {
+        sessions,
+        count: trackedOrdinal(sessions),
+        activeId:
+          state.activeId === id && status !== "running"
+            ? (state.sessions.find((session) => session.id !== id && isLiveSession(session))?.id ?? null)
+            : state.activeId,
+      };
+    }),
   setActive: (id) => set({ activeId: id }),
   setLifecycle: (id, lifecycleId) =>
     set((state) => ({
@@ -270,9 +363,9 @@ export async function createSession(
   lifecycleId?: string,
 ): Promise<string> {
   const id = crypto.randomUUID();
-  const label = `${prefix} ${sessionStore.getState().count + 1}`;
+  const label = nextSessionLabel(prefix, sessionStore.getState().sessions);
   // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
-  await openTerminalSession(id, kind, "", harness, { label, lifecycleId });
+  const persisted = await openTerminalSession(id, kind, "", harness, { label, lifecycleId });
   sessionStore.getState().upsert(
     {
       id,
@@ -284,5 +377,6 @@ export async function createSession(
     },
     true,
   );
+  if (persisted) notifySessionCatalogChanged("create", id);
   return id;
 }

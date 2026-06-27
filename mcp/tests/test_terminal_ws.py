@@ -37,7 +37,7 @@ from agents_remember.serving.app import (
     create_app,
     resolve_terminal_launch,
 )
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal import TerminalHost, TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
@@ -132,24 +132,29 @@ class _FakeSession:
 class _FakeTerminalHost:
     """A `TerminalHost` duck-type backed by a `socketpair` (no real PTY).
 
-    The endpoint's master fd is one socket end; the test drives the other (`peer`) to
-    simulate child output (`feed`), read delivered stdin (`read_child_input`), and end the
-    child (`end`).
+    Each websocket attachment gets its own socketpair, matching the real tmux-client contract:
+    one durable tmux session name, multiple independent local PTY clients.
     """
 
     def __init__(self, sid: str = "live", cwd: Path | None = None) -> None:
-        self._master, self.peer = socket.socketpair()
-        self._master.setblocking(False)
-        self.peer.settimeout(2.0)
-        self.session = _FakeSession(sid, self._master.fileno(), cwd=cwd)
+        self._masters: dict[int, socket.socket] = {}
+        self._peers: dict[int, socket.socket] = {}
+        self.registry_session: _FakeSession | None = self._new_client(sid, cwd=cwd)
+        self.session = self.registry_session
+        self.attachments: list[_FakeSession] = []
         self.resizes: list[tuple[int, int]] = []
+        self.ensured: list[dict[str, object]] = []
         self.opened: list[dict[str, object]] = []
+        self.attached: list[dict[str, object]] = []
         self.probe_names: set[str] = set()
         self.terminated: list[str] = []
+        self.closed: list[str] = []
         self.shutdown_called = False
 
     def get(self, sid: str) -> _FakeSession | None:
-        return self.session if sid == self.session.sid else None
+        if self.registry_session is not None and sid == self.registry_session.sid:
+            return self.registry_session
+        return None
 
     def open(
         self,
@@ -171,61 +176,203 @@ class _FakeTerminalHost:
                 "suspend_unsafe": suspend_unsafe,
             }
         )
-        self.session = _FakeSession(
+        self.registry_session = self._new_client(
             sid,
-            self._master.fileno(),
             cwd=cwd,
             tmux_name=name or f"ar-{sid}",
             command=command,
             lifecycle_id=lifecycle_id,
             suspend_unsafe=suspend_unsafe,
         )
+        self.session = self.registry_session
         self.probe_names.add(self.session.tmux_name)
         return self.session
+
+    def ensure(
+        self,
+        sid: str,
+        *,
+        cwd: Path,
+        command: Sequence[str],
+        lifecycle_id: str | None = None,
+        name: str | None = None,
+        suspend_unsafe: bool = False,
+    ) -> TerminalSessionBinding:
+        tmux_name = name or f"ar-{sid}"
+        self.ensured.append(
+            {
+                "sid": sid,
+                "cwd": cwd,
+                "command": list(command),
+                "lifecycle_id": lifecycle_id,
+                "name": name,
+                "suspend_unsafe": suspend_unsafe,
+            }
+        )
+        self.probe_names.add(tmux_name)
+        return TerminalSessionBinding(
+            sid=sid,
+            tmux_name=tmux_name,
+            cwd=cwd,
+            command=tuple(command),
+            lifecycle_id=lifecycle_id,
+            suspend_unsafe=suspend_unsafe,
+        )
+
+    def attach(
+        self,
+        sid: str,
+        *,
+        cwd: Path,
+        command: Sequence[str],
+        lifecycle_id: str | None = None,
+        name: str | None = None,
+        suspend_unsafe: bool = False,
+    ) -> _FakeSession:
+        self.attached.append(
+            {
+                "sid": sid,
+                "cwd": cwd,
+                "command": list(command),
+                "lifecycle_id": lifecycle_id,
+                "name": name,
+                "suspend_unsafe": suspend_unsafe,
+            }
+        )
+        session = self._new_client(
+            sid,
+            cwd=cwd,
+            tmux_name=name or f"ar-{sid}",
+            command=command,
+            lifecycle_id=lifecycle_id,
+            suspend_unsafe=suspend_unsafe,
+        )
+        self.attachments.append(session)
+        self.session = session
+        return session
 
     def has_session(self, tmux_name: str) -> bool:
         return tmux_name in self.probe_names
 
     def terminate(self, sid: str, *, tmux_name: str | None = None) -> None:
-        target = tmux_name or (self.session.tmux_name if sid == self.session.sid else None)
+        target = tmux_name or (
+            self.registry_session.tmux_name
+            if self.registry_session is not None and sid == self.registry_session.sid
+            else None
+        )
         if target is not None:
             self.terminated.append(target)
             self.probe_names.discard(target)
-        if sid == self.session.sid:
-            self.session.alive = False
+        for session in [self.registry_session, *self.attachments]:
+            if session is not None and sid == session.sid:
+                session.alive = False
 
-    def read_nonblocking(self, _sid: str, max_bytes: int = 65536) -> bytes:
+    def close(self, sid: str | None = None) -> None:
+        if sid is None:
+            for sock in [*self._masters.values(), *self._peers.values()]:
+                with contextlib.suppress(OSError):
+                    sock.close()
+            self._masters.clear()
+            self._peers.clear()
+            return
+        if self.registry_session is not None and sid == self.registry_session.sid:
+            self.closed.append(sid)
+            self._close_client(self.registry_session)
+            self.registry_session = None
+
+    def close_session(self, session: _FakeSession) -> None:
+        self.closed.append(session.sid)
+        self._close_client(session)
+
+    def read_nonblocking(self, sid: str, max_bytes: int = 65536) -> bytes:
+        session = self.get(sid)
+        if session is None:
+            return b""
+        return self.read_session(session, max_bytes=max_bytes)
+
+    def read_session(self, session: _FakeSession, max_bytes: int = 65536) -> bytes:
+        master = self._masters[id(session)]
         try:
-            return self._master.recv(max_bytes)
+            return master.recv(max_bytes)
         except BlockingIOError:
             return b""
         except OSError:
             return b""
 
-    def write(self, _sid: str, data: bytes) -> None:
-        self._master.sendall(data)
+    def write(self, sid: str, data: bytes) -> None:
+        session = self.get(sid)
+        if session is not None:
+            self.write_session(session, data)
+
+    def write_session(self, session: _FakeSession, data: bytes) -> None:
+        self._masters[id(session)].sendall(data)
 
     def resize(self, _sid: str, *, cols: int, rows: int) -> None:
+        self.resizes.append((cols, rows))
+
+    def resize_session(self, _session: _FakeSession, *, cols: int, rows: int) -> None:
         self.resizes.append((cols, rows))
 
     def shutdown(self) -> None:
         self.shutdown_called = True
 
     # --- test drivers (the "child" side of the socketpair) ---
-    def feed(self, data: bytes) -> None:
-        self.peer.sendall(data)
+    def feed(self, data: bytes, session: _FakeSession | None = None) -> None:
+        self.feed_to(session or self.session, data)
 
-    def read_child_input(self, n: int = 4096) -> bytes:
-        return self.peer.recv(n)
+    def feed_to(self, session: _FakeSession | None, data: bytes) -> None:
+        assert session is not None
+        self._peers[id(session)].sendall(data)
 
-    def end(self) -> None:
-        self.session.alive = False
-        self.peer.close()
+    def feed_all(self, data: bytes) -> None:
+        for session in list(self.attachments):
+            if session.is_alive:
+                self.feed_to(session, data)
 
-    def close(self) -> None:
-        for sock in (self._master, self.peer):
-            with contextlib.suppress(OSError):
-                sock.close()
+    def read_child_input(self, n: int = 4096, session: _FakeSession | None = None) -> bytes:
+        target = session or self.session
+        assert target is not None
+        return self._peers[id(target)].recv(n)
+
+    def end(self, session: _FakeSession | None = None) -> None:
+        target = session or self.session
+        assert target is not None
+        target.alive = False
+        self._peers[id(target)].close()
+
+    def _new_client(
+        self,
+        sid: str,
+        *,
+        cwd: Path | None = None,
+        tmux_name: str | None = None,
+        command: Sequence[str] = ("bash",),
+        lifecycle_id: str | None = None,
+        suspend_unsafe: bool = False,
+    ) -> _FakeSession:
+        master, peer = socket.socketpair()
+        master.setblocking(False)
+        peer.settimeout(2.0)
+        session = _FakeSession(
+            sid,
+            master.fileno(),
+            cwd=cwd,
+            tmux_name=tmux_name,
+            command=command,
+            lifecycle_id=lifecycle_id,
+            suspend_unsafe=suspend_unsafe,
+        )
+        self._masters[id(session)] = master
+        self._peers[id(session)] = peer
+        return session
+
+    def _close_client(self, session: _FakeSession) -> None:
+        session.alive = False
+        for sockets in (self._masters, self._peers):
+            sock = sockets.pop(id(session), None)
+            if sock is not None:
+                with contextlib.suppress(OSError):
+                    sock.close()
 
 
 class ApplyTerminalInputTests(unittest.TestCase):
@@ -277,6 +424,10 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.host.close()
         self._dir.cleanup()
 
+    def _register_live(self) -> None:
+        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
+        self.host.probe_names.add("ar-live")
+
     def test_unknown_session_is_refused(self) -> None:
         with TestClient(self.app) as client, client.websocket_connect(
             "/api/terminal/ghost"
@@ -285,6 +436,7 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 4404)
 
     def test_pty_output_forwarded_as_binary(self) -> None:
+        self._register_live()
         with TestClient(self.app) as client, client.websocket_connect(
             "/api/terminal/live"
         ) as ws:
@@ -292,6 +444,7 @@ class TerminalWebSocketTests(unittest.TestCase):
             self.assertEqual(ws.receive_bytes(), b"\x1b[32mok\x1b[0m")
 
     def test_client_stdin_written_to_pty(self) -> None:
+        self._register_live()
         with TestClient(self.app) as client, client.websocket_connect(
             "/api/terminal/live"
         ) as ws:
@@ -299,6 +452,7 @@ class TerminalWebSocketTests(unittest.TestCase):
             self.assertEqual(self.host.read_child_input(), b"echo hi\n")
 
     def test_client_resize_forwarded_in_order(self) -> None:
+        self._register_live()
         with TestClient(self.app) as client, client.websocket_connect(
             "/api/terminal/live"
         ) as ws:
@@ -308,7 +462,35 @@ class TerminalWebSocketTests(unittest.TestCase):
             self.assertEqual(self.host.read_child_input(), b"x")
         self.assertEqual(self.host.resizes, [(100, 30)])
 
+    def test_client_disconnect_detaches_local_pty_without_exiting_catalog_row(self) -> None:
+        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
+        self.host.probe_names.add("ar-live")
+
+        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live"):
+            pass
+
+        self.assertEqual(self.host.closed, ["live"])
+        entry = self.catalog.get("live")
+        assert entry is not None
+        self.assertEqual(entry.status, "running")
+
+    def test_parallel_websockets_use_independent_terminal_clients(self) -> None:
+        self._register_live()
+
+        with TestClient(self.app) as client:  # noqa: SIM117 - ws2 must close while ws1 remains open.
+            with client.websocket_connect("/api/terminal/live") as ws1:
+                with client.websocket_connect("/api/terminal/live") as ws2:
+                    self.assertEqual(len(self.host.attachments), 2)
+                    self.host.feed_all(b"shared-output")
+                    self.assertEqual(ws1.receive_bytes(), b"shared-output")
+                    self.assertEqual(ws2.receive_bytes(), b"shared-output")
+                self.host.feed_to(self.host.attachments[0], b"still-open")
+                self.assertEqual(ws1.receive_bytes(), b"still-open")
+
+        self.assertEqual(self.host.closed, ["live", "live"])
+
     def test_child_exit_sends_exit_frame_then_closes(self) -> None:
+        self._register_live()
         with TestClient(self.app) as client, client.websocket_connect(
             "/api/terminal/live"
         ) as ws:
@@ -336,13 +518,15 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(body["lifecycleId"], "LC1")
         self.assertEqual(body["tmuxName"], "ar-term-1")
         self.assertEqual(body["status"], "running")
-        self.assertEqual(len(self.host.opened), 1)
-        opened = self.host.opened[0]
-        self.assertEqual(opened["sid"], "term-1")
-        self.assertEqual(opened["cwd"], self.tmp)  # workspace_root (== _config's tmp)
-        self.assertEqual(len(cast(list, opened["command"])), 1)  # the shell argv
-        self.assertEqual(opened["lifecycle_id"], "LC1")
-        self.assertFalse(opened["suspend_unsafe"])  # a shell keeps Ctrl-Z (job control)
+        self.assertEqual(len(self.host.ensured), 1)
+        ensured = self.host.ensured[0]
+        self.assertEqual(ensured["sid"], "term-1")
+        self.assertEqual(ensured["cwd"], self.tmp)  # workspace_root (== _config's tmp)
+        self.assertEqual(len(cast(list, ensured["command"])), 1)  # the shell argv
+        self.assertEqual(ensured["lifecycle_id"], "LC1")
+        self.assertFalse(ensured["suspend_unsafe"])  # a shell keeps Ctrl-Z (job control)
+        self.assertEqual(self.host.opened, [])
+        self.assertEqual(self.host.closed, [])
         entry = self.catalog.get("term-1")
         assert entry is not None
         self.assertEqual(entry.label, "Terminal 1")
@@ -369,7 +553,24 @@ class TerminalWebSocketTests(unittest.TestCase):
             },
         )
 
-    def test_websocket_rehydrates_missing_host_from_catalog_when_tmux_exists(self) -> None:
+    def test_post_open_keeps_detached_session_available_for_first_websocket(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/term-1", json={"kind": "terminal", "label": "Terminal 1"}
+            )
+            self.assertEqual(response.status_code, 200)
+            with client.websocket_connect("/api/terminal/term-1") as ws:
+                self.host.feed(b"first-attach")
+                self.assertEqual(ws.receive_bytes(), b"first-attach")
+
+        self.assertEqual(len(self.host.ensured), 1)
+        self.assertEqual(len(self.host.attached), 1)
+        self.assertEqual(self.host.closed, ["term-1"])
+        entry = self.catalog.get("term-1")
+        assert entry is not None
+        self.assertEqual(entry.status, "running")
+
+    def test_websocket_attaches_missing_host_from_catalog_when_tmux_exists(self) -> None:
         self.catalog.upsert(
             _catalog_entry("restored", cwd=self.tmp, tmux_name="ar-restored", command=("bash",))
         )
@@ -379,8 +580,8 @@ class TerminalWebSocketTests(unittest.TestCase):
         ) as ws:
             self.host.feed(b"restored-output")
             self.assertEqual(ws.receive_bytes(), b"restored-output")
-        self.assertEqual(self.host.opened[0]["sid"], "restored")
-        self.assertEqual(self.host.opened[0]["name"], "ar-restored")
+        self.assertEqual(self.host.attached[0]["sid"], "restored")
+        self.assertEqual(self.host.attached[0]["name"], "ar-restored")
         entry = self.catalog.get("restored")
         assert entry is not None
         self.assertEqual(entry.status, "running")
@@ -418,7 +619,7 @@ class TerminalWebSocketTests(unittest.TestCase):
         with TestClient(self.app) as client:
             response = client.post("/api/terminal/x", json={"kind": "bogus"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.host.opened, [])
+        self.assertEqual(self.host.ensured, [])
 
     def test_get_harnesses_lists_supported_set_with_detection(self) -> None:
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
@@ -441,11 +642,11 @@ class TerminalWebSocketTests(unittest.TestCase):
         body = response.json()
         self.assertEqual((body["kind"], body["harness"]), ("harness", "claude"))
         self.assertEqual(body["label"], "Claude Code 1")
-        self.assertEqual(len(self.host.opened), 1)
-        opened = self.host.opened[0]
-        self.assertEqual(opened["command"], ["claude"])  # server-resolved argv, never wire-supplied
-        self.assertEqual(opened["cwd"], self.tmp)  # workspace_root
-        self.assertTrue(opened["suspend_unsafe"])  # a bare-pane harness gets the Ctrl-Z strip
+        self.assertEqual(len(self.host.ensured), 1)
+        ensured = self.host.ensured[0]
+        self.assertEqual(ensured["command"], ["claude"])  # server-resolved argv, never wire-supplied
+        self.assertEqual(ensured["cwd"], self.tmp)  # workspace_root
+        self.assertTrue(ensured["suspend_unsafe"])  # a bare-pane harness gets the Ctrl-Z strip
         entry = self.catalog.get("h-1")
         assert entry is not None
         self.assertEqual(entry.kind, "harness")
@@ -457,7 +658,7 @@ class TerminalWebSocketTests(unittest.TestCase):
                 "/api/terminal/h-2", json={"kind": "harness", "harness": "claude"}
             )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.host.opened, [])
+        self.assertEqual(self.host.ensured, [])
 
     def test_post_open_harness_rejects_unknown_id(self) -> None:
         with patch("shutil.which", _which("gemini")), TestClient(self.app) as client:
@@ -465,7 +666,7 @@ class TerminalWebSocketTests(unittest.TestCase):
                 "/api/terminal/h-3", json={"kind": "harness", "harness": "gemini"}
             )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.host.opened, [])
+        self.assertEqual(self.host.ensured, [])
 
 
 class TerminalImageEndpointTests(unittest.TestCase):

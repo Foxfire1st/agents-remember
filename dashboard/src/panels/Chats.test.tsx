@@ -10,11 +10,47 @@ vi.mock("./Terminal", () => ({
   Terminal: ({ sessionId }: { sessionId: string }) => <div data-testid={`term-${sessionId}`} />,
 }));
 
+class FakeBroadcastChannel {
+  static instances: FakeBroadcastChannel[] = [];
+  static messages: unknown[] = [];
+
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  closed = false;
+
+  constructor(public name: string) {
+    FakeBroadcastChannel.instances.push(this);
+  }
+
+  postMessage(data: unknown): void {
+    FakeBroadcastChannel.messages.push(data);
+    for (const instance of FakeBroadcastChannel.instances) {
+      if (instance === this || instance.closed || instance.name !== this.name) continue;
+      instance.onmessage?.({ data } as MessageEvent);
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  static dispatch(data: unknown): void {
+    for (const instance of FakeBroadcastChannel.instances) {
+      if (!instance.closed) instance.onmessage?.({ data } as MessageEvent);
+    }
+  }
+
+  static reset(): void {
+    FakeBroadcastChannel.instances = [];
+    FakeBroadcastChannel.messages = [];
+  }
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   window.localStorage.clear();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  FakeBroadcastChannel.reset();
 });
 
 // These render-only tests deliberately never click a launch button: opening a session would
@@ -52,29 +88,27 @@ describe("Chats harness launch buttons (6e-2b)", () => {
   });
 });
 
-// 6e-4: a session tab carries a live xterm + WebSocket. Switching tabs must NOT unmount it (that
-// "bricks" the session) — every open session stays mounted, only the active layer is shown.
+// 6e-4 + task 22: tmux/catalog own refresh persistence. The UI initially attaches only the active
+// restored terminal; once a row has been selected in this page, it stays mounted while hidden so its
+// xterm buffer survives tab switches.
 describe("Chats session-tab persistence (6e-4)", () => {
-  it("keeps every open session mounted; switching only flips which layer is shown", async () => {
+  it("mounts restored sessions on first selection and keeps visited terminals mounted", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
     sessionStore.getState().add("Terminal", "s1");
     sessionStore.getState().add("Terminal", "s2"); // the last added is the active session
 
-    const { findByTestId, getByTestId } = render(<Chats />);
+    const { findByTestId, getByTestId, queryByTestId } = render(<Chats />);
 
-    // Both terminals are mounted — the inactive one is hidden via CSS, not torn down.
-    expect(await findByTestId("term-s1")).not.toBeNull();
-    expect(getByTestId("term-s2")).not.toBeNull();
-    expect(getByTestId("chats-terminal-layer-s2").style.display).toBe("flex");
-    expect(getByTestId("chats-terminal-layer-s1").style.display).toBe("none");
-    expect(getByTestId("chats-terminal-layer-s1").getAttribute("aria-hidden")).toBe("true");
+    expect(await findByTestId("term-s2")).not.toBeNull();
+    expect(queryByTestId("term-s1")).toBeNull();
+    expect(getByTestId("chats-terminal-layer-s2")).not.toBeNull();
 
-    // Switching back to s1 flips `display` only; both stay mounted (the bricking cure).
     act(() => {
       sessionStore.getState().setActive("s1");
     });
-    expect(getByTestId("term-s1")).not.toBeNull();
+    expect(await findByTestId("term-s1")).not.toBeNull();
     expect(getByTestId("term-s2")).not.toBeNull();
+    expect(getByTestId("chats-terminal-layer-s1")).not.toBeNull();
     expect(getByTestId("chats-terminal-layer-s1").style.display).toBe("flex");
     expect(getByTestId("chats-terminal-layer-s2").style.display).toBe("none");
   });
@@ -124,8 +158,105 @@ describe("Chats session-tab persistence (6e-4)", () => {
     const { findByTestId, getByTestId } = render(<Chats />);
 
     expect(await findByTestId("term-s1")).not.toBeNull();
-    expect(getByTestId("chats-terminal-layer-s1").style.display).toBe("flex");
+    expect(getByTestId("chats-terminal-layer-s1")).not.toBeNull();
     expect(sessionStore.getState().activeId).toBe("s1");
+  });
+
+  it("refreshes this tab when another tab ends the last catalog session", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    let catalogSessions = [
+      {
+        id: "s1",
+        label: "Terminal 1",
+        kind: "terminal",
+        cwd: "/ws",
+        tmuxName: "ar-s1",
+        createdAt: "2026-06-26T00:00:00Z",
+        lastAttachedAt: "2026-06-26T00:00:00Z",
+        status: "running",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sessions: catalogSessions }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+
+    const { findByTestId, queryByTestId } = render(<Chats />);
+    expect(await findByTestId("term-s1")).not.toBeNull();
+
+    catalogSessions = [];
+    act(() => {
+      FakeBroadcastChannel.dispatch({
+        type: "terminal-catalog-changed",
+        source: "other-tab",
+        reason: "terminate",
+        sessionId: "s1",
+      });
+    });
+
+    await waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));
+    expect(queryByTestId("term-s1")).toBeNull();
+  });
+
+  it("does not resurrect another tab's terminated session from a stale catalog echo", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    const staleSession = {
+      id: "s1",
+      label: "Terminal 1",
+      kind: "terminal",
+      cwd: "/ws",
+      tmuxName: "ar-s1",
+      createdAt: "2026-06-26T00:00:00Z",
+      lastAttachedAt: "2026-06-26T00:00:00Z",
+      status: "running",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sessions: [staleSession] }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+
+    const { findByTestId, queryByTestId } = render(<Chats />);
+    expect(await findByTestId("term-s1")).not.toBeNull();
+
+    act(() => {
+      FakeBroadcastChannel.dispatch({
+        type: "terminal-catalog-changed",
+        source: "other-tab",
+        reason: "terminate",
+        sessionId: "s1",
+      });
+    });
+
+    await waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(queryByTestId("term-s1")).toBeNull();
   });
 
   it("renders an exited restored session as status, not a terminal attachment", async () => {
@@ -166,22 +297,8 @@ describe("Chats session-tab persistence (6e-4)", () => {
     expect(queryByTestId("term-s1")).toBeNull();
   });
 
-  it("detaches a session locally without calling the terminate endpoint", async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error("no backend"));
-    vi.stubGlobal("fetch", fetchMock);
-    sessionStore.getState().add("Terminal", "s1");
-
-    const { findByLabelText } = render(<Chats />);
-    fireEvent.click(await findByLabelText("Detach Terminal 1"));
-
-    expect(sessionStore.getState().sessions).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/terminal/s1/terminate",
-      expect.objectContaining({ method: "POST" }),
-    );
-  });
-
   it("terminates a session through the backend before removing it locally", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -196,5 +313,12 @@ describe("Chats session-tab persistence (6e-4)", () => {
     fireEvent.click(await findByLabelText("Terminate Terminal 1"));
 
     await waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));
+    expect(FakeBroadcastChannel.messages).toEqual([
+      expect.objectContaining({
+        type: "terminal-catalog-changed",
+        reason: "terminate",
+        sessionId: "s1",
+      }),
+    ]);
   });
 });

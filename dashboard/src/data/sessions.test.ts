@@ -1,13 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createSession,
   deliverToSession,
   findSessionForLifecycle,
   fromTerminalSessionInfo,
+  notifySessionCatalogChanged,
   registerConnection,
   sendToSession,
   sessionStore,
+  subscribeSessionCatalogChanges,
 } from "./sessions";
 import { bracketedPaste, sanitizeForInjection, type TerminalConnection } from "./terminal";
 
@@ -31,20 +33,64 @@ function fakeConn(): TerminalConnection & { inputs: string[]; outputAt: number }
   };
 }
 
+class FakeBroadcastChannel {
+  static instances: FakeBroadcastChannel[] = [];
+  static messages: unknown[] = [];
+
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  closed = false;
+
+  constructor(public name: string) {
+    FakeBroadcastChannel.instances.push(this);
+  }
+
+  postMessage(data: unknown): void {
+    FakeBroadcastChannel.messages.push(data);
+    for (const instance of FakeBroadcastChannel.instances) {
+      if (instance === this || instance.closed || instance.name !== this.name) continue;
+      instance.onmessage?.({ data } as MessageEvent);
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  static dispatch(data: unknown): void {
+    for (const instance of FakeBroadcastChannel.instances) {
+      if (!instance.closed) instance.onmessage?.({ data } as MessageEvent);
+    }
+  }
+
+  static reset(): void {
+    FakeBroadcastChannel.instances = [];
+    FakeBroadcastChannel.messages = [];
+  }
+}
+
 // The session registry store (slice 6e hardening) — the state that now survives a cockpit view
 // switch. Reset it between cases since the store is module-level (the whole point).
-beforeEach(() => sessionStore.setState({ sessions: [], activeId: null, count: 0 }));
+beforeEach(() => {
+  sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  FakeBroadcastChannel.reset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("sessionStore (6e hardening)", () => {
-  it("add appends a labelled session, bumps the ordinal, and activates it", () => {
+  it("add appends the lowest available per-prefix label and activates it", () => {
     sessionStore.getState().add("Terminal", "a");
     sessionStore.getState().add("Claude Code", "b");
+    sessionStore.getState().add("Claude Code", "c");
     const state = sessionStore.getState();
     expect(state.sessions).toEqual([
       { id: "a", label: "Terminal 1" },
-      { id: "b", label: "Claude Code 2" },
+      { id: "b", label: "Claude Code 1" },
+      { id: "c", label: "Claude Code 2" },
     ]);
-    expect(state.activeId).toBe("b");
+    expect(state.activeId).toBe("c");
   });
 
   it("close removes the session and clears activeId only when it was the active one", () => {
@@ -81,11 +127,11 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().setLifecycle("agent-2", "LC1");
     expect(sessionStore.getState().sessions).toEqual([
       { id: "agent-1", label: "Claude Code 1" },
-      { id: "agent-2", label: "Codex 2", lifecycleId: "LC1" },
+      { id: "agent-2", label: "Codex 1", lifecycleId: "LC1" },
     ]);
     sessionStore.getState().setLifecycle("agent-2", null);
     expect(findSessionForLifecycle("LC1")).toBeUndefined();
-    expect(sessionStore.getState().sessions[1]).toEqual({ id: "agent-2", label: "Codex 2" });
+    expect(sessionStore.getState().sessions[1]).toEqual({ id: "agent-2", label: "Codex 1" });
   });
 
   it("hydrates server-owned sessions and prefers the last active live session", () => {
@@ -116,6 +162,20 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().setActive("a");
     sessionStore.getState().setStatus("a", "exited");
     expect(sessionStore.getState().activeId).toBe("b");
+  });
+
+  it("reuses a harness label after terminated sessions are removed", () => {
+    sessionStore.getState().add("Claude Code", "a");
+    sessionStore.getState().add("Claude Code", "b");
+    sessionStore.getState().add("Claude Code", "c");
+
+    for (const id of ["a", "b", "c"]) {
+      sessionStore.getState().setStatus(id, "terminated");
+      sessionStore.getState().close(id);
+    }
+    sessionStore.getState().add("Claude Code", "d");
+
+    expect(sessionStore.getState().sessions).toEqual([{ id: "d", label: "Claude Code 1" }]);
   });
 
   it("converts terminal catalog rows into store sessions", () => {
@@ -167,7 +227,55 @@ describe("sessionStore (6e hardening)", () => {
       lifecycleId: "LC1",
       status: "running",
     });
-    vi.unstubAllGlobals();
+  });
+});
+
+describe("session catalog cross-tab sync", () => {
+  it("receives remote catalog-change notifications and ignores this tab's own broadcast", () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    const seen: string[] = [];
+    const unsubscribe = subscribeSessionCatalogChanges((reason, sessionId) =>
+      seen.push(`${reason}:${sessionId ?? ""}`),
+    );
+
+    FakeBroadcastChannel.dispatch({
+      type: "terminal-catalog-changed",
+      source: "other-tab",
+      reason: "terminate",
+      sessionId: "gone",
+    });
+    notifySessionCatalogChanged("create", "created");
+    unsubscribe();
+
+    expect(seen).toEqual(["terminate:gone"]);
+    expect(FakeBroadcastChannel.messages).toEqual([
+      expect.objectContaining({
+        type: "terminal-catalog-changed",
+        reason: "create",
+        sessionId: "created",
+      }),
+    ]);
+  });
+
+  it("broadcasts create only after the backend opener persists the catalog row", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    vi.stubGlobal("crypto", { randomUUID: () => "generated-id" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+
+    await createSession("Claude Code", "harness", "claude");
+    expect(FakeBroadcastChannel.messages).toEqual([
+      expect.objectContaining({
+        type: "terminal-catalog-changed",
+        reason: "create",
+        sessionId: "generated-id",
+      }),
+    ]);
+
+    FakeBroadcastChannel.reset();
+    sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    await createSession("Claude Code", "harness", "claude");
+    expect(FakeBroadcastChannel.messages).toEqual([]);
   });
 });
 

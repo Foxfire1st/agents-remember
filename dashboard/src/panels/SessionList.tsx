@@ -1,12 +1,13 @@
-import { Button, GridList, GridListItem } from "react-aria-components";
+import type { MouseEvent, PointerEvent } from "react";
+import { GridList, GridListItem } from "react-aria-components";
 
 import { css } from "../../styled-system/css";
 import type { OpenSession } from "../data/sessions";
 
 // The session switcher (slice 6e-2c): the open terminal/chat sessions as a left-rail list, replacing
-// the old horizontal tab strip. A React Aria GridList — not a ListBox — because each row carries
-// focusable action buttons: ListBox rows are single focus stops, so nested buttons would be keyboard-
-// unreachable, while GridList gives arrow-nav between rows AND keyboard access to the per-row actions.
+// the old horizontal tab strip. A React Aria GridList — not a ListBox — because each row carries a
+// focusable End button: ListBox rows are single focus stops, so a nested button would be keyboard-
+// unreachable, while GridList gives arrow-nav between rows AND keyboard access to the row action.
 // Single selection IS the active session (selectedKeys ↔ onSelect, mirroring LifecycleList); the look
 // is Panda's `_selected`/`_focusVisible` state conditions (coding-guidelines: React Aria owns
 // behavior, Panda owns looks), and the row's selected colour cascades to the label so selection state
@@ -79,18 +80,6 @@ const actions = css({
   borderLeftStyle: "solid",
   borderLeftColor: "grid",
 });
-const actionButton = css({
-  font: "inherit",
-  fontSize: "0.62rem",
-  color: "muted",
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  paddingInline: "0.3rem",
-  minWidth: "1.6rem",
-  _hover: { color: "alarm" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
 const terminateButton = css({
   font: "inherit",
   fontSize: "0.62rem",
@@ -108,15 +97,17 @@ export function SessionList({
   sessions,
   activeId,
   onSelect,
-  onDetach,
   onTerminate,
 }: {
   sessions: OpenSession[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  onDetach: (id: string) => void;
   onTerminate: (id: string) => void;
 }) {
+  const stopRowSelection = (event: MouseEvent<HTMLButtonElement> | PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  };
+
   return (
     <GridList
       aria-label="Open sessions"
@@ -142,20 +133,18 @@ export function SessionList({
             <span className={statusBadge}>{session.status}</span>
           ) : null}
           <span className={actions}>
-            <Button
-              className={actionButton}
-              aria-label={`Detach ${session.label}`}
-              onPress={() => onDetach(session.id)}
-            >
-              ✕
-            </Button>
-            <Button
+            <button
+              type="button"
               className={terminateButton}
               aria-label={`Terminate ${session.label}`}
-              onPress={() => onTerminate(session.id)}
+              onPointerDown={stopRowSelection}
+              onClick={(event) => {
+                stopRowSelection(event);
+                onTerminate(session.id);
+              }}
             >
               End
-            </Button>
+            </button>
           </span>
         </GridListItem>
       )}

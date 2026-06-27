@@ -145,6 +145,8 @@ class TerminalCatalog:
         entry = self.get(session_id)
         if entry is None:
             return None
+        if entry.status == "terminated":
+            return entry
         updated = entry.with_status("exited")
         self.upsert(updated)
         return updated

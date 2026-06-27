@@ -89,6 +89,9 @@ TmuxProbe = Callable[[str], bool]
 TmuxKiller = Callable[[str], None]
 """Kill a tmux session name if it still exists."""
 
+TmuxCreator = Callable[[str, Path, Sequence[str]], None]
+"""Create a detached tmux session for a fixed harness argv."""
+
 
 def _tmux_has_session(name: str) -> bool:
     """Whether tmux currently knows ``name``.
@@ -121,6 +124,17 @@ def _tmux_kill_session(name: str) -> None:
         )
 
 
+def _tmux_create_detached(name: str, cwd: Path, harness: Sequence[str]) -> None:
+    """Create tmux session ``name`` without attaching a local PTY client."""
+    subprocess.run(
+        ["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "--", *harness],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=_TERMINATE_TIMEOUT,
+    )
+
+
 @dataclass
 class TerminalSession:
     """One live terminal: a tmux-wrapped PTY child plus its lifecycle/worktree correlation."""
@@ -149,6 +163,18 @@ class TerminalSession:
     def is_alive(self) -> bool:
         """Whether the underlying child is still running."""
         return self.process.is_alive
+
+
+@dataclass(frozen=True)
+class TerminalSessionBinding:
+    """Durable tmux session metadata without an attached PTY client."""
+
+    sid: str
+    tmux_name: str
+    cwd: Path
+    command: tuple[str, ...]
+    lifecycle_id: str | None
+    suspend_unsafe: bool = False
 
 
 def _tmux_session_name(sid: str) -> str:
@@ -233,10 +259,12 @@ class TerminalHost:
         spawn: Spawner | None = None,
         tmux_probe: TmuxProbe | None = None,
         tmux_killer: TmuxKiller | None = None,
+        tmux_creator: TmuxCreator | None = None,
     ) -> None:
         self._spawn: Spawner = spawn or _spawn_pty
         self._tmux_probe: TmuxProbe = tmux_probe or _tmux_has_session
         self._tmux_killer: TmuxKiller = tmux_killer or _tmux_kill_session
+        self._tmux_creator: TmuxCreator = tmux_creator or _tmux_create_detached
         self._sessions: dict[str, TerminalSession] = {}
 
     def open(
@@ -260,21 +288,67 @@ class TerminalHost:
             return existing
         if existing is not None:
             self._discard(existing)
+        session = self._spawn_session(
+            sid,
+            cwd=cwd,
+            command=command,
+            lifecycle_id=lifecycle_id,
+            name=name,
+            suspend_unsafe=suspend_unsafe,
+        )
+        self._sessions[sid] = session
+        return session
+
+    def ensure(
+        self,
+        sid: str,
+        *,
+        cwd: Path | str,
+        command: Sequence[str],
+        lifecycle_id: str | None = None,
+        name: str | None = None,
+        suspend_unsafe: bool = False,
+    ) -> TerminalSessionBinding:
+        """Ensure the durable tmux session exists without attaching a PTY client."""
         root = Path(cwd)
         harness = tuple(command)
         tmux_name = name or _tmux_session_name(sid)
-        process = self._spawn(_build_tmux_command(tmux_name, root, harness), root)
-        session = TerminalSession(
+        if not self.has_session(tmux_name):
+            self._tmux_creator(tmux_name, root, harness)
+        return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
             cwd=root,
             command=harness,
             lifecycle_id=lifecycle_id,
-            process=process,
             suspend_unsafe=suspend_unsafe,
         )
-        self._sessions[sid] = session
-        return session
+
+    def attach(
+        self,
+        sid: str,
+        *,
+        cwd: Path | str,
+        command: Sequence[str],
+        lifecycle_id: str | None = None,
+        name: str | None = None,
+        suspend_unsafe: bool = False,
+    ) -> TerminalSession:
+        """Attach one unregistered PTY client to the durable tmux session ``sid``.
+
+        Browser tabs cannot share one PTY master fd: reads race and one tab closing would close the
+        client's fd out from under another. Each WebSocket therefore gets its own tmux client process
+        attached to the same tmux server-side session. The catalog/tmux name remains the durable identity;
+        this returned object is a per-connection handle closed with :meth:`close_session`.
+        """
+        return self._spawn_session(
+            sid,
+            cwd=cwd,
+            command=command,
+            lifecycle_id=lifecycle_id,
+            name=name,
+            suspend_unsafe=suspend_unsafe,
+        )
 
     def get(self, sid: str) -> TerminalSession | None:
         """The live session for ``sid``, or ``None`` if never opened / already closed."""
@@ -301,7 +375,12 @@ class TerminalHost:
         covers both injected packages and live xterm keystrokes for the harness; an all-Ctrl-Z frame to
         a harness becomes a no-op write, while an unknown sid still raises ``KeyError`` first.
         """
-        session = self._require(sid)  # resolve first so an unknown sid still raises KeyError
+        self.write_session(
+            self._require(sid), data
+        )  # resolve first so an unknown sid still raises KeyError
+
+    def write_session(self, session: TerminalSession, data: bytes) -> None:
+        """Write browser keystrokes to one concrete PTY client."""
         if session.suspend_unsafe:
             data = data.replace(_SUSPEND_BYTE, b"")
         if data:
@@ -314,7 +393,13 @@ class TerminalHost:
         read raises ``OSError``/``EIO`` once the slave closes) -- callers poll :attr:`is_alive`
         to tell the two apart.
         """
-        fd = self._require(sid).master_fd
+        return self.read_session(self._require(sid), max_bytes=max_bytes)
+
+    def read_session(
+        self, session: TerminalSession, max_bytes: int = _READ_CHUNK
+    ) -> bytes:
+        """Drain one concrete PTY client without blocking."""
+        fd = session.master_fd
         try:
             return os.read(fd, max_bytes)
         except BlockingIOError:
@@ -324,8 +409,12 @@ class TerminalHost:
 
     def resize(self, sid: str, *, cols: int, rows: int) -> None:
         """Set the PTY window size (``TIOCSWINSZ`` -> SIGWINCH to the child / tmux client)."""
+        self.resize_session(self._require(sid), cols=cols, rows=rows)
+
+    def resize_session(self, session: TerminalSession, *, cols: int, rows: int) -> None:
+        """Set one concrete PTY client's window size."""
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
-        fcntl.ioctl(self._require(sid).master_fd, termios.TIOCSWINSZ, winsize)
+        fcntl.ioctl(session.master_fd, termios.TIOCSWINSZ, winsize)
 
     def close(self, sid: str) -> None:
         """Detach + reap the session's child and drop it from the registry (no-op if unknown).
@@ -336,6 +425,10 @@ class TerminalHost:
         session = self._sessions.pop(sid, None)
         if session is not None:
             self._discard(session)
+
+    def close_session(self, session: TerminalSession) -> None:
+        """Detach + reap one concrete PTY client without mutating the durable session registry."""
+        self._discard(session)
 
     def terminate(self, sid: str, *, tmux_name: str | None = None) -> None:
         """Explicitly kill a dashboard-owned tmux session and drop any local client."""
@@ -356,6 +449,30 @@ class TerminalHost:
             session.process.terminate()
         with contextlib.suppress(OSError):
             os.close(session.master_fd)
+
+    def _spawn_session(
+        self,
+        sid: str,
+        *,
+        cwd: Path | str,
+        command: Sequence[str],
+        lifecycle_id: str | None,
+        name: str | None,
+        suspend_unsafe: bool,
+    ) -> TerminalSession:
+        root = Path(cwd)
+        harness = tuple(command)
+        tmux_name = name or _tmux_session_name(sid)
+        process = self._spawn(_build_tmux_command(tmux_name, root, harness), root)
+        return TerminalSession(
+            sid=sid,
+            tmux_name=tmux_name,
+            cwd=root,
+            command=harness,
+            lifecycle_id=lifecycle_id,
+            process=process,
+            suspend_unsafe=suspend_unsafe,
+        )
 
     def _require(self, sid: str) -> TerminalSession:
         session = self._sessions.get(sid)

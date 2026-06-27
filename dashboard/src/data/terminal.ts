@@ -261,15 +261,23 @@ export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
   }
 }
 
-export async function fetchTerminalSessions(base = ""): Promise<TerminalSessionInfo[]> {
+export async function fetchTerminalSessionsOrNull(base = ""): Promise<TerminalSessionInfo[] | null> {
   try {
     const response = await fetch(`${base}/api/terminal/sessions`);
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const body = (await response.json()) as { sessions?: TerminalSessionInfo[] };
     return Array.isArray(body.sessions) ? body.sessions : [];
   } catch {
+    return null;
+  }
+}
+
+export async function fetchTerminalSessions(base = ""): Promise<TerminalSessionInfo[]> {
+  const sessions = await fetchTerminalSessionsOrNull(base);
+  if (sessions === null) {
     return [];
   }
+  return sessions;
 }
 
 /**

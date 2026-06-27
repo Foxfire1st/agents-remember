@@ -4,15 +4,17 @@ import { css } from "../../styled-system/css";
 import {
   createSession,
   fromTerminalSessionInfo,
+  notifySessionCatalogChanged,
   registerConnection,
   sendToSession,
   sessionStore,
+  subscribeSessionCatalogChanges,
   useSessions,
 } from "../data/sessions";
 import {
   bracketedPaste,
   fetchHarnesses,
-  fetchTerminalSessions,
+  fetchTerminalSessionsOrNull,
   sanitizeForInjection,
   terminateTerminalSession,
   type HarnessInfo,
@@ -32,10 +34,9 @@ const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: mo
 // launch buttons (slice 6e-2b) sit beside ＋ Terminal — one per *detected* harness (Claude Code /
 // Codex / Pi.dev). Open sessions live in a left-rail switcher (slice 6e-2c, `SessionList`); the
 // context composer (slice 6e-3) injects text into the active session's stdin. The session registry
-// lives in the `data/sessions` store (6e hardening). A live terminal survives two kinds of switch
-// without being re-created empty: a cockpit *view* switch (because `Cockpit` keeps <Chats> mounted,
-// hidden via CSS) and a *session-tab* switch (because every open session's terminal stays mounted
-// here, the inactive ones hidden via CSS — switching tabs only flips `display`, never unmounts).
+// lives in the `data/sessions` store (6e hardening). Cockpit view switches keep <Chats> mounted. After
+// a browser refresh, only the restored active row attaches immediately; each other row mounts on first
+// selection and then stays mounted while hidden so tab switches keep the xterm buffer intact.
 
 // Placeholder monograms (swap for real brand glyphs later) — distinct two-letter marks so Claude
 // Code and Codex don't both collapse to "C".
@@ -112,9 +113,9 @@ const terminalArea = css({
   minHeight: "0",
   gap: "0.4rem",
 });
-// One layer per open session. The active layer is shown (display:flex via inline style), the rest are
-// display:none but stay MOUNTED, so each xterm instance + its WebSocket survive a tab switch. Terminal
-// skips fitting a 0×0 hidden layer and re-fits via its ResizeObserver when the layer is shown again.
+// One layer per session that has been selected in this page. The active layer is visible; previously
+// visited layers stay mounted but hidden so xterm buffers survive tab switches. Restored sessions that
+// have not been selected yet stay unmounted until they are visible, avoiding hidden 0x0 hydration.
 const terminalLayer = css({
   flexDirection: "column",
   flex: "1",
@@ -162,6 +163,18 @@ function writeLastActiveSessionId(id: string | null): void {
   }
 }
 
+async function hydrateTerminalSessionsFromCatalog(
+  allowEmpty: boolean,
+  excludeSessionIds: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  const list = await fetchTerminalSessionsOrNull();
+  if (list === null || (list.length === 0 && !allowEmpty)) return;
+  const sessions = list
+    .filter((session) => !excludeSessionIds.has(session.id))
+    .map(fromTerminalSessionInfo);
+  sessionStore.getState().hydrate(sessions, readLastActiveSessionId());
+}
+
 /** Placeholder harness glyph: a rounded box with a monogram, `currentColor` so it tracks the button. */
 function HarnessIcon({ id }: { id: string }) {
   return (
@@ -188,6 +201,7 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
   const activeSession = sessions.find((session) => session.id === activeId);
+  const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
@@ -204,20 +218,44 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
 
   useEffect(() => {
     let active = true;
-    void fetchTerminalSessions().then((list) => {
-      if (!active || list.length === 0) return;
-      sessionStore
-        .getState()
-        .hydrate(list.map(fromTerminalSessionInfo), readLastActiveSessionId());
+    void fetchTerminalSessionsOrNull().then((list) => {
+      if (!active || list === null || list.length === 0) return;
+      sessionStore.getState().hydrate(list.map(fromTerminalSessionInfo), readLastActiveSessionId());
     });
     return () => {
       active = false;
     };
   }, []);
 
+  useEffect(
+    () =>
+      subscribeSessionCatalogChanges((reason, sessionId) => {
+        if (reason === "terminate" && sessionId) {
+          sessionStore.getState().setStatus(sessionId, "terminated");
+          sessionStore.getState().close(sessionId);
+          void hydrateTerminalSessionsFromCatalog(true, new Set([sessionId]));
+          return;
+        }
+        void hydrateTerminalSessionsFromCatalog(true);
+      }),
+    [],
+  );
+
   useEffect(() => {
     writeLastActiveSessionId(activeId);
   }, [activeId]);
+
+  useEffect(() => {
+    setMountedSessionIds((current) => {
+      const sessionIds = new Set(sessions.map((session) => session.id));
+      const next = new Set([...current].filter((id) => sessionIds.has(id)));
+      if (activeSession && (activeSession.status ?? "running") === "running") {
+        next.add(activeSession.id);
+      }
+      if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
+      return next;
+    });
+  }, [activeSession, sessions]);
 
   const startSession = (label: string, kind: "terminal" | "harness", harness?: string) =>
     selectedLifecycleId
@@ -231,7 +269,9 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
 
   const terminateSession = async (id: string) => {
     if (await terminateTerminalSession(id)) {
+      sessionStore.getState().setStatus(id, "terminated");
       sessionStore.getState().close(id);
+      notifySessionCatalogChanged("terminate", id);
     }
   };
 
@@ -282,38 +322,44 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
               sessions={sessions}
               activeId={activeId}
               onSelect={(id) => sessionStore.getState().setActive(id)}
-              onDetach={(id) => sessionStore.getState().close(id)}
               onTerminate={(id) => void terminateSession(id)}
             />
           </aside>
         )}
         <div className={terminalArea}>
-          {activeId ? (
+          {activeSession ? (
             <>
-              {sessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={terminalLayer}
-                  style={{ display: session.id === activeId ? "flex" : "none" }}
-                  aria-hidden={session.id !== activeId}
-                  data-testid={`chats-terminal-layer-${session.id}`}
-                >
-                  {(session.status ?? "running") === "running" ? (
-                    <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
-                      <Terminal
-                        sessionId={session.id}
-                        onConnection={(conn) => registerConnection(session.id, conn)}
-                      />
-                    </Suspense>
-                  ) : (
-                    <div className={statusPanel} data-testid={`chats-session-status-${session.id}`}>
-                      session {session.status}
+              {sessions
+                .filter((session) => session.id === activeSession.id || mountedSessionIds.has(session.id))
+                .map((session) => {
+                  const visible = session.id === activeSession.id;
+                  return (
+                    <div
+                      key={session.id}
+                      className={terminalLayer}
+                      style={{ display: visible ? "flex" : "none" }}
+                      aria-hidden={!visible}
+                      data-testid={`chats-terminal-layer-${session.id}`}
+                    >
+                      {(session.status ?? "running") === "running" ? (
+                        <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
+                          <Terminal
+                            sessionId={session.id}
+                            onConnection={(conn) => registerConnection(session.id, conn)}
+                          />
+                        </Suspense>
+                      ) : (
+                        <div className={statusPanel} data-testid={`chats-session-status-${session.id}`}>
+                          session {session.status}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  );
+                })}
               <SessionComposer
-                onSend={(text) => sendToSession(activeId, bracketedPaste(sanitizeForInjection(text)))}
+                onSend={(text) =>
+                  sendToSession(activeSession.id, bracketedPaste(sanitizeForInjection(text)))
+                }
               />
             </>
           ) : (

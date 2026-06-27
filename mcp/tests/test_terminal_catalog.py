@@ -84,6 +84,17 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(updated.status, "running")
         self.assertEqual(updated.last_attached_at, "2026-06-26T00:02:00Z")
 
+    def test_mark_exited_does_not_downgrade_terminated_session(self) -> None:
+        self.catalog.upsert(_entry("a"))
+        self.catalog.mark_terminated("a", "2026-06-26T00:03:00Z")
+
+        updated = self.catalog.mark_exited("a")
+
+        assert updated is not None
+        self.assertEqual(updated.status, "terminated")
+        self.assertEqual(updated.terminated_at, "2026-06-26T00:03:00Z")
+        self.assertEqual(self.catalog.list(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
