@@ -6,6 +6,7 @@ system/tools.md
 *.pyc
 __pycache__/
 *.egg-info/
+.venv
 .venv/
 .ruff_cache/
 .coverage

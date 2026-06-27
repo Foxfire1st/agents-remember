@@ -97,6 +97,16 @@ class PureEngineTests(unittest.TestCase):
         # any other lifecycle-less call stays silent
         self.assertIsNone(compute_next_step(None, None, "ping"))
 
+    def test_blocked_at_a_gate_awaits_the_decision(self) -> None:
+        # A raised lifecycle_gate blocks the lifecycle; the hint must await the
+        # developer's decision + lifecycle_resume, never the post-gate step — and
+        # this holds regardless of phase/contract (the gate can open anywhere).
+        for st in (_state("close", state="blocked"), _state("build", state="blocked")):
+            step = compute_next_step(st, None, "lifecycle_gate", guidance=_GUIDANCE)
+            assert step is not None
+            self.assertEqual(step.nextTool, "lifecycle_resume")
+            self.assertIn("await", step.summary.lower())
+
     def test_front_half_generic_points_back_to_the_rundown(self) -> None:
         step = compute_next_step(_state("reframe-research"), None, "read_ar_files")
         assert step is not None
@@ -183,6 +193,16 @@ class EdgeAndChokePointTests(unittest.TestCase):
 
     def test_next_step_for_returns_none_without_an_active_lifecycle(self) -> None:
         self.assertIsNone(next_step_for(self.amb, "ping"))
+
+    def test_next_step_for_blocked_gate_awaits_resume(self) -> None:
+        # The live seam: raising a gate calls amb.block() (state -> "blocked"), and
+        # the lifecycle_gate response must carry the await/resume hint, not the
+        # premature operational step.
+        self.amb.start()
+        self.amb.block(kind="closeout-approval", prompt="approve?")
+        step = next_step_for(self.amb, "lifecycle_gate")
+        assert step is not None
+        self.assertEqual(step["nextTool"], "lifecycle_resume")
 
     def test_next_step_for_front_half(self) -> None:
         self.amb.start()

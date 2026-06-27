@@ -76,6 +76,18 @@ _LOOP_BACK = NextStep(
     ),
 )
 
+# A raised lifecycle_gate calls ``amb.block`` (state -> "blocked"). Until the
+# developer decides, the only correct next move is to wait and then resume — never
+# the post-gate operational step, which would jump the open gate. This carries the
+# hint chain THROUGH the gate (raise -> blocked/await -> resume -> continue).
+_AWAIT_GATE = NextStep(
+    summary=(
+        "Blocked at a gate — awaiting the developer's decision (dashboard or chat). "
+        "Do not proceed past the gate: once they decide, call lifecycle_resume, then continue."
+    ),
+    nextTool="lifecycle_resume",
+)
+
 
 def compute_next_step(
     state: LifecycleState | None,
@@ -97,6 +109,12 @@ def compute_next_step(
         if tool_name == "lifecycle_end":
             return _LOOP_BACK
         return None
+
+    # Blocked at an open gate (a raised lifecycle_gate set state="blocked"): the
+    # only correct next move is to await the developer's decision and resume — never
+    # the post-gate operational step below, which would jump the gate.
+    if state.state == "blocked":
+        return _AWAIT_GATE
 
     # FRONT HALF — non-linear, prose-guided (no worktree contract yet).
     if contract is None:
