@@ -31,6 +31,7 @@ from .tools import (
     lifecycle_phase_payload,
     lifecycle_resume_payload,
     lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
     memory_carryover_apply_payload,
@@ -823,6 +824,12 @@ def create_server(config: McpRuntimeConfig) -> Any:
         """Resume the active lifecycle from blocked back to running once the gate or question
         that blocked it is resolved."""
         return lifecycle_resume_payload()
+
+    @server.tool()
+    def lifecycle_turn_end_notification(summary: str) -> dict[str, Any]:
+        """Notify the developer the turn is complete and stop -- no wait, no gate; the next AR
+        tool next turn resumes automatically."""
+        return lifecycle_turn_end_notification_payload(summary)
 
     @server.tool()
     def lifecycle_end(outcome: str) -> dict[str, Any]:

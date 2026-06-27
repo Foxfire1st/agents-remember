@@ -67,6 +67,27 @@ def lifecycle_resume_payload() -> dict[str, Any]:
     )
 
 
+def lifecycle_turn_end_notification_payload(summary: str) -> dict[str, Any]:
+    """NOTIFY-AND-CONTINUE turn end (leaf-28): declare the turn complete and stop.
+
+    No gate, no wait -- ``await_developer`` flips the lifecycle to
+    ``awaiting-developer``; the next AR tool call auto-resumes it at the
+    ``_tool_payload`` choke point. This tool itself does NOT self-dismiss (the
+    choke point guards on the tool name) so its own response still reports the
+    awaiting-developer state.
+    """
+    state = require_ambient().await_developer(summary=summary)
+    return _tool_payload(
+        "lifecycle_turn_end_notification",
+        {
+            "ok": True,
+            "operation": "lifecycle_turn_end_notification",
+            **_state_fields(state),
+            "summary": summary,
+        },
+    )
+
+
 def lifecycle_end_payload(outcome: str) -> dict[str, Any]:
     state = require_ambient().end(outcome)
     return _tool_payload(

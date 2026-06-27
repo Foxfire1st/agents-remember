@@ -74,7 +74,7 @@ The intended order is:
    integration branch and integrates back into it. For a nested master, create
    the child integration branch from the parent integration branch.
 6. choose or review the task slug and workflow variables
-7. present the **Worktree Intent Gate** and wait for explicit developer approval
+7. **hand off** the **Worktree Intent Gate** (notify-and-continue) for explicit developer approval
 8. create the durable task wrapper when one is needed
 9. request the `worktree_start` MCP tool only after the task identity is stable, the
    correct landable `source_branch` is selected, external memory is clean, and
@@ -96,8 +96,18 @@ visible: leaf work branches integrate into the pushable integration/source branc
 recorded by their enclosure; protected targets are reached later through the
 repo's PR flow.
 
-Run the applicable dry-run/preflight first, report the intent packet in chat,
-then raise the intent junction with `lifecycle_gate`:
+Run the applicable dry-run/preflight first, then **hand off**: call
+`lifecycle_turn_end_notification(summary={…the intent packet + the approve/revise ask…})` as the **last
+tool call**, then deliver the intent packet as your final prose and **STOP / end your turn**. The
+notification sets the `awaiting-developer` lifecycle state, surfaces a
+dashboard attention item, and returns immediately (no wait, no inbox). The developer approves from the
+dashboard or in the leaf's attached chat; the **first AR tool call of your next turn** auto-resumes the
+lifecycle (`running`), clears the attention item, and proceeds to `worktree_start` — you send no explicit
+`lifecycle_resume`.
+
+Parked fallback: the block-and-wait `lifecycle_gate` junction (plus the operator inbox and dashboard
+GateResponder) still works if you deliberately raise it for a durable, developer-attributed,
+mutation-blocking record:
 
 ```text
 lifecycle_gate(
@@ -107,11 +117,10 @@ lifecycle_gate(
 )
 ```
 
-The developer approves from the dashboard (a developer-attributed decision) or in
-chat; the agent's own `gate_decide` is model-attributed and never counts as
-approval. Once the developer has approved, the agent **always** sends
-`lifecycle_resume()` to clear the block, then calls `worktree_start`. A chat
-"approved" does not propagate itself.
+It is no longer the active path and nothing routes toward it. On that path the agent's own `gate_decide`
+is model-attributed and never counts as approval; once the developer has approved, the agent **always**
+sends `lifecycle_resume()` to clear the block, then calls `worktree_start`. A chat "approved" does not
+propagate itself.
 
 For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. A standalone worktree-backed task stores its leaf enclosure at `<task-folder>/enclosures/<leaf-id>/series-contract.md`. A master series additionally stores its integration contract at `<master-task-folder>/series-contract.md`.
 
@@ -190,13 +199,14 @@ moved since task start.
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
 
-Run `worktree_integrate(..., dry_run=true)` first, report the preview in chat,
-then raise the integration junction with
-`lifecycle_gate(kind="integration-approval", ask=..., packet={ ...the integration plan... })`.
-The agent never self-approves — a model-attributed
-decision is not a developer approval. Once the developer response is handled, the
-agent **always** sends `lifecycle_resume()` to clear the block, then runs
-`worktree_integrate`.
+Run `worktree_integrate(..., dry_run=true)` first, then **hand off**: call
+`lifecycle_turn_end_notification(summary={…the integration plan…})` as the **last tool call**, then
+deliver the integration preview as your final prose and **STOP**.
+The developer approves on the dashboard or in chat; the first AR tool call of your next turn auto-resumes
+and runs `worktree_integrate` — you send no explicit `lifecycle_resume`. Parked fallback: the
+block-and-wait `lifecycle_gate(kind="integration-approval", ask=…, packet={ ...the integration plan... })`
++ `lifecycle_resume` still works if deliberately raised; on that path the agent never self-approves — a
+model-attributed decision is not a developer approval.
 
 Before previewing integration, check out the recorded code and memory `source_branch` in their source repositories; `worktree_integrate` requires those active checkouts even for `dry_run=true`.
 
@@ -217,12 +227,14 @@ After successful integration, complete any repo-specific landing tail first: pus
 
 Lifecycle finalization is explicitly human-gated and runs only after closeout, integration, and any PR/carryover tail are complete. It proves the current parent-child branch edge, then removes the recorded code and memory worktrees, deletes local task branches only when Git can prove they are merged, removes empty worktree group folders when safe, records `cleanup: completed` in the contract, and updates task documents.
 
-Run `lifecycle_finalize_task(..., dry_run=true)` first, relay the landed-commit
-proof, cleanup plan, and task-document updates in chat, then raise the cleanup
-junction with `lifecycle_gate(kind="cleanup-approval", ask=..., packet={ ...what cleanup removes... })`.
-A model-attributed decision is never a developer approval. Once the developer
-response is handled, the agent **always** sends `lifecycle_resume()` to clear
-the block, then runs `lifecycle_finalize_task`.
+Run `lifecycle_finalize_task(..., dry_run=true)` first, then **hand off**: call
+`lifecycle_turn_end_notification(summary={…what cleanup removes…})` as the **last tool call**, then relay
+the landed-commit proof, cleanup plan, and task-document updates as your final prose and **STOP**. The developer approves
+on the dashboard or in chat; the first AR tool call of your next turn auto-resumes and runs
+`lifecycle_finalize_task` — you send no explicit `lifecycle_resume`. Parked fallback: the block-and-wait
+`lifecycle_gate(kind="cleanup-approval", ask=…, packet={ ...what cleanup removes... })` +
+`lifecycle_resume` still works if deliberately raised; on that path a model-attributed decision is never
+a developer approval.
 
 `lifecycle_finalize_task` proves one immediate edge: the contract's landed code
 commit (`integrated_code_commit` when present, otherwise `code_commit`) must be an

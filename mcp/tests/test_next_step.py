@@ -11,12 +11,17 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.tools.lifecycle import lifecycle_start_payload
+from agents_remember.mcp.tools.core import ping_payload
+from agents_remember.mcp.tools.lifecycle import (
+    lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
+)
 from agents_remember.mcp.tools.next_step import (
     FRONT_HALF_RUNDOWN,
     _from_guidance,
@@ -29,6 +34,7 @@ from agents_remember.observer.ambient import (
     reset_ambient,
 )
 from agents_remember.observer.lifecycle_state import LifecycleState
+from agents_remember.observer.reducer import build_attention_queue, project_lifecycle
 from agents_remember.observer.store import EventStore
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
@@ -108,16 +114,29 @@ class PureEngineTests(unittest.TestCase):
             self.assertIn("await", step.summary.lower())
 
     def test_front_half_generic_points_back_to_the_rundown(self) -> None:
+        # Leaf-28: the front-half hint now notifies the developer and stops.
         step = compute_next_step(_state("reframe-research"), None, "read_ar_files")
         assert step is not None
         self.assertIn("rundown", step.summary)
-        self.assertEqual(step.nextTool, "lifecycle_gate")
-        self.assertEqual(step.nextArgs, {"kind": "plan-approval"})
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
-    def test_decide_points_to_the_worktree_intent_gate(self) -> None:
+    def test_decide_points_to_the_turn_end_notification(self) -> None:
+        # Leaf-28: the decide hint notifies + stops instead of raising worktree-intent.
         step = compute_next_step(_state("decide"), None, "worktree_start")
         assert step is not None
-        self.assertEqual(step.nextArgs, {"kind": "worktree-intent"})
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
+
+    def test_awaiting_developer_hints_the_stop(self) -> None:
+        # NOTIFY-AND-CONTINUE: an awaiting-developer lifecycle (the notification's own
+        # response) hints the stop -- no nextTool, the next AR call auto-resumes.
+        step = compute_next_step(_state("build", state="awaiting-developer"), None, "ping")
+        assert step is not None
+        self.assertIsNone(step.nextTool)
+        self.assertIn("resumes automatically", step.summary)
 
     def test_linear_delegates_to_guidance_when_no_gate_moment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,7 +152,7 @@ class PureEngineTests(unittest.TestCase):
         self.assertEqual(step.nextTool, "worktree_status")
         self.assertIsNone(step.nextArgs and step.nextArgs.get("kind"))
 
-    def test_closeout_preview_hints_the_closeout_gate_until_approved(self) -> None:
+    def test_closeout_preview_hints_the_turn_end_until_approved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             unapproved = _contract(base, approved_for_commit=False)
@@ -142,14 +161,16 @@ class PureEngineTests(unittest.TestCase):
 
             pending = compute_next_step(st, unapproved, "worktree_closeout_preview")
             assert pending is not None
-            self.assertEqual(pending.nextArgs, {"kind": "closeout-approval"})
+            self.assertEqual(pending.nextTool, "lifecycle_turn_end_notification")
+            assert pending.nextArgs is not None
+            self.assertIn("summary", pending.nextArgs)
 
-            # Once approved, the preview is no longer a gate moment -> guidance.
+            # Once approved, the preview is no longer a turn-end moment -> guidance.
             after = compute_next_step(st, approved, "worktree_closeout_preview", guidance=_GUIDANCE)
             assert after is not None
             self.assertEqual(after.nextOperation, "continue_work")
 
-    def test_integrate_dry_run_hints_the_integration_gate(self) -> None:
+    def test_integrate_dry_run_hints_the_turn_end(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = _contract(
                 Path(tmp), closeout_status="completed", integration_status="not-started"
@@ -160,9 +181,11 @@ class PureEngineTests(unittest.TestCase):
                 "worktree_integrate",
             )
         assert step is not None
-        self.assertEqual(step.nextArgs, {"kind": "integration-approval"})
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
-    def test_finalize_dry_run_hints_the_cleanup_gate(self) -> None:
+    def test_finalize_dry_run_hints_the_turn_end(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = _contract(Path(tmp), integration_status="completed", cleanup="pending")
             step = compute_next_step(
@@ -171,7 +194,9 @@ class PureEngineTests(unittest.TestCase):
                 "lifecycle_finalize_task",
             )
         assert step is not None
-        self.assertEqual(step.nextArgs, {"kind": "cleanup-approval"})
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
     def test_from_guidance_maps_the_guidance_shape(self) -> None:
         step = _from_guidance(_GUIDANCE)
@@ -208,7 +233,8 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.start()
         step = next_step_for(self.amb, "read_ar_files")
         assert step is not None
-        self.assertEqual(step["nextArgs"], {"kind": "plan-approval"})
+        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
+        self.assertIn("summary", step["nextArgs"])
 
     def test_missing_contract_degrades_to_front_half_hint(self) -> None:
         # A promoted lifecycle whose contract file is not on disk yet (the
@@ -218,17 +244,19 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.promote(enclosure=str(self.root / "missing.md"), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_status")
         assert step is not None
-        self.assertEqual(step["nextArgs"], {"kind": "plan-approval"})
+        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
+        self.assertIn("summary", step["nextArgs"])
 
-    def test_dry_run_window_in_decide_shows_worktree_intent(self) -> None:
+    def test_dry_run_window_in_decide_shows_turn_end(self) -> None:
         # The live worktree_start --dry-run case: promoted (enclosure set) +
-        # contract not yet written + phase 'decide' -> the worktree-intent hint.
+        # contract not yet written + phase 'decide' -> the notify-and-stop hint.
         self.amb.start()
         self.amb.phase("decide")
         self.amb.promote(enclosure=str(self.root / "missing.md"), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_start")
         assert step is not None
-        self.assertEqual(step["nextArgs"], {"kind": "worktree-intent"})
+        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
+        self.assertIn("summary", step["nextArgs"])
 
     def test_corrupt_contract_degrades_gracefully(self) -> None:
         # A contract file that EXISTS but is unparseable (torn by a racing
@@ -239,7 +267,8 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.promote(enclosure=str(torn), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_status")
         assert step is not None
-        self.assertEqual(step["nextArgs"], {"kind": "plan-approval"})
+        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
+        self.assertIn("summary", step["nextArgs"])
 
     def test_next_step_for_linear_delegates_to_guidance(self) -> None:
         contract_path = self.root / "series-contract.md"
@@ -255,7 +284,38 @@ class EdgeAndChokePointTests(unittest.TestCase):
         payload = lifecycle_start_payload()
         self.assertEqual(payload["frontHalfRundown"], FRONT_HALF_RUNDOWN)
         self.assertIn("nextStep", payload)
-        self.assertEqual(payload["nextStep"]["nextArgs"], {"kind": "plan-approval"})
+        self.assertEqual(payload["nextStep"]["nextTool"], "lifecycle_turn_end_notification")
+        self.assertIn("summary", payload["nextStep"]["nextArgs"])
+
+    def test_turn_end_notification_does_not_self_dismiss_then_next_call_resumes(self) -> None:
+        # Leaf-28 choke-point auto-dismiss. (a) The notification flows through
+        # _tool_payload in the SAME call that set awaiting-developer; the tool-name
+        # guard must keep it from self-dismissing, so its own response still reports
+        # awaiting-developer and hints the stop. (b) The next arbitrary AR tool call
+        # auto-resumes to running and the awaiting-developer attention item is gone.
+        lc = self.amb.start()
+        store = EventStore(self.root)
+
+        payload = lifecycle_turn_end_notification_payload("Turn complete; your move.")
+        # (a) does not self-dismiss
+        self.assertEqual(payload["state"], "awaiting-developer")
+        assert self.amb.current is not None
+        self.assertEqual(self.amb.current.state, "awaiting-developer")
+        self.assertNotIn("nextTool", payload["nextStep"])
+        self.assertIn("resumes automatically", payload["nextStep"]["summary"])
+        parked = project_lifecycle(store.read(lc.id), now=datetime.now(UTC))
+        self.assertEqual(
+            [i.kind for i in build_attention_queue([parked], [], [], [])],
+            ["awaiting-developer"],
+        )
+
+        # (b) the next arbitrary AR tool call auto-resumes...
+        ping_payload()
+        assert self.amb.current is not None
+        self.assertEqual(self.amb.current.state, "running")
+        # ...and the awaiting-developer attention item disappears (state-derived).
+        resumed = project_lifecycle(store.read(lc.id), now=datetime.now(UTC))
+        self.assertEqual(build_attention_queue([resumed], [], [], []), [])
 
 
 if __name__ == "__main__":

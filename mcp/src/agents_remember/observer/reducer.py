@@ -276,7 +276,17 @@ def _apply_kind(proj: LifecycleProjection, event: Event) -> LifecycleProjection:
     elif event.kind == "lifecycle.blocked":
         updates["state"] = "blocked"
         updates["ask"] = data.get("ask")
+    elif event.kind == "lifecycle.awaiting-developer":
+        # NOTIFY-AND-CONTINUE turn end (leaf-28): non-terminal. The summary rides
+        # on the projection's ``ask`` carrier (mirroring how the block ask rides on
+        # ``lifecycle.blocked``) so the awaiting-developer attention item can surface
+        # it; ``lifecycle.resumed`` clears it back to None on auto-resume.
+        updates["state"] = "awaiting-developer"
+        summary = data.get("summary")
+        updates["ask"] = {"summary": summary} if summary is not None else None
     elif event.kind == "lifecycle.resumed":
+        # Carries both the parked blocked path and the awaiting-developer turn-end
+        # path back to running (resume() / resume_from_await() both emit this).
         updates["state"] = "running"
         updates["ask"] = None
     elif event.kind == "lifecycle.paused":
@@ -535,11 +545,43 @@ def build_attention_queue(
     return items
 
 
+def _await_summary(ask: dict[str, Any] | None) -> str | None:
+    """The developer-facing summary an awaiting-developer turn-end carried."""
+    if not ask:
+        return None
+    summary = ask.get("summary")
+    return str(summary) if summary is not None else None
+
+
 def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[AttentionItem]:
-    """Blocked gates, then inferred stale/dormant sessions (one item per lifecycle)."""
+    """Awaiting-developer turn ends and bare blocks, then inferred stale/dormant
+    sessions (one item per lifecycle).
+
+    A durable open gate is emitted by ``_gate_attention`` and already materialized
+    onto ``lifecycle.gate`` by ``_attach_gates``, so the ``blocked-gate`` item fires
+    only for a *bare* ``block()`` with no GateRecord (``lifecycle.gate is None``) --
+    that ``and lifecycle.gate is None`` is the gate-open/blocked-gate dedup.
+    """
     items: list[AttentionItem] = []
     for lifecycle in lifecycles:
-        if lifecycle.state == "blocked":
+        if lifecycle.state == "awaiting-developer":
+            # NOTIFY-AND-CONTINUE turn end (leaf-28): one info item, the developer's
+            # cue that the turn is theirs. enclosure is the deep-link anchor when set.
+            items.append(
+                AttentionItem(
+                    id=f"awaiting-developer:{lifecycle.id}",
+                    kind="awaiting-developer",
+                    severity="info",
+                    lane="lifecycle",
+                    title="Turn complete — your move",
+                    detail=_await_summary(lifecycle.ask),
+                    waitSeconds=lifecycle.staleSeconds,
+                    lifecycleId=lifecycle.id,
+                    enclosure=lifecycle.enclosure,
+                    repoId=lifecycle.repoId,
+                )
+            )
+        elif lifecycle.state == "blocked" and lifecycle.gate is None:
             items.append(
                 AttentionItem(
                     id=f"blocked-gate:{lifecycle.id}",

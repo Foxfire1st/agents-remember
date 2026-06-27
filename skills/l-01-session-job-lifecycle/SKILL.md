@@ -25,53 +25,66 @@ or build-mode decisions proceed.
                                                    +-- research-only (e.g. investigation, code questions...)
 ```
 
-## Gate Protocol — Dry-run action => "Report" Action => "Raise" Action
+## Hand-off Protocol — Dry-run action => "Notify-and-stop" Action => "Report" Action
 
-Every lifecycle gate/turn-end — reframe agreement, plan gate, worktree intent, commit
-approval, push approval, integration, cleanup/finalization, regular turn-end — is **two actions, never one**:
+Every developer hand-off / gate moment — reframe agreement, plan gate, worktree intent, commit
+approval, push approval, integration, cleanup/finalization, regular turn-end — is **notify-and-continue**:
+surface an attention item, present the result, and **end your turn**; the developer responds and your
+**next** turn picks up automatically. It is **three actions, never one**:
 
-1. **Dry-run action.** Run applicable MCP tools in `dry-run` for the gate. If dry run succeeds,
-   proceed with the report action. If dry run fails, try to ammend the issue first before reporting failure.
-2. **Report action.** Deliver the complete gate report as plain assistant output
+1. **Dry-run action.** Run applicable MCP tools in `dry-run` for the hand-off. If dry run succeeds,
+   proceed with the notify-and-stop action. If dry run fails, try to ammend the issue first before reporting failure.
+2. **Notify-and-stop action.** Call `lifecycle_turn_end_notification(summary=…)`. It sets the new
+   **`awaiting-developer`** lifecycle state, surfaces a dashboard attention item, and **returns
+   immediately — no wait, no inbox.** This is the **last tool call of the turn** — the report prose
+   still follows it; do not STOP here. The developer responds on the
+   dashboard or in the leaf's attached chat, and the **first AR tool call of your next turn**
+   automatically resumes the lifecycle (`running`) and clears the attention item — you send **no**
+   explicit resume.
+3. **Report action.** Deliver the complete hand-off report as plain assistant output
    (the reframe, the plan, the intent packet, or the closeout relay with
    preview facts, quality results, proposed commit messages, and
-   attestations), add the approval question as the last
-   line of prose. Do not end the turn until `lifecycle_gate` is being invoked!
-3. **Raise action.** Invoke the gated tool `lifecycle_gate` to bring the approval request to the developer.
+   attestations), and make the decision you are handing to the developer the last
+   line of prose. **The report is the last thing in the turn — then STOP / end your turn.**
 
-Use the `dry-run` step to verify that the planned tool call will succeed for example closeout`
+Use the `dry-run` step to verify that the planned tool call (for example the closeout apply) will
+succeed before you hand off, and self-fix any failure before reporting it.
 
-The report turn must not contain anything that can raise an approval mechanism
-over the text: no structured question widget, no mutating tool call, no
-permission-triggering operation. Harnesses render approval prompts over or
-instead of same-turn prose, so a report attached to its own approval prompt is
-a report the developer never sees.
+`lifecycle_turn_end_notification` returns immediately and does **not** render a prompt over your prose,
+so the report you deliver after it is exactly what the developer sees — call the
+notification, then deliver the report as your final prose, then stop. Keep the report turn free of any mutating or permission-triggering operation so
+nothing obscures the report.
 
-Your turn only ends after raising the `lifecycle_gate`. The developer cannot
-see your response before using the tool. Which means you cannot complete the task.
+Junction → Dry-run → notify (`lifecycle_turn_end_notification`) → Report. Every junction below now hands
+off through that one notification; the named `kind` is the **parked** durable-gate label the fallback
+would use (see "Parked fallback" below), kept so the dashboard can still classify each hand-off:
 
-Junction → Dry-run → Report → durable gate `kind` (these are the kinds the dashboard renders; name
-the right one per junction):
+| Junction                         | Parked durable gate `kind` | Skill that hands off                                       |
+| -------------------------------- | -------------------------- | ---------------------------------------------------------- |
+| plan gate                        | `plan-approval`            | `l-01-session-job-lifecycle`                               |
+| worktree intent                  | `worktree-intent`          | `c-09-git-worktree-manager`                                |
+| commit / closeout                | `closeout-approval`        | `c-12-closeout`                                            |
+| push                             | `push-approval`            | `l-01-session-job-lifecycle` / `c-09-git-worktree-manager` |
+| integration                      | `integration-approval`     | `c-09-git-worktree-manager` / `c-12-closeout`              |
+| cleanup / lifecycle finalization | `cleanup-approval`         | `c-09-git-worktree-manager` / `c-12-closeout`              |
+| any other dev-wait               | `agent-question`           | `l-01-session-job-lifecycle`                               |
 
-| Junction                         | Durable gate `kind`                                          | Skill that raises it                                       |
-| -------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------- |
-| plan gate                        | `plan-approval`                                              | `l-01-session-job-lifecycle`                               |
-| worktree intent                  | `worktree-intent`                                            | `c-09-git-worktree-manager`                                |
-| commit / closeout                | `closeout-approval`                                          | `c-12-closeout`                                            |
-| push                             | `push-approval`                                              | `l-01-session-job-lifecycle` / `c-09-git-worktree-manager` |
-| integration                      | `integration-approval`                                       | `c-09-git-worktree-manager` / `c-12-closeout`              |
-| cleanup / lifecycle finalization | `cleanup-approval`                                           | `c-09-git-worktree-manager` / `c-12-closeout`              |
-| any other dev-wait               | `agent-question` (ambient `lifecycle_gate(kind="question")`) | `l-01-session-job-lifecycle`                               |
-
-`closeout-approval` **is** the commit gate — there is no separate
+`closeout-approval` **is** the commit hand-off — there is no separate
 `commit-approval`. Closeout is the single commit-of-record for code, memory, and
-ledger, so every commit (including a singular one) routes through the
-`closeout-approval` gate. `agent-question` is the non-exhaustive catch-all so any
-dev-wait that is not a structured junction is still observable.
+ledger, so every commit (including a singular one) routes through the closeout
+hand-off. `agent-question` is the non-exhaustive catch-all so any dev-wait that is
+not a structured junction is still observable.
 
-These gate tools are opt-in and most valuable when a dashboard is driving
-approval. A gateless chat session keeps the two-turn protocol exactly as written
-above; the gate choreography is additive, not a new requirement on every turn.
+### Parked fallback — block-and-wait `lifecycle_gate`
+
+The block-and-wait `lifecycle_gate(kind=…)` junction (which creates a durable gate and waits for a
+developer decision), the operator inbox, and the dashboard GateResponder **still exist and still work**
+when explicitly raised — but they are **no longer the active path**, and nothing routes toward them:
+`next_step.py` repoints every gate moment to `lifecycle_turn_end_notification`. Reach for the
+server-enforced `lifecycle_gate` (followed by `lifecycle_resume` after the developer decides) only when
+you deliberately need a durable, developer-attributed, mutation-blocking approval record; its `kind`
+values are the table above. If you ever do raise it, it renders an approval prompt **over** your prose,
+so the report must land in an earlier turn — which is exactly why notify-and-stop is preferred.
 
 ## Lifecycle Signals — Making The Session Observable
 
@@ -81,19 +94,21 @@ resumable across chat deaths (design `docs/design/observable-lifecycle.md`). The
 model **never handles a lifecycle id** — identity is server-side, anchored in the
 worktree contract.
 
-| When (phase)                           | Signal                                                                                                                                        | Why                                                                                                                                                                                                                 |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Trust Checkpoint passes (managed repo) | `lifecycle_start`                                                                                                                             | Begin a **fleeting** lifecycle (guarded: one per session; takes no id).                                                                                                                                             |
-| Entering each phase                    | `lifecycle_phase`                                                                                                                             | Move the orthogonal phase axis (`request`/`trust-checkpoint`/`reframe-research`/`decide`/`build`/`close`).                                                                                                          |
-| At a gate (reframe, plan, commit, …)   | `lifecycle_gate(kind=<junction-kind>, ask=…, packet=…)`, then `lifecycle_resume` after the developer decides or sends a handled Chat response | Create the durable gate, block the lifecycle with the ask, and keep the tool call waiting until a developer decision or gate-specific inbox response exists; then clear the lifecycle once the response is handled. |
-| `worktree_start` (Decide → Build)      | _(promotion — automatic)_                                                                                                                     | The fleeting lifecycle becomes **persistent**, anchored in the contract; no separate signal.                                                                                                                        |
-| Resuming an existing task              | `worktree_attach`                                                                                                                             | Re-adopts the contract's lifecycle (contract-resolved); the model passes no id.                                                                                                                                     |
-| Leaving unsaved fleeting work          | `switch_lifecycle` (`on_unsaved=save`\|`discard`)                                                                                             | The save gate: promote it or abandon it — never dropped silently.                                                                                                                                                   |
-| Close                                  | `lifecycle_end` (`completed`\|`abandoned`)                                                                                                    | The terminal record.                                                                                                                                                                                                |
+| When (phase)                             | Signal                                                      | Why                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trust Checkpoint passes (managed repo)   | `lifecycle_start`                                           | Begin a **fleeting** lifecycle (guarded: one per session; takes no id).                                                                                                                                                                                                                                          |
+| Entering each phase                      | `lifecycle_phase`                                           | Move the orthogonal phase axis (`request`/`trust-checkpoint`/`reframe-research`/`decide`/`build`/`close`).                                                                                                                                                                                                       |
+| At a hand-off (reframe, plan, commit, …) | `lifecycle_turn_end_notification(summary=…)` (last tool call), then the report prose, then **STOP** | Set `awaiting-developer`, surface the dashboard attention item, and return immediately (no wait, no inbox); the next turn's first AR tool call auto-resumes (`running`) and clears the item. Block-and-wait `lifecycle_gate(kind=<junction-kind>, ask=…, packet=…)` + `lifecycle_resume` is the parked fallback. |
+| `worktree_start` (Decide → Build)        | _(promotion — automatic)_                                   | The fleeting lifecycle becomes **persistent**, anchored in the contract; no separate signal.                                                                                                                                                                                                                     |
+| Resuming an existing task                | `worktree_attach`                                           | Re-adopts the contract's lifecycle (contract-resolved); the model passes no id.                                                                                                                                                                                                                                  |
+| Leaving unsaved fleeting work            | `switch_lifecycle` (`on_unsaved=save`\|`discard`)           | The save gate: promote it or abandon it — never dropped silently.                                                                                                                                                                                                                                                |
+| Close                                    | `lifecycle_end` (`completed`\|`abandoned`)                  | The terminal record.                                                                                                                                                                                                                                                                                             |
 
 Rules: `lifecycle_start` is guarded (one active lifecycle, no id). `paused` is
-**system-owned** — there is no pause signal. A tool call outside any lifecycle is
-**dropped, never misattributed**. `worktree_start` **promotes** the current
+**system-owned** — there is no pause signal. `awaiting-developer` is set by
+`lifecycle_turn_end_notification` and auto-cleared back to `running` by the next
+turn's first AR tool call — you never resume it by hand. A tool call outside any
+lifecycle is **dropped, never misattributed**. `worktree_start` **promotes** the current
 lifecycle (fleeting → persistent); `worktree_attach` **resumes** the contract's
 lifecycle; both keep identity server-side.
 
@@ -201,10 +216,14 @@ precondition in Phase 4.
    down, then produce the **plan**: the steps, and a **code example for every
    distinct change** you intend to make.
 
-**Plan gate:** stop and wait for explicit developer approval before changing any code. No
-implementation begins before this approval. Raise this junction with
-`lifecycle_gate(kind="plan-approval", ask={…the developer-facing approval ask…}, packet={…the plan…})`,
-then `lifecycle_resume` once the developer response is handled — and clear it before any edit.
+**Plan gate:** **hand off** before changing any code. No implementation begins
+before the developer approves. Call
+`lifecycle_turn_end_notification(summary={…the plan + the developer-facing approval ask…})` as the
+**last tool call**, then present the plan as your final prose and **STOP**;
+the developer approves on the dashboard or in chat and your next turn auto-resumes to begin
+implementation. (Parked fallback: the server-enforced
+`lifecycle_gate(kind="plan-approval", ask=…, packet=…)` + `lifecycle_resume` still exist if you
+deliberately need a mutation-blocking approval record.)
 
 ---
 
@@ -214,9 +233,11 @@ One decision: does this job change code?
 
 - **No -> research-only exit.** Deliver the answer/assessment. No worktree, no task artifact, no closeout.
   A research-only job may recommend or spawn a follow-up build job; it does not perform one itself.
-- **Yes -> worktree intent gate, then always a worktree.** Read `c-09-git-worktree-manager`
-  and `system/git-workflow.md`, present the worktree intent packet, and wait for
-  explicit developer approval before `worktree_start`. Then open it with
+- **Yes -> worktree intent hand-off, then always a worktree.** Read `c-09-git-worktree-manager`
+  and `system/git-workflow.md`, call
+  `lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the worktree
+  intent packet as your final prose and **STOP**. The developer approves and your next turn
+  auto-resumes to `worktree_start`. Then open it with
   `c-09-git-worktree-manager` and pick the build mode:
   - **Chat build** — small enough to carry inline this session: worktree-backed, **no** `task.md`.
   - **Durable task build** — hand off to `w-02-light-task-workflow`: `task.md`, checklist, decision
@@ -271,31 +292,37 @@ Land the work. **Implementation approval is not commit approval.**
 1. Run the `c-09-git-worktree-manager` closeout **preview** for the worktree (`worktree_closeout_preview`).
    Every build closes through its worktree — there is no direct-checkout closeout.
    Relay the proposed code, memory, and ledger commit messages.
-2. **Commit gate:** stop for explicit developer commit approval before any real commit or closeout
+2. **Commit gate:** run the closeout **preview** (dry-run), then **hand off** before any real commit or closeout
    apply. If required onboarding is missing, run the `c-05-create-or-update-onboarding-files` skill for the affected file and re-run the preview.
-   When the lifecycle is dashboard-connected, this gate is also enforced **server-side**: a durable
-   developer-attributed `closeout-approval` gate is the un-forgeable record of approval, and
-   `worktree_closeout_apply` refuses unless it is approved by the developer — an agent self-approval
-   never satisfies it. The `c-12-closeout` skill owns the opt-in `lifecycle_gate`
-   handoff; gateless lifecycles keep this chat commit gate unchanged.
+   Call `lifecycle_turn_end_notification(summary={…the preview facts + the commit ask…})` as the
+   **last tool call**, then deliver the preview facts as your final prose and **STOP**;
+   the developer approves on the dashboard or in chat and your next turn auto-resumes to
+   `worktree_closeout_apply`. The `c-12-closeout` skill owns this hand-off. Parked fallback: when you
+   deliberately raise the durable `closeout-approval` `lifecycle_gate`, it is enforced **server-side** —
+   `worktree_closeout_apply` refuses unless it is approved by the developer, and an agent self-approval
+   never satisfies it.
 3. On approval, the `c-09-git-worktree-manager` skill owns the external-memory invariant in order: commit code → refresh affected
    onboarding metadata to the new code commit → run memory quality control → commit memory content →
    update and commit the ledger.
 4. **Integrate + land** per `c-09-git-worktree-manager` and `system/git-workflow.md`: integrate the
    worktree branch into the approved source/integration branch, then on a PR-gated repo push that
    source branch, open the PR, wait for green checks, and merge per the repo convention. Never push a
-   protected branch directly. The agent does not push on its own authority — raise the `push-approval`
-   junction with `lifecycle_gate`, and only push after the developer response is handled and the agent has sent `lifecycle_resume`.
-   The `c-09-git-worktree-manager` skill raises the matching `integration-approval` and
-   `cleanup-approval` gates at its landing tail.
+   protected branch directly. The agent does not push on its own authority — call
+   `lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the push intent
+   as your final prose, and **STOP**; push only after the developer
+   approves and your next turn auto-resumes. The `c-09-git-worktree-manager` skill makes the matching
+   integration and cleanup/finalization hand-offs at its landing tail (parked durable kinds
+   `integration-approval` / `cleanup-approval`).
 5. **Map the ledger to the landed commit.** A PR merge usually lands a **merge commit** on top of the
    work — tree-identical to the verified tip but a new SHA the ledger does not yet map. Ensure the
    ledger maps that merge commit so the next worktree can base off the merged branch without a manual
    reconciliation. `system/git-workflow.md` owns this step.
 6. **Finalize the lifecycle:** run `lifecycle_finalize_task(..., dry_run=true)` once the local parent
-   branch contains the landed commit and memory carryover is done. Relay its landed-commit proof,
-   cleanup plan, and task-document updates, then ask for cleanup/finalization approval. On approval,
-   send `lifecycle_resume()` and run the real finalizer. The tool proves one parent-child branch edge,
+   branch contains the landed commit and memory carryover is done. Call
+   `lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then relay its landed-commit
+   proof, cleanup plan, and task-document updates as your final prose, and
+   **STOP**. The developer approves cleanup/finalization and your next turn auto-resumes to run the real
+   finalizer. The tool proves one parent-child branch edge,
    reclaims the worktrees, and marks the leaf task plus immediate parent row `Completed` when those
    task-doc paths are supplied. It does not recursively complete ancestors; repeat the edge at the next
    parent level when that parent task lands.

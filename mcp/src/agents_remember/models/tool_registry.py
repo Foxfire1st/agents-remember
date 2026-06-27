@@ -43,6 +43,7 @@ from agents_remember.models.lifecycle import (
     LifecyclePhaseResponse,
     LifecycleResumeResponse,
     LifecycleStartResponse,
+    LifecycleTurnEndNotificationResponse,
     SwitchLifecycleResponse,
 )
 from agents_remember.models.lifecycle_finalize import LifecycleFinalizeTaskResponse
@@ -141,6 +142,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "lifecycle_start": LifecycleStartResponse,
     "lifecycle_block": LifecycleBlockResponse,
     "lifecycle_resume": LifecycleResumeResponse,
+    "lifecycle_turn_end_notification": LifecycleTurnEndNotificationResponse,
     "lifecycle_end": LifecycleEndResponse,
     "switch_lifecycle": SwitchLifecycleResponse,
     "lifecycle_phase": LifecyclePhaseResponse,

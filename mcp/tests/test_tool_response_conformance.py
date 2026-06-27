@@ -238,6 +238,13 @@ def _lifecycle_payloads(root: Path) -> dict[str, dict]:
             "lifecycle_resume": tools.lifecycle_resume_payload(),
             "lifecycle_end": tools.lifecycle_end_payload("completed"),
             "switch_lifecycle": tools.switch_lifecycle_payload(),
+            # Captured last: switch_lifecycle leaves a fresh running lifecycle, the
+            # only state await_developer accepts. The notification does not self-dismiss
+            # (the choke point guards on its name), so its own payload reports
+            # awaiting-developer.
+            "lifecycle_turn_end_notification": tools.lifecycle_turn_end_notification_payload(
+                "Turn complete; your move."
+            ),
         }
     finally:
         reset_ambient()

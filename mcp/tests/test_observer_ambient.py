@@ -88,6 +88,32 @@ class StateMachineTests(_AmbientCase):
         with self.assertRaises(LifecycleError):
             self.amb.resume()
 
+    def test_await_developer_only_from_running(self) -> None:
+        # NOTIFY-AND-CONTINUE turn end (leaf-28): running -> awaiting-developer,
+        # emitting lifecycle.awaiting-developer with the summary on its data.
+        lc = self.amb.start()
+        awaiting = self.amb.await_developer(summary="Turn complete; your move.")
+        self.assertEqual(awaiting.state, "awaiting-developer")
+        events = self.store.read(lc.id)
+        self.assertEqual(events[-1].kind, "lifecycle.awaiting-developer")
+        self.assertEqual(events[-1].data["summary"], "Turn complete; your move.")
+        # Only running awaits: a second await (now awaiting) raises.
+        with self.assertRaises(LifecycleError):
+            self.amb.await_developer(summary="again")
+
+    def test_resume_from_await_only_from_awaiting(self) -> None:
+        lc = self.amb.start()
+        # The strict resume() guard stays blocked-only -- it never resumes an await.
+        self.amb.await_developer(summary="s")
+        with self.assertRaises(LifecycleError):
+            self.amb.resume()
+        resumed = self.amb.resume_from_await()
+        self.assertEqual(resumed.state, "running")
+        self.assertEqual(self.kinds(lc.id)[-1], "lifecycle.resumed")
+        # Only awaiting resumes this way: from running it raises.
+        with self.assertRaises(LifecycleError):
+            self.amb.resume_from_await()
+
     def test_end_clears_current_and_lifts_the_guard(self) -> None:
         self.amb.start()
         ended = self.amb.end("abandoned")

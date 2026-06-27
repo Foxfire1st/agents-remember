@@ -32,6 +32,7 @@ from .lifecycle import (
     lifecycle_phase_payload,
     lifecycle_resume_payload,
     lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
     switch_lifecycle_payload,
 )
 from .lifecycle_finalize import lifecycle_finalize_task_payload
@@ -109,6 +110,7 @@ __all__ = [
     "lifecycle_phase_payload",
     "lifecycle_resume_payload",
     "lifecycle_start_payload",
+    "lifecycle_turn_end_notification_payload",
     "memory_baseline_adopt_payload",
     "memory_baseline_status_payload",
     "memory_carryover_apply_payload",

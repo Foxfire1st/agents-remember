@@ -183,6 +183,33 @@ class FoldTests(unittest.TestCase):
         self.assertEqual(proj.state, "blocked")
         self.assertEqual(proj.ask, {"kind": "decision"})
 
+    def test_awaiting_developer_then_resume(self) -> None:
+        # NOTIFY-AND-CONTINUE turn end (leaf-28): non-terminal awaiting-developer
+        # carries the summary on the ask carrier; resume clears it back to running.
+        await_only = project_lifecycle(
+            [
+                _started(),
+                _event(
+                    "lifecycle.awaiting-developer",
+                    ts="2026-06-13T18:00:10+00:00",
+                    summary="Turn complete; your move.",
+                ),
+            ],
+            now=FRESH,
+        )
+        self.assertEqual(await_only.state, "awaiting-developer")
+        self.assertEqual(await_only.ask, {"summary": "Turn complete; your move."})
+        resumed = project_lifecycle(
+            [
+                _started(),
+                _event("lifecycle.awaiting-developer", ts="2026-06-13T18:00:10+00:00", summary="s"),
+                _event("lifecycle.resumed", ts="2026-06-13T18:00:20+00:00"),
+            ],
+            now=FRESH,
+        )
+        self.assertEqual(resumed.state, "running")
+        self.assertIsNone(resumed.ask)
+
     def test_tokens_aggregate(self) -> None:
         log = [
             _started(),
@@ -1121,6 +1148,35 @@ class AttentionQueueTests(unittest.TestCase):
         )
         self.assertEqual(proj.analytics.attentionQueue[0].kind, "dormant-fleeting")
 
+    def test_awaiting_developer_yields_one_info_item(self) -> None:
+        # NOTIFY-AND-CONTINUE turn end (leaf-28): exactly one awaiting-developer item,
+        # info severity, carrying the summary as its detail -- no double-emission.
+        proj = project_workspace(
+            [
+                [
+                    _started(lifecycle_id="LC1"),
+                    _event(
+                        "lifecycle.awaiting-developer",
+                        lifecycle_id="LC1",
+                        ts="2026-06-13T18:00:05+00:00",
+                        summary="Drafted the plan; awaiting your review.",
+                    ),
+                ]
+            ],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+        )
+        queue = proj.analytics.attentionQueue
+        self.assertEqual(len(queue), 1)
+        item = queue[0]
+        self.assertEqual(
+            (item.kind, item.severity, item.lane, item.lifecycleId),
+            ("awaiting-developer", "info", "lifecycle", "LC1"),
+        )
+        self.assertEqual(item.title, "Turn complete — your move")
+        self.assertEqual(item.detail, "Drafted the plan; awaiting your review.")
+
     def test_drift_and_failed_setup_surface(self) -> None:
         proj = project_workspace(
             [[_started()]],
@@ -1212,6 +1268,43 @@ class GateProjectionTests(unittest.TestCase):
         )
         self.assertIsNone(proj.lifecycles[0].gate)
         self.assertEqual([i for i in proj.analytics.attentionQueue if i.kind == "gate-open"], [])
+
+    def _blocked_log(self) -> list:  # type: ignore[type-arg]
+        return [
+            _started(lifecycle_id="LC1"),
+            _event(
+                "lifecycle.blocked",
+                lifecycle_id="LC1",
+                ts="2026-06-13T18:00:05+00:00",
+                ask={"kind": "decision", "question": "Approve the plan?"},
+            ),
+        ]
+
+    def test_blocked_with_open_gate_dedups_to_gate_open(self) -> None:
+        # The gate-open/blocked-gate double-emission fix: a blocked lifecycle that
+        # also has a durable open gate (the lifecycle_gate path: block() + GateRecord)
+        # yields ONE lifecycle-lane item -- the gate-open -- not two.
+        proj = project_workspace(
+            [self._blocked_log()],
+            enclosures=[],
+            providers=[],
+            now=FRESH,
+            gates=[self._open()],
+        )
+        lane_items = [i for i in proj.analytics.attentionQueue if i.lane == "lifecycle"]
+        self.assertEqual(len(lane_items), 1)
+        self.assertEqual(lane_items[0].kind, "gate-open")
+        self.assertEqual(
+            [i for i in proj.analytics.attentionQueue if i.kind == "blocked-gate"], []
+        )
+
+    def test_bare_block_without_gate_still_yields_blocked_gate(self) -> None:
+        # PARK, not delete: a bare block() with no GateRecord still raises blocked-gate.
+        proj = project_workspace(
+            [self._blocked_log()], enclosures=[], providers=[], now=FRESH
+        )
+        kinds = [i.kind for i in proj.analytics.attentionQueue]
+        self.assertEqual(kinds, ["blocked-gate"])
 
 
 class GateReaderTests(unittest.TestCase):

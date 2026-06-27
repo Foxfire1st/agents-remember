@@ -43,6 +43,16 @@ class LifecycleResumeResponse(LifecycleResponse):
     """``lifecycle_resume``: the lifecycle is running again."""
 
 
+class LifecycleTurnEndNotificationResponse(LifecycleResponse):
+    """``lifecycle_turn_end_notification``: NOTIFY-AND-CONTINUE turn end (leaf-28).
+
+    The lifecycle is ``awaiting-developer`` (non-terminal); ``summary`` echoes the
+    developer-facing turn-end note. The next AR tool call auto-resumes to running.
+    """
+
+    summary: str
+
+
 class LifecyclePhaseResponse(LifecycleResponse):
     """``lifecycle_phase``: the lifecycle moved along the phase axis."""
 

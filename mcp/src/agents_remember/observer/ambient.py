@@ -159,6 +159,44 @@ class AmbientLifecycle:
             self._emit_locked("lifecycle.resumed", "declared", "model")
             return self.current
 
+    def await_developer(self, *, summary: str) -> LifecycleState:
+        """``running`` -> ``awaiting-developer``: the NOTIFY-AND-CONTINUE turn end.
+
+        Modeled on :meth:`block`, but there is no gate and no wait: the model
+        declares the turn complete and stops. The state is non-terminal -- the
+        next AR tool call auto-resumes it (``resume_from_await``) at the
+        ``_tool_payload`` choke point -- so this is a notification, not a barrier.
+        """
+        with self._lock:
+            current = self._require_active()
+            if current.state != "running":
+                raise LifecycleError(
+                    f"cannot await-developer from state {current.state!r}; only running awaits"
+                )
+            self.current = replace(current, state="awaiting-developer")
+            self._emit_locked("lifecycle.awaiting-developer", "declared", "model", summary=summary)
+            return self.current
+
+    def resume_from_await(self) -> LifecycleState:
+        """``awaiting-developer`` -> ``running`` on the next AR tool call.
+
+        A separate method from :meth:`resume` (which only resumes ``blocked``) so
+        the parked gate stack keeps its strict "only blocked resumes" guard. The
+        choke point calls this automatically when any tool other than the turn-end
+        notification fires while awaiting -- the auto-dismiss that makes the
+        notification a stop, not a stall.
+        """
+        with self._lock:
+            current = self._require_active()
+            if current.state != "awaiting-developer":
+                raise LifecycleError(
+                    f"cannot resume-from-await from state {current.state!r}; "
+                    "only awaiting-developer resumes this way"
+                )
+            self.current = replace(current, state="running")
+            self._emit_locked("lifecycle.resumed", "declared", "model")
+            return self.current
+
     def end(self, outcome: str) -> LifecycleState:
         """Terminal ``lifecycle.ended``; clears the ambient (§1.2).
 

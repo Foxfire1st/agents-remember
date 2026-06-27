@@ -3,8 +3,12 @@
 One pure function maps the projected lifecycle state to the single next move,
 attached to every tool response at the ``mcp.tools.base._tool_payload`` choke
 point. It marries the pre-lifecycle worktree hint system into the whole
-lifecycle spine, built on the EXISTING ``lifecycle_gate`` (auto-firing a
-turn-end notification is the leaf-28 follow-up, not this).
+lifecycle spine. Leaf-28 made NOTIFY-AND-CONTINUE the active turn-end model: at
+each former gate moment the hint points the agent at
+``lifecycle_turn_end_notification`` (notify the developer and stop, no wait),
+and the next AR tool call auto-resumes the lifecycle. The ``lifecycle_gate``
+stack is PARKED -- still works if raised, just no longer the hinted path -- and
+the ``blocked`` branch's await/resume hint stays intact for it.
 
 Two regimes, settled with the developer on the leaf-26 Lifecycle Flow tab
 (``dashboard/src/panels/FlowTab.tsx`` -- its RUNDOWN/LINEAR structures are the
@@ -22,8 +26,9 @@ spec):
 
 * LINEAR HALF -- from ``worktree_start`` on (contract present). Delegate to the
   proven ``guidance.lifecycle_guidance`` state machine for the operational
-  chain, overlaying a gate-raise hint at the gate moments so the existing
-  ``lifecycle_gate`` is never forgotten mid-thread.
+  chain, overlaying a turn-end hint at the former gate moments so the agent
+  notifies via ``lifecycle_turn_end_notification`` and stops rather than barreling
+  past a decision point.
 
 The engine stays pure: ``compute_next_step`` receives already-resolved inputs
 (state, the loaded contract or ``None``, the just-completed tool name, and the
@@ -56,15 +61,16 @@ FRONT_HALF_RUNDOWN: list[str] = [
     "job selection — bug / feature → build ; triage / research → research-only exit.",
     "task file exists? (build/fix) — yes → worktree_start ; "
     "no → task_doc first (persist the proposal + approval), then worktree_start.",
-    "when the plan is ready, present it and raise lifecycle_gate(kind='plan-approval'); from "
-    "worktree_start on, every tool response carries the next step.",
+    "when the plan is ready, present it and notify via lifecycle_turn_end_notification, then "
+    "stop — your next AR tool call resumes automatically; from worktree_start on, every tool "
+    "response carries the next step.",
 ]
 
 # Front-half generic pointer back to the rundown (every non-``decide`` call).
 _FRONT_HALF_SUMMARY = (
     "Front half (non-linear): follow the lifecycle_start rundown — reframe → research → "
-    "job-selection → task-file-exists? → task_doc. When the plan is ready, raise "
-    "lifecycle_gate(kind='plan-approval'); the linear per-tool chain begins at worktree_start."
+    "job-selection → task-file-exists? → task_doc. When the plan is ready, notify via "
+    "lifecycle_turn_end_notification and stop; the linear per-tool chain begins at worktree_start."
 )
 
 # The lifecycle is a loop: a terminal lifecycle_end is the seam back to the next
@@ -86,6 +92,16 @@ _AWAIT_GATE = NextStep(
         "Do not proceed past the gate: once they decide, call lifecycle_resume, then continue."
     ),
     nextTool="lifecycle_resume",
+)
+
+# The NOTIFY-AND-CONTINUE turn-end hint (leaf-28): once the lifecycle is parked in
+# awaiting-developer, the turn is the developer's. No nextTool — the agent stops; the
+# next AR tool call auto-resumes the lifecycle to running at the _tool_payload choke point.
+_TURN_HANDED_TO_DEVELOPER = NextStep(
+    summary=(
+        "Turn handed to the developer — stop here; your next AR tool call resumes "
+        "automatically. No gate, no wait."
+    ),
 )
 
 
@@ -112,26 +128,34 @@ def compute_next_step(
 
     # Blocked at an open gate (a raised lifecycle_gate set state="blocked"): the
     # only correct next move is to await the developer's decision and resume — never
-    # the post-gate operational step below, which would jump the gate.
+    # the post-gate operational step below, which would jump the gate. (The parked
+    # gate path still works if raised; leaf-28 just no longer hints toward it.)
     if state.state == "blocked":
         return _AWAIT_GATE
+
+    # NOTIFY-AND-CONTINUE turn end (leaf-28): the lifecycle is parked in
+    # awaiting-developer (the lifecycle_turn_end_notification response itself, before
+    # the next call auto-resumes). Hint the stop, not another call — nextTool=None so
+    # the agent does not push past its own turn end.
+    if state.state == "awaiting-developer":
+        return _TURN_HANDED_TO_DEVELOPER
 
     # FRONT HALF — non-linear, prose-guided (no worktree contract yet).
     if contract is None:
         if state.phase == "decide":
             return NextStep(
                 summary=(
-                    "Decide: verify `worktree_start --dry-run` (self-fix first), then raise "
-                    "lifecycle_gate(kind='worktree-intent') and wait for approval before opening "
-                    "the worktree."
+                    "Decide: verify `worktree_start --dry-run` (self-fix first), then notify via "
+                    "lifecycle_turn_end_notification and stop — the developer opens the worktree on "
+                    "their turn; your next AR tool call resumes automatically."
                 ),
-                nextTool="lifecycle_gate",
-                nextArgs={"kind": "worktree-intent"},
+                nextTool="lifecycle_turn_end_notification",
+                nextArgs={"summary": "Ready to open the worktree — your call."},
             )
         return NextStep(
             summary=_FRONT_HALF_SUMMARY,
-            nextTool="lifecycle_gate",
-            nextArgs={"kind": "plan-approval"},
+            nextTool="lifecycle_turn_end_notification",
+            nextArgs={"summary": "Plan ready for your review."},
         )
 
     # LINEAR HALF — overlay the existing-gate raise at the gate moments...
@@ -145,24 +169,27 @@ def compute_next_step(
 
 
 def _gate_after(tool_name: str, contract: WorktreeContract) -> NextStep | None:
-    """The gate-raise overlay: after a dry-run/preview, hint the EXISTING gate.
+    """The turn-end overlay: after a dry-run/preview, hint NOTIFY-AND-CONTINUE.
 
     Keyed on the just-completed tool plus the contract sub-state. Closeout uses
     distinct ``preview``/``apply`` tools; ``worktree_integrate`` and
     ``lifecycle_finalize_task`` reuse one tool with a ``dry_run`` arg, so the
     not-yet-applied contract state distinguishes the dry-run from the apply
-    without inspecting args. Auto-firing these is the leaf-28 improvement; 27
-    hints and the agent calls the gate.
+    without inspecting args. Leaf-28: at each former gate moment the agent now
+    notifies via ``lifecycle_turn_end_notification`` and stops (no gate, no wait);
+    the next AR tool call auto-resumes the lifecycle. The parked ``lifecycle_gate``
+    still works if raised — it is simply no longer the hinted path.
     """
     if tool_name == "worktree_closeout_preview" and not contract.approved_for_commit:
         return NextStep(
             summary=(
-                "Closeout preview is ready — report it, then raise "
-                "lifecycle_gate(kind='closeout-approval', ask=…, packet=<preview>) and wait for the "
-                "developer's commit approval (an agent self-approval never satisfies it)."
+                "Closeout preview is ready — report it, then notify via "
+                "lifecycle_turn_end_notification and stop for the developer's commit approval "
+                "(an agent self-approval never satisfies it); your next AR tool call resumes "
+                "automatically."
             ),
-            nextTool="lifecycle_gate",
-            nextArgs={"kind": "closeout-approval"},
+            nextTool="lifecycle_turn_end_notification",
+            nextArgs={"summary": "Closeout preview ready for your commit approval."},
         )
     if (
         tool_name == "worktree_integrate"
@@ -171,11 +198,11 @@ def _gate_after(tool_name: str, contract: WorktreeContract) -> NextStep | None:
     ):
         return NextStep(
             summary=(
-                "Integration dry-run verified — raise lifecycle_gate(kind='integration-approval') "
-                "and wait before applying the integration."
+                "Integration dry-run verified — notify via lifecycle_turn_end_notification and "
+                "stop before applying the integration; your next AR tool call resumes automatically."
             ),
-            nextTool="lifecycle_gate",
-            nextArgs={"kind": "integration-approval"},
+            nextTool="lifecycle_turn_end_notification",
+            nextArgs={"summary": "Integration dry-run verified — ready to integrate."},
         )
     if (
         tool_name == "lifecycle_finalize_task"
@@ -184,11 +211,11 @@ def _gate_after(tool_name: str, contract: WorktreeContract) -> NextStep | None:
     ):
         return NextStep(
             summary=(
-                "Finalize dry-run verified — raise lifecycle_gate(kind='cleanup-approval') and wait "
-                "before reclaiming the worktrees."
+                "Finalize dry-run verified — notify via lifecycle_turn_end_notification and stop "
+                "before reclaiming the worktrees; your next AR tool call resumes automatically."
             ),
-            nextTool="lifecycle_gate",
-            nextArgs={"kind": "cleanup-approval"},
+            nextTool="lifecycle_turn_end_notification",
+            nextArgs={"summary": "Finalize dry-run verified — ready to reclaim the worktrees."},
         )
     return None
 

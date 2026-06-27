@@ -17,7 +17,12 @@ from agents_remember.errors import AgentsRememberError
 # One state at a time; ``completed``/``abandoned`` are terminal. ``paused`` is
 # system-owned -- there is no pause signal: the projection infers it from stale
 # heartbeats or a recorded switch-away, the model never declares it.
-State = Literal["running", "paused", "blocked", "completed", "abandoned"]
+# ``awaiting-developer`` is the NOTIFY-AND-CONTINUE turn-end state (leaf-28): the
+# model declares the turn complete and stops -- non-terminal, auto-resumed by the
+# next AR tool call (no gate, no wait).
+State = Literal[
+    "running", "paused", "blocked", "awaiting-developer", "completed", "abandoned"
+]
 
 # Orthogonal to state (a lifecycle can be ``paused`` while in phase ``build``).
 # The enum is the session-lifecycle skill's heading vocabulary, hyphenated.

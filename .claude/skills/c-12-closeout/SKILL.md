@@ -29,7 +29,7 @@ Worktree closeout records closeout state in the contract the
 `c-09-git-worktree-manager` skill owns later integration, lifecycle finalization,
 cleanup, and task-document completion.
 
-## Approval Gate
+## Approval Hand-off
 
 Closeout is explicitly human-gated. Agents must request the matching preview
 tool first, relay the proposed code, memory, and ledger commit messages to the
@@ -40,19 +40,30 @@ records the developer's explicit commit approval. Agents must not treat
 implementation approval, a previous "looks good", or their own judgment as
 commit approval.
 
-The relay follows the `l-01-session-job-lifecycle` skill gate protocol: run the
-preview/dry-run first, deliver the preview facts and proposed messages as plain
-chat output ending with the approval question, then raise `lifecycle_gate` when
-using the dashboard gate surface. Never invoke `worktree_closeout_apply` before
-the developer response is handled and the lifecycle is cleared with
-`lifecycle_resume()`. A report attached to a hidden approval prompt is a report
-the developer never sees.
+The relay follows the `l-01-session-job-lifecycle` skill hand-off protocol: run the
+preview/dry-run first, then call
+`lifecycle_turn_end_notification(summary={…the preview facts + the commit ask…})` as the **last tool
+call**, then deliver the preview facts and proposed messages as plain
+chat output ending with the commit ask, and **STOP / end your
+turn**. The notification sets the `awaiting-developer` lifecycle state, surfaces a dashboard attention item, and
+returns immediately (no wait, no inbox). The developer approves on the dashboard or in the leaf's
+attached chat; the **first AR tool call of your next turn** auto-resumes the lifecycle (`running`),
+clears the attention item, and runs `worktree_closeout_apply` — you send no explicit `lifecycle_resume`.
+Never invoke `worktree_closeout_apply` in the same turn as the relay; the preview report is what the
+developer sees.
 
-## Server-Side Gate Enforcement
+## Server-Side Gate Enforcement (parked fallback)
 
-The chat approval gate above is the floor. When the lifecycle is connected to
-the dashboard, closeout is **also** enforced server-side through a durable
-`closeout-approval` gate, so a developer can approve from the cockpit and the
+This block-and-wait gate is the **parked fallback**, not the active path: the active closeout hand-off is
+the notify-and-continue `lifecycle_turn_end_notification` above. `lifecycle_gate`, the operator inbox,
+and the dashboard GateResponder still exist and still enforce when you **deliberately** raise the durable
+gate, but nothing routes toward them automatically (`next_step.py` repoints every gate moment to the
+notification). Use the path below only when you need a durable, developer-attributed, mutation-blocking
+approval record.
+
+The chat approval hand-off above is the floor. When the lifecycle is connected to
+the dashboard and a `closeout-approval` gate is explicitly raised, closeout is **also** enforced
+server-side through that durable gate, so a developer can approve from the cockpit and the
 mutating tool — not a UI button — is the security boundary.
 
 `closeout-approval` **is** the commit gate — closeout is the single
@@ -173,9 +184,11 @@ must be clean before creating the memory content commit.
 
 Push behavior is not automatic. Closeout commits code, memory, and ledger only;
 it never pushes. Pushing the integration branch is part of the landing tail the
-`c-09-git-worktree-manager` skill owns, gated by
-`lifecycle_gate(kind="push-approval", ...)` and followed by `lifecycle_resume`
-before any push once the developer response is handled.
+`c-09-git-worktree-manager` skill owns: call
+`lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the push intent as
+your final prose, and **STOP**; push only after the developer approves and
+your next turn auto-resumes. (Parked fallback: the durable
+`lifecycle_gate(kind="push-approval", ...)` + `lifecycle_resume` still works if deliberately raised.)
 
 Closeout does not mark the task `Completed`. After closeout, integration, any
 PR-gated merge/pull, and memory carryover are done, use

@@ -51,6 +51,7 @@ PUBLIC_TOOLS = (
     "codex_benchmark_run",
     "lifecycle_start",
     "lifecycle_resume",
+    "lifecycle_turn_end_notification",
     "lifecycle_end",
     "switch_lifecycle",
     "lifecycle_phase",
@@ -75,6 +76,17 @@ def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     amb = ambient()
     if amb is not None:
         amb.emit_tool(tool_name, finalized)
+        # Leaf-28 auto-dismiss: a NOTIFY-AND-CONTINUE turn end parks the lifecycle in
+        # awaiting-developer; the next AR tool call resumes it to running so the
+        # notification is a stop, not a stall. The tool-name guard is mandatory --
+        # lifecycle_turn_end_notification flows through here in the SAME call that set
+        # the state, so without it the notification would self-dismiss.
+        if (
+            amb.current is not None
+            and amb.current.state == "awaiting-developer"
+            and tool_name != "lifecycle_turn_end_notification"
+        ):
+            amb.resume_from_await()
         # Task 27: attach the engine-computed next step for the active lifecycle.
         # next_step_for is exception-safe, so it never raises into the tool path.
         next_step = next_step_for(amb, tool_name)
