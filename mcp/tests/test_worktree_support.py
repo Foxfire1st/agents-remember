@@ -429,6 +429,38 @@ def closed_external_contract_fixture(
     return closed
 
 
+def closeout_args(contract, *, dry_run: bool = False) -> Namespace:
+    return Namespace(
+        contract_path=contract.contract_path,
+        approved=not dry_run,
+        approval_note="" if dry_run else "developer approved commit preview",
+        code_commit_message="Add feature",
+        memory_commit_message="Document feature",
+        ledger_commit_message="Sync ledger",
+        dry_run=dry_run,
+    )
+
+
+def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
+    return Namespace(
+        contract_path=contract.contract_path,
+        approved=not dry_run,
+        strategy="ff-only",
+        ledger_commit_message="",
+        dry_run=dry_run,
+    )
+
+
+def integrated_external_contract_fixture(root: Path):
+    contract = dirty_open_external_contract_fixture(root)
+    with redirect_stdout(io.StringIO()):
+        assert worktree_manager.command_closeout(closeout_args(contract)) == 0
+    closed = load_contract(contract.contract_path)
+    with redirect_stdout(io.StringIO()):
+        assert worktree_manager.command_integrate(integrate_args(closed)) == 0
+    return load_contract(contract.contract_path)
+
+
 class WorktreeSupportTests(unittest.TestCase):
     def test_master_start_creates_integration_contract_and_leaf_enclosure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1224,6 +1256,96 @@ class WorktreeSupportTests(unittest.TestCase):
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["changed_code_paths"], {"count": 1, "sample": ["second.txt"]})
             self.assertEqual(payload["sidecar_body_gate"]["stale"], {"count": 0, "sample": []})
+
+    def test_recloseout_after_integration_reopens_and_reintegrates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = integrated_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            assert contract.memory_repo_path is not None
+            (contract.code_worktree / "second.txt").write_text("second\n", encoding="utf-8")
+            write_file_onboarding(
+                contract.memory_worktree / "onboarding",
+                contract.repo_name,
+                "second.txt",
+                contract.code_commit,
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
+                )
+            preview = json.loads(output.getvalue())
+            self.assertTrue(preview["integration_reopen"]["would_reopen"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+            closeout_payload = json.loads(output.getvalue())
+            self.assertTrue(closeout_payload["integration_reopen"]["reopened"])
+            reopened = load_contract(contract.contract_path)
+            self.assertEqual(reopened.integration_status, "not-started")
+            self.assertEqual(reopened.integration_strategy, "")
+            self.assertEqual(reopened.integrated_code_commit, "")
+            self.assertEqual(reopened.integrated_memory_content_commit, "")
+            self.assertEqual(reopened.integrated_ledger_commit, "")
+            self.assertEqual(
+                worktree_manager.status_payload(reopened)["phase"], "integration-pending"
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_integrate(integrate_args(reopened, dry_run=True)), 0
+                )
+            self.assertEqual(json.loads(output.getvalue())["state"], "would-integrate")
+
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(worktree_manager.command_integrate(integrate_args(reopened)), 0)
+            reintegrated = load_contract(contract.contract_path)
+            self.assertEqual(reintegrated.integration_status, "completed")
+            self.assertEqual(
+                git(contract.code_repo_path, "rev-parse", "main"), reintegrated.code_commit
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", "main"), reintegrated.ledger_commit
+            )
+
+    def test_noop_recloseout_after_integration_keeps_completed_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = integrated_external_contract_fixture(root)
+            assert contract.memory_repo_path is not None
+            code_source = git(contract.code_repo_path, "rev-parse", "main")
+            memory_source = git(contract.memory_repo_path, "rev-parse", "main")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
+                )
+            preview = json.loads(output.getvalue())
+            self.assertFalse(preview["integration_reopen"]["would_reopen"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+            closeout_payload = json.loads(output.getvalue())
+            self.assertFalse(closeout_payload["integration_reopen"]["reopened"])
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.integration_status, "completed")
+            self.assertEqual(loaded.integrated_code_commit, contract.integrated_code_commit)
+            self.assertEqual(
+                loaded.integrated_memory_content_commit,
+                contract.integrated_memory_content_commit,
+            )
+            self.assertEqual(loaded.integrated_ledger_commit, contract.integrated_ledger_commit)
+            self.assertEqual(loaded.code_commit, contract.code_commit)
+            self.assertEqual(loaded.memory_content_commit, contract.memory_content_commit)
+            self.assertEqual(loaded.ledger_commit, contract.ledger_commit)
+            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), code_source)
+            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), memory_source)
 
     def test_closeout_excludes_sync_transported_committed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

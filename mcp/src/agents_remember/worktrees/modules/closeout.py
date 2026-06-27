@@ -7,6 +7,7 @@ from agents_remember.controlplane.enforcement import CloseoutGuard, evaluate_clo
 from agents_remember.controlplane.records import apply_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
+    find_mapping,
     load_ledger,
     prepend_mapping,
     write_ledger,
@@ -22,6 +23,7 @@ from agents_remember.worktrees.modules.git import (
     commit_if_dirty,
     committed_changed_paths,
     head_commit,
+    is_ancestor,
     require_git,
     worktree_dirty,
 )
@@ -116,6 +118,84 @@ def _refresh_plans_have_work(
     )
 
 
+def _completed_integration_source_heads(contract, base: str, integrated: str) -> set[str]:
+    expected = {base}
+    if contract.integration_status == "completed" and integrated:
+        expected.add(integrated)
+    return expected
+
+
+def _format_expected_heads(expected: set[str]) -> str:
+    return ", ".join(sorted(expected))
+
+
+def _commit_missing_from_source(repo, commit: str, source_branch: str) -> bool:
+    return bool(commit) and not is_ancestor(repo, commit, source_branch)
+
+
+def _preview_integration_reopen(
+    contract,
+    *,
+    code_dirty: bool,
+    memory_would_commit: bool,
+) -> dict[str, object]:
+    if contract.integration_status != "completed":
+        return {"would_reopen": False, "reason": "integration is not completed"}
+    code_head = head_commit(contract.code_worktree)
+    code_unlanded = code_dirty or (
+        code_head != contract.code_commit
+        and _commit_missing_from_source(
+            contract.code_repo_path, code_head, contract.code_source_branch
+        )
+    )
+    would_reopen = code_unlanded or memory_would_commit
+    return {
+        "would_reopen": would_reopen,
+        "code_would_reopen": code_unlanded,
+        "memory_would_reopen": memory_would_commit,
+        "reason": "completed integration would be reopened after closeout"
+        if would_reopen
+        else "no new unlanded code or memory content is expected",
+    }
+
+
+def _completed_integration_reopen(
+    contract,
+    *,
+    code_commit: str,
+    memory_content_commit: str,
+    ledger_commit: str,
+) -> dict[str, object]:
+    if contract.integration_status != "completed":
+        return {"reopened": False, "reason": "integration is not completed"}
+    code_changed = code_commit != contract.code_commit
+    code_unlanded = code_changed and _commit_missing_from_source(
+        contract.code_repo_path, code_commit, contract.code_source_branch
+    )
+    memory_content_changed = (
+        contract.memory_mode == "external"
+        and bool(memory_content_commit)
+        and memory_content_commit != contract.memory_content_commit
+    )
+    memory_unlanded = False
+    if memory_content_changed and contract.memory_repo_path is not None:
+        memory_unlanded = _commit_missing_from_source(
+            contract.memory_repo_path, ledger_commit, contract.memory_source_branch
+        )
+    reopened = code_unlanded or memory_unlanded
+    return {
+        "reopened": reopened,
+        "code_unlanded": code_unlanded,
+        "memory_unlanded": memory_unlanded,
+        "previous_code_commit": contract.code_commit,
+        "previous_memory_content_commit": contract.memory_content_commit,
+        "previous_ledger_commit": contract.ledger_commit,
+        "reason": "new closeout commit is not on the recorded source branch"
+        if reopened
+        else "no new unlanded code or memory content commit",
+    }
+
+
 def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     ledger_message = (
         args.ledger_commit_message
@@ -191,6 +271,9 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "stamped_without_body_review": [],
         }
     )
+    memory_would_commit = memory_dirty or _refresh_plans_have_work(
+        metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
+    )
     return {
         "state": "would-closeout",
         **status_payload(contract),
@@ -229,6 +312,9 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "route_overview_body_gate": route_overview_body_gate,
         "route_overviews_attested_no_impact": route_overview_body_gate["attested_no_impact"],
         "route_index_refresh": route_index_refresh,
+        "integration_reopen": _preview_integration_reopen(
+            contract, code_dirty=code_dirty, memory_would_commit=memory_would_commit
+        ),
         "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract)),
         "proposed_commits": {
             "code": {
@@ -237,10 +323,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
                 "worktree": contract.code_worktree.as_posix(),
             },
             "memory": {
-                "would_commit": memory_dirty
-                or _refresh_plans_have_work(
-                    metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
-                ),
+                "would_commit": memory_would_commit,
                 "message": args.memory_commit_message,
                 "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
                 "metadata_refresh_after_code_commit": contract.memory_mode == "external",
@@ -259,10 +342,14 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
 
 def _validate_closeout_source_heads(contract) -> None:
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
-    if current_code_source != contract.code_base_commit:
+    expected_code_heads = _completed_integration_source_heads(
+        contract, contract.code_base_commit, contract.integrated_code_commit
+    )
+    if current_code_source not in expected_code_heads:
         raise RuntimeError(
             "code source branch moved since task start: "
-            f"{contract.code_source_branch} is {current_code_source}, expected {contract.code_base_commit}"
+            f"{contract.code_source_branch} is {current_code_source}, "
+            f"expected {_format_expected_heads(expected_code_heads)}"
         )
     if (
         contract.memory_mode == "external"
@@ -272,10 +359,14 @@ def _validate_closeout_source_heads(contract) -> None:
         current_memory_source = head_commit(
             contract.memory_repo_path, contract.memory_source_branch
         )
-        if current_memory_source != contract.memory_base_commit:
+        expected_memory_heads = _completed_integration_source_heads(
+            contract, contract.memory_base_commit, contract.integrated_ledger_commit
+        )
+        if current_memory_source not in expected_memory_heads:
             raise RuntimeError(
                 "memory source branch moved since task start: "
-                f"{contract.memory_source_branch} is {current_memory_source}, expected {contract.memory_base_commit}"
+                f"{contract.memory_source_branch} is {current_memory_source}, "
+                f"expected {_format_expected_heads(expected_memory_heads)}"
             )
 
 
@@ -415,20 +506,27 @@ def _external_closeout_commits(
         memory_tree=contract.memory_worktree,
         memory_verified_commit=contract_memory_verified_commit(contract),
     )
-    refreshed_entities = refresh_entity_fingerprints_for_context(
-        context, changed_paths
-    )
+    refreshed_entities = refresh_entity_fingerprints_for_context(context, changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
     memory_quality = _run_memory_quality_gate(context)
-    memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
-    ledger = load_ledger(contract.ledger_path)
-    write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
-    require_git(contract.memory_worktree, ["add", "memory.md"])
-    ledger_commit = commit_if_dirty(
-        contract.memory_worktree,
-        args.ledger_commit_message
-        or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
+    memory_content_dirty = worktree_dirty(contract.memory_worktree)
+    memory_commit = (
+        commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
+        if memory_content_dirty
+        else contract.memory_content_commit or head_commit(contract.memory_worktree)
     )
+    ledger = load_ledger(contract.ledger_path)
+    existing_mapping = find_mapping(ledger, code_commit)
+    if existing_mapping is not None and existing_mapping.memory_commit == memory_commit:
+        ledger_commit = contract.ledger_commit or head_commit(contract.memory_worktree)
+    else:
+        write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
+        require_git(contract.memory_worktree, ["add", "memory.md"])
+        ledger_commit = commit_if_dirty(
+            contract.memory_worktree,
+            args.ledger_commit_message
+            or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
+        )
     return (
         memory_commit,
         ledger_commit,
@@ -502,6 +600,13 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             code_commit_date,
             working_paths=worklist["working"],
         )
+    integration_reopen = _completed_integration_reopen(
+        contract,
+        code_commit=code_commit,
+        memory_content_commit=memory_commit,
+        ledger_commit=ledger_commit,
+    )
+    reopened = bool(integration_reopen["reopened"])
     updated = replace(
         contract,
         human_review_status="approved",
@@ -511,6 +616,14 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         code_commit=code_commit,
         memory_content_commit=memory_commit,
         ledger_commit=ledger_commit,
+        integration_status="not-started" if reopened else contract.integration_status,
+        integration_strategy="" if reopened else contract.integration_strategy,
+        integrated_code_commit="" if reopened else contract.integrated_code_commit,
+        integrated_memory_content_commit=""
+        if reopened
+        else contract.integrated_memory_content_commit,
+        integrated_ledger_commit="" if reopened else contract.integrated_ledger_commit,
+        cleanup="pending" if reopened else contract.cleanup,
     )
     write_contract(contract.contract_path, updated)
     if gate_guard is not None and gate_guard.gate_id is not None:
@@ -535,6 +648,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "route_overviews_stamped_without_body_review": stamped_overviews,
             "route_index_refresh": route_index_refresh,
             "memory_quality": memory_quality,
+            "integration_reopen": integration_reopen,
             "closeout_gate": _closeout_gate_payload(gate_guard),
         },
     )
