@@ -10,11 +10,17 @@ export default defineConfig({
   plugins: [react()],
   build: { outDir: "dist", emptyOutDir: true },
   server: {
-    port: 5173,
+    // Port + `/api` proxy target are env-overridable so parallel worktree dev loops can each run
+    // their own Vite + dashboard backend without colliding (defaults: 5173 -> 127.0.0.1:8765).
+    port: Number(process.env.AR_DASHBOARD_DEV_PORT) || 5173,
     // `ws: true` upgrades proxied WebSockets — the Mode B2 terminal bridge (`/api/terminal/{id}`,
     // slice 6e) rides the same `/api` proxy as the SSE/HTTP channels onto the dashboard server.
     proxy: {
-      "/api": { target: "http://127.0.0.1:8765", changeOrigin: true, ws: true },
+      "/api": {
+        target: process.env.AR_DASHBOARD_API ?? "http://127.0.0.1:8765",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 });

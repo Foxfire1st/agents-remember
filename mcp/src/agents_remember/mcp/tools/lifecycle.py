@@ -17,6 +17,7 @@ from agents_remember.observer.lifecycle_state import LifecycleState, coerce_phas
 from agents_remember.observer.save_gate import coerce_save_decision
 
 from .base import _tool_payload
+from .next_step import FRONT_HALF_RUNDOWN
 
 
 def _state_fields(state: LifecycleState) -> dict[str, Any]:
@@ -32,6 +33,9 @@ def lifecycle_start_payload() -> dict[str, Any]:
             "operation": "lifecycle_start",
             **_state_fields(state),
             "fleeting": state.fleeting,
+            # Task 27: the one-time, non-linear front-half roadmap. The per-tool
+            # nextStep chain only begins once the worktree exists.
+            "frontHalfRundown": list(FRONT_HALF_RUNDOWN),
         },
     )
 

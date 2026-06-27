@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import tempfile
 import unittest
@@ -490,15 +491,18 @@ class CliTests(unittest.TestCase):
 
 
 class CliRunTests(unittest.TestCase):
-    def _args(self) -> argparse.Namespace:
-        return argparse.Namespace(
-            config="/abs/settings.json",
-            host="127.0.0.1",
-            port=8765,
-            interval=1.0,
-            sim=None,
-            sim_speed="1",
-        )
+    def _args(self, **overrides: object) -> argparse.Namespace:
+        base = {
+            "config": "/abs/settings.json",
+            "host": "127.0.0.1",
+            "port": 8765,
+            "interval": 1.0,
+            "reload": False,
+            "sim": None,
+            "sim_speed": "1",
+        }
+        base.update(overrides)
+        return argparse.Namespace(**base)
 
     def test_run_launches_server(self) -> None:
         with (
@@ -516,6 +520,47 @@ class CliRunTests(unittest.TestCase):
         with mock.patch.object(cli_dashboard, "load_config", side_effect=ConfigError("bad")):
             result = cli_dashboard.run(self._args())
         self.assertEqual(result, 1)
+
+    def test_run_reload_launches_the_dev_factory(self) -> None:
+        with (
+            mock.patch.object(cli_dashboard, "load_config", return_value=object()),
+            mock.patch.object(cli_dashboard, "create_app") as create,
+            mock.patch("uvicorn.run") as serve,
+        ):
+            result = cli_dashboard.run(self._args(reload=True))
+        self.assertEqual(result, 0)
+        # --reload passes an import-string factory so uvicorn's reloader can re-import on
+        # change; the app object is never pre-built in this branch.
+        create.assert_not_called()
+        serve.assert_called_once()
+        args, kwargs = serve.call_args
+        self.assertEqual(args[0], "agents_remember.cli.dashboard:_dev_app")
+        self.assertTrue(kwargs["factory"])
+        self.assertTrue(kwargs["reload"])
+
+    def test_run_reload_with_sim_is_rejected(self) -> None:
+        with mock.patch.object(cli_dashboard, "load_config", return_value=object()):
+            result = cli_dashboard.run(self._args(reload=True, sim="/fix"))
+        self.assertEqual(result, 1)
+
+    def test_dev_app_factory_builds_from_env(self) -> None:
+        with (
+            mock.patch.object(cli_dashboard, "load_config", return_value=object()) as load,
+            mock.patch.object(cli_dashboard, "create_app", return_value="APP") as create,
+            mock.patch.dict(
+                os.environ,
+                {
+                    cli_dashboard._DEV_CONFIG_ENV: "/abs/settings.json",
+                    cli_dashboard._DEV_INTERVAL_ENV: "2.5",
+                },
+                clear=False,
+            ),
+        ):
+            app = cli_dashboard._dev_app()
+        self.assertEqual(app, "APP")
+        load.assert_called_once_with("/abs/settings.json")
+        _, kwargs = create.call_args
+        self.assertEqual(kwargs["interval"], 2.5)
 
     def test_main_dispatches_to_subcommand(self) -> None:
         with mock.patch.object(cli_dashboard, "run", return_value=0) as run_stub:
@@ -785,6 +830,7 @@ class CliSimTests(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 8765,
             "interval": 1.0,
+            "reload": False,
             "sim": None,
             "sim_speed": "1",
         }

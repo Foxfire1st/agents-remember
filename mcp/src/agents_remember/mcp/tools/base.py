@@ -8,6 +8,8 @@ from agents_remember.models.tokens import finalize_payload_tokens
 from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer.ambient import ambient
 
+from .next_step import next_step_for
+
 TRANSPORT = "stdio"
 PUBLIC_TOOLS = (
     "ping",
@@ -73,4 +75,9 @@ def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     amb = ambient()
     if amb is not None:
         amb.emit_tool(tool_name, finalized)
+        # Task 27: attach the engine-computed next step for the active lifecycle.
+        # next_step_for is exception-safe, so it never raises into the tool path.
+        next_step = next_step_for(amb, tool_name)
+        if next_step is not None:
+            finalized["nextStep"] = next_step
     return finalized

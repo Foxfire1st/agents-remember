@@ -26,6 +26,11 @@ class LifecycleStartResponse(LifecycleResponse):
     """``lifecycle_start``: a freshly minted, running lifecycle."""
 
     fleeting: bool
+    # The one-time front-half roadmap (task 27): prose, because the non-linear
+    # front half (reframe -> research -> job-selection -> task-file-exists? ->
+    # task_doc) has no clean per-tool hint anchors. Optional so older callers and
+    # the conformance fixtures stay valid.
+    frontHalfRundown: list[str] | None = None
 
 
 class LifecycleBlockResponse(LifecycleResponse):

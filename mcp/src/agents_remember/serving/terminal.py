@@ -103,6 +103,7 @@ def _tmux_has_session(name: str) -> bool:
         result = subprocess.run(
             ["tmux", "has-session", "-t", name],
             check=False,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
@@ -118,6 +119,7 @@ def _tmux_kill_session(name: str) -> None:
         subprocess.run(
             ["tmux", "kill-session", "-t", name],
             check=False,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
@@ -129,6 +131,7 @@ def _tmux_create_detached(name: str, cwd: Path, harness: Sequence[str]) -> None:
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "--", *harness],
         check=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         timeout=_TERMINATE_TIMEOUT,
