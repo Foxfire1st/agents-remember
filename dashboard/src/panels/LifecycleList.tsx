@@ -340,7 +340,16 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       activeEnclosuresByLifecycle,
     );
     if (!enclosure) continue;
-    rows.push(lifecycleRow(lifecycle, docs, enclosure, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
+    rows.push(
+      lifecycleRow(
+        lifecycle,
+        docs,
+        enclosure,
+        pickupForLifecycle(lifecycle, pickupsByLifecycle),
+        input.series,
+        docPaths,
+      ),
+    );
   }
 
   return rows.sort(compareRows);
@@ -431,6 +440,8 @@ function lifecycleRow(
   docs: TaskDocNode[],
   enclosure: EnclosureNode | undefined,
   pickup: AgentPickupNode | undefined,
+  seriesList: SeriesNode[],
+  masterDocPaths: Set<string>,
 ): OperationRow {
   const label = taskLabel(lifecycle, docs, enclosure);
   const repo = lifecycle.repoId ?? "—";
@@ -457,10 +468,29 @@ function lifecycleRow(
     pickup,
     createdAt: lifecycle.startedAt,
     fallbackOrder: lifecycle.id,
+    // A lifecycle with an enclosure but no matching doc (e.g. a reopened/orphaned leaf) still
+    // belongs under its master; carry the parent so it nests instead of floating top-level.
+    parentKey: masterParentKeyForEnclosure(enclosure, seriesList, masterDocPaths),
     depth: 0,
     fleeting: lifecycle.fleeting,
     inferred: lifecycle.inferred,
   };
+}
+
+// The master a worktree enclosure belongs to: its `taskRoot` is the master task folder and the
+// master series doc lives directly in it. Mirrors taskHierarchy's parentSelectionKey so an orphaned
+// lifecycle row nests under the same master node a normal subtask doc would.
+function masterParentKeyForEnclosure(
+  enclosure: EnclosureNode | undefined,
+  seriesList: SeriesNode[],
+  masterDocPaths: Set<string>,
+): string | undefined {
+  if (!enclosure) return undefined;
+  const series = seriesList.find((item) => pathDir(item.docPath) === enclosure.taskRoot);
+  if (!series) return undefined;
+  return masterDocPaths.has(series.docPath)
+    ? taskDocSelectionKey(series.docPath)
+    : seriesSelectionKey(series.seriesId);
 }
 
 function groupRows(rows: OperationRow[], pivot: Pivot): OperationGroup[] {
@@ -587,7 +617,7 @@ function isRootTaskDoc(doc: Pick<TaskDocNode, "kind" | "docPath">): boolean {
 }
 
 function enclosureForDoc(
-  doc: Pick<TaskDocNode, "id" | "docPath">,
+  doc: Pick<TaskDocNode, "id" | "docPath" | "lifecycleId">,
   enclosures: EnclosureNode[],
 ): EnclosureNode | undefined {
   const dir = pathDir(doc.docPath);
@@ -595,7 +625,17 @@ function enclosureForDoc(
   return enclosures.find((enclosure) => {
     if (enclosure.taskRoot !== dir) return false;
     if (enclosure.leafId === stem) return true;
-    return Boolean(doc.id && enclosure.leafId === doc.id);
+    if (doc.id && enclosure.leafId === doc.id) return true;
+    // Reopening a finalized task spins up a fresh worktree whose leafId is the original slug (or id)
+    // plus a cycle suffix (e.g. `…-s7`) and shares the doc's lifecycle. Require BOTH the shared
+    // lifecycle AND that suffixed-slug shape, so a doc never grabs an unrelated enclosure that merely
+    // runs under the same (master) lifecycle — otherwise the reopened work renders as a parent-less
+    // standalone phantom instead of nesting under its master.
+    if (!doc.lifecycleId || enclosure.lifecycleId !== doc.lifecycleId) return false;
+    return (
+      enclosure.leafId.startsWith(`${stem}-`) ||
+      Boolean(doc.id && enclosure.leafId.startsWith(`${doc.id}-`))
+    );
   });
 }
 

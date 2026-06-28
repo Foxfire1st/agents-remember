@@ -318,6 +318,105 @@ describe("LifecycleList task labels", () => {
     );
   });
 
+  it("nests a reopened leaf whose suffixed enclosure leaf id only matches the doc by lifecycle", () => {
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({ id: "LC-29", repoId: "agents-remember", state: "paused", inferred: true }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/29-s7",
+            lifecycleId: "LC-29",
+            // Reopen suffix: matches neither the doc stem nor the doc id — only the shared lifecycle.
+            leafId: "29_event-river-retention-and-projection-freshness-s7",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+            taskDoc({
+              id: "29",
+              lifecycleId: "LC-29",
+              title: "Event-River Retention and Projection Freshness",
+              docPath:
+                "/tasks/260610_browser-dashboard/29_event-river-retention-and-projection-freshness.json",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "29",
+                  name: "Event-River Retention and Projection Freshness",
+                  file: "29_event-river-retention-and-projection-freshness.md",
+                  status: "Completed",
+                  scope: "",
+                  createdAt: "2026-06-27T22:33:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText, queryByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    const row = getByText("29. Event-River Retention and Projection Freshness");
+    // Nests under the master instead of rendering as a parent-less standalone phantom, even though
+    // the reopened worktree's leaf id is suffixed and only the shared lifecycle links doc↔enclosure.
+    expect(row.closest("[data-depth='1']")).toBeTruthy();
+    expect(row.closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
+      "taskdoc:/tasks/260610_browser-dashboard/task.json",
+    );
+    expect(queryByText("29_event-river-retention-and-projection-freshness-s7")).toBeNull();
+  });
+
+  it("nests a doc-less orphan lifecycle under its master instead of floating top-level", () => {
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({ id: "LC-ORPHAN", repoId: "agents-remember", state: "paused", inferred: true }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/orphan-s7",
+            lifecycleId: "LC-ORPHAN",
+            leafId: "30_some-leaf-s7",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+          ],
+          series: [seriesNode({ seriesId: "260610_browser-dashboard" })],
+        },
+      }),
+    );
+
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    // No task doc references this lifecycle, so it renders via the bare lifecycle row — but it still
+    // nests under its master (resolved from the enclosure's taskRoot), not as a top-level phantom.
+    const row = getByText("30_some-leaf-s7");
+    expect(row.closest("[data-depth='1']")).toBeTruthy();
+    expect(row.closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
+      "taskdoc:/tasks/260610_browser-dashboard/task.json",
+    );
+  });
+
   it("keeps standalone root task documents visible without listing loose leaf docs", () => {
     const onSelect = vi.fn();
     seed(
