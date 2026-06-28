@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from agents_remember.observer.drift_snapshots import prune_orphaned_drift_snapshots
 from agents_remember.observer.events import Event
 from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
@@ -131,6 +132,7 @@ def project_and_write(
     coordination_root = config.coordination_root
     sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces(config, moment)
     enclosures = read_enclosures(coordination_root)
+    prune_orphaned_drift_snapshots(config)
     if provider_refresher is not None:
         provider_refresher.maybe_refresh(config, now=moment)
     projection = project_workspace(

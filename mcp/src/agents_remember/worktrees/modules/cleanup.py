@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
+from agents_remember.observer.drift_snapshots import remove_drift_snapshot
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor, run_git
@@ -330,6 +331,14 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     )
     removed_worktrees = _removed_worktrees(contract, args.dry_run)
     branches = _deleted_branches(contract, args.dry_run)
+    drift_snapshots = {
+        "code": remove_drift_snapshot(
+            contract.coordination_root,
+            repository=contract.code_worktree.name,
+            branch=contract.code_work_branch,
+            dry_run=args.dry_run,
+        )
+    }
     planned_removed = (
         _scheduled_removal_paths(providers, removed_worktrees) if args.dry_run else None
     )
@@ -349,6 +358,7 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "providers": providers,
             "removed_worktrees": removed_worktrees,
             "branches": branches,
+            "drift_snapshots": drift_snapshots,
             "directories": directories,
             "kept_branches": _kept_branches(branches),
         },

@@ -12,7 +12,8 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check import drif
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     ACTIONABLE_CLASSIFICATIONS,
 )
-from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot_dir
+from agents_remember.observer.drift_snapshots import drift_snapshot_path
+from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA
 
 
 def not_checked() -> dict[str, Any]:
@@ -125,9 +126,11 @@ def _write_drift_snapshot(code_repository_root: Path, context: Any, rows: list[A
         ),
         "rows": [_row_to_dict(row, context.onboarding_root) for row in rows],
     }
-    repo_token = drift.sanitize_report_token(code_repository_root.name)
-    branch_token = drift.sanitize_report_token(branch)
-    snapshot_path = drift_snapshot_dir(context.coordination_root) / f"{repo_token}__{branch_token}.json"
+    snapshot_path = drift_snapshot_path(
+        context.coordination_root,
+        repository=code_repository_root.name,
+        branch=branch,
+    )
     try:
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = snapshot_path.with_name(f"{snapshot_path.name}.tmp")

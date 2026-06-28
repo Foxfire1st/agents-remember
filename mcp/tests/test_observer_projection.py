@@ -32,6 +32,7 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
 from agents_remember.memory_quality.integrity.onboarding_drift_check import summary
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftRow
+from agents_remember.observer.drift_snapshots import drift_snapshot_path
 from agents_remember.observer.events import Event
 from agents_remember.observer.paths import (
     DRIFT_SNAPSHOT_SCHEMA,
@@ -1435,7 +1436,7 @@ class DriftSnapshotReaderTests(unittest.TestCase):
     ) -> None:  # type: ignore[type-arg]
         directory = drift_snapshot_dir(self.coord)
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / f"{repo}__{branch}.json").write_text(
+        drift_snapshot_path(self.coord, repository=repo, branch=branch).write_text(
             json.dumps(
                 {
                     "schema": schema,
@@ -1840,6 +1841,8 @@ class DriftSnapshotProducerTests(unittest.TestCase):
             ),
         ]
         summary._write_drift_snapshot(repo, context, rows)
+        expected_path = drift_snapshot_path(coord, repository="repo-x", branch="feat-x")
+        self.assertTrue(expected_path.exists())
         nodes = read_drift_snapshots(coord, now=FRESH)
         self.assertEqual(len(nodes), 1)
         self.assertEqual((nodes[0].repository, nodes[0].branch), ("repo-x", "feat-x"))
@@ -1936,6 +1939,61 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
             (observer_root(config) / "latest-state.json").read_text(encoding="utf-8")
         )
         self.assertIn("analytics", state)
+
+    def test_project_and_write_prunes_orphaned_worktree_drift_snapshots(self) -> None:
+        config = self._config()
+        official = self._write_snapshot("repo-a", "main")
+        active_contract = default_contract(
+            task_name="active task",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=(self.tmp / "ws" / "repo-a").resolve(),
+            code_source_branch="feat/dashboard",
+            code_work_branch="ar/active",
+            code_base_commit="base",
+            worktree_name="active-worktree",
+        )
+        active_contract.code_worktree.mkdir(parents=True)
+        write_contract(active_contract.contract_path, active_contract)
+        active = self._write_snapshot(active_contract.code_worktree.name, "ar/active")
+        orphaned = self._write_snapshot("deleted-worktree", "ar/deleted")
+        invalid = drift_snapshot_dir(self.coord) / "invalid.json"
+        invalid.write_text(
+            json.dumps({"schema": "other/v9", "repository": "deleted", "branch": "ar/x"}),
+            encoding="utf-8",
+        )
+
+        proj = project_and_write(config, now=FRESH)
+
+        self.assertTrue(official.exists())
+        self.assertTrue(active.exists())
+        self.assertFalse(orphaned.exists())
+        self.assertTrue(invalid.exists())
+        self.assertEqual(
+            {(node.repository, node.branch) for node in proj.analytics.driftSnapshots},
+            {("repo-a", "main"), (active_contract.code_worktree.name, "ar/active")},
+        )
+
+    def _write_snapshot(self, repository: str, branch: str) -> Path:
+        path = drift_snapshot_path(self.coord, repository=repository, branch=branch)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": DRIFT_SNAPSHOT_SCHEMA,
+                    "repository": repository,
+                    "branch": branch,
+                    "checkedAt": T0,
+                    "counts": {"drifted": 1},
+                    "actionableCount": 1,
+                    "rows": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
 
 
 class TaskDocumentsReaderTests(unittest.TestCase):

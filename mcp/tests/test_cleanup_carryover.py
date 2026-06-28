@@ -8,6 +8,7 @@ child-edge cleanup. The "carryover done" signal is the official ledger itself (n
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,8 @@ from agents_remember.kernel.memory_ledger import (
     ledger_to_text,
     prepend_mapping,
 )
+from agents_remember.observer.drift_snapshots import drift_snapshot_path
+from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     cleanup_result,
@@ -61,6 +64,26 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
     }
     base.update(over)
     return WorktreeContract(**base)  # type: ignore[arg-type]
+
+
+def _write_drift_snapshot(coordination_root: Path, *, repository: str, branch: str) -> Path:
+    path = drift_snapshot_path(coordination_root, repository=repository, branch=branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema": DRIFT_SNAPSHOT_SCHEMA,
+                "repository": repository,
+                "branch": branch,
+                "checkedAt": "2026-06-13T18:00:00+00:00",
+                "counts": {"drifted": 1},
+                "actionableCount": 1,
+                "rows": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 class CarryoverDoneTests(unittest.TestCase):
@@ -325,6 +348,74 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         self.assertEqual(result.payload["state"], "would-cleanup")  # type: ignore[index]
         self.assertIn("Cleanup would reclaim", result.payload["summary"])  # type: ignore[index]
         self.assertTrue(directories["worktree_group"]["would_remove"])  # type: ignore[index]
+
+
+class CleanupDriftSnapshotTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
+    def test_cleanup_dry_run_reports_worktree_drift_snapshot_removal(
+        self, carryover: MagicMock
+    ) -> None:
+        carryover.return_value = (True, "2026-06-24T09:00:00+02:00")
+        code_repo = self.tmp / "code"
+        memory_repo = self.tmp / "mem"
+        init_repo(code_repo, "main")
+        init_repo(memory_repo, "main")
+        contract = _contract(self.tmp, code_repo_path=code_repo, memory_repo_path=memory_repo)
+        write_contract(contract.contract_path, contract)
+        snapshot = _write_drift_snapshot(
+            contract.coordination_root,
+            repository=contract.code_worktree.name,
+            branch=contract.code_work_branch,
+        )
+
+        result = cleanup_result(WorktreeArgs(contract_path=contract.contract_path, dry_run=True))
+        drift_snapshots = result.payload["drift_snapshots"]  # type: ignore[index]
+
+        self.assertTrue(snapshot.exists())
+        self.assertTrue(drift_snapshots["code"]["would_remove"])  # type: ignore[index]
+        self.assertFalse(drift_snapshots["code"]["removed"])  # type: ignore[index]
+
+    @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
+    def test_cleanup_removes_exact_worktree_drift_snapshot(self, carryover: MagicMock) -> None:
+        carryover.return_value = (True, "2026-06-24T09:00:00+02:00")
+        code_repo = self.tmp / "code"
+        memory_repo = self.tmp / "mem"
+        init_repo(code_repo, "main")
+        init_repo(memory_repo, "main")
+        contract = _contract(self.tmp, code_repo_path=code_repo, memory_repo_path=memory_repo)
+        write_contract(contract.contract_path, contract)
+        snapshot = _write_drift_snapshot(
+            contract.coordination_root,
+            repository=contract.code_worktree.name,
+            branch=contract.code_work_branch,
+        )
+        other = _write_drift_snapshot(
+            contract.coordination_root,
+            repository="other-worktree",
+            branch=contract.code_work_branch,
+        )
+
+        result = cleanup_result(
+            WorktreeArgs(
+                contract_path=contract.contract_path,
+                approved=True,
+                dry_run=False,
+                teardown_providers=False,
+            )
+        )
+        drift_snapshots = result.payload["drift_snapshots"]  # type: ignore[index]
+
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(snapshot.exists())
+        self.assertTrue(other.exists())
+        self.assertTrue(drift_snapshots["code"]["removed"])  # type: ignore[index]
 
 
 class RemoteBranchDeleteTests(unittest.TestCase):
