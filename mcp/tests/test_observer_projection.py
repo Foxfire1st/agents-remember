@@ -501,6 +501,26 @@ class ActionAvailabilityTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_active_worktree_groups_passthrough_sorted(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1", ts=T0)]],
+            enclosures=[_enclosure()],
+            providers=[],
+            now=FRESH,
+            active_worktree_groups=["b-ar", "a-ar"],
+        )
+        # The Topology active set is exposed deterministically (sorted) on the projection.
+        self.assertEqual(proj.activeWorktreeGroups, ["a-ar", "b-ar"])
+
+    def test_active_worktree_groups_default_empty(self) -> None:
+        proj = project_workspace(
+            [[_started(lifecycle_id="LC1", ts=T0)]],
+            enclosures=[_enclosure()],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual(proj.activeWorktreeGroups, [])
+
     def test_tree_and_metrics(self) -> None:
         logs = [
             [_started(lifecycle_id="LC1", ts=T0)],

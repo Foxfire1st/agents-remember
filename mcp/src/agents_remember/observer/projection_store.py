@@ -181,6 +181,10 @@ def project_and_write(
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
         gates=read_gates(coordination_root, now=moment),
         attention_dismissals=attention_store.current(),
+        # The Topology constellation filters its tree on this active set — the same
+        # active-enclosure admission the Engine Room's engine_process_facts use, so both
+        # views share one definition of "active" rather than diverging.
+        active_worktree_groups=sorted(engine_groups),
     )
     attention_store.prune_lifecycles(
         {lifecycle.id for lifecycle in projection.lifecycles if lifecycle.state not in TERMINAL_STATES}

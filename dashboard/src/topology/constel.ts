@@ -181,7 +181,7 @@ export function mountConstel(
     ctx.globalAlpha = 1;
 
     ctx.strokeStyle = EDGE;
-    ([[RF.repo, "REPOS"], [RF.wt, "WORKTREES"], [RF.task, "TASKS"]] as const).forEach(([rf, label]) => {
+    ([[RF.repo, "CHECKOUTS"], [RF.wt, "ENCLOSURES"]] as const).forEach(([rf, label]) => {
       ctx.globalAlpha = 0.05;
       ctx.beginPath();
       ctx.arc(cx, cy, rf * R, 0, TAU);
@@ -197,9 +197,11 @@ export function mountConstel(
         ctx.globalAlpha = 0.1;
         ctx.strokeStyle = nd.status === "ok" ? EDGE : col(nd.status);
         ctx.lineWidth = 0.6;
-      } else if (nd.kind === "task") {
-        ctx.globalAlpha = nd.status === "ok" ? 0.13 : 0.3;
-        ctx.strokeStyle = col(nd.status);
+      } else if (nd.kind === "wt") {
+        // The enclosure node now carries the lifecycle status — colour its edge when not ok
+        // (the signal the old task-rim edge used to provide before the rim was folded in).
+        ctx.globalAlpha = nd.status === "ok" ? 0.16 : 0.3;
+        ctx.strokeStyle = nd.status === "ok" ? EDGE : col(nd.status);
         ctx.lineWidth = 1;
       } else {
         ctx.globalAlpha = 0.16;

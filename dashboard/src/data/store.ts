@@ -24,6 +24,7 @@ export interface DashboardState {
   lifecycles: Record<string, LifecycleProjection>; // keyed by id
   enclosures: Record<string, EnclosureNode>; // keyed by `enclosure`
   providers: Record<string, ProviderNode>; // keyed by id
+  activeWorktreeGroups: string[]; // worktree-group basenames with a live enclosure (Topology scope)
   metrics: Metrics | null;
   analytics: Analytics | null;
   events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
@@ -94,6 +95,9 @@ function reduceDelta(
       return { providers: upsert(state.providers, data as ProviderNode, (x) => x.id) };
     case "provider.removed":
       return { providers: remove(state.providers, (data as { id: string }).id) };
+    case "activeWorktreeGroups":
+      // Whole-value replacement (a bare list, no key) — see serving/delta.py.
+      return { activeWorktreeGroups: (data as { activeWorktreeGroups: string[] }).activeWorktreeGroups };
     case "metrics":
       return { metrics: data as Metrics };
     case "analytics": {
@@ -115,6 +119,7 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
   lifecycles: {},
   enclosures: {},
   providers: {},
+  activeWorktreeGroups: [],
   metrics: null,
   analytics: null,
   events: [],
@@ -128,6 +133,7 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
       lifecycles: byKey(projection.lifecycles, (x) => x.id),
       enclosures: byKey(projection.enclosures, (x) => x.enclosure),
       providers: byKey(projection.providers, (x) => x.id),
+      activeWorktreeGroups: projection.activeWorktreeGroups ?? [],
       metrics: projection.metrics,
       analytics: projection.analytics,
       suppressedAttentionIds: pruneSuppressedAttention(
@@ -172,6 +178,7 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
       lifecycles: {},
       enclosures: {},
       providers: {},
+      activeWorktreeGroups: [],
       metrics: null,
       analytics: null,
       events: [],

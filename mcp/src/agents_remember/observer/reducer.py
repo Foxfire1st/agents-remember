@@ -115,6 +115,7 @@ def project_workspace(
     engine_start_progress: list[dict[str, Any]] | None = None,
     gates: list[GateRecord] | None = None,
     attention_dismissals: dict[str, AttentionDismissalRecord] | None = None,
+    active_worktree_groups: list[str] | None = None,
     stalest_limit: int = 10,
 ) -> WorkspaceProjection:
     """Assemble the whole tree from already-read logs + structural + analytical snapshots.
@@ -172,6 +173,7 @@ def project_workspace(
         lifecycles=lifecycles,
         enclosures=enriched,
         providers=providers,
+        activeWorktreeGroups=sorted(active_worktree_groups or []),
         metrics=_metrics(lifecycles, sidecars),
         analytics=analytics,
     )

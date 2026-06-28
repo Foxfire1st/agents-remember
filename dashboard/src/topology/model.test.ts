@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { EnclosureNode, ProviderNode } from "../types/projection";
-import { buildTopology } from "./model";
+import type { EnclosureNode, LifecycleProjection, ProviderNode } from "../types/projection";
+import { activeTopologyInputs, buildTopology } from "./model";
 
 const enclosure = (overrides: Partial<EnclosureNode> = {}): EnclosureNode => ({
   enclosure: "/tasks/demo/enclosures/demo/series-contract.md",
@@ -32,7 +32,68 @@ const provider = (overrides: Partial<ProviderNode> = {}): ProviderNode => ({
   ...overrides,
 });
 
+const lifecycle = (overrides: Partial<LifecycleProjection> = {}): LifecycleProjection => ({
+  id: "LC1",
+  state: "running",
+  phase: "build",
+  fleeting: false,
+  tokens: 0,
+  startedAt: "2026-06-28T00:00",
+  lastEventTs: "2026-06-28T00:00",
+  inferred: false,
+  actions: [],
+  tokenSeries: [],
+  ...overrides,
+});
+
+describe("activeTopologyInputs", () => {
+  it("keeps only active-group enclosures and drops orphan/terminal lifecycles", () => {
+    const live = enclosure({
+      enclosure: "/tasks/demo/enclosures/live/series-contract.md",
+      worktreeGroup: "/worktrees/agents-remember/live-ar",
+    });
+    const dead = enclosure({
+      enclosure: "/tasks/demo/enclosures/dead/series-contract.md",
+      worktreeGroup: "/worktrees/agents-remember/dead-ar",
+    });
+    const liveLc = lifecycle({ id: "LIVE", enclosure: live.enclosure });
+    const deadLc = lifecycle({ id: "DEAD", enclosure: dead.enclosure });
+    const orphanLc = lifecycle({ id: "ORPHAN", enclosure: undefined });
+
+    // activeWorktreeGroups is a basename set; EnclosureNode.worktreeGroup is a full path.
+    const out = activeTopologyInputs([liveLc, deadLc, orphanLc], [live, dead], ["live-ar"]);
+
+    expect(out.enclosures).toEqual([live]);
+    expect(out.lifecycles).toEqual([liveLc]);
+  });
+});
+
 describe("buildTopology", () => {
+  it("folds the bound lifecycle into the enclosure node and emits no task ring", () => {
+    const owner = enclosure();
+    const lc = lifecycle({ id: "LCX", enclosure: owner.enclosure, phase: "build", state: "blocked" });
+    const nodes = buildTopology([lc], [owner], []);
+
+    const wt = nodes.find((node) => node.kind === "wt" && node.label === owner.taskName);
+    expect(wt).toBeDefined();
+    expect(wt?.id).toBe("LCX"); // click-through now lives on the enclosure node
+    expect(wt?.status).toBe("crit"); // lifecycleStatus(blocked)
+    expect(wt?.sub).toBe("build · blocked");
+    expect(nodes.some((node) => (node.kind as string) === "task")).toBe(false);
+  });
+
+  it("joins a worktree provider to its enclosure when worktreeGroup formats differ (path vs basename)", () => {
+    const owner = enclosure({ worktreeGroup: "/worktrees/agents-remember/demo-ar" });
+    // Real served data: the worktree ProviderNode.worktreeGroup is a basename, the enclosure's a full path.
+    const nodes = buildTopology([], [owner], [provider({ worktreeGroup: "demo-ar" })]);
+
+    const worktreeIndex = nodes.findIndex((node) => node.kind === "wt" && node.label === owner.taskName);
+    const providerNode = nodes.find((node) => node.kind === "prov");
+
+    expect(worktreeIndex).toBeGreaterThan(-1);
+    expect(providerNode?.parent).toBe(worktreeIndex);
+  });
+
   it("parents worktree-scoped providers to their owning worktree node", () => {
     const owner = enclosure();
     const nodes = buildTopology([], [owner], [provider({ worktreeGroup: owner.worktreeGroup })]);

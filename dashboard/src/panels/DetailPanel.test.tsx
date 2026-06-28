@@ -157,6 +157,7 @@ function seedSeries(
         ]
       : [],
     providers: [],
+    activeWorktreeGroups: [],
     metrics: {
       lifecycleCount: 1,
       runningCount: 1,
@@ -224,6 +225,7 @@ function seedSeriesOrdering() {
     lifecycles: [],
     enclosures: [],
     providers: [],
+    activeWorktreeGroups: [],
     metrics: {
       lifecycleCount: 0,
       runningCount: 0,
@@ -275,6 +277,7 @@ function seedProjection(over: Partial<WorkspaceProjection>) {
     lifecycles,
     enclosures: [],
     providers: [],
+    activeWorktreeGroups: [],
     metrics: {
       lifecycleCount: lifecycles.length,
       runningCount: lifecycles.filter((entry) => entry.state === "running").length,
@@ -360,6 +363,7 @@ function seedPromotedLeaf() {
       }),
     ],
     providers: [],
+    activeWorktreeGroups: [],
     metrics: {
       lifecycleCount: 1,
       runningCount: 0,

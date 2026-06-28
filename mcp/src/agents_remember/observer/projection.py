@@ -786,5 +786,13 @@ class WorkspaceProjection(BaseModel):
     lifecycles: list[LifecycleProjection] = Field(default_factory=list)
     enclosures: list[EnclosureNode] = Field(default_factory=list)
     providers: list[ProviderNode] = Field(default_factory=list)
+    # Worktree-group basenames whose enclosure lifecycle is still active (non-terminal,
+    # cleanup not completed/abandoned). The shared `enclosures`/`lifecycles` collections keep
+    # every historical entry for the Operations/Lifecycle history surfaces; this is the bounded
+    # active set the Topology constellation filters on so it shows live work, not all-time work.
+    # Sourced from the same `active_enclosure_worktree_groups` admission the Engine Room uses,
+    # so the two views share one definition of "active". The join key matches the worktree-scoped
+    # `ProviderNode.worktreeGroup` (a basename) and `Path(EnclosureNode.worktreeGroup).name`.
+    activeWorktreeGroups: list[str] = Field(default_factory=list)
     metrics: Metrics = Field(default_factory=Metrics)
     analytics: Analytics = Field(default_factory=Analytics)

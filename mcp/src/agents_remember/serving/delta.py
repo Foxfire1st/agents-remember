@@ -50,6 +50,12 @@ def diff_projection(
         "enclosure", previous.enclosures, current.enclosures, key="enclosure"
     )
     deltas += _collection_deltas("provider", previous.providers, current.providers, key="id")
+    if previous.activeWorktreeGroups != current.activeWorktreeGroups:
+        # A bare list isn't a node with a key, so it rides as a whole-value replacement
+        # (like metrics/analytics) wrapped in a marker dict the client unwraps.
+        deltas.append(
+            DeltaEvent("activeWorktreeGroups", {"activeWorktreeGroups": current.activeWorktreeGroups})
+        )
     if previous.metrics != current.metrics:
         deltas.append(DeltaEvent("metrics", current.metrics))
     if previous.analytics != current.analytics:

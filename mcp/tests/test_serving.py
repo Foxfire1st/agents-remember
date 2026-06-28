@@ -131,6 +131,7 @@ def _projection(
     lifecycles: tuple[LifecycleProjection, ...] = (),
     providers: tuple[ProviderNode, ...] = (),
     enclosures: tuple[EnclosureNode, ...] = (),
+    active_worktree_groups: tuple[str, ...] = (),
     metrics: Metrics | None = None,
     analytics: Analytics | None = None,
 ) -> WorkspaceProjection:
@@ -139,6 +140,7 @@ def _projection(
         lifecycles=list(lifecycles),
         providers=list(providers),
         enclosures=list(enclosures),
+        activeWorktreeGroups=list(active_worktree_groups),
         metrics=metrics or Metrics(),
         analytics=analytics or Analytics(),
     )
@@ -168,6 +170,17 @@ class DeltaTests(unittest.TestCase):
     def test_lifecycle_removed(self) -> None:
         deltas = diff_projection(_projection(lifecycles=(_lifecycle("L1"),)), _projection())
         self.assertEqual(deltas, [DeltaEvent("lifecycle.removed", {"id": "L1"})])
+
+    def test_active_worktree_groups_changed_emits_whole_value_delta(self) -> None:
+        prev = _projection(active_worktree_groups=("a-ar",))
+        deltas = diff_projection(prev, _projection(active_worktree_groups=("a-ar", "b-ar")))
+        self.assertEqual(
+            deltas, [DeltaEvent("activeWorktreeGroups", {"activeWorktreeGroups": ["a-ar", "b-ar"]})]
+        )
+
+    def test_active_worktree_groups_unchanged_yields_no_delta(self) -> None:
+        prev = _projection(active_worktree_groups=("a-ar",))
+        self.assertEqual(diff_projection(prev, _projection(active_worktree_groups=("a-ar",))), [])
 
     def test_provider_added_and_removed(self) -> None:
         prev = _projection(providers=(_provider("a"),))

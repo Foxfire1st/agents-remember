@@ -110,6 +110,7 @@ function projection(over: Partial<WorkspaceProjection>): WorkspaceProjection {
     lifecycles,
     enclosures: [],
     providers: [],
+    activeWorktreeGroups: [],
     metrics: {
       lifecycleCount: lifecycles.length,
       runningCount: lifecycles.filter((entry) => entry.state === "running").length,

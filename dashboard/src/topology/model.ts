@@ -1,7 +1,10 @@
 // The coordination-topology model (mc2 harvest #4): a deterministic radial tree derived from
-// the projection — workspace core → repos (inner ring) → worktrees (middle ring) → lifecycles
-// (rim), with provider satellites orbiting their scoped parent. Pure + deterministic
-// (id-sorted) so the render is stable across snapshots and unit-testable without a canvas.
+// the projection — workspace core → source checkouts (inner ring) → active worktree enclosures
+// (outer ring), with provider satellites orbiting their scoped parent. The view is bounded to
+// ACTIVE work: the caller passes only enclosures whose worktree group is live (see
+// `activeTopologyInputs`), and each enclosure node folds in its 1:1 lifecycle (id/status/phase)
+// — there is no separate lifecycle/task rim. Pure + deterministic (id-sorted) so the render is
+// stable across snapshots and unit-testable without a canvas.
 
 import { engineState } from "../data/selectors";
 import type { EnclosureNode, LifecycleProjection, ProviderNode } from "../types/projection";
@@ -9,7 +12,7 @@ import type { EnclosureNode, LifecycleProjection, ProviderNode } from "../types/
 export type ConstelStatus = "core" | "ok" | "warn" | "crit" | "idle";
 
 export interface ConstelNode {
-  kind: "ws" | "repo" | "wt" | "task" | "prov";
+  kind: "ws" | "repo" | "wt" | "prov";
   parent: number; // index into the node list, -1 for the workspace core
   rf: number; // ring fraction from the centre (0 for ws/prov)
   ang: number; // angle in radians (0 for prov — they orbit by poff)
@@ -23,16 +26,37 @@ export interface ConstelNode {
   py: number;
 }
 
-export const RF = { repo: 0.26, wt: 0.52, task: 0.76 };
+export const RF = { repo: 0.3, wt: 0.62 };
 
 const TAU = Math.PI * 2;
-const RANK: Record<ConstelStatus, number> = { crit: 3, warn: 2, ok: 1, idle: 0, core: 0 };
 
 function lifecycleStatus(lifecycle: LifecycleProjection): ConstelStatus {
   if (lifecycle.state === "blocked") return "crit";
   if (lifecycle.state === "abandoned") return "idle";
   if (lifecycle.state === "paused" || lifecycle.inferred) return "warn";
   return "ok"; // running / completed
+}
+
+// Worktree groups join across the projection by BASENAME: the worktree-scoped
+// `ProviderNode.worktreeGroup` and `activeWorktreeGroups` are basenames, while
+// `EnclosureNode.worktreeGroup` is a full path. Normalising both sides here keeps the
+// enclosure↔provider and enclosure↔active-set joins correct on real served data.
+const groupKey = (group: string): string => group.split("/").pop() ?? group;
+
+// Bound the topology inputs to active work: keep only enclosures whose worktree group is in
+// `activeWorktreeGroups` (the server's active-enclosure admission), then keep only the
+// lifecycles bound to one of those surviving enclosures. The shared store collections retain
+// all-time history for other views; this is the pure seam that scopes the constellation.
+export function activeTopologyInputs(
+  lifecycles: LifecycleProjection[],
+  enclosures: EnclosureNode[],
+  activeWorktreeGroups: string[],
+): { lifecycles: LifecycleProjection[]; enclosures: EnclosureNode[] } {
+  const active = new Set(activeWorktreeGroups.map(groupKey));
+  const liveEnclosures = enclosures.filter((e) => active.has(groupKey(e.worktreeGroup)));
+  const liveKeys = new Set(liveEnclosures.map((e) => e.enclosure));
+  const liveLifecycles = lifecycles.filter((l) => l.enclosure != null && liveKeys.has(l.enclosure));
+  return { lifecycles: liveLifecycles, enclosures: liveEnclosures };
 }
 
 export function buildTopology(
@@ -46,10 +70,12 @@ export function buildTopology(
     return nodes.length - 1;
   };
 
+  // Source checkouts (repo ring): every repo with an active enclosure, plus repos a
+  // non-worktree provider covers (the official line still shows even with no active worktree).
+  // Lifecycles no longer contribute repo keys of their own — they live on their enclosure.
   const repoKeys = [
     ...new Set([
       ...enclosures.map((e) => e.repoName),
-      ...lifecycles.map((l) => l.repoId).filter((r): r is string => Boolean(r)),
       ...providers
         .filter((provider) => provider.scope !== "worktree")
         .map((provider) => provider.repoId)
@@ -66,7 +92,7 @@ export function buildTopology(
     base: 7,
     status: "core",
     label: "WORKSPACE",
-    sub: `${repoKeys.length} repos · ${enclosures.length} worktrees · ${lifecycles.length} lifecycles`,
+    sub: `${repoKeys.length} checkouts · ${enclosures.length} active worktrees`,
     id: null,
   });
 
@@ -74,11 +100,18 @@ export function buildTopology(
   const nRepos = Math.max(repoKeys.length, 1);
   repoKeys.forEach((repo, ri) => {
     const ang = (ri / nRepos) * TAU;
-    repoIdx.set(repo, add({ kind: "repo", parent: ws, rf: RF.repo, ang, poff: 0, base: 4.6, status: "ok", label: repo, sub: "repo", id: null }));
+    repoIdx.set(repo, add({ kind: "repo", parent: ws, rf: RF.repo, ang, poff: 0, base: 4.6, status: "ok", label: repo, sub: "checkout", id: null }));
   });
 
-  // Worktrees (enclosures) spread within their repo's angular span.
-  const wtIdxByEnclosure = new Map<string, number>();
+  // Each active enclosure binds 1:1 to its lifecycle (EnclosureNode.lifecycleId ↔
+  // LifecycleProjection.enclosure), so the enclosure node IS the selectable leaf — it folds in
+  // the lifecycle's id (click-through), status, and phase·state. No separate task rim.
+  const lcByEnclosure = new Map<string, LifecycleProjection>();
+  for (const lifecycle of lifecycles) {
+    if (lifecycle.enclosure) lcByEnclosure.set(lifecycle.enclosure, lifecycle);
+  }
+
+  // Active worktree enclosures spread within their checkout's angular span.
   const wtIdxByGroup = new Map<string, number>();
   const span = (TAU / nRepos) * 0.74;
   const enclByRepo = new Map<string, EnclosureNode[]>();
@@ -93,34 +126,39 @@ export function buildTopology(
     const repoAng = nodes[parent].ang;
     encls.forEach((enclosure, wi) => {
       const a = repoAng + (encls.length > 1 ? (wi / (encls.length - 1) - 0.5) * span : 0);
-      const status: ConstelStatus = enclosure.cleanup === "pending" ? "warn" : "ok";
-      const wtIdx = add({ kind: "wt", parent, rf: RF.wt, ang: a, poff: 0, base: 3.1, status, label: enclosure.taskName || enclosure.enclosure, sub: `worktree · ${enclosure.cleanup} cleanup`, id: null });
-      wtIdxByEnclosure.set(enclosure.enclosure, wtIdx);
-      wtIdxByGroup.set(enclosure.worktreeGroup, wtIdx);
+      const lifecycle = lcByEnclosure.get(enclosure.enclosure);
+      const status: ConstelStatus = lifecycle
+        ? lifecycleStatus(lifecycle)
+        : enclosure.cleanup === "pending"
+          ? "warn"
+          : "ok";
+      const wtIdx = add({
+        kind: "wt",
+        parent,
+        rf: RF.wt,
+        ang: a,
+        poff: 0,
+        base: 3.1,
+        status,
+        label: enclosure.taskName || enclosure.enclosure,
+        sub: lifecycle ? `${lifecycle.phase} · ${lifecycle.state}` : `worktree · ${enclosure.cleanup} cleanup`,
+        id: lifecycle?.id ?? null,
+      });
+      wtIdxByGroup.set(groupKey(enclosure.worktreeGroup), wtIdx);
     });
   }
 
-  // Lifecycles (tasks) at the rim: under their enclosure if known, else their repo, else the core.
-  for (const lifecycle of [...lifecycles].sort((a, b) => a.id.localeCompare(b.id))) {
-    let parent = ws;
-    if (lifecycle.enclosure && wtIdxByEnclosure.has(lifecycle.enclosure)) {
-      parent = wtIdxByEnclosure.get(lifecycle.enclosure) ?? ws;
-    } else if (lifecycle.repoId && repoIdx.has(lifecycle.repoId)) {
-      parent = repoIdx.get(lifecycle.repoId) ?? ws;
-    }
-    const status = lifecycleStatus(lifecycle);
-    add({ kind: "task", parent, rf: RF.task, ang: nodes[parent].ang, poff: 0, base: 2.7, status, label: lifecycle.id, sub: `${lifecycle.phase} · ${lifecycle.state}`, id: lifecycle.id });
-    if (nodes[parent].kind === "wt" && RANK[status] > RANK[nodes[parent].status]) {
-      nodes[parent].status = status;
-    }
-  }
-
-  // Provider satellites orbit their scoped parent: worktree providers attach to their enclosure;
-  // repo-covered workspace providers attach to their repo; aggregate workspace providers stay core.
+  // Provider satellites orbit their scoped parent: worktree providers attach to their enclosure
+  // (joined by worktree-group basename); repo-covered workspace providers attach to their source
+  // checkout; aggregate workspace providers (no repoId) stay on the core.
   providers.forEach((provider, pi) => {
     const engine = engineState(provider);
     const status: ConstelStatus = engine === "down" ? "crit" : engine === "indexing" ? "idle" : "ok";
-    const parent = provider.worktreeGroup ? (wtIdxByGroup.get(provider.worktreeGroup) ?? ws) : provider.repoId ? (repoIdx.get(provider.repoId) ?? ws) : ws;
+    const parent = provider.worktreeGroup
+      ? (wtIdxByGroup.get(groupKey(provider.worktreeGroup)) ?? ws)
+      : provider.repoId
+        ? (repoIdx.get(provider.repoId) ?? ws)
+        : ws;
     add({ kind: "prov", parent, rf: 0, ang: 0, poff: (pi / Math.max(providers.length, 1)) * TAU, base: 1.5, status, label: provider.id, sub: `provider · ${provider.state}`, id: null });
   });
 

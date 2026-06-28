@@ -10,6 +10,7 @@ const STATE_EVENTS = [
   "enclosure.removed",
   "provider",
   "provider.removed",
+  "activeWorktreeGroups",
   "metrics",
   "analytics",
 ] as const;

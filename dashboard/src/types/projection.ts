@@ -413,6 +413,11 @@ export interface WorkspaceProjection {
   lifecycles: LifecycleProjection[];
   enclosures: EnclosureNode[];
   providers: ProviderNode[];
+  // Worktree-group basenames whose enclosure lifecycle is still active — the bounded set the
+  // Topology constellation filters on (the shared lifecycles/enclosures arrays keep all-time
+  // history for other views). Join key = worktree ProviderNode.worktreeGroup / basename of
+  // EnclosureNode.worktreeGroup. Source of truth: projection.py activeWorktreeGroups.
+  activeWorktreeGroups: string[];
   metrics: Metrics;
   analytics: Analytics;
 }

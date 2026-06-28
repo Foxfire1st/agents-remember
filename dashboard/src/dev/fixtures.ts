@@ -51,6 +51,7 @@ function project(over: Partial<WorkspaceProjection> = {}): WorkspaceProjection {
     generatedAt: "2026-06-14T09:01:00+00:00",
     enclosures: [],
     providers: [],
+    activeWorktreeGroups: [],
     ...rest,
     lifecycles,
     metrics: {

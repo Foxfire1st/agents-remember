@@ -4,7 +4,7 @@ import { css, cva } from "../../styled-system/css";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 import { mountConstel, type ConstelHandle } from "../topology/constel";
-import { buildTopology } from "../topology/model";
+import { activeTopologyInputs, buildTopology } from "../topology/model";
 
 // Topology — the radial constellation hero (mc2 harvest #4), ported to a React-wrapped <canvas>.
 // React owns the projection→model adapter (a pure, memoised build over the store maps) + mount;
@@ -83,20 +83,23 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const providers = useDashboard((s) => s.providers);
+  const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
 
-  const model = useMemo(
-    () =>
-      buildTopology(
-        Object.values(lifecycles),
-        Object.values(enclosures),
-        Object.values(providers),
-      ),
-    [lifecycles, enclosures, providers],
-  );
+  // Bound the constellation to active work: filter the store's all-time enclosures/lifecycles
+  // down to the live worktree groups before building the radial model (the shared store maps
+  // keep history for other views).
+  const model = useMemo(() => {
+    const active = activeTopologyInputs(
+      Object.values(lifecycles),
+      Object.values(enclosures),
+      activeWorktreeGroups,
+    );
+    return buildTopology(active.lifecycles, active.enclosures, Object.values(providers));
+  }, [lifecycles, enclosures, providers, activeWorktreeGroups]);
 
   // Keep the latest onSelect + model in refs so the mount effect stays mount-once.
   const onSelectRef = useRef(onSelect);
