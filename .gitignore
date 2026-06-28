@@ -13,3 +13,4 @@ __pycache__/
 uv.lock
 mcp/tests/fixtures/sim-rich/
 .dashboard-pastes/
+/.deepsec/
