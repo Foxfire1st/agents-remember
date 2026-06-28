@@ -70,6 +70,7 @@ from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
+from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harnesses import (
     Which,
     detect_harnesses,
@@ -711,5 +712,6 @@ def create_app(
         dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
         return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
 
+    register_files_routes(app, config)
     mount_static(app)
     return app
