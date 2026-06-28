@@ -21,6 +21,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.attention_dismissals import (
+    AttentionDismissalRecord,
+    AttentionDismissalStore,
+)
 from agents_remember.controlplane.interaction_retention import (
     AGENT_PICKUP_TTL_SECONDS,
     pickup_age_seconds,
@@ -434,6 +438,19 @@ def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[
     with contextlib.suppress(OSError, ValueError):
         gates.extend(store.current(None).values())
     return gates
+
+
+def read_attention_dismissals(coordination_root: Path) -> dict[str, AttentionDismissalRecord]:
+    """The operator's current lifecycle attention acknowledgements (leaf-28 S5.2).
+
+    Reads ``<observer_root>/workspace/attention-dismissals.jsonl`` (co-located with
+    the gate logs) into ``{itemId: AttentionDismissalRecord}`` so the reducer can
+    suppress a cleared lifecycle item across projection passes.
+    """
+    store = AttentionDismissalStore(observer_logs_root(coordination_root))
+    with contextlib.suppress(OSError, ValueError):
+        return store.current()
+    return {}
 
 
 def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentPickupNode]:

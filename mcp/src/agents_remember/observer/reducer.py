@@ -19,9 +19,10 @@ derived state as a written fact.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, get_args
 
+from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
 from agents_remember.controlplane.records import DECISION_STATES, GateRecord
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
@@ -78,10 +79,15 @@ def project_lifecycle(events: list[Event], *, now: datetime) -> LifecycleProject
     for event in events[1:]:
         if event.kind == "correction.recorded":
             continue  # its effect is applied at the corrected event's position
+        before_state = proj.state
         proj = _apply_kind(proj, event)
         corrected = corrections.get(event.id)
         if corrected is not None:
             proj = proj.model_copy(update={"state": corrected})
+        if proj.state != before_state:
+            # Stamp when the lifecycle entered its new written state (the attention
+            # queue's stable, heartbeat-immune dismissal anchor).
+            proj = proj.model_copy(update={"stateEnteredAt": event.ts})
     proj = proj.model_copy(update={"lastEventTs": events[-1].ts})
     proj = _project_inferred(proj, events, now)
     return proj.model_copy(
@@ -108,6 +114,7 @@ def project_workspace(
     engine_process_facts: list[EngineProcessFacts] | None = None,
     engine_start_progress: list[dict[str, Any]] | None = None,
     gates: list[GateRecord] | None = None,
+    attention_dismissals: dict[str, AttentionDismissalRecord] | None = None,
     stalest_limit: int = 10,
 ) -> WorkspaceProjection:
     """Assemble the whole tree from already-read logs + structural + analytical snapshots.
@@ -155,6 +162,7 @@ def project_workspace(
             setup_progress or [],
             engine_start_progress or [],
             gates or [],
+            dismissals=attention_dismissals or {},
         ),
         engine_processes=engine_processes,
         stalest_limit=stalest_limit,
@@ -265,6 +273,7 @@ def _seed_from_started(event: Event) -> LifecycleProjection:
         repoId=event.repoId,
         startedAt=event.ts,
         lastEventTs=event.ts,
+        stateEnteredAt=event.ts,
     )
 
 
@@ -520,6 +529,8 @@ def build_attention_queue(
     setup_progress: list[SetupProgressNode],
     start_progress: list[dict[str, Any]] | None = None,
     gates: list[GateRecord] | None = None,
+    *,
+    dismissals: dict[str, AttentionDismissalRecord] | None = None,
 ) -> list[AttentionItem]:
     """The home-screen attention queue: a ranked cross-section of what needs the human.
 
@@ -530,6 +541,12 @@ def build_attention_queue(
     The taxonomy is extensible (North-Star Constraint 7): each source contributes one
     small builder. Enclosure-derived items (pending review / worktree debt) are the
     hangar's job (5c).
+
+    ``dismissals`` (``{itemId: AttentionDismissalRecord}``, read from the compact
+    :class:`AttentionDismissalStore`, leaf-28 S5.2) suppresses a lifecycle-bound item
+    the operator cleared while keeping the derivation pure: an item is dropped when a
+    matching lifecycle acknowledgement exists at or after its triggering ``signalTs``,
+    and re-surfaces the moment a *newer* signal arrives.
     """
     items = [
         *_lifecycle_attention(lifecycles),
@@ -539,11 +556,47 @@ def build_attention_queue(
         *_setup_attention(setup_progress),
         *_start_attention(start_progress or []),
     ]
+    dismissed = dismissals or {}
+    items = [item for item in items if not _is_dismissed(item, dismissed)]
     items.sort(
         key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), -(item.waitSeconds or 0.0), item.id)
     )
     return items
 
+
+def _is_dismissed(
+    item: AttentionItem, dismissals: dict[str, AttentionDismissalRecord]
+) -> bool:
+    """True when a lifecycle acknowledgement still suppresses this item (leaf-28 S5.2).
+
+    A dismissal holds while it is at or after the item's triggering ``signalTs``;
+    a *newer* signal (``signalTs`` > ``dismissedAt``) re-surfaces the item. An item
+    with no ``signalTs`` anchor stays suppressed until its condition clears (it stops
+    being emitted) -- the dismissal then has nothing to hide.
+    """
+    dismissal = dismissals.get(item.id)
+    if dismissal is None or dismissal.lifecycleId is None:
+        return False
+    if item.lifecycleId != dismissal.lifecycleId:
+        return False
+    return not _signal_after(item.signalTs, dismissal.dismissedAt)
+
+
+def _signal_after(signal_ts: str | None, dismissed_at: str) -> bool:
+    """True when the triggering signal is strictly newer than the dismissal.
+
+    Parses both ISO-8601 stamps (rather than comparing strings) so a stamp printed
+    without microseconds still orders correctly.
+    """
+    if not signal_ts:
+        return False
+    signal = datetime.fromisoformat(signal_ts)
+    dismissed = datetime.fromisoformat(dismissed_at)
+    if signal.tzinfo is None:
+        signal = signal.replace(tzinfo=UTC)
+    if dismissed.tzinfo is None:
+        dismissed = dismissed.replace(tzinfo=UTC)
+    return signal > dismissed
 
 def _await_summary(ask: dict[str, Any] | None) -> str | None:
     """The developer-facing summary an awaiting-developer turn-end carried."""
@@ -579,6 +632,9 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                     lifecycleId=lifecycle.id,
                     enclosure=lifecycle.enclosure,
                     repoId=lifecycle.repoId,
+                    # The turn-end transition time -- a fresh turn-end re-enters the
+                    # state and re-surfaces a dismissed item; a heartbeat does not.
+                    signalTs=lifecycle.stateEnteredAt or None,
                 )
             )
         elif lifecycle.state == "blocked" and lifecycle.gate is None:
@@ -594,6 +650,7 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                     lifecycleId=lifecycle.id,
                     enclosure=lifecycle.enclosure,
                     repoId=lifecycle.repoId,
+                    signalTs=lifecycle.stateEnteredAt or None,
                 )
             )
         elif lifecycle.inferred and lifecycle.state == "paused" and lifecycle.lastEventTs:
@@ -609,6 +666,10 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                     waitSeconds=lifecycle.staleSeconds,
                     lifecycleId=lifecycle.id,
                     repoId=lifecycle.repoId,
+                    # The moment it last had activity (the quiet point): a revived
+                    # session advances this past a dismissal and re-surfaces if it
+                    # later goes quiet again.
+                    signalTs=lifecycle.lastEventTs or None,
                 )
             )
         elif lifecycle.inferred and lifecycle.state == "abandoned" and lifecycle.lastEventTs:
@@ -622,6 +683,7 @@ def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[Attentio
                     waitSeconds=lifecycle.staleSeconds,
                     lifecycleId=lifecycle.id,
                     repoId=lifecycle.repoId,
+                    signalTs=lifecycle.lastEventTs or None,
                 )
             )
     return items
@@ -671,6 +733,9 @@ def _gate_attention(gates: list[GateRecord]) -> list[AttentionItem]:
             detail="awaiting your decision",
             lifecycleId=gate.lifecycleId,
             gateId=gate.id,
+            # The gate's open-snapshot time; a re-gate is a new id, so a dismissal
+            # never bleeds onto a freshly opened gate.
+            signalTs=gate.ts or None,
         )
         for gate in gates
         if gate.state == "open"

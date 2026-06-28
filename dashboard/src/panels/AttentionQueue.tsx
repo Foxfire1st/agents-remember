@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 
 import { css, cva } from "../../styled-system/css";
-import { postGateDecision } from "../data/actions";
+import { postAttentionDismiss } from "../data/actions";
 import { fmtWait, selectQueue } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import { Dot } from "../grammar/Dot";
@@ -11,7 +11,9 @@ import type { AttentionItem, TaskDocNode } from "../types/projection";
 
 // The home-screen attention queue (note 06): the server-ranked list of what needs the human,
 // rebuilt from mc2's renderAttn UX. "Open" jumps to the item's lifecycle in the detail view — the
-// deliberate queue↔detail coupling. Read-only: the inline resolve affordance is slice 06.
+// deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable (leaf-28 S5.2): a
+// per-item "Dismiss" and "Clear all" both POST a current acknowledgement; gate rows are consumed by
+// the server cancelling/deleting the gate.
 const sizing = css({ flex: "0 1 auto", maxHeight: "42%" });
 const list = css({ listStyle: "none", margin: "0", padding: "0", display: "grid", gap: "0.35rem" });
 const item = cva({
@@ -62,6 +64,22 @@ const clearButton = css({
   cursor: "pointer",
   _disabled: { opacity: 0.5, cursor: "default" },
 });
+const dismissButton = css({
+  font: "inherit",
+  fontSize: "0.7rem",
+  color: "muted",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.4rem",
+  paddingBlock: "0.12rem",
+  cursor: "pointer",
+  _hover: { color: "ink", borderColor: "muted" },
+  _disabled: { opacity: 0.5, cursor: "default" },
+});
+const actionsCol = css({ display: "flex", alignItems: "center", gap: "0.35rem" });
 
 const EMPTY_TASK_DOCS: readonly TaskDocNode[] = [];
 
@@ -81,38 +99,55 @@ function detailForAttention(item: AttentionItem, doc: TaskDocNode | undefined): 
   return [item.title, item.detail].filter(Boolean).join(" · ");
 }
 
+function dismissPayload(item: AttentionItem) {
+  return {
+    itemId: item.id,
+    kind: item.kind,
+    lifecycleId: item.lifecycleId ?? null,
+    gateId: item.gateId,
+  };
+}
+
+function canDismiss(item: AttentionItem): boolean {
+  return Boolean(item.lifecycleId || (item.kind === "gate-open" && item.gateId));
+}
+
 export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
   const queue = useDashboard(selectQueue);
   const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
   const [clearing, setClearing] = useState(false);
-  const gateItems = queue.filter(
-    (item): item is AttentionItem & { gateId: string } =>
-      item.kind === "gate-open" && Boolean(item.gateId),
-  );
-  const clearGates = () => {
-    if (clearing || gateItems.length === 0) return;
+  const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
+  const dismissableQueue = queue.filter(canDismiss);
+  const dismissItem = (item: AttentionItem) => {
+    if (!canDismiss(item) || dismissing.has(item.id)) return;
+    setDismissing((prev) => new Set(prev).add(item.id));
+    void postAttentionDismiss(dismissPayload(item)).finally(() =>
+      setDismissing((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      }),
+    );
+  };
+  const clearAll = () => {
+    if (clearing || dismissableQueue.length === 0) return;
     setClearing(true);
-    void Promise.all(
-      gateItems.map((item) =>
-        postGateDecision(item.lifecycleId ?? null, "cancel", {
-          gateId: item.gateId,
-          note: "Cleared from attention queue.",
-        }),
-      ),
-    ).finally(() => setClearing(false));
+    void Promise.all(dismissableQueue.map((item) => postAttentionDismiss(dismissPayload(item)))).finally(() =>
+      setClearing(false),
+    );
   };
   const panelHead = (
     <div className={head}>
       <h2 className={heading}>Attention · {queue.length} waiting</h2>
-      {gateItems.length > 0 ? (
+      {dismissableQueue.length > 0 ? (
         <button
           type="button"
           className={clearButton}
-          onClick={clearGates}
+          onClick={clearAll}
           disabled={clearing}
           data-testid="attn-clear"
         >
-          {clearing ? "Clearing" : "Clear"}
+          {clearing ? "Clearing" : "Clear all"}
         </button>
       ) : null}
     </div>
@@ -133,6 +168,7 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
               const doc = taskForAttention(q, docs);
               const displayTitle = titleForAttention(q, doc);
               const displayDetail = detailForAttention(q, doc);
+              const dismissable = canDismiss(q);
               return (
                 <motion.li
                   key={q.id}
@@ -151,11 +187,25 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
                       {q.lane} · {fmtWait(q.waitSeconds)}
                     </div>
                   </div>
-                  {lifecycleId ? (
-                    <button type="button" className={ghost} onClick={() => onSelect(lifecycleId)}>
-                      Open
-                    </button>
-                  ) : null}
+                  <div className={actionsCol}>
+                    {lifecycleId ? (
+                      <button type="button" className={ghost} onClick={() => onSelect(lifecycleId)}>
+                        Open
+                      </button>
+                    ) : null}
+                    {dismissable ? (
+                      <button
+                        type="button"
+                        className={dismissButton}
+                        onClick={() => dismissItem(q)}
+                        disabled={dismissing.has(q.id)}
+                        data-testid="attn-dismiss"
+                        aria-label={`Dismiss ${displayTitle}`}
+                      >
+                        Dismiss
+                      </button>
+                    ) : null}
+                  </div>
                 </motion.li>
               );
             })}

@@ -31,6 +31,10 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
+from agents_remember.controlplane.attention_dismissals import (
+    AttentionDismissalRecord,
+    AttentionDismissalStore,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import create_gate
 from agents_remember.controlplane.store import GateStore
@@ -48,7 +52,11 @@ from agents_remember.observer.projection import (
     WorkspaceProjection,
 )
 from agents_remember.observer.projection_store import project_and_write
-from agents_remember.serving.actions import GateDecisionIntent, evaluate_action
+from agents_remember.serving.actions import (
+    DismissalIntent,
+    GateDecisionIntent,
+    evaluate_action,
+)
 from agents_remember.serving.app import create_app, stream_events
 from agents_remember.serving.delta import DeltaEvent, diff_projection
 from agents_remember.serving.events import (
@@ -485,6 +493,167 @@ class ActionGateTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["status"], "bad-address")
+
+
+class ActionDismissTests(unittest.TestCase):
+    """Leaf-28 S5.2: the ``dismiss`` verb records compact lifecycle acknowledgements,
+    and pairs a ``gate-open`` dismissal with gate deletion."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def test_evaluate_action_emits_dismissal_intent(self) -> None:
+        outcome = evaluate_action(
+            _projection(),
+            "dismiss",
+            "L1",
+            actor="developer",
+            now=_TS,
+            item_id="awaiting-developer:L1",
+            kind="awaiting-developer",
+        )
+        self.assertEqual(outcome.status_code, 202)
+        self.assertIsNone(outcome.gate_decision)
+        self.assertEqual(
+            outcome.dismissal,
+            DismissalIntent(
+                item_id="awaiting-developer:L1",
+                dismissed_at=_TS,
+                kind="awaiting-developer",
+                lifecycle_id="L1",
+                gate_id=None,
+                note=None,
+            ),
+        )
+
+    def test_evaluate_action_dismiss_requires_item_id(self) -> None:
+        outcome = evaluate_action(
+            _projection(), "dismiss", "L1", actor="developer", now=_TS, kind="blocked-gate"
+        )
+        self.assertEqual(outcome.status_code, 400)
+        self.assertEqual(outcome.body["status"], "missing-item")
+        self.assertIsNone(outcome.dismissal)
+
+    def test_evaluate_action_dismiss_requires_lifecycle_for_non_gate_item(self) -> None:
+        outcome = evaluate_action(
+            _projection(),
+            "dismiss",
+            None,
+            actor="developer",
+            now=_TS,
+            item_id="provider-down:cgc",
+            kind="provider-down",
+        )
+        self.assertEqual(outcome.status_code, 400)
+        self.assertEqual(outcome.body["status"], "missing-lifecycle")
+        self.assertIsNone(outcome.dismissal)
+
+    def test_attention_store_upserts_and_prunes_lifecycle_rows(self) -> None:
+        store = AttentionDismissalStore(observer_logs_root(self.tmp))
+        store.dismiss(
+            AttentionDismissalRecord(
+                itemId="stale-session:L1",
+                kind="stale-session",
+                lifecycleId="L1",
+                dismissedAt=_TS,
+            )
+        )
+        store.dismiss(
+            AttentionDismissalRecord(
+                itemId="stale-session:L1",
+                kind="stale-session",
+                lifecycleId="L1",
+                dismissedAt="2026-06-14T10:01:00Z",
+            )
+        )
+        self.assertEqual(len(store.read()), 1)
+        self.assertEqual(store.current()["stale-session:L1"].dismissedAt, "2026-06-14T10:01:00Z")
+
+        self.assertEqual(store.prune_lifecycles(set()), 1)
+        self.assertEqual(store.current(), {})
+        self.assertFalse(store.log_path().exists())
+
+    def test_attention_store_prune_compacts_legacy_duplicate_live_rows(self) -> None:
+        store = AttentionDismissalStore(observer_logs_root(self.tmp))
+        older = AttentionDismissalRecord(
+            itemId="stale-session:L1",
+            kind="stale-session",
+            lifecycleId="L1",
+            dismissedAt=_TS,
+        )
+        newer = AttentionDismissalRecord(
+            itemId="stale-session:L1",
+            kind="stale-session",
+            lifecycleId="L1",
+            dismissedAt="2026-06-14T10:01:00Z",
+        )
+        path = store.log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            older.model_dump_json(by_alias=True, exclude_none=True)
+            + "\n"
+            + newer.model_dump_json(by_alias=True, exclude_none=True)
+            + "\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(store.prune_lifecycles({"L1"}), 1)
+        self.assertEqual(len(store.read()), 1)
+        self.assertEqual(store.current()["stale-session:L1"].dismissedAt, "2026-06-14T10:01:00Z")
+
+    def test_api_action_dismiss_records_lifecycle_acknowledgement(self) -> None:
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/dismiss",
+                json={
+                    "target": "L1",
+                    "itemId": "stale-session:L1",
+                    "kind": "stale-session",
+                },
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["status"], "received")
+        dismissals = AttentionDismissalStore(observer_logs_root(self.tmp)).current()
+        self.assertEqual(dismissals["stale-session:L1"].lifecycleId, "L1")
+
+    def test_api_action_dismiss_gate_open_also_cancels_gate(self) -> None:
+        store = GateStore(observer_logs_root(self.tmp))
+        store.append(
+            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS)
+        )
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/dismiss",
+                json={
+                    "target": "L1",
+                    "itemId": "gate:G1",
+                    "kind": "gate-open",
+                    "gateId": "G1",
+                },
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["gate"]["state"], "cancelled")  # gate cancel still fires
+        self.assertEqual(store.current("L1"), {})  # cancel deletes the gate
+        dismissals = AttentionDismissalStore(observer_logs_root(self.tmp)).current()
+        self.assertNotIn("gate:G1", dismissals)  # the deleted gate is the consumed source
+
+    def test_api_action_dismiss_missing_gate_is_already_consumed(self) -> None:
+        # A gate-open dismiss whose gate already vanished must not 500: the cancel KeyError
+        # is swallowed because the missing gate means the source item is already gone.
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/dismiss",
+                json={"target": "L1", "itemId": "gate:gone", "kind": "gate-open", "gateId": "gone"},
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertNotIn("gate", response.json())  # no gate payload when the cancel found nothing
+        dismissals = AttentionDismissalStore(observer_logs_root(self.tmp)).current()
+        self.assertNotIn("gate:gone", dismissals)
 
 
 class StaticTests(unittest.TestCase):

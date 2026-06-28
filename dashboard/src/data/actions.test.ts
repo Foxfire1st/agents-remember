@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { postGateDecision } from "./actions";
+import { postAttentionDismiss, postGateDecision } from "./actions";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,5 +61,52 @@ describe("postGateDecision", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "no-open-gate" }), { status: 409 })),
     );
     await expect(postGateDecision("LC1", "approve")).resolves.toBe("no-open-gate");
+  });
+});
+
+describe("postAttentionDismiss", () => {
+  it("posts the item id, kind, lifecycle target, and gate id", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 202 }));
+    vi.stubGlobal("fetch", fetch);
+
+    const status = await postAttentionDismiss({
+      itemId: "gate:G1",
+      kind: "gate-open",
+      lifecycleId: "LC1",
+      gateId: "G1",
+    });
+
+    expect(status).toBe("dismissed");
+    expect(fetch).toHaveBeenCalledWith("/api/actions/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId: "gate:G1", kind: "gate-open", target: "LC1", gateId: "G1" }),
+    });
+  });
+
+  it("omits target for a gate-id-only gate item", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 202 }));
+    vi.stubGlobal("fetch", fetch);
+
+    const status = await postAttentionDismiss({
+      itemId: "gate:G1",
+      kind: "gate-open",
+      lifecycleId: null,
+      gateId: "G1",
+    });
+
+    expect(status).toBe("dismissed");
+    expect(fetch).toHaveBeenCalledWith("/api/actions/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId: "gate:G1", kind: "gate-open", gateId: "G1" }),
+    });
+  });
+
+  it("maps a non-202 response to error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
+    await expect(
+      postAttentionDismiss({ itemId: "x", kind: "stale-session" }),
+    ).resolves.toBe("error");
   });
 });

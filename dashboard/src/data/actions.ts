@@ -36,3 +36,36 @@ export async function postGateDecision(
     return "error";
   }
 }
+
+// Leaf-28 S5.2: dismiss ONE lifecycle-bound attention-queue item. POSTs to the same
+// `/api/actions/{verb}` return channel with verb `dismiss`; the server records a compact
+// lifecycle acknowledgement, or cancels/deletes the gate for a `gate-open` item. Fire-and-report
+// like postGateDecision: the SSE delta removes the item on the next tick. 202 dismissed,
+// anything else / network failure → error.
+
+export type AttentionDismissStatus = "dismissed" | "error";
+
+export interface AttentionDismissTarget {
+  itemId: string;
+  kind: string;
+  lifecycleId?: string | null;
+  gateId?: string;
+}
+
+export async function postAttentionDismiss(
+  item: AttentionDismissTarget,
+): Promise<AttentionDismissStatus> {
+  try {
+    const body: Record<string, string> = { itemId: item.itemId, kind: item.kind };
+    if (item.lifecycleId) body.target = item.lifecycleId;
+    if (item.gateId) body.gateId = item.gateId;
+    const res = await fetch(`/api/actions/dismiss`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.status === 202 ? "dismissed" : "error";
+  } catch {
+    return "error";
+  }
+}

@@ -266,6 +266,7 @@ export interface AttentionItem {
   enclosure?: string;
   repoId?: string;
   providerId?: string;
+  signalTs?: string; // triggering-signal time — current-occurrence acknowledgement anchor (leaf-28 S5.2)
 }
 
 export interface AgentPickupNode {

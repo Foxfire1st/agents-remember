@@ -22,6 +22,10 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane.attention_dismissals import (
+    AttentionDismissalRecord,
+    AttentionDismissalStore,
+)
 from agents_remember.controlplane.records import create_gate, decide_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
@@ -1092,6 +1096,34 @@ class SnapshotReaderTests(unittest.TestCase):
         self.assertEqual(proj.metrics.lifecycleCount, 1)
         self.assertTrue((observer_root(config) / "latest-state.json").exists())
 
+    def test_project_and_write_prunes_completed_lifecycle_attention_acknowledgement(self) -> None:
+        config = self._config()
+        root = observer_root(config)
+        store = EventStore(root)
+        store.append(_started(lifecycle_id="LC1", ts=T0))
+        store.append(
+            _event(
+                "lifecycle.ended",
+                lifecycle_id="LC1",
+                ts="2026-06-13T18:00:05+00:00",
+                outcome="completed",
+            )
+        )
+        dismissals = AttentionDismissalStore(root)
+        dismissals.dismiss(
+            AttentionDismissalRecord(
+                itemId="awaiting-developer:LC1",
+                kind="awaiting-developer",
+                lifecycleId="LC1",
+                dismissedAt="2026-06-13T18:00:04+00:00",
+            )
+        )
+
+        project_and_write(config, now=FRESH)
+
+        self.assertEqual(dismissals.current(), {})
+        self.assertFalse(dismissals.log_path().exists())
+
 
 class TokenSeriesTests(unittest.TestCase):
     def test_cumulative_series_from_tool_events(self) -> None:
@@ -1295,6 +1327,162 @@ class AttentionQueueTests(unittest.TestCase):
         proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
         self.assertEqual(proj.analytics.attentionQueue, [])
 
+
+class AttentionDismissalTests(unittest.TestCase):
+    """Leaf-28 S5.2: a lifecycle acknowledgement suppresses one current occurrence,
+    and a newer triggering signal re-surfaces it."""
+
+    AWAIT_TS = "2026-06-13T18:00:05+00:00"
+    DISMISS_TS = "2026-06-13T18:00:10+00:00"  # >= AWAIT_TS / blocked ts / T0
+
+    def _await_log(self) -> list[Event]:
+        return [
+            _started(lifecycle_id="LC1"),
+            _event(
+                "lifecycle.awaiting-developer",
+                lifecycle_id="LC1",
+                ts=self.AWAIT_TS,
+                summary="Drafted the plan; awaiting your review.",
+            ),
+        ]
+
+    def _queue_for(self, logs, *, now, dismissals=None, **kw):  # type: ignore[no-untyped-def]
+        return project_workspace(
+            logs,
+            enclosures=[],
+            providers=kw.get("providers", []),
+            now=now,
+            gates=kw.get("gates"),
+            attention_dismissals=dismissals,
+        ).analytics.attentionQueue
+
+    def _dismissal(
+        self,
+        item_id: str,
+        *,
+        lifecycle_id: str | None = "LC1",
+        kind: str | None = None,
+        dismissed_at: str | None = None,
+    ) -> dict[str, AttentionDismissalRecord]:
+        return {
+            item_id: AttentionDismissalRecord(
+                itemId=item_id,
+                kind=kind,
+                lifecycleId=lifecycle_id,
+                dismissedAt=dismissed_at or self.DISMISS_TS,
+            )
+        }
+
+    def test_state_entered_at_is_heartbeat_immune(self) -> None:
+        # The anchor the whole design rests on: a heartbeat advances lastEventTs but NOT
+        # stateEnteredAt, so a dismissed blocked/awaiting item does not flap back on a beat.
+        proj = project_lifecycle(
+            [
+                _started(lifecycle_id="LC1"),
+                _event("lifecycle.blocked", lifecycle_id="LC1", ts=self.AWAIT_TS),
+                _event("lifecycle.heartbeat", lifecycle_id="LC1", ts="2026-06-13T18:00:20+00:00"),
+            ],
+            now=FRESH,
+        )
+        self.assertEqual(proj.stateEnteredAt, self.AWAIT_TS)
+        self.assertEqual(proj.lastEventTs, "2026-06-13T18:00:20+00:00")
+
+    def test_awaiting_item_carries_state_entered_signal(self) -> None:
+        item = self._queue_for([self._await_log()], now=FRESH)[0]
+        self.assertEqual((item.kind, item.signalTs), ("awaiting-developer", self.AWAIT_TS))
+
+    def test_dismiss_suppresses_awaiting_developer(self) -> None:
+        queue = self._queue_for(
+            [self._await_log()],
+            now=FRESH,
+            dismissals=self._dismissal("awaiting-developer:LC1", kind="awaiting-developer"),
+        )
+        self.assertEqual(queue, [])
+
+    def test_dismiss_suppresses_blocked_gate(self) -> None:
+        log = [
+            _started(lifecycle_id="LC1"),
+            _event("lifecycle.blocked", lifecycle_id="LC1", ts=self.AWAIT_TS, ask={"x": 1}),
+        ]
+        self.assertEqual(
+            self._queue_for(
+                [log],
+                now=FRESH,
+                dismissals=self._dismissal("blocked-gate:LC1", kind="blocked-gate"),
+            ),
+            [],
+        )
+
+    def test_dismiss_suppresses_stale_session(self) -> None:
+        self.assertEqual(
+            self._queue_for(
+                [[_started(lifecycle_id="LC1")]],
+                now=STALE,
+                dismissals=self._dismissal("stale-session:LC1", kind="stale-session"),
+            ),
+            [],
+        )
+
+    def test_dismiss_suppresses_dormant_fleeting(self) -> None:
+        self.assertEqual(
+            self._queue_for(
+                [[_started(fleeting=True, lifecycle_id="LC1")]],
+                now=DORMANT,
+                dismissals=self._dismissal("dormant-fleeting:LC1", kind="dormant-fleeting"),
+            ),
+            [],
+        )
+
+    def test_dismiss_suppresses_gate_open(self) -> None:
+        gate = create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id="G1", now=T0)
+        self.assertEqual(
+            self._queue_for(
+                [[_started(lifecycle_id="LC1")]],
+                now=FRESH,
+                gates=[gate],
+                dismissals=self._dismissal("gate:G1", kind="gate-open"),
+            ),
+            [],
+        )
+
+    def test_non_lifecycle_dismissal_does_not_suppress_provider_down(self) -> None:
+        # Attention acknowledgements are scoped to lifecycles; repo/provider alarms clear
+        # when their source condition clears.
+        queue = self._queue_for(
+            [[_started(lifecycle_id="LC1")]],
+            now=FRESH,
+            providers=[ProviderNode(id="cgc", state="stopped", ok=False)],
+            dismissals=self._dismissal(
+                "provider-down:cgc", lifecycle_id=None, kind="provider-down"
+            ),
+        )
+        self.assertEqual([i.kind for i in queue if i.kind == "provider-down"], ["provider-down"])
+
+    def test_newer_turn_end_supersedes_dismissal(self) -> None:
+        # A fresh turn-end re-enters awaiting (a newer stateEnteredAt) and re-surfaces the
+        # item despite an older dismissal -- a dismissal acknowledges THIS occurrence only.
+        re_log = [
+            _started(lifecycle_id="LC1"),
+            _event("lifecycle.awaiting-developer", lifecycle_id="LC1", ts=self.AWAIT_TS, summary="1"),
+            _event("lifecycle.resumed", lifecycle_id="LC1", ts="2026-06-13T18:00:07+00:00"),
+            _event(
+                "lifecycle.awaiting-developer",
+                lifecycle_id="LC1",
+                ts="2026-06-13T18:00:08+00:00",
+                summary="2",
+            ),
+        ]
+        queue = self._queue_for(
+            [re_log],
+            now=FRESH,
+            dismissals=self._dismissal(
+                "awaiting-developer:LC1",
+                kind="awaiting-developer",
+                dismissed_at="2026-06-13T18:00:06+00:00",
+            ),
+        )
+        kinds = [i.kind for i in queue]
+        self.assertIn("awaiting-developer", kinds)  # :08 signal supersedes the :06 dismissal
 
 class GateProjectionTests(unittest.TestCase):
     """Slice 6c: durable gates materialize onto the lifecycle + the attention queue."""

@@ -99,6 +99,13 @@ class LifecycleProjection(BaseModel):
     tokens: int = 0
     startedAt: str
     lastEventTs: str
+    # When the lifecycle last *entered its current written state* (seeded at
+    # ``startedAt``, advanced on every state-changing event in the fold). Unlike
+    # ``lastEventTs`` it is immune to heartbeats, so it is the stable
+    # triggering-signal anchor the attention queue uses to honor a lifecycle
+    # acknowledgement of an awaiting-developer / blocked item and to re-surface it on a *new*
+    # occurrence. Inferred transitions (stale -> paused) intentionally do not move it.
+    stateEnteredAt: str = ""
     staleSeconds: float | None = None
     # True when ``state`` was *derived* by the reducer (stale heartbeat -> paused;
     # dormant fleeting -> abandoned) rather than read from a written transition.
@@ -547,6 +554,12 @@ class AttentionItem(BaseModel):
     enclosure: str | None = None
     repoId: str | None = None
     providerId: str | None = None
+    # The triggering signal's timestamp (state-entry / gate / snapshot time), used to
+    # honor a current lifecycle acknowledgement: an item is suppressed while an
+    # acknowledgement at-or-after this exists, and re-surfaces when a *newer* signal arrives.
+    # ``None`` means no freshness anchor, so an acknowledgement holds until the underlying
+    # condition clears.
+    signalTs: str | None = None
 
 
 class CommitRefNode(BaseModel):

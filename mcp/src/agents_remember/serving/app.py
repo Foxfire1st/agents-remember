@@ -58,6 +58,10 @@ from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
+from agents_remember.controlplane.attention_dismissals import (
+    AttentionDismissalRecord,
+    AttentionDismissalStore,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
@@ -439,7 +443,38 @@ def create_app(
             now=now_iso(),
             gate_id=request.gateId,
             note=request.note,
+            item_id=request.itemId,
+            kind=request.kind,
         )
+        if outcome.dismissal is not None:
+            # Leaf-28 S5.2: lifecycle attention dismissals are current acknowledgements,
+            # not history. A gate-open item is consumed by deleting/cancelling the gate
+            # itself, so it does not need an acknowledgement row after the source is gone.
+            intent = outcome.dismissal
+            gate: dict[str, Any] | None = None
+            if intent.kind == "gate-open" and intent.gate_id is not None:
+                with contextlib.suppress(KeyError):
+                    gate = gate_decide_payload(
+                        config,
+                        gate_id=intent.gate_id,
+                        lifecycle_id=intent.lifecycle_id,
+                        decision="cancel",
+                        decided_by="developer",
+                        decided_via="dashboard",
+                        note=intent.note or "Dismissed from attention queue.",
+                    )
+            elif intent.lifecycle_id is not None:
+                AttentionDismissalStore(observer_root(config)).dismiss(
+                    AttentionDismissalRecord(
+                        itemId=intent.item_id,
+                        dismissedAt=intent.dismissed_at,
+                        kind=intent.kind,
+                        lifecycleId=intent.lifecycle_id,
+                        gateId=intent.gate_id,
+                    )
+                )
+            body = outcome.body if gate is None else {**outcome.body, "gate": gate}
+            return JSONResponse(content=body, status_code=outcome.status_code)
         if outcome.gate_decision is not None:
             # The one durable side effect: record the operator's gate decision as
             # developer-attributed -- un-forgeable vs. the agent's model-attributed

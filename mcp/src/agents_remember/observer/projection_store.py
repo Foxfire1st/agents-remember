@@ -20,8 +20,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
 from agents_remember.observer.drift_snapshots import prune_orphaned_drift_snapshots
 from agents_remember.observer.events import Event
+from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
     LedgerNode,
@@ -135,6 +137,7 @@ def project_and_write(
     prune_orphaned_drift_snapshots(config)
     if provider_refresher is not None:
         provider_refresher.maybe_refresh(config, now=moment)
+    attention_store = AttentionDismissalStore(root)
     projection = project_workspace(
         read_lifecycle_logs(root),
         enclosures=enclosures,
@@ -153,6 +156,10 @@ def project_and_write(
         engine_process_facts=read_engine_process_facts(coordination_root),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
         gates=read_gates(coordination_root, now=moment),
+        attention_dismissals=attention_store.current(),
+    )
+    attention_store.prune_lifecycles(
+        {lifecycle.id for lifecycle in projection.lifecycles if lifecycle.state not in TERMINAL_STATES}
     )
     write_projection(root, projection)
     return projection
