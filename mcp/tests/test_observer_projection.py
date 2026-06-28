@@ -17,6 +17,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -69,6 +70,7 @@ from agents_remember.observer.reducer import (
 )
 from agents_remember.observer.snapshots import (
     _git_commit_meta,
+    _inspect_result_map,
     _ledger_window,
     read_drift_snapshots,
     read_enclosures,
@@ -752,6 +754,28 @@ class SnapshotReaderTests(unittest.TestCase):
             },
         )
 
+    def test_inspect_result_map_parses_container_names(self) -> None:
+        mapped = _inspect_result_map(
+            json.dumps(
+                [
+                    {"Name": "/cgc-db", "State": {"Running": True}},
+                    {"Name": "grepai-watch", "State": {"Running": False}},
+                    {"Name": "", "State": {"Running": True}},
+                    ["not-a-container"],
+                ]
+            )
+        )
+
+        self.assertEqual(set(mapped), {"cgc-db", "grepai-watch"})
+        self.assertTrue(mapped["cgc-db"]["State"]["Running"])
+        self.assertFalse(mapped["grepai-watch"]["State"]["Running"])
+
+    def test_inspect_result_map_ignores_unusable_payloads(self) -> None:
+        self.assertEqual(_inspect_result_map(None), {})
+        self.assertEqual(_inspect_result_map(""), {})
+        self.assertEqual(_inspect_result_map("{"), {})
+        self.assertEqual(_inspect_result_map('{"Name": "/single"}'), {})
+
     def test_read_providers_parses_snapshot_with_age(self) -> None:
         config = self._config()
         path = current_state_path(config)
@@ -961,7 +985,78 @@ class SnapshotReaderTests(unittest.TestCase):
             (code.scope, code.role, code.repoId, code.worktreeGroup),
             ("worktree", "code", "device-management", "260612-x-ar"),
         )
+        self.assertIsNone(code.ok)
+        self.assertEqual(code.state, "configured")
         self.assertEqual(nodes["grepai-memory@260612-x-ar"].role, "memory")
+
+    def test_read_providers_marks_worktree_stack_ready_from_live_containers(self) -> None:
+        config = self._config()
+        coord = config.coordination_root
+        runtime = coord / "worktrees" / "device-management" / "260612-x-ar" / "provider-runtime"
+        settings_path = runtime / "settings" / "provider-settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "contextProviders": {
+                        "providers": {
+                            "codegraphcontext-code": {
+                                "roots": [{"repoId": "device-management"}],
+                                "runtime": {
+                                    "runner": {
+                                        "containerNameTemplate": "cgc-<repoId>",
+                                    }
+                                },
+                                "backend": {"containerName": "cgc-db"},
+                            },
+                            "grepai-memory": {
+                                "runtime": {"runner": {"containerName": "grepai-watch"}},
+                                "backend": {"containerName": "grepai-db"},
+                                "embedder": {"backend": {"containerName": "grepai-ollama"}},
+                            },
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (runtime / "provider-state.json").write_text(
+            json.dumps(
+                {
+                    "schema": "ar-worktree-provider-state/v1",
+                    "repoName": "device-management",
+                    "worktreeGroup": str(runtime.parent),
+                    "isolatedProviderSettings": {
+                        "path": settings_path.as_posix(),
+                        "providers": ["codegraphcontext-code", "grepai-memory"],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        def inspected(name: str) -> dict[str, object]:
+            return {
+                "Name": f"/{name}",
+                "State": {
+                    "Running": True,
+                    "Status": "running",
+                    "StartedAt": "2026-06-27T12:00:00Z",
+                },
+            }
+
+        names = {"cgc-device-management", "cgc-db", "grepai-watch", "grepai-db", "grepai-ollama"}
+        with mock.patch(
+            "agents_remember.observer.snapshots._inspect_containers",
+            return_value={name: inspected(name) for name in names},
+        ) as inspect:
+            nodes = {node.id: node for node in read_providers(config, now=FRESH)}
+
+        self.assertEqual(inspect.call_args.args[0], names)
+        code = nodes["codegraphcontext-code@260612-x-ar"]
+        memory = nodes["grepai-memory@260612-x-ar"]
+        self.assertEqual((code.state, code.ok, code.watcherUp), ("ready", True, True))
+        self.assertEqual((memory.state, memory.ok, memory.watcherUp), ("ready", True, True))
 
     def test_read_enclosures_from_contract(self) -> None:
         coord = (self.tmp / "coord").resolve()
@@ -2397,6 +2492,30 @@ class EngineProcessTests(unittest.TestCase):
         states = {edge.kind: edge.state for edge in node.edges}
         self.assertEqual(states["cgc-seed"], "running")
         self.assertEqual(states["grepai-clone"], "running")
+        self.assertEqual(node.providers, [])
+
+    def test_missing_provider_stack_projects_missing_engine_slots(self) -> None:
+        node = build_engine_processes(
+            [
+                _facts(
+                    status={
+                        "code_worktree_exists": True,
+                        "memory_worktree_exists": True,
+                    }
+                )
+            ],
+            [],
+            [],
+            [],
+        )[0]
+        self.assertEqual(
+            [(provider.role, provider.runtimeState, provider.factState) for provider in node.providers],
+            [("code", "missing", "missing"), ("memory", "missing", "missing")],
+        )
+        states = {edge.kind: edge.state for edge in node.edges}
+        self.assertEqual(states["cgc-seed"], "planned")
+        self.assertEqual(states["grepai-clone"], "planned")
+        self.assertTrue(any("provider runtime not observed" in fact for fact in node.missingFacts))
 
     def test_failed_setup_marks_failed(self) -> None:
         setup = SetupProgressNode(
@@ -2451,7 +2570,8 @@ class EngineProcessTests(unittest.TestCase):
             worktreeGroup="260610-grp",
         )
         node = build_engine_processes([facts], [], [prov], [])[0]
-        self.assertEqual([p.id for p in node.providers], ["cgc@260610-grp"])
+        self.assertEqual([p.id for p in node.providers], ["cgc@260610-grp", "missing-memory@260610-grp"])
+        self.assertEqual(node.providers[1].factState, "missing")
 
     def test_actions_reuse_precomputed_enclosure_actions(self) -> None:
         enc = _enclosure(closeoutStatus="completed", integrationStatus="not-started")

@@ -584,7 +584,7 @@ class ProviderBootNode(BaseModel):
 
     id: str
     role: str  # "code" (CGC) | "memory" (GrepAI)
-    runtimeState: str  # nominal | indexing | down | configured | unknown
+    runtimeState: str  # nominal | indexing | down | configured | missing | unknown
     factState: str = "observed"
 
 

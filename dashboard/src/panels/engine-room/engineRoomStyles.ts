@@ -676,6 +676,7 @@ export const engineGaugeOut = cva({
       indexing: {}, // gold bezel (the cyan body shows it's charging)
       // down = FAULT → frame goes red + a red glow + a GENTLE breathe (data-fx='fault', ~1.7s sine; never a strobe).
       down: { stroke: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
+      missing: { stroke: "token(colors.alarm)", strokeDasharray: "5 4", opacity: "0.65" },
       unknown: { strokeDasharray: "4 3", opacity: "0.55" },
     },
   },
@@ -711,6 +712,7 @@ export const engineCharge = cva({
       configured: { fill: "token(colors.cyan)" }, // materialised, drained (dim) — no glow
       indexing: { fill: "token(colors.cyan)", filter: "drop-shadow(0 0 4px token(colors.cyan))" }, // charging cyan
       down: { fill: "token(colors.alarm)", filter: "drop-shadow(0 0 5px token(colors.alarm))" },
+      missing: { fill: "token(colors.alarm)" },
       unknown: { fill: "token(colors.dormant)" },
     },
   },
@@ -739,6 +741,7 @@ export const enginePetal = cva({
       configured: { opacity: "0" }, // off → no petals
       indexing: { opacity: "0.6" },
       down: { opacity: "0.6" },
+      missing: { opacity: "0" },
       unknown: { opacity: "0" },
     },
   },

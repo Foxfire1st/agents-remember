@@ -40,14 +40,22 @@ def workspace_provider_nodes(
 
 
 def worktree_provider_node(
-    provider_id: str, *, group: str, repo_id: str | None, stale_seconds: float | None
+    provider_id: str,
+    *,
+    group: str,
+    repo_id: str | None,
+    stale_seconds: float | None,
+    runtime: dict[str, Any] | None = None,
 ) -> ProviderNode:
     """Project one isolated worktree provider stack member."""
+    runtime = runtime or {}
+    ok = runtime.get("ok")
     return ProviderNode(
         id=f"{provider_id}@{group}",
-        state="configured",
-        ok=True,
-        indexingState="unknown",
+        state=str(runtime.get("state") or "configured"),
+        ok=ok if isinstance(ok, bool) else None,
+        watcherUp=runtime.get("watcherUp") is True,
+        indexingState=str(runtime.get("indexingState") or "unknown"),
         snapshotStaleSeconds=stale_seconds,
         scope="worktree",
         role=provider_role(provider_id),

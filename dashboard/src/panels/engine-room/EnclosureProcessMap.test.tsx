@@ -7,7 +7,7 @@ import { EnclosureProcessMap } from "./EnclosureProcessMap";
 import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from "./fixtures";
 
 const KNOWN_EDGE_KINDS = new Set(["worktree-add", "ledger-map", "cgc-seed", "grepai-clone", "sync", "integration"]);
-const VALID_RUNTIME = new Set(["nominal", "configured", "indexing", "down", "unknown"]);
+const VALID_RUNTIME = new Set(["nominal", "configured", "indexing", "down", "missing", "unknown"]);
 // The shared official line's two workspace engines (CGC code + GrepAI memory), as the model lifts them.
 const WORKSPACE_ENGINES: ProviderNode[] = [
   { id: "cgc", state: "ready", watcherUp: true, indexingState: "indexed", scope: "workspace", role: "code" },
@@ -514,6 +514,29 @@ describe("EnclosureCanvas — T9B/T9C refused-conduit flash (shared red/amber pr
 });
 
 describe("EnclosureCanvas — T7B provider-plan block (05o: scan-at-engine + gate beside the provider engine, engines unlit)", () => {
+  it("renders missing provider slots as visible missing gauges instead of dropping the engine", () => {
+    const node = {
+      ...nodeFrom("engine-bootstrap"),
+      providers: [
+        {
+          id: "missing-code@grp",
+          role: "code",
+          runtimeState: "missing",
+          factState: "missing",
+        },
+        {
+          id: "missing-memory@grp",
+          role: "memory",
+          runtimeState: "missing",
+          factState: "missing",
+        },
+      ],
+    } satisfies EngineProcessNode;
+    const { container } = render(<EnclosureProcessMap node={node} />);
+    const gauges = [...container.querySelectorAll('[data-testid="engine-gauge"]')];
+    expect(gauges.filter((gauge) => gauge.getAttribute("data-runtime") === "missing")).toHaveLength(2);
+  });
+
   it("renders the provider gate BESIDE the engine (NOT on the code node, NOT the big red fleeting box) and keeps the engines unlit", () => {
     const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-blocked")} />);
     // a T7B block does NOT fall into the fleeting box (that is T1B/stale-base) — it bars the provider runtime

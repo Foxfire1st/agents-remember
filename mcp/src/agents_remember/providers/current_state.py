@@ -16,8 +16,10 @@ STATE_VERSION = 1
 def build_current_provider_state(
     config: McpRuntimeConfig,
     status: dict[str, Any],
+    *,
+    checked_at: datetime | None = None,
 ) -> dict[str, Any]:
-    checked_at = datetime.now(UTC).isoformat()
+    checked_at_text = (checked_at or datetime.now(UTC)).isoformat()
     providers = current_provider_states(config, status)
     state = aggregate_state(providers)
     return {
@@ -26,7 +28,7 @@ def build_current_provider_state(
         "instance": current_state_instance(config),
         "state": state,
         "ok": state == "ready",
-        "checkedAt": checked_at,
+        "checkedAt": checked_at_text,
         "settingsFile": status.get("settingsFile", ""),
         "enabled": status.get("enabled", {}),
         "processNamespace": status.get("processNamespace"),
@@ -37,8 +39,10 @@ def build_current_provider_state(
 def write_current_provider_state(
     config: McpRuntimeConfig,
     status: dict[str, Any],
+    *,
+    checked_at: datetime | None = None,
 ) -> dict[str, Any]:
-    payload = build_current_provider_state(config, status)
+    payload = build_current_provider_state(config, status, checked_at=checked_at)
     path = current_state_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

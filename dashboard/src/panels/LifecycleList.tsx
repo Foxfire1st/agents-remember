@@ -587,12 +587,16 @@ function isRootTaskDoc(doc: Pick<TaskDocNode, "kind" | "docPath">): boolean {
 }
 
 function enclosureForDoc(
-  doc: Pick<TaskDocNode, "docPath">,
+  doc: Pick<TaskDocNode, "id" | "docPath">,
   enclosures: EnclosureNode[],
 ): EnclosureNode | undefined {
   const dir = pathDir(doc.docPath);
   const stem = pathStem(doc.docPath);
-  return enclosures.find((enclosure) => enclosure.taskRoot === dir && enclosure.leafId === stem);
+  return enclosures.find((enclosure) => {
+    if (enclosure.taskRoot !== dir) return false;
+    if (enclosure.leafId === stem) return true;
+    return Boolean(doc.id && enclosure.leafId === doc.id);
+  });
 }
 
 function isActiveEnclosure(enclosure: Pick<EnclosureNode, "cleanup">): boolean {

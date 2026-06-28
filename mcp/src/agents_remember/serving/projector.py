@@ -27,6 +27,7 @@ from agents_remember.serving.delta import DeltaEvent, diff_projection
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
     from agents_remember.observer.projection import WorkspaceProjection
+    from agents_remember.observer.projection_store import ProviderStateRefresh
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,13 @@ class Projector:
         interval: float = 1.0,
         now: Callable[[], datetime] | None = None,
         before_tick: Callable[[datetime], object] | None = None,
+        provider_refresher: ProviderStateRefresh | None = None,
     ) -> None:
         self._config = config
         self._interval = interval
         self._now: Callable[[], datetime] = now or _utcnow
         self._before_tick = before_tick
+        self._provider_refresher = provider_refresher
         self._latest: WorkspaceProjection | None = None
         self._seq = 0
         self._subscribers: set[asyncio.Queue[_Item]] = set()
@@ -86,7 +89,11 @@ class Projector:
         """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread)."""
         if self._before_tick is not None:
             self._before_tick(moment)
-        return project_and_write(self._config, now=moment)
+        return project_and_write(
+            self._config,
+            now=moment,
+            provider_refresher=self._provider_refresher,
+        )
 
     def current(self) -> tuple[int, WorkspaceProjection | None]:
         """The latest (sequence, projection) for a new connection's snapshot."""

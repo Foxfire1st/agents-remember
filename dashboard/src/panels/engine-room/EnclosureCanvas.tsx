@@ -99,7 +99,7 @@ import {
 
 type ConduitState =
   | "nominal" | "complete" | "running" | "blocked" | "failed" | "stale" | "skipped" | "planned" | "unknown";
-type RuntimeState = "nominal" | "configured" | "indexing" | "down" | "unknown";
+type RuntimeState = "nominal" | "configured" | "indexing" | "down" | "missing" | "unknown";
 
 function conduitState(value: string): ConduitState {
   switch (value) {
@@ -113,7 +113,7 @@ function conduitState(value: string): ConduitState {
 
 function runtimeState(value: string | undefined): RuntimeState {
   switch (value) {
-    case "nominal": case "configured": case "indexing": case "down":
+    case "nominal": case "configured": case "indexing": case "down": case "missing":
       return value;
     default:
       return "unknown";

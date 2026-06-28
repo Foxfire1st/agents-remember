@@ -314,7 +314,7 @@ export interface CommitRefNode {
 export interface ProviderBootNode {
   id: string;
   role: string; // "code" (CGC) | "memory" (GrepAI)
-  runtimeState: string; // nominal | indexing | down | configured | unknown
+  runtimeState: string; // nominal | indexing | down | configured | missing | unknown
   factState: ProcessFactState;
 }
 

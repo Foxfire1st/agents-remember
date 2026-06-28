@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, cast
 
 from agents_remember.mcp.config import (
@@ -134,10 +135,24 @@ def provider_summary(
     )
 
 
+def refresh_current_provider_state(
+    config: McpRuntimeConfig,
+    *,
+    checked_at: datetime | None = None,
+) -> dict[str, Any] | None:
+    projection = _provider_status_projection(
+        config,
+        include_providers=True,
+        checked_at=checked_at,
+    )
+    return projection.current_state
+
+
 def _provider_status_projection(
     config: McpRuntimeConfig,
     *,
     include_providers: bool,
+    checked_at: datetime | None = None,
 ) -> ProviderStatusProjection:
     configured = bool(config.providers)
     if not include_providers:
@@ -158,7 +173,7 @@ def _provider_status_projection(
         )
 
     status = _watchers_status(config)
-    current_state = write_current_provider_state(config, status)
+    current_state = write_current_provider_state(config, status, checked_at=checked_at)
     aggregated = current_state["state"]
     # The raw watchers ok only proves containers; the aggregated current-state
     # ok also reflects graph/workspace content, so both must hold for a green

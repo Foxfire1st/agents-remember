@@ -48,7 +48,7 @@ function steadyState(node: EngineProcessNode): StepState {
   if (node.health === "blocked") return "blocked";
   if (node.health === "running") return "running";
   if (node.health === "complete" || node.health === "nominal") {
-    return node.providers.length > 0 ? "complete" : "pending";
+    return node.providers.some((provider) => provider.factState !== "missing") ? "complete" : "pending";
   }
   return "pending";
 }

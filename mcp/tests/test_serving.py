@@ -215,6 +215,24 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delta.event, "lifecycle")
         await agen.aclose()
 
+    async def test_prime_runs_provider_refresher_before_projection(self) -> None:
+        moment = datetime(2026, 6, 27, 12, 0, tzinfo=UTC)
+        calls: list[datetime] = []
+
+        class Refresher:
+            def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None:
+                _ = config
+                calls.append(now)
+
+        projector = Projector(
+            _config(self.tmp),
+            interval=100,
+            now=lambda: moment,
+            provider_refresher=Refresher(),
+        )
+        await projector.prime()
+        self.assertEqual(calls, [moment])
+
 
 class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

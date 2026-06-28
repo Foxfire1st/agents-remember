@@ -14,10 +14,11 @@ the single path abstraction shared with the write side.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.observer.events import Event
 from agents_remember.observer.paths import observer_root
@@ -47,12 +48,16 @@ from agents_remember.observer.snapshots import (
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
+from agents_remember.providers.status import refresh_current_provider_state
 
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
 
 LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
+PROVIDER_REFRESH_TTL_SECONDS = 10.0
+
+logger = logging.getLogger(__name__)
 
 
 def read_lifecycle_logs(root: Path) -> list[list[Event]]:
@@ -81,8 +86,44 @@ def write_projection(root: Path, projection: WorkspaceProjection) -> None:
     )
 
 
+class ProviderStateRefresher:
+    """Refresh provider current-state snapshots before the observer reads them."""
+
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float = PROVIDER_REFRESH_TTL_SECONDS,
+        refresh: Any = refresh_current_provider_state,
+    ) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._refresh = refresh
+        self._last_refresh: datetime | None = None
+
+    def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None:
+        if not config.providers:
+            return
+        if self._last_refresh is not None:
+            age = (now - self._last_refresh).total_seconds()
+            if age < self._ttl_seconds:
+                return
+        self._last_refresh = now
+        try:
+            self._refresh(config, checked_at=now)
+        except Exception:
+            logger.warning("provider current-state refresh failed; using last snapshot", exc_info=True)
+
+
+class ProviderStateRefresh(Protocol):
+    """Structural contract for projection pre-read provider refreshers."""
+
+    def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None: ...
+
+
 def project_and_write(
-    config: McpRuntimeConfig, *, now: datetime | None = None
+    config: McpRuntimeConfig,
+    *,
+    now: datetime | None = None,
+    provider_refresher: ProviderStateRefresh | None = None,
 ) -> WorkspaceProjection:
     """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
     moment = now or datetime.now(UTC)
@@ -90,6 +131,8 @@ def project_and_write(
     coordination_root = config.coordination_root
     sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces(config, moment)
     enclosures = read_enclosures(coordination_root)
+    if provider_refresher is not None:
+        provider_refresher.maybe_refresh(config, now=moment)
     projection = project_workspace(
         read_lifecycle_logs(root),
         enclosures=enclosures,

@@ -1019,14 +1019,14 @@ def _engine_process(
     retry = prov_status.get("retryArgs")
     retry_args = retry if isinstance(retry, dict) else None
 
-    boot = [
-        ProviderBootNode(
-            id=provider.id,
-            role=provider.role or "code",
-            runtimeState=_engine_runtime_state(provider),
-        )
-        for provider in providers_by_group.get(group_key, [])
-    ]
+    observed_providers = providers_by_group.get(group_key, [])
+    boot = _provider_boot_nodes(
+        observed_providers,
+        group_key=group_key,
+        memory_mode=memory_mode,
+        setup_state=setup_state,
+    )
+    has_provider_surface = bool(setup_node or observed_providers)
 
     phase = _process_phase(guidance.get("phase"), setup_state, behind_official=behind_official)
     health = _process_health(phase, setup_state, failed_phases)
@@ -1085,8 +1085,47 @@ def _engine_process(
             setup_state=setup_state,
             boot=boot,
         ),
-        sourceFiles=_source_files(cp, memory_mode, group_full, has_setup=bool(setup_node or boot)),
+        sourceFiles=_source_files(cp, memory_mode, group_full, has_setup=has_provider_surface),
     )
+
+
+def _provider_boot_nodes(
+    providers: list[ProviderNode],
+    *,
+    group_key: str,
+    memory_mode: str,
+    setup_state: str | None,
+) -> list[ProviderBootNode]:
+    boot = [
+        ProviderBootNode(
+            id=provider.id,
+            role=provider.role or "code",
+            runtimeState=_engine_runtime_state(provider),
+        )
+        for provider in providers
+    ]
+    if setup_state in {"running", "blocked"} and not boot:
+        return boot
+    observed_roles = {node.role for node in boot}
+    for role in _expected_provider_roles(memory_mode):
+        if role not in observed_roles:
+            boot.append(
+                ProviderBootNode(
+                    id=f"missing-{role}@{group_key}",
+                    role=role,
+                    runtimeState="missing",
+                    factState="missing",
+                )
+            )
+    boot.sort(key=lambda node: (_ROLE_ORDER.get(node.role, 9), node.id))
+    return boot
+
+
+def _expected_provider_roles(memory_mode: str) -> list[str]:
+    roles = ["code"]
+    if memory_mode == "external":
+        roles.append("memory")
+    return roles
 
 
 def _engine_runtime_state(provider: ProviderNode) -> str:
@@ -1166,7 +1205,7 @@ def _process_edges(
             state=_seed_edge_state(
                 setup_state,
                 failed_phases,
-                any(node.role == "code" for node in boot),
+                any(node.role == "code" and node.factState != "missing" for node in boot),
                 "codegraphcontext",
             ),
             label="CGC seed",
@@ -1192,7 +1231,7 @@ def _process_edges(
                 state=_seed_edge_state(
                     setup_state,
                     failed_phases,
-                    any(node.role == "memory" for node in boot),
+                    any(node.role == "memory" and node.factState != "missing" for node in boot),
                     "grepai",
                 ),
                 label="GrepAI clone",
@@ -1257,8 +1296,14 @@ def _missing_facts(
         missing.append("code base commit not recorded in the contract")
     if memory_mode == "external" and not contract.get("ledger_path"):
         missing.append("memory ledger path not recorded")
-    if setup_state is None and not boot:
+    if setup_state is None and all(node.factState == "missing" for node in boot):
         missing.append("provider setup not observed for this worktree group")
+    missing_roles = [node.role for node in boot if node.factState == "missing"]
+    if missing_roles:
+        missing.append(
+            "provider runtime not observed for this worktree group: "
+            + ", ".join(sorted(missing_roles, key=lambda role: _ROLE_ORDER.get(role, 9)))
+        )
     return missing
 
 

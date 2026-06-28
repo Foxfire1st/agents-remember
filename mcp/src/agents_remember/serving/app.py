@@ -63,6 +63,7 @@ from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_deci
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
+from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.harnesses import (
@@ -368,6 +369,7 @@ def create_app(
     interval: float = 1.0,
     now: Callable[[], datetime] | None = None,
     before_tick: Callable[[datetime], object] | None = None,
+    refresh_provider_state: bool | None = None,
     terminal_host: TerminalHost | None = None,
     terminal_catalog: TerminalCatalog | None = None,
 ) -> FastAPI:
@@ -377,7 +379,15 @@ def create_app(
     ``terminal_host`` defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend);
     tests inject a fake to drive the WebSocket bridge without a real PTY.
     """
-    projector = Projector(config, interval=interval, now=now, before_tick=before_tick)
+    if refresh_provider_state is None:
+        refresh_provider_state = before_tick is None
+    projector = Projector(
+        config,
+        interval=interval,
+        now=now,
+        before_tick=before_tick,
+        provider_refresher=ProviderStateRefresher() if refresh_provider_state else None,
+    )
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
 

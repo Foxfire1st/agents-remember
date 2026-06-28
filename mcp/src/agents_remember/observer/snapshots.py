@@ -70,7 +70,13 @@ from agents_remember.observer.provider_nodes import (
     worktree_provider_node,
 )
 from agents_remember.observer.timeutil import age_seconds
+from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.current_state import current_state_path
+from agents_remember.providers.lifecycle.command_runner import run_command
+from agents_remember.providers.lifecycle.docker_runtime import (
+    docker_command,
+    docker_container_state_summary,
+)
 from agents_remember.providers.setup_progress import progress_status, read_setup_progress
 from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
@@ -96,6 +102,7 @@ from agents_remember.worktrees.task_resolver import (
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
+WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 
 
 def read_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderNode]:
@@ -129,24 +136,240 @@ def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[Provi
     worktrees_root = coordination_root / "worktrees"
     if not worktrees_root.is_dir():
         return []
-    nodes: list[ProviderNode] = []
+    records: list[dict[str, Any]] = []
+    container_names: set[str] = set()
+    settings_by_path: dict[str, dict[str, Any] | None] = {}
+    runtime_specs_by_path: dict[str, dict[str, dict[str, list[str]]]] = {}
     for path in sorted(worktrees_root.glob("*/*/provider-runtime/provider-state.json")):
         payload = _read_json(path)
         if payload is None or payload.get("schema") != WORKTREE_PROVIDER_STATE_SCHEMA:
             continue
-        group = path.parent.parent.name
-        repo = _text_or_none(payload.get("repoName"))
-        settings = payload.get("isolatedProviderSettings")
-        providers = settings.get("providers") if isinstance(settings, dict) else None
-        if not isinstance(providers, list):
-            continue
-        stale = _file_age_seconds(path, now)
-        for provider in providers:
+        settings = _worktree_provider_settings(payload, settings_by_path)
+        runtime_specs = _worktree_runtime_specs(settings)
+        for spec in runtime_specs.values():
+            container_names.update(spec["resources"])
+        settings_key = _worktree_settings_key(payload)
+        if settings_key is not None:
+            runtime_specs_by_path[settings_key] = runtime_specs
+        records.append(
+            {
+                "path": path,
+                "payload": payload,
+                "settingsKey": settings_key,
+                "group": path.parent.parent.name,
+                "repo": _text_or_none(payload.get("repoName")),
+                "stale": _file_age_seconds(path, now),
+                "providers": _worktree_provider_ids(payload),
+            }
+        )
+    inspected = _inspect_containers(container_names, cwd=coordination_root)
+    nodes: list[ProviderNode] = []
+    for record in records:
+        settings_key = record["settingsKey"]
+        runtime_specs = runtime_specs_by_path.get(str(settings_key), {}) if settings_key is not None else {}
+        for provider in record["providers"]:
             provider_id = str(provider)
             nodes.append(
-                worktree_provider_node(provider_id, group=group, repo_id=repo, stale_seconds=stale)
+                worktree_provider_node(
+                    provider_id,
+                    group=record["group"],
+                    repo_id=record["repo"],
+                    stale_seconds=record["stale"],
+                    runtime=_worktree_runtime_summary(
+                        runtime_specs.get(provider_id, {}),
+                        inspected,
+                    ),
+                )
             )
     return nodes
+
+
+def _worktree_provider_ids(payload: dict[str, Any]) -> list[str]:
+    settings = payload.get("isolatedProviderSettings")
+    providers = settings.get("providers") if isinstance(settings, dict) else None
+    if not isinstance(providers, list):
+        return []
+    return [str(provider) for provider in providers]
+
+
+def _worktree_settings_key(payload: dict[str, Any]) -> str | None:
+    settings = payload.get("isolatedProviderSettings")
+    raw_path = settings.get("path") if isinstance(settings, dict) else None
+    return raw_path if isinstance(raw_path, str) and raw_path else None
+
+
+def _worktree_provider_settings(
+    payload: dict[str, Any],
+    cache: dict[str, dict[str, Any] | None],
+) -> dict[str, Any] | None:
+    raw_path = _worktree_settings_key(payload)
+    if raw_path is None:
+        return None
+    if raw_path not in cache:
+        cache[raw_path] = _read_json(Path(raw_path))
+    return cache[raw_path]
+
+
+def _worktree_runtime_specs(
+    settings: dict[str, Any] | None,
+) -> dict[str, dict[str, list[str]]]:
+    providers = _settings_providers(settings)
+    specs: dict[str, dict[str, list[str]]] = {}
+    cgc = providers.get("codegraphcontext-code")
+    if isinstance(cgc, dict):
+        specs["codegraphcontext-code"] = _cgc_runtime_spec(cgc)
+    grepai = providers.get("grepai-memory")
+    if isinstance(grepai, dict):
+        specs["grepai-memory"] = _grepai_runtime_spec(grepai)
+    return specs
+
+
+def _settings_providers(settings: dict[str, Any] | None) -> dict[str, Any]:
+    context = settings.get("contextProviders") if isinstance(settings, dict) else None
+    providers = context.get("providers") if isinstance(context, dict) else None
+    return providers if isinstance(providers, dict) else {}
+
+
+def _cgc_runtime_spec(provider: dict[str, Any]) -> dict[str, list[str]]:
+    backend = provider.get("backend")
+    runtime = provider.get("runtime")
+    runner = runtime.get("runner") if isinstance(runtime, dict) else None
+    roots = provider.get("roots")
+    watchers: list[str] = []
+    template = runner.get("containerNameTemplate") if isinstance(runner, dict) else None
+    if isinstance(template, str):
+        for root in roots if isinstance(roots, list) else []:
+            repo_id = root.get("repoId") if isinstance(root, dict) else None
+            if isinstance(repo_id, str) and repo_id:
+                watchers.append(template.replace("<repoId>", repo_id))
+    resources = _compact_strings([_container_name(backend), *watchers])
+    return {"watchers": watchers, "resources": resources}
+
+
+def _grepai_runtime_spec(provider: dict[str, Any]) -> dict[str, list[str]]:
+    runtime = provider.get("runtime")
+    runner = runtime.get("runner") if isinstance(runtime, dict) else None
+    backend = provider.get("backend")
+    embedder = provider.get("embedder")
+    embedder_backend = embedder.get("backend") if isinstance(embedder, dict) else None
+    watcher = _container_name(runner)
+    resources = _compact_strings(
+        [
+            _container_name(backend),
+            _container_name(embedder_backend),
+            watcher,
+        ]
+    )
+    return {"watchers": _compact_strings([watcher]), "resources": resources}
+
+
+def _container_name(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    name = value.get("containerName")
+    return name if isinstance(name, str) and name else None
+
+
+def _compact_strings(values: list[str | None]) -> list[str]:
+    return [value for value in values if value]
+
+
+def _inspect_containers(
+    names: set[str],
+    *,
+    cwd: Path,
+) -> dict[str, dict[str, Any] | None] | None:
+    if not names:
+        return {}
+    try:
+        docker = docker_command()
+        result = run_command(
+            [docker, "inspect", *sorted(names)],
+            cwd=cwd,
+            timeout=WORKTREE_PROVIDER_INSPECT_SECONDS,
+            allow_timeout=True,
+        )
+    except (ContextProviderError, OSError):
+        return None
+    if result.get("timedOut"):
+        return None
+    inspected = _inspect_result_map(result.get("stdout"))
+    if result.get("returncode") == 0:
+        return {name: inspected.get(name) for name in names}
+    return _inspect_containers_individually(names, cwd=cwd, docker=docker)
+
+
+def _inspect_containers_individually(
+    names: set[str],
+    *,
+    cwd: Path,
+    docker: str,
+) -> dict[str, dict[str, Any] | None] | None:
+    inspected: dict[str, dict[str, Any] | None] = {}
+    for name in sorted(names):
+        try:
+            result = run_command(
+                [docker, "inspect", name],
+                cwd=cwd,
+                timeout=WORKTREE_PROVIDER_INSPECT_SECONDS,
+                allow_timeout=True,
+            )
+        except OSError:
+            return None
+        if result.get("timedOut"):
+            return None
+        if result.get("returncode") != 0:
+            inspected[name] = None
+            continue
+        inspected[name] = _inspect_result_map(result.get("stdout")).get(name)
+    return inspected
+
+
+def _inspect_result_map(raw: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, list):
+        return {}
+    results: dict[str, dict[str, Any]] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("Name") or "").lstrip("/")
+        if name:
+            results[name] = item
+    return results
+
+
+def _worktree_runtime_summary(
+    spec: dict[str, list[str]],
+    inspected: dict[str, dict[str, Any] | None] | None,
+) -> dict[str, Any] | None:
+    resources = spec.get("resources") or []
+    if not resources or inspected is None:
+        return None
+    summaries = [docker_container_state_summary(inspected.get(name)) for name in resources]
+    running = [summary for summary in summaries if summary.get("running") is True]
+    watcher_names = spec.get("watchers") or []
+    watcher_up = bool(watcher_names) and all(
+        docker_container_state_summary(inspected.get(name)).get("running") is True
+        for name in watcher_names
+    )
+    if len(running) == len(resources):
+        state = "ready"
+    elif running:
+        state = "degraded"
+    else:
+        state = "failed"
+    return {
+        "state": state,
+        "ok": state == "ready",
+        "watcherUp": watcher_up,
+        "indexingState": "unknown",
+    }
 
 
 def read_enclosures(coordination_root: Path) -> list[EnclosureNode]:

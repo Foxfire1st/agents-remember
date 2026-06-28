@@ -261,6 +261,62 @@ describe("LifecycleList task labels", () => {
     expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='0']")).toBeTruthy();
   });
 
+  it("nests numbered leaf docs whose enclosure leaf id is shorter than the task file stem", () => {
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [lifecycle({ id: "LC-31", repoId: "agents-remember" })],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/31",
+            lifecycleId: "LC-31",
+            leafId: "31",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+            taskDoc({
+              id: "31",
+              lifecycleId: "LC-31",
+              title: "Provider State Refresh and Engine Room Honesty",
+              docPath: "/tasks/260610_browser-dashboard/31_provider-state-refresh-and-engine-room-honesty.json",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "31",
+                  name: "Provider State Refresh and Engine Room Honesty",
+                  file: "31_provider-state-refresh-and-engine-room-honesty.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-27T22:33:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    const row = getByText("31. Provider State Refresh and Engine Room Honesty");
+
+    expect(getByText("Tasks · 2")).toBeTruthy();
+    expect(row.closest("[data-depth='1']")).toBeTruthy();
+    expect(row.closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
+      "taskdoc:/tasks/260610_browser-dashboard/task.json",
+    );
+  });
+
   it("keeps standalone root task documents visible without listing loose leaf docs", () => {
     const onSelect = vi.fn();
     seed(
