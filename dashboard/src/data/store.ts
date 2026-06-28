@@ -39,6 +39,12 @@ export interface DashboardState {
   reset: () => void;
 }
 
+// The Event River keeps a bounded sliding window of the raw observer feed in memory: newest
+// retained, oldest dropped past the window. This is a memory bound for a long-lived tab (not the
+// silent newest-N display cap that masked backend overload) — the backend observer-log retention
+// is the real history bound, and EventRiver virtualizes the window so render cost stays flat.
+const EVENT_WINDOW = 2000;
+
 const byKey = <T>(items: T[], key: (item: T) => string): Record<string, T> =>
   Object.fromEntries(items.map((item) => [key(item), item]));
 
@@ -134,7 +140,11 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
     set((state) => {
       try {
         const event = JSON.parse(line) as ObserverEvent;
-        return { events: [...state.events, event], eventsHydrated: true };
+        const next = [...state.events, event];
+        // Slide the window: drop the oldest once past the bound so a long-lived tab never grows
+        // the buffer without limit.
+        const events = next.length > EVENT_WINDOW ? next.slice(next.length - EVENT_WINDOW) : next;
+        return { events, eventsHydrated: true };
       } catch {
         return {}; // ignore malformed lines; never break the feed
       }

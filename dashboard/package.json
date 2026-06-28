@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@react-three/fiber": "^9.6.1",
+    "@tanstack/react-virtual": "^3.14.4",
     "@testing-library/react": "^16.3.2",
     "@types/three": "^0.184.1",
     "@xterm/addon-fit": "^0.10.0",

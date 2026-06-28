@@ -262,6 +262,59 @@ class HeartbeatTests(unittest.TestCase):
         kinds = [event.kind for event in store.read(lc.id)]
         self.assertIn("lifecycle.heartbeat", kinds)
 
+    def test_inactive_seconds_tracks_real_activity_not_heartbeats(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        clock = [datetime(2026, 1, 1, tzinfo=UTC)]
+        amb = AmbientLifecycle(
+            store, heartbeat_seconds=3600, inactivity_cutoff_seconds=600, clock=lambda: clock[0]
+        )
+        self.addCleanup(amb.shutdown)
+        amb.start()  # lifecycle.started records the first real activity at T0
+        with amb._lock:
+            self.assertEqual(amb._inactive_seconds_locked(), 0.0)
+        clock[0] = clock[0] + timedelta(seconds=120)
+        with amb._lock:
+            self.assertEqual(amb._inactive_seconds_locked(), 120.0)
+        # A heartbeat is not activity: it must not reset the inactivity clock.
+        with amb._lock:
+            amb._emit_locked(
+                "lifecycle.heartbeat", "observed", "system", state="running", phase="request"
+            )
+        clock[0] = clock[0] + timedelta(seconds=60)
+        with amb._lock:
+            self.assertEqual(amb._inactive_seconds_locked(), 180.0)
+        # A real event resets it.
+        amb.emit_tool("ping", {"tokens": 1, "ok": True})
+        with amb._lock:
+            self.assertEqual(amb._inactive_seconds_locked(), 0.0)
+
+    def test_heartbeat_ticker_goes_quiet_when_idle_and_resumes_on_activity(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        clock = [datetime(2026, 1, 1, tzinfo=UTC)]
+        amb = AmbientLifecycle(
+            store, heartbeat_seconds=0.02, inactivity_cutoff_seconds=5.0, clock=lambda: clock[0]
+        )
+        self.addCleanup(amb.shutdown)
+        lc = amb.start()
+
+        def heartbeats() -> int:
+            return sum(1 for event in store.read(lc.id) if event.kind == "lifecycle.heartbeat")
+
+        time.sleep(0.15)
+        self.assertGreater(heartbeats(), 0)  # beats while active (age 0 < cutoff)
+        clock[0] = clock[0] + timedelta(seconds=60)  # jump past the 5s inactivity cutoff
+        time.sleep(0.1)
+        quiet = heartbeats()
+        time.sleep(0.15)
+        self.assertEqual(heartbeats(), quiet)  # no new beats while idle
+        amb.emit_tool("ping", {"tokens": 1, "ok": True})  # real activity resets the clock
+        time.sleep(0.15)
+        self.assertGreater(heartbeats(), quiet)  # the ticker resumes
+
 
 class AskTests(unittest.TestCase):
     def test_build_ask_prunes_and_returns_none_when_empty(self) -> None:

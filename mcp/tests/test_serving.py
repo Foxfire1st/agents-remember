@@ -991,6 +991,88 @@ class RawEventTests(unittest.TestCase):
         self.assertIn("quiet-1", ids)
         self.assertEqual(len([event for event in events if event.source == "noisy"]), 501)
 
+    def test_read_new_events_skips_heartbeats(self) -> None:
+        self._append(
+            "L1",
+            self._event_line("L1-1", "lifecycle.started", "2026-06-14T11:00:00+00:00"),
+            self._event_line(
+                "L1-2", "lifecycle.heartbeat", "2026-06-14T11:00:16+00:00", state="running"
+            ),
+            self._event_line("L1-3", "tool.completed", "2026-06-14T11:00:30+00:00", tool="ping"),
+        )
+        events, offsets = read_new_events(self.root, {})
+        self.assertEqual(
+            [json.loads(e.data)["kind"] for e in events],
+            ["lifecycle.started", "tool.completed"],
+        )
+        # The heartbeat is consumed (offset advanced past it), never re-read on resume.
+        again, _ = read_new_events(self.root, offsets)
+        self.assertEqual(again, [])
+
+    def test_read_new_events_limit_bounds_batch(self) -> None:
+        self._append(
+            "L1",
+            *(
+                self._event_line(f"L1-{index}", "tool.completed", "2026-06-14T11:00:00+00:00", n=index)
+                for index in range(10)
+            ),
+        )
+        first, offsets = read_new_events(self.root, {}, limit=3)
+        self.assertEqual([json.loads(e.data)["data"]["n"] for e in first], [0, 1, 2])
+        more, _ = read_new_events(self.root, offsets, limit=3)
+        self.assertEqual([json.loads(e.data)["data"]["n"] for e in more], [3, 4, 5])
+
+    def test_dormant_promoted_lifecycle_pruned_without_terminal_event(self) -> None:
+        # The keystone: an enclosure-backed (promoted) lifecycle that went quiet with NO
+        # lifecycle.ended -- and whose heartbeat kept ticking until recently -- is still
+        # retired. Retention keys on *real* activity, so the recent heartbeat does not keep
+        # the log alive; last real activity (10:30, 1.5h before now) is past the TTL.
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        dead = self._append(
+            "dead",
+            self._event_line("dead-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True),
+            self._event_line("dead-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"),
+            self._event_line("dead-3", "tool.completed", "2026-06-14T10:30:00+00:00", tool="x"),
+            self._event_line("dead-hb", "lifecycle.heartbeat", "2026-06-14T11:50:00+00:00", state="running"),
+        )
+        removed = prune_expired_lifecycle_event_logs(self.root, now=now)
+        self.assertEqual(removed, [dead])
+        self.assertFalse(dead.exists())
+
+    def test_dormant_fleeting_lifecycle_pruned_without_terminal_event(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        fleet = self._append(
+            "fleet",
+            self._event_line("fleet-1", "lifecycle.started", "2026-06-14T10:00:00+00:00", fleeting=True),
+            self._event_line("fleet-hb", "lifecycle.heartbeat", "2026-06-14T11:55:00+00:00", state="running"),
+        )
+        # Only real activity is the start at 10:00 (2h ago); the recent heartbeat is ignored.
+        self.assertEqual(prune_expired_lifecycle_event_logs(self.root, now=now), [fleet])
+
+    def test_active_lifecycle_with_recent_activity_not_pruned(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        alive = self._append(
+            "alive",
+            self._event_line("alive-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True),
+            self._event_line("alive-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"),
+            self._event_line("alive-3", "tool.completed", "2026-06-14T11:50:00+00:00", tool="x"),
+        )
+        self.assertEqual(prune_expired_lifecycle_event_logs(self.root, now=now), [])
+        self.assertTrue(alive.exists())
+
+    def test_initial_offsets_bound_active_replay_to_recent_window(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        # Active (recent activity) but with history older than the 1h replay window.
+        self._append(
+            "long",
+            self._event_line("long-start", "lifecycle.started", "2026-06-14T08:00:00+00:00", fleeting=False),
+            self._event_line("long-old", "tool.completed", "2026-06-14T09:00:00+00:00", tool="x"),
+            self._event_line("long-recent", "tool.completed", "2026-06-14T11:50:00+00:00", tool="x"),
+        )
+        offsets = initial_event_offsets(self.root, now=now)
+        events, _ = read_new_events(self.root, offsets)
+        self.assertEqual([json.loads(e.data)["id"] for e in events], ["long-recent"])
+
 
 class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -1013,6 +1095,32 @@ class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
         ready = await asyncio.wait_for(gen.__anext__(), timeout=1)
         self.assertEqual(ready.event, "ready")
         self.assertEqual(ready.data, {"ready": True})
+        await gen.aclose()
+
+    async def test_stream_does_not_emit_heartbeats(self) -> None:
+        log = self.tmp / "logs" / "observer" / "lifecycles" / "L1" / "events.jsonl"
+        log.parent.mkdir(parents=True)
+        ts = datetime.now(UTC).isoformat()
+        log.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {"id": "hb", "ts": ts, "kind": "lifecycle.heartbeat", "data": {"state": "running"}}
+                    ),
+                    json.dumps(
+                        {"id": "real", "ts": ts, "kind": "tool.completed", "data": {"tool": "ping"}}
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gen = stream_raw_events(_config(self.tmp), interval=0.01)
+        first = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(first.event, "event")
+        self.assertEqual(first.data["kind"], "tool.completed")
+        ready = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(ready.event, "ready")
         await gen.aclose()
 
     async def test_invalid_cursor_uses_retained_fresh_offsets(self) -> None:

@@ -1,5 +1,5 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import type { ObserverEvent } from "../types/event";
@@ -10,6 +10,28 @@ import type {
   TaskDocNode,
 } from "../types/projection";
 import { EventRiver } from "./EventRiver";
+
+// The Event River list is virtualized (TanStack), which mounts only the rows whose positions fall
+// inside the scroll viewport. TanStack measures the viewport and rows from offsetWidth/offsetHeight,
+// which jsdom reports as 0 (no layout), so nothing would mount. Give every box a non-zero size so a
+// real viewport + measured rows let the newest window of rows mount and be asserted; off-screen rows
+// stay virtualized out (the no-cap behaviour is asserted via the retained count in the header).
+const sizedBox: Record<string, PropertyDescriptor | undefined> = {};
+beforeAll(() => {
+  for (const [prop, value] of [
+    ["offsetHeight", 600],
+    ["offsetWidth", 320],
+  ] as const) {
+    sizedBox[prop] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop);
+    Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get: () => value });
+  }
+});
+afterAll(() => {
+  for (const prop of ["offsetHeight", "offsetWidth"]) {
+    const original = sizedBox[prop];
+    if (original) Object.defineProperty(HTMLElement.prototype, prop, original);
+  }
+});
 
 afterEach(cleanup);
 beforeEach(() =>
@@ -164,7 +186,7 @@ describe("EventRiver readable activity feed", () => {
     expect(title).toContain("c/three.py");
   });
 
-  it("renders events beyond the old newest-60 display window", () => {
+  it("retains and virtualizes the full window beyond the old newest-60 cap", () => {
     dashboardStore.setState({
       events: [
         ev({
@@ -182,7 +204,9 @@ describe("EventRiver readable activity feed", () => {
       ],
     });
     const { getByText } = render(<EventRiver />);
-    expect(getByText("Read: first.py")).not.toBeNull();
+    // The whole window is retained and counted (no newest-N display slice); the newest row mounts.
+    // Off-screen rows are virtualized out of the DOM, not dropped from the feed.
+    expect(getByText(/Event river · 66/)).not.toBeNull();
     expect(getByText("Read: file-64.py")).not.toBeNull();
   });
 

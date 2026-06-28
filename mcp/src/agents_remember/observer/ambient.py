@@ -8,7 +8,9 @@ the ``_tool_payload`` choke point via :func:`ambient`. The singleton owns:
 * the signal state machine (start/block/resume/end/switch/phase),
 * event emission (signals ``declared``; the tool choke point ``observed``),
 * a heartbeat ticker that generalizes the ``setup_progress`` daemon-thread idiom
-  so a dead session is detectable by a stale last heartbeat, and
+  so a dead session is detectable by a stale last heartbeat -- and which goes
+  quiet after a span of no real activity, so an idle/parked lifecycle's log ages
+  out and becomes cleanable instead of being kept alive by its own keepalive, and
 * an opportunistic project-and-prune TTL sweep for dormant fleeting lifecycles.
 
 The state *types* live in :mod:`agents_remember.observer.lifecycle_state`; this
@@ -59,6 +61,13 @@ IdFactory = Callable[[], str]
 # caller (the privacy invariant is this projection, not Event's ``extra``).
 _READ_PACKET_FACTS = ("path", "lines", "status", "bytes")
 
+# A heartbeat reflects *activity*, not mere process liveness: after this long with no
+# real (non-heartbeat) event the ticker goes quiet so a parked/idle lifecycle's log ages
+# out and becomes cleanable instead of being held alive by its own keepalive. It resumes
+# emitting the moment real activity returns.
+INACTIVITY_CUTOFF_SECONDS = 10 * 60
+_HEARTBEAT_KIND = "lifecycle.heartbeat"
+
 
 def _default_clock() -> datetime:
     return datetime.now(UTC)
@@ -78,6 +87,7 @@ class AmbientLifecycle:
         *,
         heartbeat_seconds: float = HEARTBEAT_SECONDS,
         ttl_seconds: float = TTL_SECONDS,
+        inactivity_cutoff_seconds: float = INACTIVITY_CUTOFF_SECONDS,
         clock: Clock = _default_clock,
         id_factory: IdFactory = new_ulid,
         served_store: ServedStore | None = None,
@@ -85,6 +95,9 @@ class AmbientLifecycle:
         self._store = store
         self._heartbeat_seconds = heartbeat_seconds
         self._ttl_seconds = ttl_seconds
+        self._inactivity_cutoff_seconds = inactivity_cutoff_seconds
+        # ISO ts of the last real (non-heartbeat) event; gates the heartbeat ticker.
+        self._last_activity_iso: str | None = None
         self._clock = clock
         self._mint = id_factory
         self._lock = threading.Lock()
@@ -479,10 +492,15 @@ class AmbientLifecycle:
         current = self.current
         if current is None:  # pragma: no cover - guarded by callers
             return
+        ts = self._now()
+        if kind != _HEARTBEAT_KIND:
+            # Heartbeats are liveness theater, not activity; only real events keep the
+            # ticker alive (and reset the inactivity clock retention reads).
+            self._last_activity_iso = ts
         self._store.append(
             Event(
                 id=self._mint(),
-                ts=self._now(),
+                ts=ts,
                 kind=kind,
                 trust=trust,
                 actor=actor,
@@ -519,6 +537,11 @@ class AmbientLifecycle:
                 current = self.current
                 if current is None or current.is_terminal:
                     return
+                if self._inactive_seconds_locked() > self._inactivity_cutoff_seconds:
+                    # Idle past the cutoff: stop the heartbeat theater so the log ages out
+                    # and becomes cleanable. The ticker keeps looping and resumes emitting
+                    # the moment a real event resets the activity clock.
+                    continue
                 self._emit_locked(
                     "lifecycle.heartbeat",
                     "observed",
@@ -526,6 +549,14 @@ class AmbientLifecycle:
                     state=current.state,
                     phase=current.phase,
                 )
+
+    def _inactive_seconds_locked(self) -> float:
+        """Seconds since the last real (non-heartbeat) event for the current lifecycle."""
+        last = self._last_activity_iso
+        if last is None:
+            return 0.0
+        age = age_seconds(last, self._clock())
+        return age if age is not None else 0.0
 
     # --- TTL project-and-prune sweep ---------------------------------------
 

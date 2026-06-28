@@ -19,6 +19,21 @@ beforeEach(() => {
 });
 
 describe("dashboard store", () => {
+  it("slides the event window so the buffer never grows without bound", () => {
+    dashboardStore.setState({ events: [], eventsHydrated: false });
+    const total = 2100;
+    for (let i = 0; i < total; i += 1) {
+      dashboardStore
+        .getState()
+        .pushEvent(JSON.stringify({ id: `e-${i}`, kind: "tool.completed", data: {} }));
+    }
+    const { events, eventsHydrated } = dashboardStore.getState();
+    expect(eventsHydrated).toBe(true);
+    expect(events.length).toBe(2000); // bounded sliding window, not unbounded growth
+    expect(events[events.length - 1].id).toBe("e-2099"); // newest retained
+    expect(events[0].id).toBe("e-100"); // oldest beyond the window slid off
+  });
+
   it("folds a snapshot into id-keyed maps and goes live", () => {
     dashboardStore.getState().applySnapshot(projection);
     const state = dashboardStore.getState();
