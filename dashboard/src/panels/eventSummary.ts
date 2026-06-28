@@ -142,6 +142,21 @@ export function summarizeEvent(
   }
 }
 
+export function eventSummaryContextReady(
+  event: ObserverEvent,
+  context: EventSummaryContext,
+): boolean {
+  if (event.lifecycleId) {
+    if (context.lifecycles[event.lifecycleId]) return true;
+    if (event.enclosure && context.enclosures[event.enclosure]) return true;
+    return (context.taskDocsByLifecycle.get(event.lifecycleId) ?? []).length > 0;
+  }
+  if (event.enclosure) {
+    return Boolean(context.enclosures[event.enclosure]);
+  }
+  return true;
+}
+
 export function formatEventTime(ts: string | undefined): string {
   if (!ts) return "-";
   const date = new Date(ts);

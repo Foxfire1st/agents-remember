@@ -24,11 +24,16 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi.sse import ServerSentEvent
 
+from agents_remember.observer.event_retention import (
+    initial_event_offsets,
+    prune_expired_lifecycle_event_logs,
+)
 from agents_remember.observer.paths import observer_root
 
 if TYPE_CHECKING:
@@ -148,8 +153,12 @@ async def stream_raw_events(
 ) -> AsyncGenerator[ServerSentEvent]:
     """Emit raw ``event`` SSE records, resuming from ``last_event_id`` then tailing new lines."""
     root = observer_root(config)
-    offsets = decode_cursor(last_event_id)
+    now = datetime.now(UTC)
+    prune_expired_lifecycle_event_logs(root, now=now)
+    cursor_offsets = decode_cursor(last_event_id)
+    offsets = cursor_offsets or initial_event_offsets(root, now=now)
     while True:
+        prune_expired_lifecycle_event_logs(root, now=datetime.now(UTC))
         events, offsets = await asyncio.to_thread(read_new_events, root, offsets)
         for event in events:
             # ServerSentEvent JSON-encodes whatever it is given (the state channel passes dicts),

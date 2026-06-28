@@ -5,6 +5,7 @@ import type { ObserverEvent } from "../types/event";
 import {
   actorLabel,
   buildEventSummaryContext,
+  eventSummaryContextReady,
   formatEventTime,
   summarizeEvent,
   trustLabel,
@@ -48,7 +49,11 @@ export function EventRiver() {
   const recent = events
     .slice(-60)
     .reverse()
-    .map((event) => ({ event, summary: summarizeEvent(event, summaryContext) }))
+    .flatMap((event) =>
+      eventSummaryContextReady(event, summaryContext)
+        ? [{ event, summary: summarizeEvent(event, summaryContext) }]
+        : [],
+    )
     .filter(({ summary }) => summary.visibility !== "hidden");
   return (
     <Panel testid="event-river" title={`Event river · ${events.length}`} className={sizing}>

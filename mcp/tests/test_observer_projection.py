@@ -59,6 +59,8 @@ from agents_remember.observer.projection import (
     WorkspaceProjection,
 )
 from agents_remember.observer.projection_store import (
+    _gather_repo_surfaces_cached,
+    _repo_surface_cache,
     project_and_write,
     read_lifecycle_logs,
     write_projection,
@@ -94,6 +96,10 @@ from agents_remember.observer.snapshots import (
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
+from agents_remember.observer.worktree_provider_admission import (
+    active_enclosure_worktree_groups,
+    admitted_worktree_groups,
+)
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
 from agents_remember.tasks import TaskDocument, write_task_doc
@@ -158,6 +164,98 @@ def _enclosure(**overrides: str) -> EnclosureNode:
     }
     base.update(overrides)
     return EnclosureNode.model_validate(base)
+
+
+class WorktreeProviderAdmissionTests(unittest.TestCase):
+    def test_admits_active_enclosure_backed_build_lifecycle(self) -> None:
+        enclosures = [
+            _enclosure(
+                lifecycleId="LC1",
+                worktreeGroup="/coord/worktrees/repo/active-ar",
+                closeoutStatus="not-started",
+                integrationStatus="not-started",
+                cleanup="pending",
+            )
+        ]
+        logs = [[_started(phase="build", lifecycle_id="LC1")]]
+
+        self.assertEqual(admitted_worktree_groups(enclosures, logs, now=FRESH), {"active-ar"})
+
+    def test_rejects_parked_terminal_and_non_provider_phase_groups(self) -> None:
+        enclosures = [
+            _enclosure(
+                lifecycleId="LC1",
+                worktreeGroup="/coord/worktrees/repo/active-ar",
+                closeoutStatus="not-started",
+                integrationStatus="not-started",
+                cleanup="pending",
+            ),
+            _enclosure(
+                lifecycleId="LC2",
+                worktreeGroup="/coord/worktrees/repo/parked-ar",
+                closeoutStatus="completed",
+                integrationStatus="not-started",
+                cleanup="pending",
+            ),
+            _enclosure(
+                lifecycleId="LC3",
+                worktreeGroup="/coord/worktrees/repo/terminal-ar",
+                closeoutStatus="not-started",
+                integrationStatus="not-started",
+                cleanup="pending",
+            ),
+            _enclosure(
+                lifecycleId="LC4",
+                worktreeGroup="/coord/worktrees/repo/close-ar",
+                closeoutStatus="not-started",
+                integrationStatus="not-started",
+                cleanup="pending",
+            ),
+        ]
+        logs = [
+            [_started(phase="build", lifecycle_id="LC1")],
+            [_started(phase="build", lifecycle_id="LC2")],
+            [
+                _started(phase="build", lifecycle_id="LC3"),
+                _event("lifecycle.ended", lifecycle_id="LC3", outcome="completed"),
+            ],
+            [
+                _started(phase="build", lifecycle_id="LC4"),
+                _event("lifecycle.phase-changed", lifecycle_id="LC4", phase="close"),
+            ],
+        ]
+
+        self.assertEqual(admitted_worktree_groups(enclosures, logs, now=FRESH), {"active-ar"})
+
+    def test_active_enclosure_groups_keep_nonterminal_close_phase_for_engine_room(self) -> None:
+        enclosures = [
+            _enclosure(
+                lifecycleId="LC1",
+                worktreeGroup="/coord/worktrees/repo/close-ar",
+                closeoutStatus="completed",
+                integrationStatus="not-started",
+                cleanup="pending",
+            ),
+            _enclosure(
+                lifecycleId="LC2",
+                worktreeGroup="/coord/worktrees/repo/done-ar",
+                closeoutStatus="completed",
+                integrationStatus="completed",
+                cleanup="pending",
+            ),
+        ]
+        logs = [
+            [
+                _started(phase="build", lifecycle_id="LC1"),
+                _event("lifecycle.phase-changed", lifecycle_id="LC1", phase="close"),
+            ],
+            [
+                _started(phase="build", lifecycle_id="LC2"),
+                _event("lifecycle.ended", lifecycle_id="LC2", outcome="completed"),
+            ],
+        ]
+
+        self.assertEqual(active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"close-ar"})
 
 
 class FoldTests(unittest.TestCase):
@@ -994,6 +1092,34 @@ class SnapshotReaderTests(unittest.TestCase):
         self.assertEqual(code.state, "configured")
         self.assertEqual(nodes["grepai-memory@260612-x-ar"].role, "memory")
 
+    def test_read_providers_ignores_unadmitted_worktree_stacks(self) -> None:
+        config = self._config()
+        runtime = (
+            config.coordination_root
+            / "worktrees"
+            / "device-management"
+            / "parked-ar"
+            / "provider-runtime"
+        )
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / "provider-state.json").write_text(
+            json.dumps(
+                {
+                    "schema": "ar-worktree-provider-state/v1",
+                    "repoName": "device-management",
+                    "worktreeGroup": str(runtime.parent),
+                    "isolatedProviderSettings": {
+                        "providers": ["codegraphcontext-code", "grepai-memory"]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        nodes = read_providers(config, now=FRESH, active_worktree_groups=set())
+
+        self.assertEqual(nodes, [])
+
     def test_read_providers_marks_worktree_stack_ready_from_live_containers(self) -> None:
         config = self._config()
         coord = config.coordination_root
@@ -1055,7 +1181,12 @@ class SnapshotReaderTests(unittest.TestCase):
             "agents_remember.observer.snapshots._inspect_containers",
             return_value={name: inspected(name) for name in names},
         ) as inspect:
-            nodes = {node.id: node for node in read_providers(config, now=FRESH)}
+            nodes = {
+                node.id: node
+                for node in read_providers(
+                    config, now=FRESH, active_worktree_groups={"260612-x-ar"}
+                )
+            }
 
         self.assertEqual(inspect.call_args.args[0], names)
         code = nodes["codegraphcontext-code@260612-x-ar"]
@@ -1767,6 +1898,22 @@ class SetupProgressReaderTests(unittest.TestCase):
         self.assertEqual(node.state, "stale")
         self.assertEqual(node.currentPhase, "cgc index")
 
+    def test_active_group_filter_skips_parked_progress(self) -> None:
+        self._write(
+            "grp-parked",
+            {
+                "state": "running",
+                "startedAt": T0,
+                "updatedAt": T0,
+                "currentPhase": {"provider": "cgc", "action": "index", "startedAt": T0},
+                "completedPhases": [],
+            },
+        )
+
+        nodes = read_setup_progress_nodes(self.coord, now=FRESH, active_worktree_groups=set())
+
+        self.assertEqual(nodes, [])
+
     def test_absent_is_empty(self) -> None:
         self.assertEqual(read_setup_progress_nodes(self.coord, now=FRESH), [])
 
@@ -2127,6 +2274,49 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
             (observer_root(config) / "latest-state.json").read_text(encoding="utf-8")
         )
         self.assertIn("analytics", state)
+
+    def test_repo_surface_cache_reuses_recent_repo_reads(self) -> None:
+        config = self._config()
+        _repo_surface_cache.clear()
+        self.addCleanup(_repo_surface_cache.clear)
+        first = ([], [], [])
+        refreshed = ([], [], [])
+        with mock.patch(
+            "agents_remember.observer.projection_store._gather_repo_surfaces",
+            side_effect=[first, refreshed],
+        ) as gather:
+            one = _gather_repo_surfaces_cached(config, FRESH)
+            two = _gather_repo_surfaces_cached(
+                config, datetime(2026, 6, 13, 18, 0, 40, tzinfo=UTC)
+            )
+            three = _gather_repo_surfaces_cached(
+                config, datetime(2026, 6, 13, 18, 0, 46, tzinfo=UTC)
+            )
+
+        self.assertIs(one, first)
+        self.assertIs(two, first)
+        self.assertIs(three, refreshed)
+        self.assertEqual(gather.call_count, 2)
+
+    def test_project_and_write_keeps_provider_reads_on_fast_path_with_cached_surfaces(self) -> None:
+        config = self._config()
+        _repo_surface_cache.clear()
+        self.addCleanup(_repo_surface_cache.clear)
+        with (
+            mock.patch(
+                "agents_remember.observer.projection_store._gather_repo_surfaces",
+                return_value=([], [], []),
+            ) as gather,
+            mock.patch(
+                "agents_remember.observer.projection_store.read_providers",
+                return_value=[],
+            ) as providers,
+        ):
+            project_and_write(config, now=FRESH)
+            project_and_write(config, now=datetime(2026, 6, 13, 18, 0, 40, tzinfo=UTC))
+
+        self.assertEqual(gather.call_count, 1)
+        self.assertEqual(providers.call_count, 2)
 
     def test_project_and_write_prunes_orphaned_worktree_drift_snapshots(self) -> None:
         config = self._config()
@@ -2910,6 +3100,33 @@ class EngineProcessTests(unittest.TestCase):
             self.assertEqual(len(facts), 1)
             self.assertEqual(facts[0].contract["task_name"], "demo task")
             self.assertIn("phase", facts[0].guidance)
+
+    def test_reader_skips_inactive_engine_process_groups_when_filtered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = default_contract(
+                task_name="demo task",
+                repo_name="r",
+                workflow_kind="light",
+                memory_mode="disabled",
+                coordination_root=root,
+                code_repo_path=root / "repo",
+                code_source_branch="main",
+                code_work_branch="ar/x",
+                code_base_commit="abc",
+                worktree_name="demo-wt",
+            )
+            contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+            write_contract(contract.contract_path, contract)
+
+            self.assertEqual(
+                read_engine_process_facts(root, active_worktree_groups={"other-group"}), []
+            )
+            facts = read_engine_process_facts(
+                root, active_worktree_groups={contract.worktree_group.name}
+            )
+
+            self.assertEqual(len(facts), 1)
 
     def test_start_progress_synthesizes_pre_contract_node(self) -> None:
         entry = {

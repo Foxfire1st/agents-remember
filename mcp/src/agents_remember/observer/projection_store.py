@@ -16,12 +16,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
 from agents_remember.observer.drift_snapshots import prune_orphaned_drift_snapshots
+from agents_remember.observer.event_retention import prune_expired_lifecycle_event_logs
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.paths import observer_root
@@ -51,6 +53,10 @@ from agents_remember.observer.snapshots import (
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
+from agents_remember.observer.worktree_provider_admission import (
+    active_enclosure_worktree_groups,
+    admitted_worktree_groups,
+)
 from agents_remember.providers.status import refresh_current_provider_state
 
 if TYPE_CHECKING:
@@ -59,8 +65,18 @@ if TYPE_CHECKING:
 LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
 PROVIDER_REFRESH_TTL_SECONDS = 10.0
+REPO_SURFACE_REFRESH_TTL_SECONDS = 15.0
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _RepoSurfaceCacheEntry:
+    at: datetime
+    value: tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]
+
+
+_repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEntry] = {}
 
 
 def read_lifecycle_logs(root: Path) -> list[list[Event]]:
@@ -132,28 +148,36 @@ def project_and_write(
     moment = now or datetime.now(UTC)
     root = observer_root(config)
     coordination_root = config.coordination_root
-    sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces(config, moment)
+    prune_expired_lifecycle_event_logs(root, now=moment)
+    lifecycle_logs = read_lifecycle_logs(root)
+    sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces_cached(config, moment)
     enclosures = read_enclosures(coordination_root)
+    provider_groups = admitted_worktree_groups(enclosures, lifecycle_logs, now=moment)
+    engine_groups = active_enclosure_worktree_groups(enclosures, lifecycle_logs, now=moment)
     prune_orphaned_drift_snapshots(config)
     if provider_refresher is not None:
         provider_refresher.maybe_refresh(config, now=moment)
     attention_store = AttentionDismissalStore(root)
     projection = project_workspace(
-        read_lifecycle_logs(root),
+        lifecycle_logs,
         enclosures=enclosures,
-        providers=read_providers(config, now=moment),
+        providers=read_providers(config, now=moment, active_worktree_groups=provider_groups),
         now=moment,
         drift_snapshots=read_drift_snapshots(coordination_root, now=moment),
         sidecar_staleness=sidecar_staleness,
         setup_summaries=read_setup_summaries(coordination_root, now=moment),
-        setup_progress=read_setup_progress_nodes(coordination_root, now=moment),
+        setup_progress=read_setup_progress_nodes(
+            coordination_root, now=moment, active_worktree_groups=provider_groups
+        ),
         route_coverage=route_coverage,
         tool_reports=read_tool_reports(coordination_root, now=moment),
         agent_pickups=read_agent_pickups(coordination_root, now=moment),
         ledgers=ledgers,
         task_documents=read_task_documents(coordination_root, enclosures=enclosures, now=moment),
         series=read_series_documents(coordination_root, now=moment),
-        engine_process_facts=read_engine_process_facts(coordination_root),
+        engine_process_facts=read_engine_process_facts(
+            coordination_root, active_worktree_groups=engine_groups
+        ),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
         gates=read_gates(coordination_root, now=moment),
         attention_dismissals=attention_store.current(),
@@ -188,6 +212,33 @@ def _gather_repo_surfaces(
         if ledger is not None:
             ledgers.append(ledger)
     return sidecar_staleness, route_coverage, ledgers
+
+
+def _gather_repo_surfaces_cached(
+    config: McpRuntimeConfig, moment: datetime
+) -> tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]:
+    key = _repo_surface_cache_key(config)
+    entry = _repo_surface_cache.get(key)
+    if entry is not None:
+        age = (moment - entry.at).total_seconds()
+        if 0 <= age < REPO_SURFACE_REFRESH_TTL_SECONDS:
+            return entry.value
+    value = _gather_repo_surfaces(config, moment)
+    _repo_surface_cache[key] = _RepoSurfaceCacheEntry(at=moment, value=value)
+    return value
+
+
+def _repo_surface_cache_key(config: McpRuntimeConfig) -> tuple[tuple[str, str, str], ...]:
+    rows: list[tuple[str, str, str]] = []
+    for repo_id, scope in sorted(config.repositories.items()):
+        rows.append(
+            (
+                repo_id,
+                scope.path.as_posix(),
+                scope.memory_root.as_posix() if scope.memory_root is not None else "",
+            )
+        )
+    return tuple(rows)
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

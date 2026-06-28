@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -39,6 +40,10 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.config import ConfigError, McpRuntimeConfig
+from agents_remember.observer.event_retention import (
+    initial_event_offsets,
+    prune_expired_lifecycle_event_logs,
+)
 from agents_remember.observer.lifecycle_state import State
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import (
@@ -774,6 +779,20 @@ class RawEventTests(unittest.TestCase):
                 handle.write(line + "\n")
         return path
 
+    def _event_line(self, ident: str, kind: str, ts: str, **data: object) -> str:
+        return json.dumps(
+            {
+                "schema": "ar-observer-event/v1",
+                "id": ident,
+                "ts": ts,
+                "kind": kind,
+                "trust": "observed",
+                "actor": "system",
+                "lifecycleId": ident.split("-", maxsplit=1)[0],
+                "data": data,
+            }
+        )
+
     def test_cursor_round_trip(self) -> None:
         offsets = {"L1": 42, "workspace": 7}
         self.assertEqual(decode_cursor(encode_cursor(offsets)), offsets)
@@ -817,6 +836,112 @@ class RawEventTests(unittest.TestCase):
             [(e.source, e.data) for e in events], [("L1", '{"a":1}'), ("workspace", '{"w":1}')]
         )
 
+    def test_fresh_connection_offsets_skip_expired_terminal_lifecycles(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        old = self._append(
+            "old",
+            self._event_line("old-1", "lifecycle.started", "2026-06-14T09:00:00+00:00"),
+            self._event_line(
+                "old-2",
+                "lifecycle.ended",
+                "2026-06-14T09:30:00+00:00",
+                outcome="completed",
+            ),
+        )
+        self._append("active", self._event_line("active-1", "lifecycle.started", "2026-06-14T11:00:00+00:00"))
+        self._append(
+            "recent",
+            self._event_line("recent-1", "lifecycle.started", "2026-06-14T11:00:00+00:00"),
+            self._event_line(
+                "recent-2",
+                "lifecycle.ended",
+                "2026-06-14T11:30:00+00:00",
+                outcome="completed",
+            ),
+        )
+
+        offsets = initial_event_offsets(self.root, now=now)
+        events, _ = read_new_events(self.root, offsets)
+
+        self.assertEqual(offsets["old"], old.stat().st_size)
+        self.assertEqual({event.source for event in events}, {"active", "recent"})
+
+    def test_prunes_expired_terminal_lifecycle_event_logs(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        old = self._append(
+            "old",
+            self._event_line("old-1", "lifecycle.started", "2026-06-14T09:00:00+00:00"),
+            self._event_line(
+                "old-2",
+                "lifecycle.ended",
+                "2026-06-14T09:30:00+00:00",
+                outcome="completed",
+            ),
+        )
+        recent = self._append(
+            "recent",
+            self._event_line("recent-1", "lifecycle.started", "2026-06-14T11:00:00+00:00"),
+            self._event_line(
+                "recent-2",
+                "lifecycle.ended",
+                "2026-06-14T11:30:00+00:00",
+                outcome="completed",
+            ),
+        )
+
+        removed = prune_expired_lifecycle_event_logs(self.root, now=now)
+
+        self.assertEqual(removed, [old])
+        self.assertFalse(old.exists())
+        self.assertTrue(recent.exists())
+
+    def test_fresh_connection_offsets_workspace_events_by_age(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        workspace = self.root / "workspace" / "events.jsonl"
+        workspace.parent.mkdir(parents=True)
+        workspace.write_text(
+            "\n".join(
+                [
+                    self._event_line("ws-1", "provider.status", "2026-06-14T09:00:00+00:00"),
+                    self._event_line("ws-2", "provider.status", "2026-06-14T11:30:00+00:00"),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        events, _ = read_new_events(self.root, initial_event_offsets(self.root, now=now))
+
+        self.assertEqual([json.loads(event.data)["id"] for event in events], ["ws-2"])
+
+    def test_fresh_connection_does_not_cap_parallel_active_lifecycle_history(self) -> None:
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        noisy = tuple(
+            self._event_line(
+                f"noisy-{index}",
+                "tool.completed",
+                "2026-06-14T11:30:00+00:00",
+                tool="noop",
+                ok=True,
+            )
+            for index in range(500)
+        )
+        self._append(
+            "noisy",
+            self._event_line("noisy-start", "lifecycle.started", "2026-06-14T11:00:00+00:00"),
+            *noisy,
+        )
+        self._append(
+            "quiet",
+            self._event_line("quiet-1", "lifecycle.started", "2026-06-14T11:05:00+00:00"),
+        )
+
+        events, _ = read_new_events(self.root, initial_event_offsets(self.root, now=now))
+        ids = {json.loads(event.data)["id"] for event in events}
+
+        self.assertIn("quiet-1", ids)
+        self.assertEqual(len([event for event in events if event.source == "noisy"]), 501)
+
 
 class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -836,6 +961,25 @@ class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
         # The line is parsed to an object so ServerSentEvent single-encodes it (matching the
         # state channel); emitting the raw JSON string would double-encode the SSE wire.
         self.assertEqual(first.data, {"a": 1})
+        await gen.aclose()
+
+    async def test_invalid_cursor_uses_retained_fresh_offsets(self) -> None:
+        log = self.tmp / "logs" / "observer" / "workspace" / "events.jsonl"
+        log.parent.mkdir(parents=True)
+        recent = datetime.now(UTC).isoformat()
+        log.write_text(
+            "\n".join(
+                [
+                    json.dumps({"id": "old", "ts": "2000-01-01T00:00:00+00:00"}),
+                    json.dumps({"id": "recent", "ts": recent}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        gen = stream_raw_events(_config(self.tmp), interval=0.01, last_event_id="not-base64")
+        first = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(first.data["id"], "recent")
         await gen.aclose()
 
 

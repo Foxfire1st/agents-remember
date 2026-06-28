@@ -124,6 +124,7 @@ describe("EventRiver readable activity feed", () => {
           },
         }),
       ],
+      lifecycles: { "lc-1": lifecycle({ id: "lc-1" }) },
     });
     const { getByText } = render(<EventRiver />);
     const label = getByText("Read: contracts.py");
@@ -161,6 +162,7 @@ describe("EventRiver readable activity feed", () => {
           data: { tool: "context_packet", ok: true, tokens: 1234 },
         }),
       ],
+      lifecycles: { "lc-1": lifecycle({ id: "lc-1" }) },
     });
     const { getByText } = render(<EventRiver />);
     expect(getByText("Checked workspace context")).not.toBeNull();
@@ -169,6 +171,33 @@ describe("EventRiver readable activity feed", () => {
     expect(item?.textContent).toContain("observed");
     expect(item?.textContent).toContain("ok");
     expect(item?.textContent).toContain("1,234 tokens");
+  });
+
+  it("waits for lifecycle summary context before rendering lifecycle-bound rows", () => {
+    dashboardStore.setState({
+      events: [
+        ev({
+          kind: "tool.completed",
+          lifecycleId: "lc-loading",
+          data: { tool: "worktree_status", ok: true },
+        }),
+      ],
+    });
+    const view = render(<EventRiver />);
+    expect(view.queryByText("Checked worktree status")).toBeNull();
+
+    dashboardStore.setState({
+      analytics: analyticsWithTaskDocuments([
+        taskDoc({
+          docPath: "29_event-river-retention-and-projection-freshness.json",
+          lifecycleId: "lc-loading",
+          title: "Event River Retention And Projection Freshness",
+        }),
+      ]),
+    });
+    view.rerender(<EventRiver />);
+
+    expect(view.getByText("Checked worktree status")).not.toBeNull();
   });
 
   it("shows the destination phase for lifecycle.phase-changed", () => {
@@ -251,7 +280,7 @@ describe("EventRiver readable activity feed", () => {
   });
 
   it("falls back honestly to unknown raw event kinds", () => {
-    dashboardStore.setState({ events: [ev({ kind: "custom.unhandled", lifecycleId: "lc-1" })] });
+    dashboardStore.setState({ events: [ev({ kind: "custom.unhandled" })] });
     const { getByText } = render(<EventRiver />);
     expect(getByText("custom.unhandled")).not.toBeNull();
   });

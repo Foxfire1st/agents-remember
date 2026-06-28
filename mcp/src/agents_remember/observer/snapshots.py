@@ -109,17 +109,24 @@ WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
 WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 
 
-def read_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderNode]:
-    """Surfaces 1 + 4: the workspace provider snapshot **plus** each worktree's isolated stack.
+def read_providers(
+    config: McpRuntimeConfig,
+    *,
+    now: datetime,
+    active_worktree_groups: set[str] | None = None,
+) -> list[ProviderNode]:
+    """Surfaces 1 + 4: the workspace provider snapshot plus admitted worktree stacks.
 
     Surface 1 is the workspace ``current.json`` (one call-triggered snapshot; its age is surfaced
-    via ``snapshotStaleSeconds`` rather than faked live). Surface 4 is every worktree group's
+    via ``snapshotStaleSeconds`` rather than faked live). Surface 4 is an active worktree group's
     ``provider-runtime/provider-state.json`` -- the isolated CGC (code repo) + GrepAI (memory repo)
     stack a worktree spawns at start -- bound to its worktree group + repo + role, so the engine
-    room shows each worktree's own engines instead of only main's (the gap note 03 flagged).
+    room ignores parked worktrees and completed lifecycles whose providers are no longer live.
     """
     return _workspace_providers(config, now=now) + _worktree_providers(
-        config.coordination_root, now=now
+        config.coordination_root,
+        now=now,
+        active_worktree_groups=active_worktree_groups,
     )
 
 
@@ -135,7 +142,12 @@ def _workspace_providers(config: McpRuntimeConfig, *, now: datetime) -> list[Pro
     return workspace_provider_nodes(providers, stale_seconds=stale)
 
 
-def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[ProviderNode]:
+def _worktree_providers(
+    coordination_root: Path,
+    *,
+    now: datetime,
+    active_worktree_groups: set[str] | None,
+) -> list[ProviderNode]:
     """Surface 4: each worktree group's isolated provider stack, bound to its worktree + repo."""
     worktrees_root = coordination_root / "worktrees"
     if not worktrees_root.is_dir():
@@ -145,6 +157,9 @@ def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[Provi
     settings_by_path: dict[str, dict[str, Any] | None] = {}
     runtime_specs_by_path: dict[str, dict[str, dict[str, list[str]]]] = {}
     for path in sorted(worktrees_root.glob("*/*/provider-runtime/provider-state.json")):
+        group = path.parent.parent.name
+        if active_worktree_groups is not None and group not in active_worktree_groups:
+            continue
         payload = _read_json(path)
         if payload is None or payload.get("schema") != WORKTREE_PROVIDER_STATE_SCHEMA:
             continue
@@ -160,7 +175,7 @@ def _worktree_providers(coordination_root: Path, *, now: datetime) -> list[Provi
                 "path": path,
                 "payload": payload,
                 "settingsKey": settings_key,
-                "group": path.parent.parent.name,
+                "group": group,
                 "repo": _text_or_none(payload.get("repoName")),
                 "stale": _file_age_seconds(path, now),
                 "providers": _worktree_provider_ids(payload),
@@ -478,7 +493,11 @@ def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentP
     return sorted(pickups, key=lambda item: item.ageSeconds or 0.0, reverse=True)
 
 
-def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFacts]:
+def read_engine_process_facts(
+    coordination_root: Path,
+    *,
+    active_worktree_groups: set[str] | None = None,
+) -> list[EngineProcessFacts]:
     """Slice 5e: gather one fact bundle per leaf enclosure for the Engine Room map.
 
     Globs the same leaf enclosure files as :func:`read_enclosures`, but
@@ -495,6 +514,11 @@ def read_engine_process_facts(coordination_root: Path) -> list[EngineProcessFact
         try:
             contract = load_contract(path)
         except (ContractError, OSError):
+            continue
+        if (
+            active_worktree_groups is not None
+            and contract.worktree_group.name not in active_worktree_groups
+        ):
             continue
         cp = contract_payload(contract)
         ledger_rows, ledger_total = _ledger_window(
@@ -751,7 +775,12 @@ def read_setup_summaries(coordination_root: Path, *, now: datetime) -> list[Setu
     return nodes
 
 
-def read_setup_progress_nodes(coordination_root: Path, *, now: datetime) -> list[SetupProgressNode]:
+def read_setup_progress_nodes(
+    coordination_root: Path,
+    *,
+    now: datetime,
+    active_worktree_groups: set[str] | None = None,
+) -> list[SetupProgressNode]:
     """Surface 3: each worktree group's live provider-setup progress.
 
     Projected through the producer's own ``progress_status`` so a ``running`` group
@@ -762,6 +791,9 @@ def read_setup_progress_nodes(coordination_root: Path, *, now: datetime) -> list
         return []
     nodes: list[SetupProgressNode] = []
     for path in sorted(worktrees_root.glob("*/*/provider-runtime/setup-progress.json")):
+        group = path.parent.parent.name
+        if active_worktree_groups is not None and group not in active_worktree_groups:
+            continue
         progress = read_setup_progress(path)
         if progress is None:
             continue
@@ -769,7 +801,7 @@ def read_setup_progress_nodes(coordination_root: Path, *, now: datetime) -> list
         completed = progress.get("completedPhases")
         nodes.append(
             SetupProgressNode(
-                group=path.parent.parent.name,
+                group=group,
                 state=str(status.get("state", "unknown")),
                 currentPhase=_current_phase_text(status.get("currentPhase")),
                 heartbeatAgeSeconds=_as_float(status.get("heartbeatAgeSeconds")),
