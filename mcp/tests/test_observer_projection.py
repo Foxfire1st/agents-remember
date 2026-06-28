@@ -1444,7 +1444,13 @@ class AttentionQueueTests(unittest.TestCase):
             now=FRESH,
             drift_snapshots=[
                 DriftSnapshotNode(
-                    repository="repo-a", branch="main", counts={"drifted": 2}, actionableCount=2
+                    repository="repo-a",
+                    branch="main",
+                    counts={"drifted": 2},
+                    actionableCount=2,
+                    checkedAt="2026-06-13T18:00:00+00:00",
+                    memoryRoot="/memory/ar-repo-a",
+                    reportPath="/tmp/drift-report.md",
                 )
             ],
             setup_progress=[SetupProgressNode(group="g1", state="ok", failedPhases=["cgc setup"])],
@@ -1453,6 +1459,12 @@ class AttentionQueueTests(unittest.TestCase):
             {item.kind for item in proj.analytics.attentionQueue},
             {"actionable-drift", "failed-setup"},
         )
+        drift = next(item for item in proj.analytics.attentionQueue if item.kind == "actionable-drift")
+        self.assertEqual(drift.id, "actionable-drift:repo-a:main")
+        self.assertEqual(drift.title, "2 actionable drift in repo-a")
+        self.assertEqual(drift.signalTs, "2026-06-13T18:00:00+00:00")
+        self.assertIn("/memory/ar-repo-a", drift.detail or "")
+        self.assertIn("/tmp/drift-report.md", drift.detail or "")
 
     def test_calm_tree_has_empty_queue(self) -> None:
         proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
@@ -1588,6 +1600,33 @@ class AttentionDismissalTests(unittest.TestCase):
             ),
         )
         self.assertEqual([i.kind for i in queue if i.kind == "provider-down"], ["provider-down"])
+
+    def test_dismiss_suppresses_actionable_drift_until_newer_snapshot(self) -> None:
+        dismissed = self._dismissal(
+            "actionable-drift:repo-a:main",
+            lifecycle_id=None,
+            kind="actionable-drift",
+            dismissed_at="2026-06-13T18:00:10+00:00",
+        )
+        old_snapshot = DriftSnapshotNode(
+            repository="repo-a",
+            branch="main",
+            actionableCount=1,
+            checkedAt="2026-06-13T18:00:00+00:00",
+        )
+        self.assertEqual(
+            build_attention_queue([], [], [old_snapshot], [], dismissals=dismissed),
+            [],
+        )
+
+        newer_snapshot = DriftSnapshotNode(
+            repository="repo-a",
+            branch="main",
+            actionableCount=1,
+            checkedAt="2026-06-13T18:00:11+00:00",
+        )
+        queue = build_attention_queue([], [], [newer_snapshot], [], dismissals=dismissed)
+        self.assertEqual([item.kind for item in queue], ["actionable-drift"])
 
     def test_newer_turn_end_supersedes_dismissal(self) -> None:
         # A fresh turn-end re-enters awaiting (a newer stateEnteredAt) and re-surfaces the
@@ -2147,8 +2186,14 @@ class DriftSnapshotProducerTests(unittest.TestCase):
         )
         coord = (self.tmp / "coord").resolve()
         onboarding = (self.tmp / "onb").resolve()
+        memory = (self.tmp / "memory").resolve()
         onboarding.mkdir()
-        context = SimpleNamespace(coordination_root=coord, onboarding_root=onboarding)
+        memory.mkdir()
+        context = SimpleNamespace(
+            coordination_root=coord,
+            onboarding_root=onboarding,
+            memory_root=memory,
+        )
         rows = [
             DriftRow(
                 "onboarding/a.md",
@@ -2184,6 +2229,9 @@ class DriftSnapshotProducerTests(unittest.TestCase):
         self.assertEqual(nodes[0].counts["drifted"], 1)
         self.assertEqual(nodes[0].counts["up to date"], 1)
         self.assertEqual(nodes[0].actionableCount, 1)
+        self.assertEqual(nodes[0].sourceRoot, repo.as_posix())
+        self.assertEqual(nodes[0].memoryRoot, memory.as_posix())
+        self.assertIsNotNone(nodes[0].checkedAt)
 
 
 class ProjectAndWriteAnalyticsTests(unittest.TestCase):

@@ -447,8 +447,8 @@ def create_app(
             kind=request.kind,
         )
         if outcome.dismissal is not None:
-            # Leaf-28 S5.2: lifecycle attention dismissals are current acknowledgements,
-            # not history. A gate-open item is consumed by deleting/cancelling the gate
+            # Leaf-28 S5.2: attention dismissals are current acknowledgements, not
+            # history. A gate-open item is consumed by deleting/cancelling the gate
             # itself, so it does not need an acknowledgement row after the source is gone.
             intent = outcome.dismissal
             gate: dict[str, Any] | None = None
@@ -463,7 +463,7 @@ def create_app(
                         decided_via="dashboard",
                         note=intent.note or "Dismissed from attention queue.",
                     )
-            elif intent.lifecycle_id is not None:
+            elif intent.lifecycle_id is not None or intent.kind == "actionable-drift":
                 AttentionDismissalStore(observer_root(config)).dismiss(
                     AttentionDismissalRecord(
                         itemId=intent.item_id,

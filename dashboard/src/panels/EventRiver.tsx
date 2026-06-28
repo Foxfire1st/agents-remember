@@ -14,7 +14,8 @@ import {
 
 // The Event River (right rail): the raw observer feed with trust provenance. Newest first; the
 // trust class is the colour, so the feed never pretends `declared` is `observed`. Fed by the raw
-// /api/events channel into the store's bounded ring buffer (separate from /api/stream).
+// /api/events channel into the store (separate from /api/stream); retention belongs to the backend
+// observer-log policy, not a hard frontend display cap.
 const sizing = css({ flex: "1 1 0" });
 const list = css({ listStyle: "none", margin: "0", padding: "0", display: "grid", gap: "0.2rem" });
 const row = cva({
@@ -42,12 +43,12 @@ const meta = css({ fontSize: "0.68rem", color: "muted", letterSpacing: "0" });
 
 export function EventRiver() {
   const events = useDashboard((s) => s.events);
+  const eventsHydrated = useDashboard((s) => s.eventsHydrated || s.events.length > 0);
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
   const summaryContext = buildEventSummaryContext(lifecycles, enclosures, analytics);
-  const recent = events
-    .slice(-60)
+  const displayEvents = [...events]
     .reverse()
     .flatMap((event) =>
       eventSummaryContextReady(event, summaryContext)
@@ -55,15 +56,18 @@ export function EventRiver() {
         : [],
     )
     .filter(({ summary }) => summary.visibility !== "hidden");
+  const titleCount = eventsHydrated ? events.length : "syncing";
   return (
-    <Panel testid="event-river" title={`Event river · ${events.length}`} className={sizing}>
-      {events.length === 0 ? (
+    <Panel testid="event-river" title={`Event river · ${titleCount}`} className={sizing}>
+      {!eventsHydrated ? (
+        <p className="muted">Syncing event history.</p>
+      ) : events.length === 0 ? (
         <p className="muted">No events yet.</p>
-      ) : recent.length === 0 ? (
+      ) : displayEvents.length === 0 ? (
         <p className="muted">No displayable events.</p>
       ) : (
         <ul className={list}>
-          {recent.map(({ event, summary }) => (
+          {displayEvents.map(({ event, summary }) => (
             <EventRow key={event.id} event={event} summary={summary} />
           ))}
         </ul>

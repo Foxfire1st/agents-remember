@@ -63,7 +63,7 @@ def run_drift_summary(
         code_repository_root,
         context.onboarding_root,
     )
-    _write_drift_snapshot(code_repository_root, context, rows)
+    _write_drift_snapshot(code_repository_root, context, rows, report_path=report_path)
     return summarize_rows(
         [_row_to_dict(row, context.onboarding_root) for row in rows],
         report_path=report_path.as_posix(),
@@ -104,7 +104,13 @@ def _row_to_dict(row: Any, onboarding_root: Path) -> dict[str, Any]:
     }
 
 
-def _write_drift_snapshot(code_repository_root: Path, context: Any, rows: list[Any]) -> None:
+def _write_drift_snapshot(
+    code_repository_root: Path,
+    context: Any,
+    rows: list[Any],
+    *,
+    report_path: Path | None = None,
+) -> None:
     """Persist the drift result as a durable JSON snapshot for the observer (slice 3b, b1).
 
     Best-effort: the dashboard snapshot must never fail the drift run that produced
@@ -118,6 +124,9 @@ def _write_drift_snapshot(code_repository_root: Path, context: Any, rows: list[A
         "repository": code_repository_root.name,
         "branch": branch,
         "checkedAt": datetime.now(UTC).isoformat(),
+        "sourceRoot": code_repository_root.resolve().as_posix(),
+        "memoryRoot": Path(context.memory_root).resolve().as_posix(),
+        **({"reportPath": report_path.as_posix()} if report_path is not None else {}),
         "counts": classification_counts,
         "actionableCount": sum(
             count

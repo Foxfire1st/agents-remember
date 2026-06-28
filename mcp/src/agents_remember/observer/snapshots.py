@@ -699,6 +699,10 @@ def read_drift_snapshots(coordination_root: Path, *, now: datetime) -> list[Drif
                 branch=str(payload.get("branch", "")),
                 counts=counts,
                 actionableCount=_as_int(payload.get("actionableCount")),
+                checkedAt=checked if isinstance(checked, str) else None,
+                sourceRoot=_text_or_none(payload.get("sourceRoot")),
+                memoryRoot=_text_or_none(payload.get("memoryRoot")),
+                reportPath=_text_or_none(payload.get("reportPath")),
                 snapshotStaleSeconds=age_seconds(checked, now)
                 if isinstance(checked, str)
                 else None,

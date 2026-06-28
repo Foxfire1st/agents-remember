@@ -68,7 +68,28 @@ describe("selectQueue", () => {
       lane: "lifecycle",
       title: "Gate — input needed",
     };
-    expect(selectQueue({ analytics: { attentionQueue: [item] } } as DashboardState)).toEqual([item]);
-    expect(selectQueue({ analytics: null } as DashboardState)).toEqual([]);
+    expect(
+      selectQueue({
+        analytics: { attentionQueue: [item] },
+        suppressedAttentionIds: {},
+      } as DashboardState),
+    ).toEqual([item]);
+    expect(selectQueue({ analytics: null, suppressedAttentionIds: {} } as DashboardState)).toEqual([]);
+  });
+
+  it("hides optimistically suppressed attention ids", () => {
+    const item: AttentionItem = {
+      id: "actionable-drift:repo:main",
+      kind: "actionable-drift",
+      severity: "warn",
+      lane: "repo",
+      title: "1 actionable drift in repo",
+    };
+    expect(
+      selectQueue({
+        analytics: { attentionQueue: [item] },
+        suppressedAttentionIds: { [item.id]: true },
+      } as DashboardState),
+    ).toEqual([]);
   });
 });

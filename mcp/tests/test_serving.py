@@ -555,6 +555,29 @@ class ActionDismissTests(unittest.TestCase):
         self.assertEqual(outcome.body["status"], "missing-lifecycle")
         self.assertIsNone(outcome.dismissal)
 
+    def test_evaluate_action_allows_actionable_drift_without_lifecycle(self) -> None:
+        outcome = evaluate_action(
+            _projection(),
+            "dismiss",
+            None,
+            actor="developer",
+            now=_TS,
+            item_id="actionable-drift:agents-remember:main",
+            kind="actionable-drift",
+        )
+        self.assertEqual(outcome.status_code, 202)
+        self.assertEqual(
+            outcome.dismissal,
+            DismissalIntent(
+                item_id="actionable-drift:agents-remember:main",
+                dismissed_at=_TS,
+                kind="actionable-drift",
+                lifecycle_id=None,
+                gate_id=None,
+                note=None,
+            ),
+        )
+
     def test_attention_store_upserts_and_prunes_lifecycle_rows(self) -> None:
         store = AttentionDismissalStore(observer_logs_root(self.tmp))
         store.dismiss(
@@ -579,6 +602,18 @@ class ActionDismissTests(unittest.TestCase):
         self.assertEqual(store.prune_lifecycles(set()), 1)
         self.assertEqual(store.current(), {})
         self.assertFalse(store.log_path().exists())
+
+    def test_attention_store_keeps_actionable_drift_current_acknowledgements(self) -> None:
+        store = AttentionDismissalStore(observer_logs_root(self.tmp))
+        store.dismiss(
+            AttentionDismissalRecord(
+                itemId="actionable-drift:agents-remember:main",
+                kind="actionable-drift",
+                dismissedAt=_TS,
+            )
+        )
+        self.assertEqual(store.prune_lifecycles(set()), 0)
+        self.assertIn("actionable-drift:agents-remember:main", store.current())
 
     def test_attention_store_prune_compacts_legacy_duplicate_live_rows(self) -> None:
         store = AttentionDismissalStore(observer_logs_root(self.tmp))
@@ -623,6 +658,20 @@ class ActionDismissTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "received")
         dismissals = AttentionDismissalStore(observer_logs_root(self.tmp)).current()
         self.assertEqual(dismissals["stale-session:L1"].lifecycleId, "L1")
+
+    def test_api_action_dismiss_records_actionable_drift_acknowledgement(self) -> None:
+        app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/dismiss",
+                json={
+                    "itemId": "actionable-drift:agents-remember:main",
+                    "kind": "actionable-drift",
+                },
+            )
+        self.assertEqual(response.status_code, 202)
+        dismissals = AttentionDismissalStore(observer_logs_root(self.tmp)).current()
+        self.assertIsNone(dismissals["actionable-drift:agents-remember:main"].lifecycleId)
 
     def test_api_action_dismiss_gate_open_also_cancels_gate(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
@@ -961,6 +1010,9 @@ class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
         # The line is parsed to an object so ServerSentEvent single-encodes it (matching the
         # state channel); emitting the raw JSON string would double-encode the SSE wire.
         self.assertEqual(first.data, {"a": 1})
+        ready = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(ready.event, "ready")
+        self.assertEqual(ready.data, {"ready": True})
         await gen.aclose()
 
     async def test_invalid_cursor_uses_retained_fresh_offsets(self) -> None:

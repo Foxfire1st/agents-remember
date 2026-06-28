@@ -157,6 +157,7 @@ async def stream_raw_events(
     prune_expired_lifecycle_event_logs(root, now=now)
     cursor_offsets = decode_cursor(last_event_id)
     offsets = cursor_offsets or initial_event_offsets(root, now=now)
+    ready_sent = False
     while True:
         prune_expired_lifecycle_event_logs(root, now=datetime.now(UTC))
         events, offsets = await asyncio.to_thread(read_new_events, root, offsets)
@@ -167,5 +168,10 @@ async def stream_raw_events(
             # agent) to JSON.parse twice. Single-encoded here matches `/api/stream`.
             yield ServerSentEvent(
                 data=json.loads(event.data), event="event", id=event.cursor, retry=2000
+            )
+        if not ready_sent:
+            ready_sent = True
+            yield ServerSentEvent(
+                data={"ready": True}, event="ready", id=encode_cursor(offsets), retry=2000
             )
         await asyncio.sleep(interval)

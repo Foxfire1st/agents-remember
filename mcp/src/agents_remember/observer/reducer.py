@@ -512,6 +512,7 @@ def _stalest(nodes: list[SidecarStaleNode], limit: int) -> list[SidecarStaleNode
 
 _SEVERITY_RANK: dict[str, int] = {"alarm": 0, "warn": 1, "info": 2}
 _PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
+_DISMISSABLE_REPO_KINDS: frozenset[str] = frozenset({"actionable-drift"})
 
 
 def _ask_text(ask: dict[str, Any] | None) -> str | None:
@@ -575,9 +576,15 @@ def _is_dismissed(
     being emitted) -- the dismissal then has nothing to hide.
     """
     dismissal = dismissals.get(item.id)
-    if dismissal is None or dismissal.lifecycleId is None:
+    if dismissal is None:
         return False
-    if item.lifecycleId != dismissal.lifecycleId:
+    if dismissal.kind is not None and dismissal.kind != item.kind:
+        return False
+    if item.lifecycleId is not None or dismissal.lifecycleId is not None:
+        if item.lifecycleId != dismissal.lifecycleId:
+            return False
+        return not _signal_after(item.signalTs, dismissal.dismissedAt)
+    if item.kind not in _DISMISSABLE_REPO_KINDS:
         return False
     return not _signal_after(item.signalTs, dismissal.dismissedAt)
 
@@ -764,17 +771,33 @@ def _drift_attention(drift_snapshots: list[DriftSnapshotNode]) -> list[Attention
     """Onboarding that needs a refresh decision (actionable drift)."""
     return [
         AttentionItem(
-            id=f"actionable-drift:{drift.repository}",
+            id=f"actionable-drift:{drift.repository}:{drift.branch}",
             kind="actionable-drift",
             severity="warn",
             lane="repo",
-            title=f"{drift.actionableCount} actionable drift",
+            title=f"{drift.actionableCount} actionable drift in {drift.repository}",
+            detail=_drift_attention_detail(drift),
             waitSeconds=drift.snapshotStaleSeconds,
             repoId=drift.repository,
+            signalTs=drift.checkedAt,
         )
         for drift in drift_snapshots
         if drift.actionableCount > 0
     ]
+
+
+def _drift_attention_detail(drift: DriftSnapshotNode) -> str:
+    """Concrete provenance for repo-level drift rows."""
+    parts = [f"branch {drift.branch}"]
+    if drift.memoryRoot:
+        parts.append(f"memory {drift.memoryRoot}")
+    else:
+        parts.append("memory root unknown")
+    if drift.reportPath:
+        parts.append(f"report {drift.reportPath}")
+    if drift.checkedAt:
+        parts.append(f"checked {drift.checkedAt}")
+    return " · ".join(parts)
 
 
 def _setup_attention(setup_progress: list[SetupProgressNode]) -> list[AttentionItem]:

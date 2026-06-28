@@ -26,11 +26,16 @@ export interface DashboardState {
   providers: Record<string, ProviderNode>; // keyed by id
   metrics: Metrics | null;
   analytics: Analytics | null;
-  events: ObserverEvent[]; // bounded tail of the raw observer feed (Event River)
+  events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
+  eventsHydrated: boolean;
+  suppressedAttentionIds: Record<string, true>;
   setConn: (conn: ConnState) => void;
   applySnapshot: (projection: WorkspaceProjection) => void;
   applyDelta: (event: string, data: unknown) => void;
   pushEvent: (line: string) => void;
+  markEventsHydrated: () => void;
+  suppressAttention: (ids: readonly string[]) => void;
+  releaseAttention: (ids: readonly string[]) => void;
   reset: () => void;
 }
 
@@ -50,8 +55,17 @@ const remove = <T>(collection: Record<string, T>, id: string): Record<string, T>
   return next;
 };
 
-// The Event River keeps a bounded tail of the raw observer feed (newest last).
-const EVENT_CAP = 200;
+const pruneSuppressedAttention = (
+  suppressed: Record<string, true>,
+  analytics: Analytics | null,
+): Record<string, true> => {
+  const ids = Object.keys(suppressed);
+  if (ids.length === 0) return suppressed;
+  const liveIds = new Set((analytics?.attentionQueue ?? []).map((item) => item.id));
+  const kept = ids.filter((id) => liveIds.has(id));
+  if (kept.length === ids.length) return suppressed;
+  return Object.fromEntries(kept.map((id) => [id, true]));
+};
 
 // The state channel's named deltas, merged into the flat id-keyed maps. The server diffs
 // consecutive projections (serving/delta.py) and emits upserts / `*.removed` markers;
@@ -76,8 +90,13 @@ function reduceDelta(
       return { providers: remove(state.providers, (data as { id: string }).id) };
     case "metrics":
       return { metrics: data as Metrics };
-    case "analytics":
-      return { analytics: data as Analytics };
+    case "analytics": {
+      const analytics = data as Analytics;
+      return {
+        analytics,
+        suppressedAttentionIds: pruneSuppressedAttention(state.suppressedAttentionIds, analytics),
+      };
+    }
     default:
       return {};
   }
@@ -93,9 +112,11 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
   metrics: null,
   analytics: null,
   events: [],
+  eventsHydrated: false,
+  suppressedAttentionIds: {},
   setConn: (conn) => set({ conn }),
   applySnapshot: (projection) =>
-    set({
+    set((state) => ({
       conn: "live",
       generatedAt: projection.generatedAt,
       lifecycles: byKey(projection.lifecycles, (x) => x.id),
@@ -103,16 +124,34 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
       providers: byKey(projection.providers, (x) => x.id),
       metrics: projection.metrics,
       analytics: projection.analytics,
-    }),
+      suppressedAttentionIds: pruneSuppressedAttention(
+        state.suppressedAttentionIds,
+        projection.analytics,
+      ),
+    })),
   applyDelta: (event, data) => set((state) => reduceDelta(state, event, data)),
   pushEvent: (line) =>
     set((state) => {
       try {
         const event = JSON.parse(line) as ObserverEvent;
-        return { events: [...state.events.slice(-(EVENT_CAP - 1)), event] };
+        return { events: [...state.events, event], eventsHydrated: true };
       } catch {
         return {}; // ignore malformed lines; never break the feed
       }
+    }),
+  markEventsHydrated: () => set({ eventsHydrated: true }),
+  suppressAttention: (ids) =>
+    set((state) => ({
+      suppressedAttentionIds: {
+        ...state.suppressedAttentionIds,
+        ...Object.fromEntries(ids.map((id) => [id, true])),
+      },
+    })),
+  releaseAttention: (ids) =>
+    set((state) => {
+      const next = { ...state.suppressedAttentionIds };
+      for (const id of ids) delete next[id];
+      return { suppressedAttentionIds: next };
     }),
   // Clear everything back to an empty workspace and bump `gen` (see the `gen` field). The dev bench calls
   // this when a scenario mounts so the next mode starts from a clean slate with no overlay bleed.
@@ -126,6 +165,8 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
       metrics: null,
       analytics: null,
       events: [],
+      eventsHydrated: false,
+      suppressedAttentionIds: {},
     })),
 }));
 

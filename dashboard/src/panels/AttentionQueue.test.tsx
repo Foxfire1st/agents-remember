@@ -20,6 +20,15 @@ const blockedStart: AttentionItem = {
   detail: "no exact ledger mapping for selected code base commit",
 };
 
+const actionableDrift: AttentionItem = {
+  id: "actionable-drift:agents-remember:ar/260610-browser-dashboard",
+  kind: "actionable-drift",
+  severity: "warn",
+  lane: "repo",
+  title: "1 actionable drift in agents-remember",
+  detail: "branch ar/260610-browser-dashboard · memory /memory/ar-agents-remember",
+};
+
 const taskDoc: TaskDocNode = {
   id: "19",
   lifecycleId: "LC19",
@@ -114,7 +123,25 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
     );
   });
 
-  it("Clear all dismisses lifecycle-bound listed items, not repo/worktree alarms", async () => {
+  it("dismisses actionable drift without a lifecycle target and hides it immediately", async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue("dismissed");
+    seed([actionableDrift]);
+
+    const view = render(<AttentionQueue onSelect={() => {}} />);
+    fireEvent.click(view.getByTestId("attn-dismiss"));
+
+    expect(view.queryByText("1 actionable drift in agents-remember")).toBeNull();
+    await waitFor(() =>
+      expect(postAttentionDismiss).toHaveBeenCalledWith({
+        itemId: "actionable-drift:agents-remember:ar/260610-browser-dashboard",
+        kind: "actionable-drift",
+        lifecycleId: null,
+        gateId: undefined,
+      }),
+    );
+  });
+
+  it("Clear all dismisses dismissible listed items, not worktree alarms", async () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue("dismissed");
     seed([
       {
@@ -134,13 +161,14 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
         title: "Session gone quiet",
         lifecycleId: "LC7",
       },
+      actionableDrift,
       blockedStart,
     ]);
 
     const { getByTestId } = render(<AttentionQueue onSelect={() => {}} />);
     fireEvent.click(getByTestId("attn-clear"));
 
-    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(3));
     expect(postAttentionDismiss).toHaveBeenCalledWith({
       itemId: "gate:G19",
       kind: "gate-open",
@@ -151,6 +179,12 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
       itemId: "stale-session:LC7",
       kind: "stale-session",
       lifecycleId: "LC7",
+      gateId: undefined,
+    });
+    expect(postAttentionDismiss).toHaveBeenCalledWith({
+      itemId: "actionable-drift:agents-remember:ar/260610-browser-dashboard",
+      kind: "actionable-drift",
+      lifecycleId: null,
       gateId: undefined,
     });
   });

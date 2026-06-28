@@ -212,6 +212,10 @@ class DriftSnapshotNode(BaseModel):
     branch: str
     counts: dict[str, int] = Field(default_factory=dict)
     actionableCount: int = 0
+    checkedAt: str | None = None
+    sourceRoot: str | None = None
+    memoryRoot: str | None = None
+    reportPath: str | None = None
     snapshotStaleSeconds: float | None = None
 
 

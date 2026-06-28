@@ -16,9 +16,20 @@ import type { DashboardState } from "./store";
 // Stable empty reference: a fresh `[]` each call would make useSyncExternalStore (Zustand's
 // useStore) see a new snapshot every render and loop ("getSnapshot should be cached").
 const EMPTY_QUEUE: readonly AttentionItem[] = [];
+let cachedQueueSource: readonly AttentionItem[] | null = null;
+let cachedSuppressedSource: Record<string, true> | null = null;
+let cachedVisibleQueue: readonly AttentionItem[] = EMPTY_QUEUE;
 
-export const selectQueue = (state: DashboardState): readonly AttentionItem[] =>
-  state.analytics?.attentionQueue ?? EMPTY_QUEUE;
+export const selectQueue = (state: DashboardState): readonly AttentionItem[] => {
+  const queue = state.analytics?.attentionQueue ?? EMPTY_QUEUE;
+  const suppressed = state.suppressedAttentionIds;
+  if (Object.keys(suppressed).length === 0) return queue;
+  if (queue === cachedQueueSource && suppressed === cachedSuppressedSource) return cachedVisibleQueue;
+  cachedQueueSource = queue;
+  cachedSuppressedSource = suppressed;
+  cachedVisibleQueue = queue.filter((item) => !suppressed[item.id]);
+  return cachedVisibleQueue;
+};
 
 export type Pivot = "repo" | "phase";
 

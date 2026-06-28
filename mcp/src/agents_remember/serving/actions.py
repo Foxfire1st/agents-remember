@@ -20,8 +20,9 @@ Two action families:
   never decides safety -- North-Star), attributed, and acknowledged ``202`` without mutation.
   Disabled actions return ``409`` with the reducer's ``disabledReason``; unknown targets ``404``.
 * **Attention dismissals** (``dismiss``, leaf-28 S5.2): lifecycle-bound acknowledgements
-  for one queue occurrence. The router keeps only current acknowledgement state and prunes it
-  with the lifecycle; ``gate-open`` dismiss still cancels/deletes the gate and needs no
+  for one queue occurrence, plus the repo-level ``actionable-drift`` one-shot signal.
+  The router keeps only current acknowledgement state and prunes lifecycle rows with
+  the lifecycle; ``gate-open`` dismiss still cancels/deletes the gate and needs no
   acknowledgement row when the gate disappears.
 """
 
@@ -155,10 +156,11 @@ def evaluate_action(
 ) -> ActionOutcome:
     """Map (action, target) onto a status + body; gate-decision verbs carry an intent (6b).
 
-    The ``dismiss`` verb (leaf-28 S5.2) clears one lifecycle-bound attention item: it
-    returns a pure :class:`DismissalIntent` the router applies. Unlike a lifecycle
-    transition it needs no precomputed availability, but non-gate items must carry the
-    lifecycle id that scopes their acknowledgement row.
+    The ``dismiss`` verb (leaf-28 S5.2) clears one attention item: it returns a pure
+    :class:`DismissalIntent` the router applies. Unlike a lifecycle transition it
+    needs no precomputed availability, but non-gate items must carry the lifecycle id
+    that scopes their acknowledgement row, except the repo-level ``actionable-drift``
+    signal whose snapshot timestamp scopes the occurrence.
     """
     context = ActionEvaluationContext(
         actor=actor,
@@ -188,7 +190,10 @@ def _dismiss_action_outcome(
                 "action": action,
             },
         )
-    if target is None and not (context.kind == "gate-open" and context.gate_id):
+    if target is None and not (
+        (context.kind == "gate-open" and context.gate_id)
+        or context.kind == "actionable-drift"
+    ):
         return ActionOutcome(
             400,
             {

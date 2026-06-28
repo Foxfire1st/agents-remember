@@ -4,7 +4,7 @@ import { useState } from "react";
 import { css, cva } from "../../styled-system/css";
 import { postAttentionDismiss } from "../data/actions";
 import { fmtWait, selectQueue } from "../data/selectors";
-import { useDashboard } from "../data/store";
+import { dashboardStore, useDashboard } from "../data/store";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
 import type { AttentionItem, TaskDocNode } from "../types/projection";
@@ -12,8 +12,9 @@ import type { AttentionItem, TaskDocNode } from "../types/projection";
 // The home-screen attention queue (note 06): the server-ranked list of what needs the human,
 // rebuilt from mc2's renderAttn UX. "Open" jumps to the item's lifecycle in the detail view — the
 // deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable (leaf-28 S5.2): a
-// per-item "Dismiss" and "Clear all" both POST a current acknowledgement; gate rows are consumed by
-// the server cancelling/deleting the gate.
+// per-item "Dismiss" and "Clear all" both POST a current acknowledgement. Lifecycle rows are scoped
+// by lifecycle id, gate rows are consumed by cancelling/deleting the gate, and actionable-drift rows
+// are repo-level one-shot signals anchored by the drift snapshot timestamp.
 const sizing = css({ flex: "0 1 auto", maxHeight: "42%" });
 const list = css({ listStyle: "none", margin: "0", padding: "0", display: "grid", gap: "0.35rem" });
 const item = cva({
@@ -109,7 +110,11 @@ function dismissPayload(item: AttentionItem) {
 }
 
 function canDismiss(item: AttentionItem): boolean {
-  return Boolean(item.lifecycleId || (item.kind === "gate-open" && item.gateId));
+  return Boolean(
+    item.lifecycleId ||
+      (item.kind === "gate-open" && item.gateId) ||
+      item.kind === "actionable-drift",
+  );
 }
 
 export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
@@ -120,21 +125,36 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
   const dismissableQueue = queue.filter(canDismiss);
   const dismissItem = (item: AttentionItem) => {
     if (!canDismiss(item) || dismissing.has(item.id)) return;
+    dashboardStore.getState().suppressAttention([item.id]);
     setDismissing((prev) => new Set(prev).add(item.id));
-    void postAttentionDismiss(dismissPayload(item)).finally(() =>
-      setDismissing((prev) => {
-        const next = new Set(prev);
-        next.delete(item.id);
-        return next;
-      }),
-    );
+    void postAttentionDismiss(dismissPayload(item))
+      .then((status) => {
+        if (status !== "dismissed") dashboardStore.getState().releaseAttention([item.id]);
+      })
+      .finally(() =>
+        setDismissing((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        }),
+      );
   };
   const clearAll = () => {
     if (clearing || dismissableQueue.length === 0) return;
+    const ids = dismissableQueue.map((item) => item.id);
+    dashboardStore.getState().suppressAttention(ids);
     setClearing(true);
-    void Promise.all(dismissableQueue.map((item) => postAttentionDismiss(dismissPayload(item)))).finally(() =>
-      setClearing(false),
-    );
+    void Promise.all(
+      dismissableQueue.map(async (item) => ({
+        id: item.id,
+        status: await postAttentionDismiss(dismissPayload(item)),
+      })),
+    )
+      .then((results) => {
+        const failed = results.filter((result) => result.status !== "dismissed").map((result) => result.id);
+        if (failed.length > 0) dashboardStore.getState().releaseAttention(failed);
+      })
+      .finally(() => setClearing(false));
   };
   const panelHead = (
     <div className={head}>

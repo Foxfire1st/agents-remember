@@ -14,7 +14,6 @@ import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
-import { FlowTab } from "../panels/FlowTab";
 import { Hangar } from "../panels/Hangar";
 import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/LifecycleList";
@@ -29,11 +28,10 @@ import { Topology } from "../panels/Topology";
 // Slice 5f S1 (§4.1): the "machine map" views (Engine Room / Topology) and the Chats terminal
 // (slice 6e) drop the rails and span the full body width; the top-bar caution stays visible so an
 // alarm is never hidden.
-type View = "operations" | "flow" | "engine" | "memory" | "topology" | "hangar" | "chats";
+type View = "operations" | "engine" | "memory" | "topology" | "hangar" | "chats";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "operations", label: "Operations" },
-  { id: "flow", label: "Lifecycle Flow" },
   { id: "engine", label: "Engine Room" },
   { id: "memory", label: "Memory" },
   { id: "topology", label: "Topology" },
@@ -173,7 +171,15 @@ const chatsLayer = css({
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
 export function Cockpit() {
   useEffect(() => connectState(), []);
-  useEffect(() => connectEvents((line) => dashboardStore.getState().pushEvent(line)), []);
+  useEffect(
+    () =>
+      connectEvents(
+        (line) => dashboardStore.getState().pushEvent(line),
+        "",
+        () => dashboardStore.getState().markEventsHydrated(),
+      ),
+    [],
+  );
   return <CockpitShell />;
 }
 
@@ -187,7 +193,7 @@ export function CockpitShell() {
 
   // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
   // layout breathes.
-  const fullBleed = view === "flow" || view === "engine" || view === "topology" || view === "chats";
+  const fullBleed = view === "engine" || view === "topology" || view === "chats";
 
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
@@ -262,8 +268,6 @@ function ViewBody({
   onOpen: (id: string) => void;
 }) {
   switch (view) {
-    case "flow":
-      return <FlowTab />;
     case "engine":
       return <EngineRoom />;
     case "memory":

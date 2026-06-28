@@ -17,6 +17,7 @@ beforeEach(() =>
     analytics: null,
     enclosures: {},
     events: [],
+    eventsHydrated: false,
     lifecycles: {},
   }),
 );
@@ -111,6 +112,16 @@ function analyticsWithTaskDocuments(taskDocuments: TaskDocNode[]): Analytics {
 }
 
 describe("EventRiver readable activity feed", () => {
+  it("waits for the raw event stream to hydrate before claiming an empty river", () => {
+    const view = render(<EventRiver />);
+    expect(view.getByText("Syncing event history.")).not.toBeNull();
+    expect(view.queryByText("No events yet.")).toBeNull();
+
+    dashboardStore.setState({ eventsHydrated: true });
+    view.rerender(<EventRiver />);
+    expect(view.getByText("No events yet.")).not.toBeNull();
+  });
+
   it("renders 'Read: <basename>' with the repo, and the full path on hover", () => {
     const full = "mcp/src/agents_remember/kernel/coordination_context/contracts.py";
     dashboardStore.setState({
@@ -151,6 +162,28 @@ describe("EventRiver readable activity feed", () => {
     expect(title).toContain("a/one.py");
     expect(title).toContain("b/two.py");
     expect(title).toContain("c/three.py");
+  });
+
+  it("renders events beyond the old newest-60 display window", () => {
+    dashboardStore.setState({
+      events: [
+        ev({
+          id: "first",
+          kind: "read.packet",
+          data: { repoId: "agents-remember", files: [{ path: "oldest/first.py" }] },
+        }),
+        ...Array.from({ length: 65 }, (_, i) =>
+          ev({
+            id: `extra-${i}`,
+            kind: "read.packet",
+            data: { repoId: "agents-remember", files: [{ path: `batch/file-${i}.py` }] },
+          }),
+        ),
+      ],
+    });
+    const { getByText } = render(<EventRiver />);
+    expect(getByText("Read: first.py")).not.toBeNull();
+    expect(getByText("Read: file-64.py")).not.toBeNull();
   });
 
   it("translates tool.completed rows with friendly tool copy, result state, tokens, and agent actor copy", () => {

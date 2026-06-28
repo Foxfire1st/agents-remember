@@ -38,8 +38,13 @@ export function connectState(base = ""): () => void {
  * lines for the Event River; the browser carries the opaque byte-offset `Last-Event-ID`
  * cursor across reconnects. A separate connection from the state channel by design.
  */
-export function connectEvents(onLine: (line: string) => void, base = ""): () => void {
+export function connectEvents(
+  onLine: (line: string) => void,
+  base = "",
+  onReady?: () => void,
+): () => void {
   const source = new EventSource(`${base}/api/events`);
   source.addEventListener("event", (event) => onLine((event as MessageEvent).data));
+  source.addEventListener("ready", () => onReady?.());
   return () => source.close();
 }

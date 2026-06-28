@@ -2,9 +2,9 @@
 
 Attention-queue items are derived from lifecycle/control-plane state on every
 projection pass. A dismissal therefore records only the live acknowledgement
-needed to hide one lifecycle-bound occurrence until a newer signal arrives or the
-lifecycle leaves the live set. This file is deliberately compacted in place:
-attention items are disposable UI facts, not an audit trail.
+needed to hide one current occurrence until a newer signal arrives or the source
+leaves the live set. This file is deliberately compacted in place: attention
+items are disposable UI facts, not an audit trail.
 """
 
 from __future__ import annotations
@@ -75,12 +75,12 @@ class AttentionDismissalStore:
         return latest
 
     def prune_lifecycles(self, live_lifecycle_ids: set[str]) -> int:
-        """Physically drop acknowledgements for missing/non-live lifecycles and compact duplicates."""
+        """Drop acknowledgements for missing/non-live lifecycles and compact duplicates."""
         records = self.read()
         kept = [
             record
             for record in self.current().values()
-            if record.lifecycleId is not None and record.lifecycleId in live_lifecycle_ids
+            if _keep_current_record(record, live_lifecycle_ids)
         ]
         if len(kept) == len(records):
             return 0
@@ -103,3 +103,9 @@ class AttentionDismissalStore:
             encoding="utf-8",
         )
         os.replace(tmp, path)
+
+
+def _keep_current_record(record: AttentionDismissalRecord, live_lifecycle_ids: set[str]) -> bool:
+    if record.lifecycleId is not None:
+        return record.lifecycleId in live_lifecycle_ids
+    return record.kind == "actionable-drift"

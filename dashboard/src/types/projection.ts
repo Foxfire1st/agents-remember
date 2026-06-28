@@ -100,6 +100,10 @@ export interface DriftSnapshotNode {
   branch: string;
   counts: Record<string, number>;
   actionableCount: number;
+  checkedAt?: string;
+  sourceRoot?: string;
+  memoryRoot?: string;
+  reportPath?: string;
   snapshotStaleSeconds?: number;
 }
 
