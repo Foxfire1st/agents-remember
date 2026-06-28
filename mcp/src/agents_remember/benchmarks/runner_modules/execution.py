@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import time
+import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from agents_remember.benchmarks.runner_modules.constants import (
     CODEX_BENCHMARK_SCOPE,
     CODEX_EXECUTABLE_NAME,
     CODEX_EXECUTABLE_RESOLUTION,
+    CODEX_HARNESS_DIR,
     CODEX_SANDBOX_DEFAULT,
 )
 from agents_remember.benchmarks.runner_modules.manifest import (
@@ -63,6 +65,61 @@ def codex_sandbox_argument(codex_sandbox: str) -> str | None:
     if sandbox == CODEX_SANDBOX_DEFAULT:
         return None
     return sandbox
+
+
+def codex_config_literal(value: object, *, config_path: Path) -> str:
+    if isinstance(value, str):
+        return json.dumps(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, list):
+        items = (codex_config_literal(item, config_path=config_path) for item in value)
+        return "[" + ",".join(items) + "]"
+    raise RuntimeError(f"unsupported benchmark Codex config value in {config_path}: {value!r}")
+
+
+def benchmark_mcp_config_overrides(cwd: Path) -> list[str]:
+    config_path = cwd / CODEX_HARNESS_DIR / "config.toml"
+    if not config_path.exists():
+        return []
+
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    servers = config.get("mcp_servers", {})
+    if not isinstance(servers, dict):
+        raise RuntimeError(f"benchmark Codex config has invalid mcp_servers table: {config_path}")
+
+    overrides: list[str] = []
+    scalar_keys = (
+        "command",
+        "args",
+        "startup_timeout_sec",
+        "cwd",
+        "url",
+        "bearer_token_env_var",
+        "env_vars",
+    )
+    for server_name, server_config in servers.items():
+        if not isinstance(server_config, dict):
+            raise RuntimeError(
+                f"benchmark Codex config has invalid MCP server {server_name!r}: {config_path}"
+            )
+        server_prefix = f"mcp_servers.{server_name}"
+        for key in scalar_keys:
+            if key in server_config:
+                literal = codex_config_literal(server_config[key], config_path=config_path)
+                overrides.extend(["-c", f"{server_prefix}.{key}={literal}"])
+        env = server_config.get("env", {})
+        if env:
+            if not isinstance(env, dict):
+                raise RuntimeError(
+                    f"benchmark Codex config has invalid env table for {server_name!r}: {config_path}"
+                )
+            for env_name, env_value in env.items():
+                literal = codex_config_literal(env_value, config_path=config_path)
+                overrides.extend(["-c", f"{server_prefix}.env.{env_name}={literal}"])
+    return overrides
 
 
 def codex_execution_policy(
@@ -113,6 +170,7 @@ def codex_command(
         "-c",
         f"project_root_markers=['{BENCHMARK_ROOT_MARKER}']",
     ]
+    command.extend(benchmark_mcp_config_overrides(cwd))
     sandbox_argument = codex_sandbox_argument(codex_sandbox)
     if sandbox_argument is not None:
         command[7:7] = ["--sandbox", sandbox_argument]

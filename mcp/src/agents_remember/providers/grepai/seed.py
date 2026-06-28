@@ -99,6 +99,13 @@ def grepai_clone_bundle(args: Any, target_settings: dict[str, Any]) -> dict[str,
 
 
 def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> GrepaiCloneContext | dict[str, Any]:
+    # Benchmarks are hermetic: a benchmark-scoped target must never clone from another
+    # stack. This is what stopped the benchmark from starting the live workspace backend
+    # as a clone source and cascading a full re-embed across main + every worktree.
+    target_cfg = provider_settings(target_settings, GREPAI_PROVIDER_ID)
+    target_instance = target_cfg.get("instance") if isinstance(target_cfg, dict) else None
+    if isinstance(target_instance, dict) and target_instance.get("scope") == "benchmark":
+        return _clone_skip("benchmark grepai-memory is hermetic; seeding/cloning is disabled")
     source_coordination_root = args.grepai_seed_source_coordination_root
     if source_coordination_root is None:
         return _clone_skip("no GrepAI seed source coordination root configured")

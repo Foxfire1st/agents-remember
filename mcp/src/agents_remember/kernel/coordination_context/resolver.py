@@ -322,6 +322,7 @@ def build_coordination_context(
         task_name,
         parent_task,
         leaf_id,
+        worktree_name,
     )
     task_root = _task_root(
         coordination_root, code_repository_name, task_name, parent_task, contract

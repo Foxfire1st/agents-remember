@@ -436,8 +436,25 @@ def _cgc_watcher_state(repo_id: str, watcher: dict[str, Any]) -> CGCWatcherState
         ok=watcher.get("ok"),
         watcherUp=watcher.get("watcherUp"),
         indexingState=str(watcher.get("indexingState") or "unknown"),
-        lastRefresh=watcher.get("lastRefresh"),
+        lastRefresh=_last_refresh_summary(watcher.get("lastRefresh")),
     )
+
+
+def _last_refresh_summary(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return str(value)
+
+    updated_at = value.get("updatedAt")
+    parts: list[str] = [str(updated_at)] if updated_at else []
+    if "returncode" in value:
+        parts.append(f"returncode={value['returncode']}")
+    if "durationSeconds" in value:
+        parts.append(f"durationSeconds={value['durationSeconds']}")
+    return " ".join(parts) if parts else None
 
 
 def _watcher_state_from_up(watcher_up: Any) -> WatcherState:

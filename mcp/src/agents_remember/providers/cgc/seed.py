@@ -242,6 +242,12 @@ def cgc_seed_bundle(args: Any, settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_seed_context(args: Any, settings: dict[str, Any]) -> CgcSeedContext | dict[str, Any]:
+    # Benchmarks are hermetic (see grepai/seed.py): a benchmark-scoped target never seeds
+    # from another stack, so it cannot reach into the live workspace cgc backend.
+    target_cfg = provider_settings(settings, CGC_PROVIDER_ID)
+    target_instance = target_cfg.get("instance") if isinstance(target_cfg, dict) else None
+    if isinstance(target_instance, dict) and target_instance.get("scope") == "benchmark":
+        return _seed_skip("benchmark codegraphcontext is hermetic; seeding is disabled")
     source_coordination_root = args.cgc_seed_source_coordination_root
     if source_coordination_root is None:
         return _seed_skip("no seed source coordination root configured")

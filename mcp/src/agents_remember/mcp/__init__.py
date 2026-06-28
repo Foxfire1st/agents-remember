@@ -8,4 +8,4 @@ try:
     # Single source of truth: the installed package metadata (mcp/pyproject.toml).
     SERVER_VERSION = version("agents-remember-mcp")
 except PackageNotFoundError:  # running from a source checkout without an install
-    SERVER_VERSION = "2.9.1"
+    SERVER_VERSION = "2.9.3"

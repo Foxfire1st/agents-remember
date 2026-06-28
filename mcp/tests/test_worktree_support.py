@@ -58,6 +58,7 @@ from agents_remember.worktrees.task_resolver import (
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
     load_contract,
+    worktree_group_for,
     write_contract,
 )
 
@@ -603,6 +604,132 @@ class WorktreeSupportTests(unittest.TestCase):
             )
 
             self.assertEqual(context.task_root, root / "ar-coordination" / "tasks" / "repo-a")
+
+    def _external_memory_skeleton(self, root: Path) -> tuple[Path, Path]:
+        """Build an external-memory code+memory skeleton; return (code_repo, coordination_root)."""
+        code_repo = root / "repo-a"
+        code_repo.mkdir()
+        coordination_root = root / "ar-coordination"
+        memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
+        (memory_repo / "system").mkdir(parents=True)
+        (memory_repo / "onboarding").mkdir()
+        (memory_repo / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+        return code_repo, coordination_root
+
+    def _write_task_contract(
+        self, coordination_root: Path, code_repo: Path, *, task_name: str, worktree_name: str
+    ):
+        """Write a real external-memory contract at tasks/<repo>/<task>/contract.md."""
+        contract = default_contract(
+            task_name=task_name,
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=coordination_root,
+            code_repo_path=code_repo,
+            code_source_branch="main",
+            code_work_branch=f"ar/{worktree_name}",
+            code_base_commit="abc123",
+            worktree_name=worktree_name,
+            memory_repo_path=coordination_root / "memory-repos" / "ar-repo-a",
+            memory_source_branch="main",
+            memory_work_branch=f"ar/{worktree_name}",
+            memory_base_commit="def456",
+        )
+        write_contract(contract.contract_path, contract)
+        return contract
+
+    def test_resolver_resolves_contract_by_worktree_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract = self._write_task_contract(
+                coordination_root,
+                code_repo,
+                task_name="260610_browser-dashboard",
+                worktree_name="260610-browser-dashboard",
+            )
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=coordination_root,
+                worktree_name="260610-browser-dashboard",
+            )
+
+            # Regression guard: contract-derived fields are populated, not blanked.
+            self.assertIsNotNone(context.contract_path)
+            self.assertIsNotNone(context.code_worktree)
+            self.assertIsNotNone(context.memory_worktree)
+            self.assertEqual(context.contract_path, contract.contract_path)
+            self.assertEqual(context.code_worktree, contract.code_worktree)
+            self.assertEqual(context.memory_worktree, contract.memory_worktree)
+            self.assertEqual(
+                context.worktree_group,
+                worktree_group_for(coordination_root, "repo-a", "260610-browser-dashboard"),
+            )
+
+    def test_resolver_returns_empty_for_unknown_worktree_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            # A real contract exists, but for a different worktree group.
+            self._write_task_contract(
+                coordination_root,
+                code_repo,
+                task_name="task-other",
+                worktree_name="something-else",
+            )
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=coordination_root,
+                worktree_name="no-such-worktree",
+            )
+
+            self.assertIsNone(context.contract_path)
+            self.assertIsNone(context.code_worktree)
+            self.assertIsNone(context.memory_worktree)
+
+    def test_resolver_prefers_task_name_over_worktree_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract_a = self._write_task_contract(
+                coordination_root, code_repo, task_name="task-a", worktree_name="worktree-a"
+            )
+            contract_b = self._write_task_contract(
+                coordination_root, code_repo, task_name="task-b", worktree_name="worktree-b"
+            )
+
+            context = resolver.resolve_coordination_context(
+                code_repository_root=code_repo,
+                requested_topology="external",
+                coordination_root=coordination_root,
+                task_name="task-a",
+                leaf_id="worktree-a",  # series enclosure leaf: completes the task-based lookup for contract A
+                worktree_name="worktree-b",  # would match contract B on its own
+            )
+
+            # Task-based resolution (task_name + leaf_id) wins; the worktree_name match (B) is never consulted.
+            self.assertEqual(context.contract_path, contract_a.contract_path)
+            self.assertEqual(context.code_worktree, contract_a.code_worktree)
+            self.assertNotEqual(context.code_worktree, contract_b.code_worktree)
+
+    def test_find_worktree_contract_matches_group_or_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract = self._write_task_contract(
+                coordination_root, code_repo, task_name="task-x", worktree_name="worktree-x"
+            )
+
+            found = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-x")
+            self.assertEqual(found, contract.contract_path)
+
+            missing = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-y")
+            self.assertIsNone(missing)
 
     def test_worktree_provider_start_passes_grepai_worktree_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2711,7 +2838,6 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             ) -> dict[str, object]:
                 captured["settings_path"] = request.settings_path
                 captured["settings"] = json.loads(request.settings_path.read_text(encoding="utf-8"))
-                captured["cgc_seed_repo_id"] = request.cgc_seed.repo_id
                 return {"ok": True}
 
             with mock.patch.object(
@@ -2727,8 +2853,6 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     dry_run=False,
                     provider_timeout=1,
                     provider_ids=("codegraphcontext-code",),
-                    cgc_seed_source_coordination_root=root / "source-coordination",
-                    cgc_seed_repo_id="repo-a",
                 )
 
             self.assertEqual(run_provider_setup.call_count, 1)
@@ -2741,14 +2865,11 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 "codegraphcontext-code",
                 settings["contextProviders"]["providers"],
             )
-            self.assertEqual(captured["cgc_seed_repo_id"], "repo-a")
 
-    def test_benchmark_provider_setup_seeds_grepai_from_source_provider(self) -> None:
+    def test_benchmark_provider_setup_is_hermetic_no_seed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             coordination_root = root / "ar-coordination"
-            source_coordination_root = root / "source-coordination"
-            source_settings_path = root / "source-provider-settings.json"
             source_repo = root / "repos" / "repo-a"
             memory_repo = coordination_root / "memory-repos" / "ar-repo-a"
             source_repo.mkdir(parents=True)
@@ -2767,9 +2888,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 request: benchmark_runner.provider_setup.ProviderSetupRequest,
             ) -> dict[str, object]:
                 captured["grepai_seed_source"] = request.grepai_seed.source_coordination_root
-                captured["grepai_seed_source_settings"] = request.grepai_seed.source_settings_path
-                captured["grepai_seed_project"] = request.grepai_seed.project_id
-                captured["grepai_target_memory"] = request.grepai_seed.target_memory_root
+                captured["cgc_seed_source"] = request.cgc_seed.source_coordination_root
                 return {"ok": True}
 
             with mock.patch.object(
@@ -2784,16 +2903,12 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     memory_repo,
                     dry_run=False,
                     provider_timeout=1,
-                    provider_ids=("grepai-memory",),
-                    cgc_seed_source_coordination_root=source_coordination_root,
-                    cgc_seed_repo_id="repo-a",
-                    provider_seed_source_settings_path=source_settings_path,
+                    provider_ids=("grepai-memory", "codegraphcontext-code"),
                 )
 
-            self.assertEqual(captured["grepai_seed_source"], source_coordination_root)
-            self.assertEqual(captured["grepai_seed_source_settings"], source_settings_path)
-            self.assertEqual(captured["grepai_seed_project"], "repo-a")
-            self.assertEqual(captured["grepai_target_memory"], memory_repo)
+            # Hermetic-cold: the benchmark wires no seed source for either provider.
+            self.assertIsNone(captured["grepai_seed_source"])
+            self.assertIsNone(captured["cgc_seed_source"])
 
     def test_benchmark_prepare_writes_workspace_mcp_registration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2888,6 +3003,62 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
         )
         self.assertEqual(policy["sandbox"], "default")
         self.assertEqual(policy["sandboxArgument"], "omitted")
+
+    def test_codex_command_forwards_benchmark_mcp_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            codex_root = workspace / ".codex"
+            codex_root.mkdir(parents=True)
+            (codex_root / "config.toml").write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.agents_remember_benchmark]",
+                        'command = "/tmp/python"',
+                        'args = ["-m", "agents_remember.mcp", "--config", "/tmp/settings.json"]',
+                        "startup_timeout_sec = 120",
+                        "",
+                        "[mcp_servers.agents_remember_benchmark.env]",
+                        'PYTHONIOENCODING = "utf-8"',
+                        'PYTHONPATH = "/tmp/mcp/src"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
+            ):
+                command = benchmark_runner.codex_command(
+                    workspace,
+                    root / "final.md",
+                    codex_sandbox=benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
+                )
+
+        config_overrides = [
+            command[index + 1] for index, value in enumerate(command) if value == "-c"
+        ]
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.command="/tmp/python"',
+            config_overrides,
+        )
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.args=["-m","agents_remember.mcp","--config","/tmp/settings.json"]',
+            config_overrides,
+        )
+        self.assertIn(
+            "mcp_servers.agents_remember_benchmark.startup_timeout_sec=120",
+            config_overrides,
+        )
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.env.PYTHONIOENCODING="utf-8"',
+            config_overrides,
+        )
+        self.assertIn(
+            'mcp_servers.agents_remember_benchmark.env.PYTHONPATH="/tmp/mcp/src"',
+            config_overrides,
+        )
 
     def test_codex_run_metadata_records_benchmark_host_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
