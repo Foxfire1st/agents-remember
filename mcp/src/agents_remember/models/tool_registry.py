@@ -1,4 +1,4 @@
-"""Registry that maps public MCP tools to declared response models.
+"""Registry that maps MCP tool payload builders to declared response models.
 
 Response-model convention (one place, deliberately two tiers):
 
@@ -29,6 +29,24 @@ from agents_remember.models.benchmarks import (
 )
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
+from agents_remember.models.gates import (
+    GateCreateResponse,
+    GateDecideResponse,
+    GateListResponse,
+    GateResponseWaitResponse,
+    GateWaitResponse,
+    LifecycleGateResponse,
+)
+from agents_remember.models.lifecycle import (
+    LifecycleBlockResponse,
+    LifecycleEndResponse,
+    LifecyclePhaseResponse,
+    LifecycleResumeResponse,
+    LifecycleStartResponse,
+    LifecycleTurnEndNotificationResponse,
+    SwitchLifecycleResponse,
+)
+from agents_remember.models.lifecycle_finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.memory import (
     DriftCheckResponse,
     MemoryBaselineAdoptResponse,
@@ -38,6 +56,11 @@ from agents_remember.models.memory import (
     MemoryInitResponse,
     MemoryQualityCheckResponse,
     RouteIndexRefreshResponse,
+)
+from agents_remember.models.operator_inbox import (
+    OperatorInboxConsumeResponse,
+    OperatorInboxPollResponse,
+    OperatorInboxPostResponse,
 )
 from agents_remember.models.providers import (
     CGCCalleesResponse,
@@ -52,8 +75,10 @@ from agents_remember.models.providers import (
     ProviderStatusResponse,
     ProviderWatchersResponse,
 )
+from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
+from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
@@ -66,10 +91,21 @@ from agents_remember.models.worktree import (
     WorktreeSyncResponse,
 )
 
-PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+INTERNAL_COMPAT_TOOL_NAMES = frozenset(
+    {
+        "lifecycle_block",
+        "gate_create",
+        "gate_wait",
+        "gate_response_wait",
+    }
+)
+"""Lower-level compatibility payload builders, not advertised MCP tools."""
+
+TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "ping": PingResponse,
     "server_info": ServerInfoResponse,
     "context_packet": ContextPacketV2,
+    "read_ar_files": ReadArFilesResponse,
     "runtime_install": RuntimeInstallResponse,
     "resolve_context": ResolveContextResponse,
     "drift_check": DriftCheckResponse,
@@ -103,4 +139,28 @@ PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "memory_carryover_apply": MemoryCarryoverApplyResponse,
     "codex_benchmark_prepare": CodexBenchmarkPrepareResponse,
     "codex_benchmark_run": CodexBenchmarkRunResponse,
+    "lifecycle_start": LifecycleStartResponse,
+    "lifecycle_block": LifecycleBlockResponse,
+    "lifecycle_resume": LifecycleResumeResponse,
+    "lifecycle_turn_end_notification": LifecycleTurnEndNotificationResponse,
+    "lifecycle_end": LifecycleEndResponse,
+    "switch_lifecycle": SwitchLifecycleResponse,
+    "lifecycle_phase": LifecyclePhaseResponse,
+    "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
+    "task_doc": TaskDocResponse,
+    "lifecycle_gate": LifecycleGateResponse,
+    "gate_create": GateCreateResponse,
+    "gate_decide": GateDecideResponse,
+    "gate_wait": GateWaitResponse,
+    "gate_response_wait": GateResponseWaitResponse,
+    "gate_list": GateListResponse,
+    "operator_inbox_post": OperatorInboxPostResponse,
+    "operator_inbox_poll": OperatorInboxPollResponse,
+    "operator_inbox_consume": OperatorInboxConsumeResponse,
+}
+
+PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+    name: model
+    for name, model in TOOL_RESPONSE_MODELS.items()
+    if name not in INTERNAL_COMPAT_TOOL_NAMES
 }

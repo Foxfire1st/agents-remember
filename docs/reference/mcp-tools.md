@@ -42,6 +42,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50` |
 | `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). | `repo_id`, `checks=None`, `detail_limit=50` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. | `repo_id`, `dry_run=false` |
+| `read_ar_files` | Batch read up to 5 repo-relative source paths in a managed repo, each paired with its file-level onboarding, plus the repository + governing route overviews (auto-attached, session-deduped); emits a facts-only `read.packet`. **The research-phase read** — use it instead of a native read up to the build/job decision; a native read remains the edit precondition during build. | `repo_id`, `files:[{path, source:"full"\|{startLine,endLine}, onboarding?}]`, `refresh=false` |
 
 ## Memory baseline & carryover
 

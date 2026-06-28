@@ -1,0 +1,161 @@
+/* Dev gallery styling (the /dev/* harness — Bench + Reference). App.tsx routes /dev/* only under
+   import.meta.env.DEV, so this is a production-dead branch; co-located with the dev code and
+   imported by DevApp. Uses the global :root tokens (styles/tokens.css). */
+.cockpit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 1rem 1.25rem;
+  gap: 0.9rem;
+}
+.cockpit__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--grid);
+  padding-bottom: 0.6rem;
+}
+.cockpit__bar h1 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-shadow: 0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5);
+}
+.bench-overlay {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 0.25rem 0.4rem;
+  background: oklch(0.16 0.02 250 / 0.9);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+}
+/* slice 5i — the scenario selector (top) + the player transport (bottom). A single compact
+   dropdown replaces the old wrapped button wall that overlapped the cockpit header. */
+.bench__picker {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.bench__picker-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: oklch(0.6 0.02 250);
+}
+.bench__select {
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 0.22rem 0.5rem;
+  background: var(--bg);
+  color: var(--amber);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  cursor: pointer;
+  max-width: 80vw;
+}
+.bench__select:hover {
+  border-color: var(--amber);
+}
+.bench__select optgroup {
+  background: var(--bg);
+  color: oklch(0.6 0.02 250);
+}
+.bench__select option {
+  color: oklch(0.82 0.02 250);
+}
+.player {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  /* FIXED width (not min-width) so a long caption can no longer widen the fixed-position container and
+     shift the centred controls row beneath it; the caption truncates with an ellipsis instead. */
+  box-sizing: border-box;
+  width: 40rem;
+  max-width: 92vw;
+  padding: 0.45rem 0.7rem;
+  background: oklch(0.16 0.02 250 / 0.92);
+  border: 1px solid var(--grid);
+  border-radius: 4px;
+}
+.player__caption {
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+  text-align: center;
+  /* one line, ellipsis on overflow — keeps the player a constant size across scenarios/beats */
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.player__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+.player__controls button {
+  font: inherit;
+  font-size: 0.85rem;
+  min-width: 1.9rem;
+  height: 1.6rem;
+  background: var(--bg);
+  color: oklch(0.78 0.02 250);
+  border: 1px solid var(--grid);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.player__controls button.is-on {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.player__scrub {
+  flex: 1;
+  min-width: 12rem;
+  accent-color: var(--amber);
+  cursor: pointer;
+}
+.player__count {
+  font-size: 0.7rem;
+  color: oklch(0.7 0.02 250);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.6rem;
+  text-align: right;
+}
+.bench__picker select {
+  font: inherit;
+  font-size: 0.7rem;
+  background: var(--bg);
+  color: var(--amber);
+  border: 1px solid var(--grid);
+  border-radius: 2px;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
+.reference {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.reference__bar {
+  padding: 0.5rem 0.8rem;
+  color: var(--amber);
+  border-bottom: 1px solid var(--grid);
+}
+.reference__frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+}

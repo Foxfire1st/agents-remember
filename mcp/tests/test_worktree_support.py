@@ -36,6 +36,7 @@ from agents_remember.mcp.config import load_config
 from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
 from agents_remember.providers.identity import provider_instance_id
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.integrate import _merge_integrated_commits
@@ -49,10 +50,14 @@ from agents_remember.worktrees.modules.onboarding import (
     require_updated_route_overview_content,
     require_updated_sidecar_content,
 )
+from agents_remember.worktrees.task_resolver import (
+    leaf_enclosure_path,
+    series_contract_path,
+    task_root_candidates,
+)
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
     load_contract,
-    task_root_candidates,
     worktree_group_for,
     write_contract,
 )
@@ -425,7 +430,108 @@ def closed_external_contract_fixture(
     return closed
 
 
+def closeout_args(contract, *, dry_run: bool = False) -> Namespace:
+    return Namespace(
+        contract_path=contract.contract_path,
+        approved=not dry_run,
+        approval_note="" if dry_run else "developer approved commit preview",
+        code_commit_message="Add feature",
+        memory_commit_message="Document feature",
+        ledger_commit_message="Sync ledger",
+        dry_run=dry_run,
+    )
+
+
+def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
+    return Namespace(
+        contract_path=contract.contract_path,
+        approved=not dry_run,
+        strategy="ff-only",
+        ledger_commit_message="",
+        dry_run=dry_run,
+    )
+
+
+def integrated_external_contract_fixture(root: Path):
+    contract = dirty_open_external_contract_fixture(root)
+    with redirect_stdout(io.StringIO()):
+        assert worktree_manager.command_closeout(closeout_args(contract)) == 0
+    closed = load_contract(contract.contract_path)
+    with redirect_stdout(io.StringIO()):
+        assert worktree_manager.command_integrate(integrate_args(closed)) == 0
+    return load_contract(contract.contract_path)
+
+
 class WorktreeSupportTests(unittest.TestCase):
+    def test_master_start_creates_integration_contract_and_leaf_enclosure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            init_repo(code_repo, "main")
+            coordination_root = workspace / "ar-coordination"
+            (coordination_root / "memory-repos" / "ar-repo-a" / "system").mkdir(parents=True)
+            (coordination_root / "memory-repos" / "ar-repo-a" / "onboarding").mkdir()
+            task_root = coordination_root / "tasks" / "repo-a" / "260624_master"
+            write_task_doc(
+                task_root,
+                TaskDocument.model_validate(
+                    {
+                        "id": "master",
+                        "slug": "task",
+                        "title": "Master Series",
+                        "kind": "master",
+                        "status": "inProgress",
+                        "repo": "repo-a",
+                        "createdAt": "2026-06-24T02:00",
+                        "subTasks": [
+                            {
+                                "number": "15",
+                                "name": "Leaf task",
+                                "file": "15_leaf.md",
+                                "status": "inProgress",
+                            }
+                        ],
+                    }
+                ),
+            )
+
+            result = worktree_manager.start_result(
+                worktree_manager.WorktreeArgs(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    coordination_root=coordination_root,
+                    code_repository_root=code_repo,
+                    topology="external",
+                    task_name="260624_master",
+                    worktree_name="15_leaf",
+                    leaf_id="15_leaf",
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                    skip_provider_setup=True,
+                    lifecycle_id="LC-LEAF",
+                )
+            )
+
+            self.assertEqual(result.returncode, 0)
+            root_contract = load_contract(series_contract_path(task_root))
+            leaf_contract = load_contract(leaf_enclosure_path(task_root, "15_leaf"))
+            self.assertEqual(
+                (root_contract.kind, root_contract.code_source_branch), ("series", "main")
+            )
+            self.assertEqual(root_contract.code_work_branch, "ar/260624_master")
+            self.assertEqual(root_contract.code_worktree, code_repo)
+            self.assertEqual((leaf_contract.kind, leaf_contract.leaf_id), ("leaf", "15_leaf"))
+            self.assertEqual(leaf_contract.code_source_branch, "ar/260624_master")
+            self.assertEqual(leaf_contract.code_work_branch, "ar/15_leaf")
+            self.assertEqual(leaf_contract.parent_contract_path, root_contract.contract_path)
+            self.assertEqual(
+                result.payload["enclosure_path"], leaf_contract.contract_path.as_posix()
+            )
+            self.assertIn(
+                "ar/260624_master", git(code_repo, "branch", "--list", "ar/260624_master")
+            )
+            self.assertIn("ar/15_leaf", git(code_repo, "branch", "--list", "ar/15_leaf"))
+
     def test_memory_ledger_roundtrip_and_prepend(self) -> None:
         ledger = create_initial_ledger("repo-a", "c1", "m1")
         text = ledger_to_text(ledger)
@@ -602,10 +708,11 @@ class WorktreeSupportTests(unittest.TestCase):
                 requested_topology="external",
                 coordination_root=coordination_root,
                 task_name="task-a",
+                leaf_id="worktree-a",  # series enclosure leaf: completes the task-based lookup for contract A
                 worktree_name="worktree-b",  # would match contract B on its own
             )
 
-            # task_name wins; the worktree_name match (B) is never consulted.
+            # Task-based resolution (task_name + leaf_id) wins; the worktree_name match (B) is never consulted.
             self.assertEqual(context.contract_path, contract_a.contract_path)
             self.assertEqual(context.code_worktree, contract_a.code_worktree)
             self.assertNotEqual(context.code_worktree, contract_b.code_worktree)
@@ -705,7 +812,9 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(request.grepai_seed.project_id, "repo-a")
             self.assertEqual(request.grepai_seed.source_coordination_root, coordination_root)
             self.assertEqual(request.grepai_seed.target_memory_root, contract.memory_worktree)
-            self.assertEqual(request.grepai_isolated.runtime_root, contract.worktree_group / "provider-runtime")
+            self.assertEqual(
+                request.grepai_isolated.runtime_root, contract.worktree_group / "provider-runtime"
+            )
             self.assertEqual(request.grepai_isolated.target_memory_root, contract.memory_worktree)
 
     def test_start_ignores_legacy_ledger_branch_metadata(self) -> None:
@@ -941,12 +1050,8 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertIn(
                 "refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"]
             )
-            self.assertEqual(
-                payload["changed_code_paths"], {"count": 1, "sample": ["feature.txt"]}
-            )
-            self.assertEqual(
-                payload["changed_code_paths_committed"], {"count": 0, "sample": []}
-            )
+            self.assertEqual(payload["changed_code_paths"], {"count": 1, "sample": ["feature.txt"]})
+            self.assertEqual(payload["changed_code_paths_committed"], {"count": 0, "sample": []})
             self.assertEqual(payload["onboarding_metadata_refresh"]["missing"], [])
             self.assertEqual(
                 payload["onboarding_metadata_refresh"]["required"],
@@ -1049,9 +1154,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 onboarding_root=onboarding_root,
             )
 
-            plan = worktree_manager.onboarding_refresh_plan_for_context(
-                context, [source_path]
-            )
+            plan = worktree_manager.onboarding_refresh_plan_for_context(context, [source_path])
 
             self.assertEqual(plan["required"][0]["source_path"], source_path)
             self.assertEqual(plan["missing"], [])
@@ -1152,7 +1255,9 @@ class WorktreeSupportTests(unittest.TestCase):
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
             )
-            with self.assertRaisesRegex(RuntimeError, "Run the c-05-create-or-update-onboarding-files skill"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Run the c-05-create-or-update-onboarding-files skill"
+            ):
                 worktree_manager.command_closeout(args)
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
@@ -1276,10 +1381,98 @@ class WorktreeSupportTests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(worktree_manager.command_closeout(args), 0)
             payload = json.loads(output.getvalue())
-            self.assertEqual(
-                payload["changed_code_paths"], {"count": 1, "sample": ["second.txt"]}
-            )
+            self.assertEqual(payload["changed_code_paths"], {"count": 1, "sample": ["second.txt"]})
             self.assertEqual(payload["sidecar_body_gate"]["stale"], {"count": 0, "sample": []})
+
+    def test_recloseout_after_integration_reopens_and_reintegrates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = integrated_external_contract_fixture(root)
+            assert contract.memory_worktree is not None
+            assert contract.memory_repo_path is not None
+            (contract.code_worktree / "second.txt").write_text("second\n", encoding="utf-8")
+            write_file_onboarding(
+                contract.memory_worktree / "onboarding",
+                contract.repo_name,
+                "second.txt",
+                contract.code_commit,
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
+                )
+            preview = json.loads(output.getvalue())
+            self.assertTrue(preview["integration_reopen"]["would_reopen"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+            closeout_payload = json.loads(output.getvalue())
+            self.assertTrue(closeout_payload["integration_reopen"]["reopened"])
+            reopened = load_contract(contract.contract_path)
+            self.assertEqual(reopened.integration_status, "not-started")
+            self.assertEqual(reopened.integration_strategy, "")
+            self.assertEqual(reopened.integrated_code_commit, "")
+            self.assertEqual(reopened.integrated_memory_content_commit, "")
+            self.assertEqual(reopened.integrated_ledger_commit, "")
+            self.assertEqual(
+                worktree_manager.status_payload(reopened)["phase"], "integration-pending"
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_integrate(integrate_args(reopened, dry_run=True)), 0
+                )
+            self.assertEqual(json.loads(output.getvalue())["state"], "would-integrate")
+
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(worktree_manager.command_integrate(integrate_args(reopened)), 0)
+            reintegrated = load_contract(contract.contract_path)
+            self.assertEqual(reintegrated.integration_status, "completed")
+            self.assertEqual(
+                git(contract.code_repo_path, "rev-parse", "main"), reintegrated.code_commit
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", "main"), reintegrated.ledger_commit
+            )
+
+    def test_noop_recloseout_after_integration_keeps_completed_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = integrated_external_contract_fixture(root)
+            assert contract.memory_repo_path is not None
+            code_source = git(contract.code_repo_path, "rev-parse", "main")
+            memory_source = git(contract.memory_repo_path, "rev-parse", "main")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
+                )
+            preview = json.loads(output.getvalue())
+            self.assertFalse(preview["integration_reopen"]["would_reopen"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+            closeout_payload = json.loads(output.getvalue())
+            self.assertFalse(closeout_payload["integration_reopen"]["reopened"])
+            loaded = load_contract(contract.contract_path)
+            self.assertEqual(loaded.integration_status, "completed")
+            self.assertEqual(loaded.integrated_code_commit, contract.integrated_code_commit)
+            self.assertEqual(
+                loaded.integrated_memory_content_commit,
+                contract.integrated_memory_content_commit,
+            )
+            self.assertEqual(loaded.integrated_ledger_commit, contract.integrated_ledger_commit)
+            self.assertEqual(loaded.code_commit, contract.code_commit)
+            self.assertEqual(loaded.memory_content_commit, contract.memory_content_commit)
+            self.assertEqual(loaded.ledger_commit, contract.ledger_commit)
+            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), code_source)
+            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), memory_source)
 
     def test_closeout_excludes_sync_transported_committed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1304,9 +1497,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 self.assertEqual(worktree_manager.command_closeout(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["changed_code_paths"], {"count": 0, "sample": []})
-            self.assertEqual(
-                payload["changed_code_paths_committed"], {"count": 0, "sample": []}
-            )
+            self.assertEqual(payload["changed_code_paths_committed"], {"count": 0, "sample": []})
 
     def test_closeout_preview_bounds_committed_path_lists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1363,10 +1554,13 @@ class WorktreeSupportTests(unittest.TestCase):
                     }
                 ],
             }
-            with mock.patch(
-                "agents_remember.worktrees.modules.closeout.run_memory_quality_check",
-                return_value=failed_quality,
-            ), self.assertRaisesRegex(RuntimeError, "clean memory_quality_check"):
+            with (
+                mock.patch(
+                    "agents_remember.worktrees.modules.closeout.run_memory_quality_check",
+                    return_value=failed_quality,
+                ),
+                self.assertRaisesRegex(RuntimeError, "clean memory_quality_check"),
+            ):
                 worktree_manager.command_closeout(args)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
@@ -1425,15 +1619,18 @@ class WorktreeSupportTests(unittest.TestCase):
                 ),
             )
 
-    def test_status_reports_commit_approval_pending_for_dirty_closed_contract(self) -> None:
+    def test_status_reports_integration_pending_for_dirty_closed_contract(self) -> None:
+        # slice 09: a dirty tree is no longer read as a commit-approval gate. A closed-out contract reports
+        # its honest lifecycle position (integration-pending) even when the worktree is dirty;
+        # commit-approval-pending is owned by the closeout preview / a raised gate, not `git status`.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
             (contract.code_worktree / "followup.txt").write_text("follow-up\n", encoding="utf-8")
             payload = worktree_manager.status_payload(contract)
-            self.assertEqual(payload["phase"], "commit-approval-pending")
-            self.assertEqual(payload["nextOperation"], "request_commit_approval")
-            self.assertEqual(payload["nextTool"], "worktree_closeout_preview")
+            self.assertEqual(payload["phase"], "integration-pending")
+            self.assertEqual(payload["nextOperation"], "request_integration_decision")
+            self.assertEqual(payload["nextTool"], "worktree_integrate")
             self.assertNotIn("next_command", payload)
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
@@ -1641,9 +1838,7 @@ class WorktreeSupportTests(unittest.TestCase):
             (agents_repo / ".env").write_text(
                 "AR_COORDINATION_ROOT=custom-coordination\n", encoding="utf-8"
             )
-            (agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a").mkdir(
-                parents=True
-            )
+            (agents_repo / "custom-coordination" / "memory-repos" / "ar-repo-a").mkdir(parents=True)
             external_memory = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
             external_memory.mkdir(parents=True)
             with mock.patch.object(resolver, "agents_repo_from_script", return_value=agents_repo):
@@ -2601,13 +2796,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
             self.assertEqual(
                 providers["grepai-memory"]["watch"]["logDir"],
-                (
-                    coordination_root
-                    / "logs"
-                    / "providers"
-                    / "grepai"
-                    / instance_id
-                ).as_posix(),
+                (coordination_root / "logs" / "providers" / "grepai" / instance_id).as_posix(),
             )
             self.assertEqual(
                 providers["codegraphcontext-code"]["backend"]["containerName"],
@@ -2777,9 +2966,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             self.assertIn(str(settings_path.resolve()).replace("\\", "\\\\"), config_text)
 
     def test_codex_command_resolves_from_path_and_declares_benchmark_policy(self) -> None:
-        with mock.patch.object(
-            benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
-        ):
+        with mock.patch.object(benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"):
             command = benchmark_runner.codex_command(
                 Path("workspace"),
                 Path("final.md"),
@@ -2802,9 +2989,7 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
         self.assertFalse(policy["arbitraryShell"])
 
     def test_codex_command_default_sandbox_omits_sandbox_argument(self) -> None:
-        with mock.patch.object(
-            benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
-        ):
+        with mock.patch.object(benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"):
             command = benchmark_runner.codex_command(
                 Path("workspace"),
                 Path("final.md"),
@@ -2924,12 +3109,9 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 )
 
             metadata = json.loads(
-                (
-                    output_root
-                    / "triage"
-                    / "with-onboarding"
-                    / "run-001.metadata.json"
-                ).read_text(encoding="utf-8")
+                (output_root / "triage" / "with-onboarding" / "run-001.metadata.json").read_text(
+                    encoding="utf-8"
+                )
             )
             policy = metadata["codexExecutionPolicy"]
             self.assertEqual(policy["scope"], "codex-benchmark-only")

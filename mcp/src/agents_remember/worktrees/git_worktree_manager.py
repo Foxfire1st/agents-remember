@@ -33,6 +33,7 @@ from agents_remember.worktrees.modules.closeout import (
     closeout_result,
 )
 from agents_remember.worktrees.modules.context import contract_context, resolve_context
+from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     changed_worktree_paths,
@@ -105,6 +106,7 @@ from agents_remember.worktrees.modules.sync import sync_result
 
 __all__ = [
     "ENTITY_FINGERPRINT_ALGORITHM",
+    "FinalizeArgs",
     "WorktreeArgs",
     "WorktreeCommandResult",
     "WorktreeProviderSetupConfig",
@@ -142,6 +144,7 @@ __all__ = [
     "ensure_worktree",
     "entity_fingerprint_refresh_plan",
     "entity_fingerprint_refresh_plan_for_context",
+    "finalize_result",
     "has_changes",
     "head_commit",
     "integrate_result",

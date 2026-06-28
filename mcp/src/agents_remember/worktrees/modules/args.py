@@ -28,6 +28,8 @@ class WorktreeArgs:
     topology: Literal["internal", "external"] | None = None
     contract_path: Path | None = None
     task_name: str | None = None
+    parent_task: str | None = None
+    leaf_id: str | None = None
 
     # Start inputs
     worktree_name: str | None = None
@@ -39,6 +41,7 @@ class WorktreeArgs:
     stale_base_choice: str | None = None
     memory_sync_choice: str | None = None
     custom_instruction: str | None = None
+    lifecycle_id: str = ""
 
     # Provider setup
     skip_provider_setup: bool = False

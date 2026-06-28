@@ -12,23 +12,24 @@ The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 **Closeout is worktree-only:** every change affecting the code repo runs through a
 `c-09-git-worktree-manager` dual worktree (code + memory) — there is no
 direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
-worktree start, attach, status, integration, and cleanup; use this skill for the
-closeout gate and code-memory-ledger commit order.
+worktree start, attach, status, integration, lifecycle finalization, and cleanup;
+use this skill for the closeout gate and code-memory-ledger commit order.
 
 ## MCP Tools
 
 Use the worktree closeout tools against the task contract:
 
 ```text
-worktree_closeout_preview(contract_path="<contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_closeout_apply(contract_path="<contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 ```
 
 Worktree closeout records closeout state in the contract the
 `c-09-git-worktree-manager` skill created or attached; the
-`c-09-git-worktree-manager` skill owns later integration and cleanup.
+`c-09-git-worktree-manager` skill owns later integration, lifecycle finalization,
+cleanup, and task-document completion.
 
-## Approval Gate
+## Approval Hand-off
 
 Closeout is explicitly human-gated. Agents must request the matching preview
 tool first, relay the proposed code, memory, and ledger commit messages to the
@@ -39,12 +40,78 @@ records the developer's explicit commit approval. Agents must not treat
 implementation approval, a previous "looks good", or their own judgment as
 commit approval.
 
-The relay is its own turn, per the `l-01-session-job-lifecycle` skill gate
-protocol: deliver the preview facts and proposed messages as plain output
-ending with the approval question, and never invoke `worktree_closeout_apply`
-— or any approval-prompting mechanism — in the same turn as the relay. A
-report attached to its own approval prompt is a report the developer never
-sees.
+The relay follows the `l-01-session-job-lifecycle` skill hand-off protocol: run the
+preview/dry-run first, then call
+`lifecycle_turn_end_notification(summary={…the preview facts + the commit ask…})` as the **last tool
+call**, then deliver the preview facts and proposed messages as plain
+chat output ending with the commit ask, and **STOP / end your
+turn**. The notification sets the `awaiting-developer` lifecycle state, surfaces a dashboard attention item, and
+returns immediately (no wait, no inbox). The developer approves on the dashboard or in the leaf's
+attached chat; the **first AR tool call of your next turn** auto-resumes the lifecycle (`running`),
+clears the attention item, and runs `worktree_closeout_apply` — you send no explicit `lifecycle_resume`.
+Never invoke `worktree_closeout_apply` in the same turn as the relay; the preview report is what the
+developer sees.
+
+## Server-Side Gate Enforcement (parked fallback)
+
+This block-and-wait gate is the **parked fallback**, not the active path: the active closeout hand-off is
+the notify-and-continue `lifecycle_turn_end_notification` above. `lifecycle_gate`, the operator inbox,
+and the dashboard GateResponder still exist and still enforce when you **deliberately** raise the durable
+gate, but nothing routes toward them automatically (`next_step.py` repoints every gate moment to the
+notification). Use the path below only when you need a durable, developer-attributed, mutation-blocking
+approval record.
+
+The chat approval hand-off above is the floor. When the lifecycle is connected to
+the dashboard and a `closeout-approval` gate is explicitly raised, closeout is **also** enforced
+server-side through that durable gate, so a developer can approve from the cockpit and the
+mutating tool — not a UI button — is the security boundary.
+
+`closeout-approval` **is** the commit gate — closeout is the single
+commit-of-record for code, memory, and ledger, so there is no separate
+`commit-approval` kind; every commit routes through this gate. The dashboard
+junction uses the preview/dry-run -> chat report -> `lifecycle_gate` order above.
+
+How it binds:
+
+1. To route approval through the dashboard, raise the closeout junction with the
+   durable gate kind, developer-facing ask, and preview packet in one operation:
+
+   ```text
+   lifecycle_gate(
+     kind="closeout-approval",
+     ask={"kind": "decision", "prompt": "<the commit ask>", "options": ["approve", "revise"]},
+     packet={ ...preview facts... },
+   )
+   ```
+
+2. The developer approves (or rejects / requests revision) from the dashboard.
+   Only the dashboard writes a **developer-attributed** decision
+   (`decidedBy="developer"`); the agent's own `gate_decide` is recorded
+   `decidedBy="model"` and never counts as approval.
+
+3. On the developer's resolution reaching the agent, **clear** the ambient block
+   with `lifecycle_resume()`, then run `worktree_closeout_apply`. A chat "approved"
+   does not propagate itself; the agent always sends the clear. The apply step
+   reads the lifecycle's gate and **refuses** unless it is `approved` by the
+   developer — an `open`, `rejected`, `revision-requested`, already-`applied`, or
+   **model-approved** gate blocks the closeout; on success the tool appends an
+   `applied` snapshot so one approval cannot be replayed.
+
+Rules:
+
+1. **Never self-approve.** A model-attributed approval is rejected by
+   enforcement. Wait for the developer's dashboard decision or Chat response, and
+   never pass your own judgment off as commit approval.
+2. **Opening a gate is opt-in and deliberate.** Open a `closeout-approval` gate
+   **only** when a developer is driving approval from the dashboard. Do **not**
+   open one in a pure-chat session with no cockpit watching — an `open` gate blocks
+   your own closeout until it is decided.
+3. **Gateless lifecycles are unchanged.** With no `closeout-approval` gate the chat
+   commit gate (`intent_note` after an explicit "commit") governs exactly as before;
+   enforcement is additive, never a new requirement on every closeout.
+4. The closeout preview/apply payload carries a `closeout_gate` block
+   (`enforced` / `permitted` / `gateId` / `reason`); relay it at the commit-approval
+   gate so the developer sees whether a dashboard gate is open, approved, or absent.
 
 ## Preconditions
 
@@ -75,7 +142,7 @@ not modified in the current task, because advancing verification metadata over
 stale content defeats the commit-hash-based drift check. Update changed sidecars
 during implementation, not at the metadata-refresh step.
 
-The closeout worklist covers the working tree plus the contract-recorded
+The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
 contract's recorded closeout commit, falling back to the task base) and the
 work branch HEAD, scoped by the recorded base so synced-in parallel work and
@@ -115,7 +182,19 @@ Route overview metadata and generated route indexes are memory-content changes.
 They must be refreshed before `memory_quality_check`, and `memory_quality_check`
 must be clean before creating the memory content commit.
 
-Push behavior is not automatic.
+Push behavior is not automatic. Closeout commits code, memory, and ledger only;
+it never pushes. Pushing the integration branch is part of the landing tail the
+`c-09-git-worktree-manager` skill owns: call
+`lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the push intent as
+your final prose, and **STOP**; push only after the developer approves and
+your next turn auto-resumes. (Parked fallback: the durable
+`lifecycle_gate(kind="push-approval", ...)` + `lifecycle_resume` still works if deliberately raised.)
+
+Closeout does not mark the task `Completed`. After closeout, integration, any
+PR-gated merge/pull, and memory carryover are done, use
+`lifecycle_finalize_task` from the `c-09-git-worktree-manager` skill to prove the
+landed parent-child branch edge, run or verify cleanup, and update the current
+task plus immediate parent row.
 
 ## Failure Conditions
 
@@ -142,7 +221,7 @@ for that source file, then rerun the closeout preview.
 ## Boundaries
 
 1. The `c-12-closeout` skill owns closeout approval and code-memory-ledger commit sequencing.
-2. The `c-12-closeout` skill does not create worktrees, integrate worktrees, or clean up worktrees.
+2. The `c-12-closeout` skill does not create worktrees, integrate worktrees, finalize lifecycles, or clean up worktrees.
 3. The `c-12-closeout` skill does not initialize memory roots; use the `c-00-initialize-memory-repo` skill.
 4. The `c-12-closeout` skill must not commit without explicit commit approval after a closeout preview.
 5. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.

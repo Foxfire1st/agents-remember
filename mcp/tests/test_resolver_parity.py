@@ -12,8 +12,14 @@ MCP_ROOT = Path(__file__).resolve().parents[1]
 MCP_SRC = MCP_ROOT / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.worktrees.task_resolver import (
+    TaskResolutionError,
+    iter_active_series_contracts,
+    resolve_active_task_root,
+)
 from agents_remember.worktrees.worktree_contract import (
     default_contract,
+    default_series_contract,
     write_contract,
 )
 
@@ -121,6 +127,111 @@ class ResolverCliTests(unittest.TestCase):
             self.assertEqual(context["contract_path"], contract.contract_path.as_posix())
             self.assertEqual(context["worktree_group"], contract.worktree_group.as_posix())
             self.assertEqual(context["code_worktree"], contract.code_worktree.as_posix())
+
+            by_leaf = run_package_resolver(
+                "--code-repository-name",
+                "agents-remember",
+                "--workspace-root",
+                str(fixture["workspace"]),
+                "--coordination-root",
+                str(coordination),
+                "--task-name",
+                "Resolver Parity",
+                "--leaf-id",
+                "resolver-parity",
+            )
+            self.assertEqual(by_leaf["contract_path"], contract.contract_path.as_posix())
+            self.assertEqual(by_leaf["task_root"], contract.task_root.as_posix())
+
+    def test_parent_task_disambiguates_nested_task_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = create_external_fixture(root)
+            repo = fixture["repo"]
+            coordination = fixture["coordination"]
+            head = current_head(repo)
+            root_child = coordination / "tasks" / "agents-remember" / "child"
+            nested_child = coordination / "tasks" / "agents-remember" / "parent" / "child"
+            for task_root, branch in (
+                (root_child, "ar/root-child"),
+                (nested_child, "ar/parent-child"),
+            ):
+                write_contract(
+                    task_root / "series-contract.md",
+                    default_series_contract(
+                        task_name="child",
+                        repo_name="agents-remember",
+                        workflow_kind="master-series",
+                        memory_mode="disabled",
+                        coordination_root=coordination,
+                        code_repo_path=repo,
+                        protected_branch=current_branch(repo),
+                        integration_branch=branch,
+                        code_base_commit=head,
+                        task_root=task_root,
+                    ),
+            )
+
+            with self.assertRaisesRegex(TaskResolutionError, "multiple active tasks"):
+                resolve_active_task_root(
+                    coordination,
+                    "agents-remember",
+                    "child",
+                    fallback=False,
+                )
+
+            context = run_package_resolver(
+                "--code-repository-name",
+                "agents-remember",
+                "--workspace-root",
+                str(fixture["workspace"]),
+                "--coordination-root",
+                str(coordination),
+                "--task-name",
+                "child",
+                "--parent-task",
+                "parent",
+            )
+
+            assert_context_shape(self, context)
+            self.assertEqual(context["task_root"], nested_child.as_posix())
+
+    def test_active_series_discovery_excludes_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = create_external_fixture(root)
+            repo = fixture["repo"]
+            coordination = fixture["coordination"]
+            repo_tasks = coordination / "tasks" / "agents-remember"
+            active = repo_tasks / "active"
+            archived = repo_tasks / "0_archive" / "archived"
+            for task_root, task_name in ((active, "active"), (archived, "archived")):
+                write_contract(
+                    task_root / "series-contract.md",
+                    default_series_contract(
+                        task_name=task_name,
+                        repo_name="agents-remember",
+                        workflow_kind="master-series",
+                        memory_mode="disabled",
+                        coordination_root=coordination,
+                        code_repo_path=repo,
+                        protected_branch=current_branch(repo),
+                        integration_branch=f"ar/{task_name}",
+                        code_base_commit=current_head(repo),
+                        task_root=task_root,
+                    ),
+                )
+
+            discovered = list(iter_active_series_contracts(repo_tasks))
+
+            self.assertEqual(discovered, [active / "series-contract.md"])
+            with self.assertRaisesRegex(TaskResolutionError, "active task not found"):
+                resolve_active_task_root(
+                    coordination,
+                    "agents-remember",
+                    "archived",
+                    fallback=False,
+                )
 
 
 def assert_context_shape(

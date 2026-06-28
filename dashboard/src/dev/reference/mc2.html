@@ -1,0 +1,1338 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agents Remember · Agent Operations</title>
+<style>
+/* ─── SpaceX tokens (verbatim contract) ─────────────────────────────── */
+:root {
+  --bg: #000000;
+  --surface: #000000;
+  --surface-warm: var(--surface);
+  --fg: #f0f0fa;
+  --fg-2: var(--fg);
+  --muted: rgba(240, 240, 250, 0.7);
+  --meta: var(--muted);
+  --border: rgba(240, 240, 250, 0.35);
+  --border-soft: rgba(240, 240, 250, 0.1);
+  --accent: #f0f0fa;
+  --accent-on: #000000;
+  --accent-hover: #ffffff;
+  --accent-active: #d8d8e6;
+  --success: #16a34a;
+  --warn: #eab308;
+  --danger: #dc2626;
+  --font-display: "D-DIN-Bold", "D-DIN", "DIN Alternate", "Helvetica Neue", Arial, Verdana, sans-serif;
+  --font-body: "D-DIN", "DIN Alternate", "Helvetica Neue", Arial, Verdana, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --text-xs: 10px;
+  --text-sm: 12px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 40px;
+  --text-4xl: 48px;
+  --leading-body: 1.5;
+  --leading-tight: 1.0;
+  --tracking-display: 0.02em;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --section-y-desktop: 120px;
+  --section-y-tablet: 80px;
+  --section-y-phone: 56px;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-pill: 32px;
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: none;
+  --focus-ring: 0 0 0 2px var(--accent);
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --container-max: 1440px;
+  --container-gutter-desktop: 24px;
+  --container-gutter-tablet: 20px;
+  --container-gutter-phone: 18px;
+}
+
+/* ─── reset / base ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: var(--text-base);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+canvas { display: block; }
+button { font: inherit; cursor: pointer; color: inherit; background: none; border: none; }
+::selection { background: var(--accent); color: var(--accent-on); }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--border-soft); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ─── helpers ───────────────────────────────────────────────────────── */
+.up { text-transform: uppercase; letter-spacing: 0.12em; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--muted); }
+.eyebrow { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted); margin: 0; }
+
+/* ─── app shell ─────────────────────────────────────────────────────── */
+.app {
+  display: grid;
+  grid-template-columns: 256px 1fr;
+  grid-template-rows: 62px 1fr;
+  grid-template-areas: "logo top" "rail stage";
+  height: 100vh;
+}
+.brandbox { grid-area: logo; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--space-6); border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+.brandbox .wm { font-family: var(--font-display); font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; line-height: 1; }
+.brandbox .wm b { color: var(--accent-hover); }
+.brandbox .sub { font-size: 9px; text-transform: uppercase; letter-spacing: 0.26em; color: var(--muted); margin-top: 6px; }
+
+.topbar { grid-area: top; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-8); border-bottom: 1px solid var(--border-soft); }
+.tb-left { display: flex; align-items: baseline; gap: var(--space-5); min-width: 0; }
+.tb-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--fg); white-space: nowrap; }
+.tb-crumb { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-right { display: flex; align-items: center; gap: var(--space-6); }
+.readout { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.readout .rv { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.05em; }
+.readout .rl { font-size: 8px; text-transform: uppercase; letter-spacing: 0.2em; color: var(--muted); }
+.envtag { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 9px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted); }
+
+.ghost { display: inline-flex; align-items: center; gap: 8px; background: var(--border-soft); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--fg); padding: 9px 18px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; transition: background var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard); white-space: nowrap; }
+.ghost:hover { background: color-mix(in oklch, var(--fg) 18%, transparent); color: var(--accent-hover); }
+.ghost:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ghost[disabled] { opacity: 0.5; cursor: progress; }
+.ghost.sm { padding: 6px 12px; font-size: 9px; }
+
+/* ─── rail ──────────────────────────────────────────────────────────── */
+.rail { grid-area: rail; border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; overflow-y: auto; }
+.nav { padding: var(--space-5) 0; flex: 1; }
+.nav-item { width: 100%; display: flex; align-items: center; gap: var(--space-4); padding: 13px var(--space-6); border-left: 2px solid transparent; color: var(--muted); text-align: left; transition: color var(--motion-base) var(--ease-standard), background var(--motion-base) var(--ease-standard); }
+.nav-item .ni { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; opacity: 0.6; }
+.nav-item .nl { font-size: 12px; text-transform: uppercase; letter-spacing: 0.13em; }
+.nav-item:hover { color: var(--fg); }
+.nav-item.active { color: var(--accent-hover); border-left-color: var(--accent); background: var(--border-soft); }
+.nav-item .nb { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--warn); letter-spacing: 0.05em; }
+.rail-foot { border-top: 1px solid var(--border-soft); padding: var(--space-5) var(--space-6); display: flex; flex-direction: column; gap: 9px; }
+.rf-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.rf-k { font-size: 9px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted); }
+.rf-v { font-family: var(--font-mono); font-size: 10px; color: var(--fg); letter-spacing: 0.03em; text-align: right; }
+
+/* ─── stage / views ─────────────────────────────────────────────────── */
+.stage { grid-area: stage; overflow-y: auto; }
+.view { display: none; padding: var(--space-8); }
+.view.active { display: block; animation: rise var(--motion-base) var(--ease-standard); }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-6); }
+.view-head h1 { font-family: var(--font-display); font-weight: 700; font-size: var(--text-2xl); text-transform: uppercase; letter-spacing: var(--tracking-display); line-height: var(--leading-tight); margin: 0; }
+.view-head .vh-sub { font-size: 12px; color: var(--muted); margin: 8px 0 0; max-width: 70ch; line-height: 1.5; }
+.view-head .vh-side { font-family: var(--font-mono); font-size: 11px; color: var(--muted); text-align: right; letter-spacing: 0.04em; white-space: nowrap; }
+
+.panel { border: 1px solid var(--border-soft); padding: var(--space-6); position: relative; }
+.panel.tight { padding: var(--space-5); }
+.panel-h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
+.panel-h .ph-t { font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; }
+.panel-h .ph-m { font-family: var(--font-mono); font-size: 10px; color: var(--muted); letter-spacing: 0.06em; }
+
+.cols { display: grid; gap: var(--space-5); }
+.c-2 { grid-template-columns: 2fr 1fr; }
+.c-3 { grid-template-columns: repeat(3, 1fr); }
+.c-4 { grid-template-columns: repeat(4, 1fr); }
+.mt5 { margin-top: var(--space-5); }
+
+/* dots / pills */
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; flex: none; }
+.dot.ok { background: color-mix(in oklch, var(--success) 85%, var(--fg)); }
+.dot.warn { background: var(--warn); }
+.dot.crit { background: var(--danger); }
+.dot.idle { background: var(--muted); }
+.dot.core { background: var(--accent-hover); }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 9px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--fg); white-space: nowrap; }
+
+/* bars */
+.bar { height: 5px; background: var(--border-soft); position: relative; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--fg); }
+.bar > i.warn { background: var(--warn); }
+.barline { display: grid; grid-template-columns: 1fr 44px; align-items: center; gap: var(--space-4); }
+.barline + .barline { margin-top: 14px; }
+.barline .bk { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 7px; }
+.barline .bv { font-family: var(--font-mono); font-size: 12px; text-align: right; }
+
+/* tables */
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th, .tbl td { text-align: left; padding: 11px 13px; border-bottom: 1px solid var(--border-soft); }
+.tbl th { font-size: 9px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted); font-weight: 400; }
+.tbl td { font-size: 12px; }
+.tbl td.m, .tbl th.m { font-family: var(--font-mono); letter-spacing: 0.03em; }
+.tbl td.r, .tbl th.r { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl tbody tr { transition: background var(--motion-fast) var(--ease-standard); }
+.tbl tbody tr:hover { background: var(--border-soft); }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+
+/* pipeline stepper */
+.pipe { display: flex; border: 1px solid var(--border-soft); }
+.step { flex: 1; padding: var(--space-5); border-right: 1px solid var(--border-soft); }
+.step:last-child { border-right: 0; }
+.step .si { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 0.12em; }
+.step .sl { margin-top: 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; line-height: 1.3; min-height: 26px; }
+.step .sc { margin-top: 12px; font-family: var(--font-display); font-weight: 700; font-size: var(--text-xl); }
+.step.hot { background: var(--border-soft); }
+.step.hot .sc { color: var(--accent-hover); }
+
+/* ─── workspace / operations chrome ─────────────────────────────────── */
+.ops-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5); flex-wrap: wrap; }
+.rtabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.rtab { padding: 8px 15px; border: 1px solid var(--border-soft); font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); transition: color var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard); }
+.rtab:hover { color: var(--fg); }
+.rtab.active { color: var(--accent-hover); border-color: var(--border); background: var(--border-soft); }
+.rtab .rt-n { font-family: var(--font-mono); margin-left: 8px; color: var(--muted); }
+
+.counters { display: flex; border: 1px solid var(--border-soft); flex-wrap: wrap; }
+.ctr { padding: 12px 20px; border-left: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 96px; }
+.ctr:first-child { border-left: 0; }
+.ctr .cv { font-family: var(--font-display); font-weight: 700; font-size: var(--text-xl); }
+.ctr .cl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+
+.ops { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.rstack { display: flex; flex-direction: column; gap: var(--space-5); }
+.ops-content { min-width: 0; }
+.ops-panels { display: grid; grid-template-columns: 1.15fr 1fr; gap: var(--space-5); align-items: start; }
+.ops-content .detail { max-height: calc(100vh - 220px); overflow-y: auto; }
+.ops-left { min-width: 0; }
+.ops-right { display: grid; grid-template-rows: 1fr 1fr; gap: var(--space-5); min-width: 0; height: calc(100vh - 220px); }
+.ops-right > .panel { min-height: 0; overflow-y: auto; }
+.detail-top { position: sticky; top: calc(-1 * var(--space-6)); display: flex; align-items: center; gap: var(--space-4); margin: calc(-1 * var(--space-6)) calc(-1 * var(--space-6)) var(--space-5); padding: var(--space-5) var(--space-6) 13px; background: var(--bg); border-bottom: 1px solid var(--border-soft); z-index: 2; }
+[hidden] { display: none !important; }
+@media (max-width: 1080px) { .ops-panels { grid-template-columns: 1fr; } .ops-content .detail { max-height: none; } .ops-right { height: auto; grid-template-rows: auto auto; } .ops-right > .panel { overflow: visible; } }
+/* Operations fits its block exactly on the wide layout — no page scroll; tree + centre fill the height, overflow stays inside panels */
+@media (min-width: 1281px) {
+  #view-operations.view.active { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  #view-operations .ops { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  #view-operations .ops > .panel { min-height: 0; }
+  #view-operations [data-od-id="op-tree"] { display: flex; flex-direction: column; }
+  #view-operations [data-od-id="op-tree"] .tree { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  #view-operations .ops-content { height: 100%; min-height: 0; }
+  #view-operations .ops-panels { height: 100%; min-height: 0; align-items: stretch; }
+  #view-operations .ops-left { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+  #view-operations #opsAttn { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  #view-operations .ops-left .detail { flex: 1 1 auto; min-height: 0; }
+  #view-operations .ops-right { height: 100%; min-height: 0; }
+  #view-operations .ops-content .detail { max-height: 100%; }
+}
+
+/* operation tree */
+.axis { display: inline-flex; border: 1px solid var(--border-soft); margin-bottom: var(--space-4); }
+.axis button { padding: 7px 13px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+.axis button.active { background: var(--border-soft); color: var(--accent-hover); }
+.tree { font-size: 12px; }
+.trow { display: flex; align-items: center; gap: 9px; padding: 7px 8px; cursor: pointer; border-left: 2px solid transparent; }
+.trow:hover { background: var(--border-soft); }
+.trow.sel { background: var(--border-soft); border-left-color: var(--accent); }
+.caret { width: 12px; font-size: 9px; color: var(--muted); flex: none; text-align: center; user-select: none; }
+.tlabel { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow.t-ws .tlabel, .trow.t-repo .tlabel, .trow.t-stage .tlabel { text-transform: uppercase; letter-spacing: 0.09em; font-size: 11px; }
+.trow.t-wt .tlabel { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.tbadge { font-family: var(--font-mono); font-size: 9px; color: var(--muted); flex: none; }
+.tchildren.collapsed { display: none; }
+
+/* selected task detail */
+.dbc { font-family: var(--font-mono); font-size: 10px; color: var(--muted); letter-spacing: 0.04em; }
+.detail h2 { font-family: var(--font-display); font-weight: 700; font-size: var(--text-xl); text-transform: uppercase; letter-spacing: var(--tracking-display); margin: 10px 0 0; line-height: var(--leading-tight); }
+.dmeta { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border-soft); margin: var(--space-5) 0; }
+.dmeta .dm { padding: 13px 15px; border-left: 1px solid var(--border-soft); }
+.dmeta .dm:first-child { border-left: 0; }
+.dm .dk { font-size: 9px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
+.dm .dv { font-size: 12px; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+.lcmini { display: flex; gap: 6px; flex-wrap: wrap; margin: var(--space-4) 0 var(--space-5); }
+.lc { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); padding: 5px 9px; border: 1px solid var(--border-soft); }
+.lc.on { color: var(--accent-hover); border-color: var(--border); background: var(--border-soft); }
+.lc.warn { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 45%, transparent); }
+.chk-row { display: grid; grid-template-columns: 16px 1fr; gap: 11px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); align-items: baseline; }
+.chk-row .cg { font-family: var(--font-mono); font-size: 11px; text-align: center; }
+.chk-row .ct { font-size: 12px; }
+.chk-row.done .ct { color: var(--muted); }
+.dsub { font-size: 9px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted); margin: var(--space-5) 0 var(--space-3); }
+.kv { display: flex; justify-content: space-between; gap: var(--space-4); padding: 9px 0; border-bottom: 1px solid var(--border-soft); font-size: 12px; }
+.kv:last-child { border-bottom: 0; }
+.kv .kk { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+.kv .kvv { font-family: var(--font-mono); font-size: 11px; text-align: right; }
+.attn-box { border: 1px solid color-mix(in oklch, var(--warn) 40%, transparent); padding: var(--space-4); margin-top: var(--space-5); }
+
+/* attention queue */
+.atn-item { display: grid; grid-template-columns: 12px 1fr auto; gap: 11px; padding: 13px 0; border-bottom: 1px solid var(--border-soft); align-items: start; }
+.atn-item:last-child { border-bottom: 0; }
+.atn-item .dot { margin-top: 4px; }
+.ai-t { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
+.ai-x { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
+.ai-meta { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-top: 6px; letter-spacing: 0.03em; }
+
+/* providers */
+.pgroup { border: 1px solid var(--border-soft); margin-bottom: var(--space-5); }
+.pgroup-h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 13px var(--space-5); border-bottom: 1px solid var(--border-soft); }
+.pgroup-h .pgt { font-family: var(--font-mono); font-size: 12px; }
+.pgroup-h .pgs { font-size: 9px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
+.pinst { display: grid; grid-template-columns: 1.4fr 70px auto 64px; gap: var(--space-4); align-items: center; padding: 12px var(--space-5); border-bottom: 1px solid var(--border-soft); }
+.pinst:last-child { border-bottom: 0; }
+.pinst .pk { font-family: var(--font-mono); font-size: 11px; }
+.pinst .pstat { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-flex; align-items: center; gap: 7px; }
+.pinst .pl { font-family: var(--font-mono); font-size: 10px; color: var(--muted); text-align: right; }
+.phist { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+.phist i { width: 3px; background: var(--border-soft); }
+.phist i.on { background: var(--fg); }
+.phist.warn i.on { background: var(--warn); }
+.phist.idle i { background: var(--border-soft); }
+.provsum-row { display: grid; grid-template-columns: 1fr auto; gap: var(--space-3); padding: 11px 0; border-bottom: 1px solid var(--border-soft); align-items: center; }
+.provsum-row:last-child { border-bottom: 0; }
+.provsum-row .psk { font-family: var(--font-mono); font-size: 11px; }
+.provsum-row .psx { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-top: 3px; }
+.psd { display: inline-flex; gap: 5px; }
+
+/* live feed */
+.feed { display: flex; flex-direction: column; }
+.feed-row { display: grid; grid-template-columns: 56px 12px 1fr; gap: 11px; align-items: start; padding: 11px 0; border-bottom: 1px solid var(--border-soft); }
+.feed-row:last-child { border-bottom: 0; }
+.feed-row .ft { font-family: var(--font-mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; padding-top: 2px; }
+.feed-row .fd .fk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.13em; }
+.feed-row .fd .fx { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+.feed-row .dot { margin-top: 5px; }
+@keyframes flash { from { background: var(--border-soft); } to { background: transparent; } }
+.feed-row.new { animation: flash 1.4s var(--ease-standard); }
+
+.list { display: flex; flex-direction: column; }
+.li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.li:last-child { border-bottom: 0; }
+.li .lt { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.li .lx { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; letter-spacing: 0.03em; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 46px; }
+.spark i { flex: 1; background: var(--border-soft); display: block; }
+.spark i.hi { background: var(--fg); }
+
+/* constellation */
+.constel { padding: 0; overflow: hidden; }
+.constel-wrap { position: relative; height: 560px; }
+.constel-wrap canvas { width: 100%; height: 100%; }
+.constel-head { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: var(--space-5) var(--space-6); z-index: 2; pointer-events: none; }
+.constel-legend { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: var(--space-6); flex-wrap: wrap; padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border-soft); z-index: 2; pointer-events: none; }
+.lg { display: inline-flex; align-items: center; gap: 8px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--muted); }
+.tip { position: absolute; z-index: 5; pointer-events: none; opacity: 0; transform: translate(-50%, -135%); transition: opacity var(--motion-fast) var(--ease-standard); background: var(--bg); border: 1px solid var(--border); padding: 7px 11px; white-space: nowrap; }
+.tip .tt { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; }
+.tip .ts { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-top: 3px; letter-spacing: 0.05em; }
+
+/* ─── memory health (view 04) ───────────────────────────────────────── */
+.mbar { display: flex; height: 16px; border: 1px solid var(--border-soft); overflow: hidden; }
+.mbar.mini { height: 7px; border: 0; background: var(--border-soft); }
+.mbar .seg { display: block; height: 100%; }
+.seg.cur { background: var(--fg); }
+.seg.dft { background: var(--warn); }
+.seg.stl { background: color-mix(in oklch, var(--fg) 26%, transparent); }
+.seg.mis { background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--danger) 60%, transparent) 0 3px, transparent 3px 7px); }
+.mlegend { display: flex; gap: var(--space-8); flex-wrap: wrap; margin-top: var(--space-5); }
+.mleg { display: flex; gap: 10px; align-items: flex-start; }
+.mleg .sw { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+.mleg-col { display: flex; flex-direction: column; }
+.mleg .mlk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.13em; }
+.mleg .mlv { font-family: var(--font-mono); color: var(--accent-hover); margin-left: 7px; letter-spacing: 0; }
+.mleg .mld { font-size: 10px; color: var(--muted); margin-top: 5px; max-width: 24ch; line-height: 1.4; }
+.mrepo-h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 14px 0 12px; border-bottom: 1px solid var(--border); }
+.mrepo-h .mrt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; }
+.mrepo-h .mrs { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+.mroute { display: grid; grid-template-columns: 1.2fr 76px minmax(80px,1fr) 92px; gap: var(--space-4); align-items: center; padding: 13px 0; border-bottom: 1px solid var(--border-soft); }
+.mroute:last-child { border-bottom: 0; }
+.mroute .mrk { font-family: var(--font-mono); font-size: 11px; }
+.mroute .mrk small { display: block; margin-top: 5px; font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-family: var(--font-body); }
+.mroute .mrn { font-family: var(--font-mono); font-size: 11px; color: var(--muted); text-align: right; }
+.mroute .mrstate { text-align: right; }
+.gaterow { padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
+.gaterow:last-child { border-bottom: 0; }
+.gaterow .gh { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.gaterow .gt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
+.gaterow .gx { font-size: 11px; color: var(--muted); margin-top: 7px; line-height: 1.45; }
+
+/* ─── responsive ────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
+  .ops { grid-template-columns: 1fr; }
+  .c-2, .c-3, .c-4 { grid-template-columns: 1fr; }
+  .dmeta { grid-template-columns: repeat(2, 1fr); }
+  .dmeta .dm:nth-child(odd) { border-left: 0; }
+  .pipe { flex-wrap: wrap; }
+  .step { flex: 1 1 33%; }
+}
+@media (max-width: 860px) {
+  body { overflow: auto; }
+  .app { grid-template-columns: 1fr; grid-template-rows: auto auto auto 1fr; grid-template-areas: "logo" "top" "rail" "stage"; height: auto; min-height: 100vh; }
+  .rail { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  .nav { display: flex; padding: 0; }
+  .nav-item { border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .nav-item.active { border-left: 0; border-bottom-color: var(--accent); }
+  .rail-foot { display: none; }
+  .stage { overflow: visible; }
+  .pinst { grid-template-columns: 1fr auto; }
+  .pinst .phist, .pinst .pl { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .view.active, .feed-row.new { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="brandbox" data-od-id="brand">
+    <div class="wm">AGENTS·<b>REMEMBER</b></div>
+    <div class="sub">Agent Operations</div>
+  </div>
+
+  <header class="topbar" data-od-id="topbar">
+    <div class="tb-left">
+      <span class="tb-title" id="crumbTitle">Operations</span>
+      <span class="tb-crumb" id="crumbPath">workspace · nexu-ops · 2 repos · 7 worktrees · 8 tasks</span>
+    </div>
+    <div class="tb-right">
+      <span class="envtag"><span class="dot ok"></span> Sample telemetry</span>
+      <div class="readout"><span class="rv" id="uptime">00d 00:00:00</span><span class="rl">Coord uptime</span></div>
+      <div class="readout"><span class="rv" id="clock">--:--:-- UTC</span><span class="rl">Mission time</span></div>
+      <button class="ghost" id="scanBtn">▣ Run drift scan</button>
+    </div>
+  </header>
+
+  <aside class="rail" data-od-id="rail">
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-view="operations" data-title="Operations" data-path="workspace · nexu-ops · 2 repos"><span class="ni">01</span><span class="nl">Operations</span><span class="nb" id="badge-ops"></span></button>
+      <button class="nav-item" data-view="lifecycles" data-title="Lifecycles" data-path="l-01 · lifecycle → worktree → task"><span class="ni">02</span><span class="nl">Lifecycles</span></button>
+      <button class="nav-item" data-view="providers" data-title="Provider Health" data-path="isolated per-worktree instances"><span class="ni">03</span><span class="nl">Providers</span><span class="nb" id="badge-prov"></span></button>
+      <button class="nav-item" data-view="health" data-title="Memory Health" data-path="memory_quality · drift · gates"><span class="ni">04</span><span class="nl">Memory Health</span><span class="nb" id="badge-health"></span></button>
+      <button class="nav-item" data-view="retrieval" data-title="Retrieval" data-path="c-04 strategy router"><span class="ni">05</span><span class="nl">Retrieval</span></button>
+      <button class="nav-item" data-view="topology" data-title="Topology" data-path="workspace constellation"><span class="ni">06</span><span class="nl">Topology</span></button>
+    </nav>
+    <div class="rail-foot">
+      <div class="rf-row"><span class="rf-k">Workspace</span><span class="rf-v">nexu-ops</span></div>
+      <div class="rf-row"><span class="rf-k">Topology</span><span class="rf-v">repo-local</span></div>
+      <div class="rf-row"><span class="rf-k">Ledger</span><span class="rf-v">aligned</span></div>
+      <div class="rf-row"><span class="rf-k">MCP</span><span class="rf-v">v2.3.1 · live</span></div>
+    </div>
+  </aside>
+
+  <main class="stage">
+
+    <!-- ════ OPERATIONS ════ -->
+    <section class="view active" id="view-operations" data-od-id="operations">
+      <div class="ops-head">
+        <div class="rtabs" id="rtabs">
+          <button class="rtab active" data-repo="all">All repos</button>
+          <button class="rtab" data-repo="ar">agents-remember</button>
+          <button class="rtab" data-repo="cw">coordination-workbench</button>
+        </div>
+        <div class="counters" id="counters"></div>
+      </div>
+
+      <div class="ops">
+        <div class="panel tight" data-od-id="op-tree">
+          <div class="panel-h"><span class="ph-t">Operation tree</span><span class="ph-m mono" id="treeCount"></span></div>
+          <div class="axis" id="axis">
+            <button data-axis="repo" class="active">By repo</button>
+            <button data-axis="lifecycle">By lifecycle</button>
+          </div>
+          <div class="tree" id="tree"></div>
+        </div>
+
+        <div class="ops-content">
+        <div class="ops-panels">
+          <div class="ops-left">
+            <div class="panel tight" id="opsAttn" data-od-id="op-attention">
+              <div class="panel-h"><span class="ph-t">Attention queue</span><span class="ph-m mono" id="attnCount"></span></div>
+              <div id="attn"></div>
+            </div>
+            <div class="panel detail" id="detail" data-od-id="op-detail" hidden></div>
+          </div>
+          <div class="ops-right">
+            <div class="panel tight" data-od-id="op-providers">
+              <div class="panel-h"><span class="ph-t">Provider health</span><button class="ghost sm" data-view="providers">All →</button></div>
+              <div id="provsum"></div>
+            </div>
+            <div class="panel tight" data-od-id="op-eventlog">
+              <div class="panel-h"><span class="ph-t">Event log</span><span class="ph-m mono">stream</span></div>
+              <div class="feed" id="feed">
+                <div class="feed-row"><span class="ft">14:32:07</span><span class="dot warn"></span><div class="fd"><div class="fk">Attention · T-118</div><div class="fx">commit approval held · agents-remember</div></div></div>
+                <div class="feed-row"><span class="ft">14:31:44</span><span class="dot crit"></span><div class="fd"><div class="fk">Conflict · T-119</div><div class="fx">rebase conflict · 2 files · intent-router</div></div></div>
+                <div class="feed-row"><span class="ft">14:30:58</span><span class="dot ok"></span><div class="fd"><div class="fk">Provider · spawn</div><div class="fx">wt-205 grepai instance booting</div></div></div>
+                <div class="feed-row"><span class="ft">14:30:12</span><span class="dot ok"></span><div class="fd"><div class="fk">Worktree · integration</div><div class="fx">T-117 gates passed · ready to merge</div></div></div>
+                <div class="feed-row"><span class="ft">14:29:30</span><span class="dot ok"></span><div class="fd"><div class="fk">Retrieval · semantic</div><div class="fx">c-08 resolver · 6 hits</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ LIFECYCLES ════ -->
+    <section class="view" id="view-lifecycles" data-od-id="lifecycles">
+      <div class="view-head">
+        <div>
+          <h1>Lifecycles</h1>
+          <p class="vh-sub">The second axis — <b>lifecycle → worktree → task</b>. Every active session pinned to its l-01 stage, across both repos in the workspace.</p>
+        </div>
+        <div class="vh-side" id="lcSide"></div>
+      </div>
+      <div class="panel" style="margin-bottom:var(--space-5)">
+        <div class="panel-h"><span class="ph-t">Lifecycle pipeline · l-01</span><span class="ph-m mono">tasks by stage</span></div>
+        <div class="pipe" id="lcPipe"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><span class="ph-t">Active lifecycles</span><span class="ph-m mono">workspace · nexu-ops</span></div>
+        <table class="tbl"><thead><tr><th>Stage</th><th class="m">Repo</th><th class="m">Worktree</th><th class="m">Task</th><th>Lens</th><th>Mode</th><th>Status</th></tr></thead><tbody id="lcBody"></tbody></table>
+      </div>
+    </section>
+
+    <!-- ════ PROVIDERS ════ -->
+    <section class="view" id="view-providers" data-od-id="providers">
+      <div class="view-head">
+        <div>
+          <h1>Provider Health</h1>
+          <p class="vh-sub">Each git worktree spawns its <b>own</b> provider instances for isolation — codegraphcontext, grepai, semantic-index and the MCP bridge. Load &amp; latency are per-instance, never shared across worktrees.</p>
+        </div>
+        <div class="vh-side" id="provSide"></div>
+      </div>
+      <div class="cols c-4" style="margin-bottom:var(--space-5)" id="provStat"></div>
+      <div id="provDetail"></div>
+    </section>
+
+    <!-- ════ MEMORY HEALTH ════ -->
+    <section class="view" id="view-health" data-od-id="memory-health">
+      <div class="view-head">
+        <div>
+          <h1>Memory Health</h1>
+          <p class="vh-sub">Onboarding memory is a <b>1-to-1 mirror of the code</b> — every source file earns a file card, cards group under route pillars, pillars under the repo overview. Health is how faithfully that mirror still matches the code underneath it.</p>
+        </div>
+        <div class="vh-side" id="memSide"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:var(--space-5)">
+        <div class="panel-h"><span class="ph-t">Mirror coverage</span><span class="ph-m mono" id="memCovMeta"></span></div>
+        <div id="memCovBar"></div>
+        <div class="mlegend" id="memLegend"></div>
+      </div>
+
+      <div class="ops-head">
+        <div class="rtabs" id="memTabs">
+          <button class="rtab active" data-mrepo="all">All repos</button>
+          <button class="rtab" data-mrepo="ar">agents-remember</button>
+          <button class="rtab" data-mrepo="cw">coordination-workbench</button>
+        </div>
+        <span class="ph-m mono" id="memStructMeta"></span>
+      </div>
+
+      <div class="cols c-2">
+        <div class="panel">
+          <div class="panel-h"><span class="ph-t">Memory structure · overview → pillars → cards</span><span class="ph-m mono">freshness per route</span></div>
+          <div class="mtree" id="memTree"></div>
+        </div>
+        <div class="rstack">
+          <div class="panel">
+            <div class="panel-h"><span class="ph-t">Quality gates · c-02</span><span class="ph-m mono">what each enforces</span></div>
+            <div id="memGates"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><span class="ph-t">Needs work</span><span class="ph-m mono" id="memActMeta"></span></div>
+            <div id="memActions"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ RETRIEVAL ════ -->
+    <section class="view" id="view-retrieval" data-od-id="retrieval">
+      <div class="view-head">
+        <div>
+          <h1>Retrieval</h1>
+          <p class="vh-sub">The c-04 strategy router across three substrates — semantics for known concepts, relationships for known anchors, intent for hidden contracts and code truths.</p>
+        </div>
+        <div class="vh-side">762 queries · 24h<br>avg 71 ms · hit-rate 86%</div>
+      </div>
+      <div class="cols c-3" style="margin-bottom:var(--space-5)">
+        <div class="panel"><span class="eyebrow">Strategy 01</span><div style="font-family:var(--font-display);font-weight:700;font-size:var(--text-3xl);margin:12px 0 4px">412</div><div class="up" style="font-size:11px">Semantic · 54%</div><div class="lx mono" style="margin-top:14px;color:var(--muted)">known concept · unknown structure</div><div class="bar mt5"><i style="width:54%"></i></div><div class="kv" style="margin-top:14px"><span class="kk">avg latency</span><span class="kvv">42 ms</span></div><div class="kv"><span class="kk">hit-rate</span><span class="kvv">91%</span></div></div>
+        <div class="panel"><span class="eyebrow">Strategy 02</span><div style="font-family:var(--font-display);font-weight:700;font-size:var(--text-3xl);margin:12px 0 4px">196</div><div class="up" style="font-size:11px">Relationship · 26%</div><div class="lx mono" style="margin-top:14px;color:var(--muted)">known anchor · unknown connections</div><div class="bar mt5"><i style="width:26%"></i></div><div class="kv" style="margin-top:14px"><span class="kk">substrate</span><span class="kvv">codegraphcontext</span></div><div class="kv"><span class="kk">avg latency</span><span class="kvv">88 ms</span></div></div>
+        <div class="panel"><span class="eyebrow">Strategy 03</span><div style="font-family:var(--font-display);font-weight:700;font-size:var(--text-3xl);margin:12px 0 4px">154</div><div class="up" style="font-size:11px">Intent · 20%</div><div class="lx mono" style="margin-top:14px;color:var(--muted)">hidden contracts · code truths</div><div class="bar mt5"><i style="width:20%"></i></div><div class="kv" style="margin-top:14px"><span class="kk">substrate</span><span class="kvv">grepai</span></div><div class="kv"><span class="kk">avg latency</span><span class="kvv">130 ms</span></div></div>
+      </div>
+      <div class="cols c-2">
+        <div class="panel">
+          <div class="panel-h"><span class="ph-t">Query log</span><span class="ph-m mono">tail · live</span></div>
+          <table class="tbl"><thead><tr><th class="m">Time</th><th>Strategy</th><th class="m">Worktree</th><th class="r">ms</th><th class="r">Hits</th></tr></thead><tbody>
+            <tr><td class="m">14:32:07</td><td><span class="pill"><span class="dot ok"></span>Semantic</span></td><td class="m">wt-118</td><td class="r m">38</td><td class="r m">6</td></tr>
+            <tr><td class="m">14:31:51</td><td><span class="pill"><span class="dot ok"></span>Relationship</span></td><td class="m">wt-119</td><td class="r m">91</td><td class="r m">4</td></tr>
+            <tr><td class="m">14:30:12</td><td><span class="pill"><span class="dot ok"></span>Intent</span></td><td class="m">wt-205</td><td class="r m">142</td><td class="r m">3</td></tr>
+            <tr><td class="m">14:29:40</td><td><span class="pill"><span class="dot ok"></span>Semantic</span></td><td class="m">wt-204</td><td class="r m">46</td><td class="r m">7</td></tr>
+            <tr><td class="m">14:28:55</td><td><span class="pill"><span class="dot ok"></span>Relationship</span></td><td class="m">wt-ar-main</td><td class="r m">79</td><td class="r m">5</td></tr>
+          </tbody></table>
+        </div>
+        <div class="panel">
+          <div class="panel-h"><span class="ph-t">Volume · last 12 h</span><span class="ph-m mono">queries / hr</span></div>
+          <div class="spark" id="spark"></div>
+          <div class="mt5 list">
+            <div class="li"><div class="lt">Peak hour</div><span class="kvv">11:00 · 94 q</span></div>
+            <div class="li"><div class="lt">Cache warm-hits</div><span class="kvv">38%</span></div>
+            <div class="li"><div class="lt">Re-routed strategy</div><span class="kvv">17 queries</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ TOPOLOGY ════ -->
+    <section class="view" id="view-topology" data-od-id="topology">
+      <div class="view-head">
+        <div>
+          <h1>Coordination Topology</h1>
+          <p class="vh-sub">How agents-remember isolates work: the <b>workspace</b> at the core, its <b>repos</b> on the inner ring, each repo's <b>worktrees</b> (main checkout + feature branches) on the middle ring, and the <b>task</b> in flight on each at the rim. The small satellites around every worktree are its own isolated provider instances. Hover any node.</p>
+        </div>
+        <div class="vh-side">nexu-ops<br>2 repos · 7 worktrees · 8 tasks · 28 providers</div>
+      </div>
+      <div class="panel constel">
+        <div class="constel-head">
+          <span class="eyebrow">Coordination map · live</span>
+          <span class="ph-m mono">workspace → repo → worktree → task</span>
+        </div>
+        <div class="constel-wrap" id="cwrap">
+          <canvas id="constel"></canvas>
+          <div class="tip" id="tip"><div class="tt" id="tipT"></div><div class="ts" id="tipS"></div></div>
+        </div>
+        <div class="constel-legend">
+          <span class="lg"><span class="dot core"></span> Workspace · repo</span>
+          <span class="lg"><span class="dot ok"></span> Worktree · running · healthy provider</span>
+          <span class="lg"><span class="dot warn"></span> Waiting / drift / degraded</span>
+          <span class="lg"><span class="dot crit"></span> Blocked</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var root = getComputedStyle(document.documentElement);
+  var FG = (root.getPropertyValue("--fg") || "#f0f0fa").trim();
+  var WHITE = (root.getPropertyValue("--accent-hover") || "#ffffff").trim();
+  var WARN = (root.getPropertyValue("--warn") || "#eab308").trim();
+  var DANGER = (root.getPropertyValue("--danger") || "#dc2626").trim();
+  var SUCCESS = (root.getPropertyValue("--success") || "#16a34a").trim();
+  var MUTED = "#9a9aa6";
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function esc(s){ return String(s).replace(/[&<>]/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":"&gt;";}); }
+
+  /* ── single source of truth: workspace model ───────────────────── */
+  var STAGES = [["request","Request"],["context","Context/Trust"],["reframe","Reframe"],["research","Research"],["build","Build"],["close","Close"]];
+  var STAGEL = {}; STAGES.forEach(function(s){ STAGEL[s[0]]=s[1]; });
+  var STATUSL = { running:"Running", done:"Done", waiting:"Waiting", blocked:"Blocked", queued:"Queued" };
+  function statusDot(s){ return s==="running"?"ok":s==="done"?"ok":s==="waiting"?"warn":s==="blocked"?"crit":"idle"; }
+
+  function P(k,s,lat,load){ return {k:k,s:s,lat:lat,load:load}; }
+  var PRO = function(a,b,c,d){ return [P("codegraphcontext",a[0],a[1],a[2]),P("grepai",b[0],b[1],b[2]),P("semantic-index",c[0],c[1],c[2]),P("mcp-bridge",d[0],d[1],d[2])]; };
+
+  var WS = { name:"nexu-ops", repos:[
+    { id:"ar", name:"agents-remember", worktrees:[
+      { id:"wt-118", branch:"feat/harness-root-starter-packages", providers:PRO(["healthy",88,0.42],["healthy",130,0.31],["healthy",42,0.55],["healthy",12,0.18]),
+        tasks:[{ id:"T-118", title:"Harness root starter packages", stage:"build", lens:"Feature", mode:"durable · w-02", status:"running",
+          art:"3 file cards · onboarding wave 3", ckpt:"checkpoint @ step 5 · 14:21", mem:"memory archive · staged",
+          attn:{type:"approval", text:"Commit approval held — review starter-package manifest before commit.", wait:"22m"},
+          steps:[["Resolve coordination context","d"],["Scaffold starter package layout","d"],["Wire harness root manifest","d"],["Bind MCP server entry","d"],["Run runtime_install verify","d"],["Commit — approval held","w"]] }] },
+      { id:"wt-119", branch:"feat/retrieval-intent-router", providers:PRO(["degraded",210,0.78],["healthy",140,0.49],["healthy",46,0.40],["healthy",14,0.20]),
+        tasks:[{ id:"T-119", title:"Intent router substrate", stage:"build", lens:"Feature", mode:"durable · w-02", status:"blocked",
+          art:"grepai adapter · router contract", ckpt:"checkpoint @ step 4 · 13:58", mem:"memory archive · pending",
+          attn:{type:"conflict", text:"Rebase on main hit a conflict in 2 files — needs human resolve.", wait:"36m"},
+          steps:[["Define intent substrate contract","d"],["Implement grepai adapter","d"],["Route unknown-contract queries","d"],["Add router fallback","d"],["Rebase on main — conflict","b"],["Integration tests","i"]] }] },
+      { id:"wt-117", branch:"fix/mcp-package-readme", providers:PRO(["healthy",80,0.20],["healthy",120,0.15],["healthy",40,0.22],["healthy",11,0.10]),
+        tasks:[{ id:"T-117", title:"MCP package README fix", stage:"close", lens:"Bug", mode:"durable · w-02", status:"done",
+          art:"README · version bump", ckpt:"all gates passed · 14:30", mem:"memory archive · refreshed",
+          attn:null,
+          steps:[["Fix package README","d"],["Update version","d"],["Missing-onboarding check","d"],["Memory quality gate","d"],["Ledger align — ready to merge","d"]] }] },
+      { id:"wt-ar-main", branch:"main", checkout:true, providers:PRO(["healthy",84,0.30],["healthy",124,0.25],["healthy",41,0.35],["healthy",12,0.14]),
+        tasks:[{ id:"T-121", title:"Onboarding drift cleanup", stage:"research", lens:"Triage", mode:"chat", status:"waiting",
+          art:"2 drift hits · worktrees + benchmarks", ckpt:"research notes · 14:05", mem:"memory archive · n/a",
+          attn:{type:"decision", text:"Drift on worktrees slice — keep the flag or refresh onboarding now?", wait:"11m"},
+          steps:[["Run onboarding_drift_check","d"],["Triage 2 drift hits","d"],["Decision — false positive?","w"],["Refresh stale slices","i"],["Re-verify","i"]] }] }
+    ]},
+    { id:"cw", name:"coordination-workbench", worktrees:[
+      { id:"wt-204", branch:"feat/lifecycle-eventlog", providers:PRO(["healthy",92,0.38],["healthy",135,0.30],["healthy",44,0.50],["healthy",13,0.16]),
+        tasks:[{ id:"T-204", title:"Event log schema", stage:"build", lens:"Feature", mode:"durable · w-02", status:"running",
+          art:"event schema draft", ckpt:"checkpoint @ step 3 · 14:12", mem:"memory archive · staged",
+          attn:null,
+          steps:[["Draft event schema","d"],["Define event types","d"],["Wire emitter","d"],["Persist to ledger","a"],["Stream to console","i"],["Backfill","i"],["Tests","i"]] }] },
+      { id:"wt-205", branch:"chore/provider-isolation", providers:PRO(["spawning",0,0],["spawning",0,0],["healthy",45,0.20],["healthy",15,0.12]),
+        tasks:[{ id:"T-205", title:"Provider isolation harness", stage:"context", lens:"Feature", mode:"durable · w-02", status:"waiting",
+          art:"spawn survey", ckpt:"context checkpoint · 13:40", mem:"memory archive · n/a",
+          attn:{type:"answer", text:"Per-worktree or per-task provider isolation? Affects instance pool sizing.", wait:"48m"},
+          steps:[["Survey current provider spawn","d"],["Choose isolation level","w"],["Per-worktree instance pool","i"],["Port / pid allocation","i"],["Teardown on integrate","i"],["Health probes","i"]] }] },
+      { id:"wt-cw-main", branch:"main", checkout:true, providers:PRO(["healthy",90,0.22],["healthy",128,0.18],["healthy",43,0.28],["healthy",12,0.13]),
+        tasks:[{ id:"T-206", title:"Adopt memory baseline", stage:"request", lens:"Research", mode:"chat", status:"queued",
+          art:"—", ckpt:"queued", mem:"memory archive · n/a",
+          attn:null,
+          steps:[["Resolve context","i"],["Check drift","i"],["Adopt baseline","i"],["Ledger first entry","i"]] }] }
+    ]}
+  ]};
+
+  /* derived helpers */
+  function eachTask(repoFilter, fn) {
+    WS.repos.forEach(function (repo) {
+      if (repoFilter && repoFilter !== "all" && repo.id !== repoFilter) return;
+      repo.worktrees.forEach(function (wt) {
+        wt.tasks.forEach(function (task) { fn(repo, wt, task); });
+      });
+    });
+  }
+  function findTask(id) { var hit = null; eachTask(null, function (r, w, t) { if (t.id === id) hit = { repo: r, wt: w, task: t }; }); return hit; }
+  function doneCount(t){ var n=0; t.steps.forEach(function(s){ if(s[1]==="d") n++; }); return n; }
+
+  /* ── view router ───────────────────────────────────────────────── */
+  var items = Array.prototype.slice.call(document.querySelectorAll(".nav-item"));
+  var views = {};
+  ["operations","lifecycles","providers","health","retrieval","topology"].forEach(function (k) { views[k] = document.getElementById("view-" + k); });
+  var crumbT = document.getElementById("crumbTitle"), crumbP = document.getElementById("crumbPath");
+  var done = {};
+
+  function show(name) {
+    if (!views[name]) name = "operations";
+    Object.keys(views).forEach(function (k) { views[k].classList.toggle("active", k === name); });
+    items.forEach(function (b) {
+      var on = b.getAttribute("data-view") === name;
+      b.classList.toggle("active", on);
+      if (on) { crumbT.textContent = b.getAttribute("data-title"); crumbP.textContent = b.getAttribute("data-path"); }
+    });
+    try { localStorage.setItem("ar.view", name); } catch (e) {}
+    if (name === "retrieval" && !done.spark) { done.spark = true; buildSpark(); }
+    if (name === "lifecycles") renderLifecycles();
+    if (name === "providers") renderProviders();
+    if (name === "health") renderMemory();
+    if (name === "topology") { buildConstel(); resize(); }
+    views[name].scrollTop = 0;
+  }
+  items.forEach(function (b) { b.addEventListener("click", function () { show(b.getAttribute("data-view")); }); });
+  document.addEventListener("click", function (e) {
+    var j = e.target.closest("[data-view]");
+    if (j && !j.classList.contains("nav-item")) show(j.getAttribute("data-view"));
+  });
+  document.addEventListener("keydown", function (e) {
+    var map = { "1":"operations","2":"lifecycles","3":"providers","4":"health","5":"retrieval","6":"topology" };
+    if (map[e.key] && !/input|textarea/i.test((document.activeElement || {}).tagName || "")) show(map[e.key]);
+  });
+
+  /* ── clock ─────────────────────────────────────────────────────── */
+  var clock = document.getElementById("clock"), up = document.getElementById("uptime"), upSec = 148328;
+  function tick() {
+    var d = new Date();
+    clock.textContent = pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + ":" + pad(d.getUTCSeconds()) + " UTC";
+    upSec++; var days = Math.floor(upSec / 86400), r = upSec % 86400;
+    up.textContent = pad(days) + "d " + pad(Math.floor(r / 3600)) + ":" + pad(Math.floor((r % 3600) / 60)) + ":" + pad(r % 60);
+  }
+  tick(); setInterval(tick, 1000);
+
+  /* ── operations: counters ──────────────────────────────────────── */
+  function renderCounters() {
+    var c = { running:0, waiting:0, blocked:0, queued:0 };
+    eachTask(repoFilter, function (r, w, t) { if (c[t.status] != null) c[t.status]++; });
+    var defs = [["running","Running","ok"],["waiting","Waiting","warn"],["blocked","Blocked","crit"],["queued","Queued","idle"],["done","Done · 24h","ok"]];
+    document.getElementById("counters").innerHTML = defs.map(function (d) {
+      var v = d[0] === "done" ? 18 : c[d[0]];
+      return '<div class="ctr"><div class="cv num">' + v + '</div><div class="cl"><span class="dot ' + d[2] + '"></span>' + d[1] + '</div></div>';
+    }).join("");
+  }
+
+  /* ── operations: tree ──────────────────────────────────────────── */
+  var repoFilter = "all", axis = "repo", selectedId = "T-118";
+
+  function taskRow(repo, wt, task, depth) {
+    var sel = task.id === selectedId ? " sel" : "";
+    var badge = task.attn ? '<span class="tbadge" style="color:var(--warn)">●</span>' : '';
+    return '<div class="trow t-task' + sel + '" style="padding-left:' + (depth * 16 + 8) + 'px" data-task="' + task.id + '">' +
+      '<span class="caret"></span><span class="dot ' + statusDot(task.status) + '"></span>' +
+      '<span class="tlabel">' + task.id + ' · ' + esc(task.title) + '</span>' + badge + '</div>';
+  }
+  function groupRow(type, label, meta, depth, key) {
+    return '<div class="trow t-' + type + '" style="padding-left:' + (depth * 16 + 8) + 'px" data-toggle="' + key + '">' +
+      '<span class="caret" data-caret="' + key + '">▾</span>' +
+      '<span class="tlabel">' + esc(label) + '</span>' + (meta ? '<span class="tbadge">' + meta + '</span>' : '') + '</div>';
+  }
+
+  function renderTree() {
+    var html = "", n = 0;
+    if (axis === "repo") {
+      html += groupRow("ws", "Workspace · " + WS.name, "", 0, "ws");
+      html += '<div class="tchildren" data-group="ws">';
+      WS.repos.forEach(function (repo, ri) {
+        if (repoFilter !== "all" && repo.id !== repoFilter) return;
+        var wtCount = repo.worktrees.length;
+        html += groupRow("repo", repo.name, wtCount + " wt", 1, "repo-" + ri);
+        html += '<div class="tchildren" data-group="repo-' + ri + '">';
+        repo.worktrees.forEach(function (wt, wi) {
+          var br = wt.checkout ? wt.branch + " · checkout" : wt.branch;
+          html += groupRow("wt", br, "", 2, "wt-" + ri + "-" + wi);
+          html += '<div class="tchildren" data-group="wt-' + ri + '-' + wi + '">';
+          wt.tasks.forEach(function (t) { html += taskRow(repo, wt, t, 3); n++; });
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      STAGES.forEach(function (st, si) {
+        var rows = [];
+        eachTask(repoFilter, function (r, w, t) { if (t.stage === st[0]) rows.push([r, w, t]); });
+        if (!rows.length) return;
+        html += groupRow("stage", st[1], rows.length + "", 0, "stage-" + si);
+        html += '<div class="tchildren" data-group="stage-' + si + '">';
+        rows.forEach(function (x) {
+          html += groupRow("wt", x[1].branch, x[0].name, 1, "lcwt-" + si + "-" + x[2].id);
+          html += '<div class="tchildren" data-group="lcwt-' + si + '-' + x[2].id + '">';
+          html += taskRow(x[0], x[1], x[2], 2); n++;
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+    }
+    var tree = document.getElementById("tree");
+    tree.innerHTML = html;
+    document.getElementById("treeCount").textContent = n + " tasks";
+    Array.prototype.forEach.call(tree.querySelectorAll(".trow.t-task"), function (row) {
+      row.addEventListener("click", function () { selectTask(row.getAttribute("data-task")); });
+    });
+    Array.prototype.forEach.call(tree.querySelectorAll("[data-toggle]"), function (row) {
+      row.addEventListener("click", function () {
+        var key = row.getAttribute("data-toggle");
+        var kids = tree.querySelector('[data-group="' + key + '"]');
+        var caret = row.querySelector(".caret");
+        if (kids) { var c = kids.classList.toggle("collapsed"); if (caret) caret.textContent = c ? "▸" : "▾"; }
+      });
+    });
+  }
+
+  function showDetail() { var a = document.getElementById("opsAttn"), d = document.getElementById("detail"); if (a) a.hidden = true; if (d) { d.hidden = false; d.scrollTop = 0; } }
+  function showPanels() { var a = document.getElementById("opsAttn"), d = document.getElementById("detail"); if (d) d.hidden = true; if (a) a.hidden = false; }
+  function selectTask(id) {
+    selectedId = id;
+    Array.prototype.forEach.call(document.querySelectorAll(".trow.t-task"), function (r) {
+      r.classList.toggle("sel", r.getAttribute("data-task") === id);
+    });
+    renderDetail();
+    showDetail();
+  }
+
+  /* ── operations: selected task detail ──────────────────────────── */
+  function stateGlyph(s){ return s==="d"?'<span style="color:'+SUCCESS+'">✓</span>':s==="a"?'<span style="color:'+WHITE+'">◆</span>':s==="b"?'<span style="color:'+DANGER+'">✕</span>':s==="w"?'<span style="color:'+WARN+'">◷</span>':'<span style="color:'+MUTED+'">·</span>'; }
+  function renderDetail() {
+    var ctx = findTask(selectedId) || findTask("T-118");
+    var t = ctx.task, wt = ctx.wt, repo = ctx.repo;
+    var dc = doneCount(t), total = t.steps.length;
+    var lcmini = STAGES.map(function (s) {
+      var on = s[0] === t.stage; var warnStage = on && (t.status === "waiting" || t.status === "blocked");
+      return '<span class="lc' + (on ? (warnStage ? " warn" : " on") : "") + '">' + s[1] + '</span>';
+    }).join("");
+    var checklist = t.steps.map(function (s) {
+      return '<div class="chk-row' + (s[1] === "d" ? " done" : "") + '"><span class="cg">' + stateGlyph(s[1]) + '</span><span class="ct">' + esc(s[0]) + '</span></div>';
+    }).join("");
+    var attn = t.attn ? '<div class="attn-box"><div class="dsub" style="margin-top:0;color:' + WARN + '">⚠ Awaiting you · ' + t.attn.type + ' · ' + t.attn.wait + '</div><div style="font-size:12px;line-height:1.5">' + esc(t.attn.text) + '</div><div style="margin-top:14px;display:flex;gap:8px"><button class="ghost sm" data-resolve="' + t.id + '">Resolve →</button></div></div>' : '';
+    document.getElementById("detail").innerHTML =
+      '<div class="detail-top"><button class="ghost sm" id="detailBack">← Back</button><span class="ph-m mono" style="margin-left:auto">' + t.id + ' · ' + STAGEL[t.stage] + '</span></div>' +
+      '<div class="dbc">' + repo.name + ' / ' + wt.branch + ' / ' + STAGEL[t.stage] + '</div>' +
+      '<h2>' + esc(t.title) + '</h2>' +
+      '<div class="dmeta">' +
+        '<div class="dm"><div class="dk">Task</div><div class="dv mono" style="text-transform:none">' + t.id + '</div></div>' +
+        '<div class="dm"><div class="dk">Job lens</div><div class="dv">' + t.lens + '</div></div>' +
+        '<div class="dm"><div class="dk">Build mode</div><div class="dv" style="text-transform:none;font-family:var(--font-mono);font-size:11px">' + t.mode + '</div></div>' +
+        '<div class="dm"><div class="dk">Status</div><div class="dv"><span class="dot ' + statusDot(t.status) + '"></span> ' + STATUSL[t.status] + '</div></div>' +
+      '</div>' +
+      '<div class="dsub">Lifecycle position</div>' + '<div class="lcmini">' + lcmini + '</div>' +
+      '<div class="dsub">Progress · ' + dc + ' / ' + total + '</div>' + checklist +
+      '<div class="cols c-2 mt5" style="gap:var(--space-5)">' +
+        '<div><div class="dsub" style="margin-top:0">Artifacts &amp; context</div>' +
+          '<div class="kv"><span class="kk">Touched</span><span class="kvv">' + esc(t.art) + '</span></div>' +
+          '<div class="kv"><span class="kk">Worktree</span><span class="kvv">' + wt.branch.split("/").pop() + '</span></div></div>' +
+        '<div><div class="dsub" style="margin-top:0">Checkpoint &amp; memory</div>' +
+          '<div class="kv"><span class="kk">Checkpoint</span><span class="kvv">' + esc(t.ckpt) + '</span></div>' +
+          '<div class="kv"><span class="kk">Memory</span><span class="kvv">' + esc(t.mem) + '</span></div></div>' +
+      '</div>' + attn;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-resolve]"), function (b) {
+      b.addEventListener("click", function () { resolveAttn(b.getAttribute("data-resolve")); });
+    });
+    var bk = document.getElementById("detailBack");
+    if (bk) bk.addEventListener("click", showPanels);
+  }
+
+  /* ── operations: attention queue ───────────────────────────────── */
+  var resolved = {};
+  function renderAttn() {
+    var rows = [];
+    eachTask(repoFilter, function (r, w, t) { if (t.attn && !resolved[t.id]) rows.push([r, w, t]); });
+    document.getElementById("attnCount").textContent = rows.length + " waiting";
+    document.getElementById("badge-ops").textContent = rows.length ? rows.length : "";
+    if (!rows.length) { document.getElementById("attn").innerHTML = '<div class="muted" style="font-size:12px;padding:8px 0">No agents waiting — queue clear.</div>'; return; }
+    document.getElementById("attn").innerHTML = rows.map(function (x) {
+      var t = x[2], dotc = t.status === "blocked" ? "crit" : "warn";
+      return '<div class="atn-item"><span class="dot ' + dotc + '"></span>' +
+        '<div><div class="ai-t">' + t.id + ' · ' + t.attn.type + '</div>' +
+        '<div class="ai-x">' + esc(t.attn.text) + '</div>' +
+        '<div class="ai-meta">' + x[0].name + ' · ' + x[1].branch.split("/").pop() + ' · ' + t.attn.wait + '</div></div>' +
+        '<button class="ghost sm" data-jump="' + t.id + '">Open</button></div>';
+    }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-jump]"), function (b) {
+      b.addEventListener("click", function () { selectTask(b.getAttribute("data-jump")); document.getElementById("detail").scrollIntoView ? null : null; });
+    });
+  }
+  function resolveAttn(id) {
+    resolved[id] = true;
+    var ctx = findTask(id); if (ctx) { ctx.task.attn = null; if (ctx.task.status === "waiting" || ctx.task.status === "blocked") ctx.task.status = "running"; }
+    pushEvent(["ok", "Attention · " + id, "resolved by operator · task resumed"]);
+    renderAttn(); renderCounters(); renderTree(); renderDetail();
+  }
+
+  /* ── operations: provider summary ──────────────────────────────── */
+  function provDots(wt) { return wt.providers.map(function (p) { var d = p.s === "healthy" ? "ok" : p.s === "degraded" ? "warn" : p.s === "spawning" ? "idle" : "crit"; return '<span class="dot ' + d + '"></span>'; }).join(""); }
+  function renderProvSum() {
+    var html = "";
+    WS.repos.forEach(function (repo) {
+      if (repoFilter !== "all" && repo.id !== repoFilter) return;
+      repo.worktrees.forEach(function (wt) {
+        var bad = wt.providers.filter(function (p) { return p.s !== "healthy"; }).length;
+        if (repoFilter === "all" && !bad && wt.checkout) return; // trim clean checkouts in the all-view summary
+        html += '<div class="provsum-row"><div><div class="psk">' + wt.branch.split("/").pop() + '</div>' +
+          '<div class="psx">' + repo.id + ' · ' + (bad ? bad + " degraded" : "all healthy") + '</div></div>' +
+          '<div class="psd">' + provDots(wt) + '</div></div>';
+      });
+    });
+    document.getElementById("provsum").innerHTML = html;
+  }
+
+  /* ── providers view ────────────────────────────────────────────── */
+  function hist(load, status) {
+    var bars = 16, cls = status === "degraded" ? "warn" : status === "spawning" ? "idle" : "";
+    var out = '<div class="phist ' + cls + '">';
+    for (var i = 0; i < bars; i++) {
+      var base = status === "spawning" ? 0.05 : load;
+      var v = Math.max(0.06, Math.min(1, base + (Math.sin(i * 0.9 + load * 6) * 0.18) + (i / bars) * 0.05));
+      var on = status === "spawning" ? "" : " on";
+      out += '<i class="' + on.trim() + '" style="height:' + Math.round(v * 100) + '%"></i>';
+    }
+    return out + '</div>';
+  }
+  function renderProviders() {
+    var total = 0, healthy = 0, degraded = 0, spawning = 0, wtCount = 0;
+    WS.repos.forEach(function (r) { r.worktrees.forEach(function (w) { wtCount++; w.providers.forEach(function (p) { total++; if (p.s === "healthy") healthy++; else if (p.s === "degraded") degraded++; else if (p.s === "spawning") spawning++; }); }); });
+    document.getElementById("badge-prov").textContent = (degraded + spawning) ? (degraded + spawning) : "";
+    document.getElementById("provSide").innerHTML = total + " instances · " + wtCount + " worktrees<br>" + healthy + " healthy · " + (degraded + spawning) + " attention";
+    var stats = [["Instances", total, "ok"], ["Healthy", healthy, "ok"], ["Degraded", degraded, "warn"], ["Spawning", spawning, "idle"]];
+    document.getElementById("provStat").innerHTML = stats.map(function (s) {
+      return '<div class="panel"><div class="ml" style="font-size:9px;letter-spacing:0.16em;color:var(--muted);text-transform:uppercase">' + s[0] + '</div>' +
+        '<div style="font-family:var(--font-display);font-weight:700;font-size:var(--text-3xl);margin-top:10px;color:' + (s[2] === "warn" ? WARN : s[2] === "idle" && s[1] ? FG : FG) + '">' + s[1] + '</div></div>';
+    }).join("");
+    var html = "";
+    WS.repos.forEach(function (repo) {
+      repo.worktrees.forEach(function (wt) {
+        var bad = wt.providers.filter(function (p) { return p.s !== "healthy"; }).length;
+        html += '<div class="pgroup"><div class="pgroup-h"><span class="pgt">' + repo.name + ' / ' + wt.branch + (wt.checkout ? ' · checkout' : '') + '</span>' +
+          '<span class="pgs">' + (bad ? bad + ' need attention' : 'isolated · 4 healthy') + '</span></div>';
+        wt.providers.forEach(function (p) {
+          var d = p.s === "healthy" ? "ok" : p.s === "degraded" ? "warn" : p.s === "spawning" ? "idle" : "crit";
+          var lat = p.s === "spawning" ? "—" : p.lat + " ms";
+          html += '<div class="pinst"><span class="pk">' + p.k + '</span>' +
+            '<span class="pstat"><span class="dot ' + d + '"></span>' + p.s + '</span>' +
+            hist(p.load, p.s) +
+            '<span class="pl">' + lat + '</span></div>';
+        });
+        html += '</div>';
+      });
+    });
+    document.getElementById("provDetail").innerHTML = html;
+  }
+
+  /* ── lifecycles view ───────────────────────────────────────────── */
+  function renderLifecycles() {
+    var counts = {}; STAGES.forEach(function (s) { counts[s[0]] = 0; });
+    var rows = [];
+    eachTask(null, function (r, w, t) { counts[t.stage]++; rows.push([r, w, t]); });
+    var order = {}; STAGES.forEach(function (s, i) { order[s[0]] = i; });
+    rows.sort(function (a, b) { return order[a[2].stage] - order[b[2].stage]; });
+    document.getElementById("lcSide").innerHTML = rows.length + " active lifecycles<br>2 repos · nexu-ops";
+    document.getElementById("lcPipe").innerHTML = STAGES.map(function (s, i) {
+      var hot = counts[s[0]] > 0 && (s[0] === "build");
+      return '<div class="step' + (hot ? " hot" : "") + '"><div class="si">' + pad(i + 1) + '</div><div class="sl">' + s[1] + '</div><div class="sc num">' + counts[s[0]] + '</div></div>';
+    }).join("");
+    document.getElementById("lcBody").innerHTML = rows.map(function (x) {
+      var t = x[2];
+      return '<tr><td class="up" style="font-size:10px">' + STAGEL[t.stage] + '</td><td class="m">' + x[0].id + '</td><td class="m">' + x[1].branch.split("/").pop() + '</td><td class="m">' + t.id + '</td>' +
+        '<td><span class="pill">' + t.lens + '</span></td><td class="m" style="font-size:11px">' + t.mode + '</td>' +
+        '<td><span class="pill"><span class="dot ' + statusDot(t.status) + '"></span>' + STATUSL[t.status] + '</span></td></tr>';
+    }).join("");
+  }
+
+  /* ── memory health (view 04) ───────────────────────────────────── */
+  /* Onboarding memory is a 1-to-1 mirror of source: cards = current+drift+stale,
+     missing = source files with no card. One model, derived four ways. */
+  var MEM = { repos: [
+    { id:"ar", name:"agents-remember", overview:"current", routes:[
+      { name:"kernel",          src:12, current:11, drift:1, stale:0 },
+      { name:"controllers",     src:9,  current:9,  drift:0, stale:0 },
+      { name:"memory_quality",  src:14, current:12, drift:1, stale:1 },
+      { name:"worktrees",       src:8,  current:4,  drift:2, stale:1 },
+      { name:"mcp/tools",       src:11, current:7,  drift:0, stale:2 },
+      { name:"cli",             src:6,  current:6,  drift:0, stale:0 },
+      { name:"benchmarks",      src:18, current:6,  drift:0, stale:5 }
+    ]},
+    { id:"cw", name:"coordination-workbench", overview:"current", routes:[
+      { name:"kernel",          src:10, current:10, drift:0, stale:0 },
+      { name:"eventlog",        src:7,  current:6,  drift:1, stale:0 },
+      { name:"providers",       src:9,  current:5,  drift:0, stale:1 }
+    ]}
+  ]};
+  var memRepoFilter = "all";
+  function routeCards(r){ return r.current + r.drift + r.stale; }
+  function routeMissing(r){ return r.src - routeCards(r); }
+  function memTotals(filter){
+    var T = { src:0, cards:0, current:0, drift:0, stale:0, missing:0, routes:0, repos:0 };
+    MEM.repos.forEach(function(repo){
+      if (filter !== "all" && repo.id !== filter) return;
+      T.repos++;
+      repo.routes.forEach(function(r){
+        T.routes++; T.src += r.src; T.current += r.current; T.drift += r.drift; T.stale += r.stale;
+        T.cards += routeCards(r); T.missing += routeMissing(r);
+      });
+    });
+    return T;
+  }
+  function memSeg(cls, v){ return v > 0 ? '<i class="seg ' + cls + '" style="flex:' + v + '"></i>' : ''; }
+  function mbar(c, d, s, m, mini){
+    return '<div class="mbar' + (mini ? ' mini' : '') + '">' +
+      memSeg('cur', c) + memSeg('dft', d) + memSeg('stl', s) + memSeg('mis', m) + '</div>';
+  }
+  function legendHTML(T){
+    var defs = [
+      ["cur","Current",T.current,"verified against current code"],
+      ["dft","Drift",T.drift,"code changed after last verify"],
+      ["stl","Stale",T.stale,"not re-verified in &gt;14 days"],
+      ["mis","Missing",T.missing,"source file with no card · blocks closeout"]
+    ];
+    return defs.map(function(d){
+      return '<div class="mleg"><span class="sw seg ' + d[0] + '"></span><div class="mleg-col">' +
+        '<div class="mlk">' + d[1] + '<span class="mlv num">' + d[2] + '</span></div>' +
+        '<div class="mld">' + d[3] + '</div></div></div>';
+    }).join("");
+  }
+  function memTreeHTML(filter){
+    var html = "";
+    MEM.repos.forEach(function(repo){
+      if (filter !== "all" && repo.id !== filter) return;
+      var rs = 0, rc = 0; repo.routes.forEach(function(r){ rs += r.src; rc += routeCards(r); });
+      html += '<div class="mrepo-h"><span class="mrt">' + repo.name + '</span>' +
+        '<span class="mrs">overview ' + repo.overview + ' · ' + rc + '/' + rs + ' cards</span></div>';
+      repo.routes.forEach(function(r){
+        var cards = routeCards(r), miss = routeMissing(r), cov = Math.round(cards / r.src * 100);
+        var st = miss > 0 ? ["crit","Gaps"] : r.drift > 0 ? ["warn","Drift"] : r.stale > 0 ? ["idle","Stale"] : ["ok","Current"];
+        html += '<div class="mroute"><div class="mrk">' + r.name + '<small>' + cov + '% mirrored</small></div>' +
+          '<div class="mrn">' + cards + ' / ' + r.src + '</div>' +
+          mbar(r.current, r.drift, r.stale, miss, true) +
+          '<div class="mrstate"><span class="pill"><span class="dot ' + st[0] + '"></span>' + st[1] + '</span></div></div>';
+      });
+    });
+    return html;
+  }
+  function memGatesHTML(missing){
+    var gates = [
+      ["Task-start drift check","Compares every touched file card against the current code before work begins.","ok","Pass"],
+      ["Pre-commit missing-onboarding","Blocks a commit when a changed source file has no file card.", missing > 0 ? "warn" : "ok", missing > 0 ? "Warn · " + missing : "Pass"],
+      ["Closeout quality gate","Integrity + style + update-history must all pass before a task can close.","idle","Ready"]
+    ];
+    return gates.map(function(g){
+      return '<div class="gaterow"><div class="gh"><span class="gt">' + g[0] + '</span>' +
+        '<span class="pill"><span class="dot ' + g[2] + '"></span>' + g[3] + '</span></div>' +
+        '<div class="gx">' + g[1] + '</div></div>';
+    }).join("");
+  }
+  function memActionsRender(filter){
+    var acts = [];
+    MEM.repos.forEach(function(repo){
+      if (filter !== "all" && repo.id !== filter) return;
+      repo.routes.forEach(function(r){
+        var miss = routeMissing(r);
+        if (miss <= 0 && r.drift <= 0 && r.stale < 3) return;
+        var sev = miss > 0 ? 3 : r.drift > 0 ? 2 : 1;
+        var what = miss > 0 ? ("Bootstrap " + miss + " missing file card" + (miss > 1 ? "s" : "") + " · c-03 onboarding wave")
+          : r.drift > 0 ? ("Refresh " + r.drift + " drifted card" + (r.drift > 1 ? "s" : "") + " · code moved ahead")
+          : ("Re-verify " + r.stale + " stale cards · freshness lapsed");
+        acts.push({ repo:repo, route:r, sev:sev, what:what });
+      });
+    });
+    acts.sort(function(a,b){ return b.sev - a.sev; });
+    document.getElementById("memActMeta").textContent = acts.length + (acts.length === 1 ? " route" : " routes");
+    document.getElementById("memActions").innerHTML = acts.length ? acts.map(function(a){
+      var dotc = a.sev === 3 ? "crit" : a.sev === 2 ? "warn" : "idle";
+      return '<div class="atn-item"><span class="dot ' + dotc + '"></span>' +
+        '<div><div class="ai-t">' + a.repo.id + ' · ' + a.route.name + '</div>' +
+        '<div class="ai-x">' + a.what + '</div></div>' +
+        '<button class="ghost sm">Open</button></div>';
+    }).join("") : '<div class="muted" style="font-size:12px;padding:8px 0">All routes mirrored &amp; fresh.</div>';
+  }
+  function globalActionCount(){
+    var n = 0; MEM.repos.forEach(function(repo){ repo.routes.forEach(function(r){
+      if (routeMissing(r) > 0 || r.drift > 0 || r.stale >= 3) n++; }); });
+    return n;
+  }
+  function renderMemory(){
+    var T = memTotals(memRepoFilter), pct = Math.round(T.cards / T.src * 100);
+    document.getElementById("memSide").innerHTML = T.src + " source files · " + T.cards + " cards<br>" + pct + "% mirrored · " + T.missing + " gaps";
+    document.getElementById("memCovMeta").textContent = "1-to-1 onboarding mapping · " + T.repos + (T.repos > 1 ? " repos" : " repo");
+    document.getElementById("memCovBar").innerHTML = mbar(T.current, T.drift, T.stale, T.missing, false);
+    document.getElementById("memLegend").innerHTML = legendHTML(T);
+    document.getElementById("memStructMeta").textContent = "overview → " + T.routes + " pillars → " + T.cards + " cards";
+    document.getElementById("memTree").innerHTML = memTreeHTML(memRepoFilter);
+    document.getElementById("memGates").innerHTML = memGatesHTML(T.missing);
+    memActionsRender(memRepoFilter);
+    var bh = document.getElementById("badge-health"); if (bh) bh.textContent = globalActionCount();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("#memTabs .rtab"), function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll("#memTabs .rtab").forEach(function (x) { x.classList.remove("active"); });
+      b.classList.add("active"); memRepoFilter = b.getAttribute("data-mrepo"); renderMemory();
+    });
+  });
+
+  /* ── repo tabs + axis toggle ───────────────────────────────────── */
+  Array.prototype.forEach.call(document.querySelectorAll("#rtabs .rtab"), function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll("#rtabs .rtab").forEach(function (x) { x.classList.remove("active"); });
+      b.classList.add("active"); repoFilter = b.getAttribute("data-repo");
+      renderCounters(); renderTree(); renderAttn(); renderProvSum();
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#axis button"), function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll("#axis button").forEach(function (x) { x.classList.remove("active"); });
+      b.classList.add("active"); axis = b.getAttribute("data-axis"); renderTree();
+    });
+  });
+
+  /* ── retrieval sparkline ───────────────────────────────────────── */
+  function buildSpark() {
+    var s = document.getElementById("spark"); if (!s || s.childNodes.length) return;
+    var vals = [41, 52, 47, 63, 58, 71, 94, 80, 66, 72, 61, 55], max = Math.max.apply(null, vals);
+    vals.forEach(function (v) { var i = document.createElement("i"); i.style.height = (18 + (v / max) * 82) + "%"; if (v === max) i.className = "hi"; s.appendChild(i); });
+  }
+
+  /* ── drift scan + live feed ────────────────────────────────────── */
+  var scanBtn = document.getElementById("scanBtn");
+  scanBtn.addEventListener("click", function () {
+    if (scanBtn.disabled) return; scanBtn.disabled = true; scanBtn.textContent = "◌ Scanning…";
+    setTimeout(function () { scanBtn.disabled = false; scanBtn.textContent = "▣ Run drift scan"; pushEvent(["ok", "Drift scan · quality", "completed · 0 new drift · 2 known stale"]); }, 1600);
+  });
+  var feed = document.getElementById("feed");
+  var pool = [
+    ["ok", "Semantic · retrieval", "concept resolved · c-04 router · 5 hits"],
+    ["ok", "Provider · health", "wt-119 codegraphcontext recovering"],
+    ["warn", "Attention · T-205", "answer needed · isolation level"],
+    ["ok", "Lifecycle · l-01", "T-204 advanced to build stage"],
+    ["ok", "Worktree · spawn", "wt-205 provider pool initializing"],
+    ["ok", "Closeout · gate", "T-117 ledger aligned · no push"]
+  ];
+  function nowStr() { var d = new Date(); return pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + ":" + pad(d.getUTCSeconds()); }
+  function pushEvent(ev) {
+    var row = document.createElement("div"); row.className = "feed-row new";
+    row.innerHTML = '<span class="ft">' + nowStr() + '</span><span class="dot ' + ev[0] + '"></span><div class="fd"><div class="fk">' + ev[1] + '</div><div class="fx">' + ev[2] + '</div></div>';
+    feed.insertBefore(row, feed.firstChild);
+    while (feed.childNodes.length > 8) feed.removeChild(feed.lastChild);
+  }
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduce) setInterval(function () { pushEvent(pool[Math.floor(Math.random() * pool.length)]); }, 5200);
+
+  /* ════ COORDINATION MAP (topology) ════
+     Deterministic radial tree: workspace core → repos (inner ring) →
+     worktrees (middle ring) → task (rim), with each worktree's isolated
+     provider instances as satellites. Edges are real parent→child links. */
+  var cv = document.getElementById("constel"), ctx = cv.getContext("2d"), wrap = document.getElementById("cwrap");
+  var tip = document.getElementById("tip"), tipT = document.getElementById("tipT"), tipS = document.getElementById("tipS");
+  var cw = 0, ch = 0, dpr = 1, mnodes = [], built = false;
+  var RF = { repo: 0.26, wt: 0.52, task: 0.76 };
+
+  function col(s) { return s === "warn" ? WARN : s === "crit" ? DANGER : s === "idle" ? MUTED : s === "core" ? WHITE : FG; }
+
+  function buildConstel() {
+    if (built) return; built = true;
+    function add(o) { mnodes.push(o); return mnodes.length - 1; }
+    var totWt = 0, totTask = 0, totProv = 0;
+    WS.repos.forEach(function (r) { r.worktrees.forEach(function (w) { totWt++; totTask += w.tasks.length; totProv += w.providers.length; }); });
+    var ws = add({ kind: "ws", parent: -1, rf: 0, ang: 0, base: 7, status: "core",
+      label: "WORKSPACE · " + WS.name.toUpperCase(), sub: WS.repos.length + " repos · " + totWt + " worktrees · " + totTask + " tasks" });
+    var nRepos = WS.repos.length;
+    WS.repos.forEach(function (repo, ri) {
+      var repoAng = (ri / nRepos) * Math.PI * 2;          // 0 = right, π = left
+      var repoIdx = add({ kind: "repo", parent: ws, rf: RF.repo, ang: repoAng, base: 4.6, status: "ok",
+        label: repo.name, sub: "repo · " + repo.worktrees.length + " worktrees" });
+      var nWt = repo.worktrees.length, span = (Math.PI * 2 / nRepos) * 0.74;
+      repo.worktrees.forEach(function (wt, wi) {
+        var a = repoAng + (nWt > 1 ? (wi / (nWt - 1) - 0.5) * span : 0);
+        var degraded = wt.providers.some(function (p) { return p.s === "degraded"; });
+        var spawning = wt.providers.some(function (p) { return p.s === "spawning"; });
+        var wtIdx = add({ kind: "wt", parent: repoIdx, rf: RF.wt, ang: a, base: 3.1, status: degraded ? "warn" : "ok",
+          label: wt.checkout ? wt.branch + " · checkout" : wt.branch,
+          sub: "worktree · " + (degraded ? "provider degraded" : spawning ? "providers spawning" : wt.providers.length + " isolated providers") });
+        wt.tasks.forEach(function (t) {
+          var s = t.status === "blocked" ? "crit" : (t.status === "waiting" ? "warn" : "ok");
+          add({ kind: "task", parent: wtIdx, rf: RF.task, ang: a, base: 2.7, status: s,
+            label: t.id + " · " + t.title, sub: "task · " + STAGEL[t.stage] + " · " + STATUSL[t.status] });
+        });
+        wt.providers.forEach(function (p, pi) {
+          var ps = p.s === "healthy" ? "ok" : p.s === "degraded" ? "warn" : p.s === "spawning" ? "idle" : "crit";
+          add({ kind: "prov", parent: wtIdx, poff: (pi / wt.providers.length) * Math.PI * 2, base: 1.5, status: ps,
+            label: p.k, sub: "provider · " + p.s + (p.s === "spawning" ? " · booting" : " · " + p.lat + "ms") });
+        });
+      });
+    });
+  }
+
+  var provSpin = 0;
+  function layout() {
+    if (!mnodes.length) return;
+    var cx = cw / 2, cy = ch / 2, R = Math.min(cw, ch) * 0.44;
+    mnodes.forEach(function (nd) {
+      if (nd.kind === "prov") {
+        var par = mnodes[nd.parent];
+        nd.px = par.px + Math.cos(nd.poff + provSpin) * 15;
+        nd.py = par.py + Math.sin(nd.poff + provSpin) * 15;
+      } else {
+        nd.px = cx + Math.cos(nd.ang) * nd.rf * R;
+        nd.py = cy + Math.sin(nd.ang) * nd.rf * R;
+      }
+    });
+  }
+
+  function resize() {
+    var r = wrap.getBoundingClientRect(); cw = r.width; ch = r.height;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.max(1, cw * dpr); cv.height = Math.max(1, ch * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); buildStars(); layout();
+  }
+  var stars = [];
+  function buildStars() { stars = []; var n = Math.round((cw * ch) / 6200); for (var i = 0; i < n; i++) stars.push({ x: Math.random() * cw, y: Math.random() * ch, a: Math.random() * 0.45 + 0.1, tw: Math.random() * 6, sp: 0.6 + Math.random() }); }
+
+  var hovered = -1;
+  wrap.addEventListener("mousemove", function (e) {
+    var r = wrap.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, best = -1, bd = 15;
+    for (var i = 0; i < mnodes.length; i++) { var d = Math.hypot(mnodes[i].px - mx, mnodes[i].py - my); if (d < bd) { bd = d; best = i; } }
+    hovered = best;
+    if (best >= 0) { tip.style.left = mnodes[best].px + "px"; tip.style.top = mnodes[best].py + "px"; tipT.textContent = mnodes[best].label; tipS.textContent = mnodes[best].sub; tip.style.opacity = "1"; wrap.style.cursor = "pointer"; }
+    else { tip.style.opacity = "0"; wrap.style.cursor = "default"; }
+  });
+  wrap.addEventListener("mouseleave", function () { hovered = -1; tip.style.opacity = "0"; });
+
+  var comets = [], lastComet = 0;
+  function spawnComet(now) {
+    var pool = [];
+    for (var i = 0; i < mnodes.length; i++) { if (mnodes[i].parent >= 0 && mnodes[i].kind !== "prov") pool.push(i); }
+    if (!pool.length) return;
+    var ci = pool[Math.floor(Math.random() * pool.length)];
+    comets.push({ a: mnodes[ci].parent, b: ci, t: 0, sp: 0.012 + Math.random() * 0.01, c: mnodes[ci].status });
+    if (comets.length > 7) comets.shift();
+    lastComet = now;
+  }
+  function ringLabel(cx, cy, R, rf, text) {
+    ctx.globalAlpha = 0.5; ctx.fillStyle = MUTED;
+    ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText(text, cx, cy - rf * R - 5); ctx.globalAlpha = 1;
+  }
+  function shortBranch(b) {
+    if (b.indexOf("· checkout") >= 0) return "main · checkout";
+    var s = b.split("/").pop();
+    return s.length > 22 ? s.slice(0, 21) + "…" : s;
+  }
+  function drawLabel(node, text, size, color, strong) {
+    var dx = node.px - cw / 2, dy = node.py - ch / 2, len = Math.hypot(dx, dy) || 1;
+    var ox = node.px + (dx / len) * (node.base + 7), oy = node.py + (dy / len) * (node.base + 7);
+    ctx.globalAlpha = strong ? 0.9 : 0.62; ctx.fillStyle = color;
+    ctx.font = (strong ? "700 " : "") + size + "px ui-monospace, monospace";
+    ctx.textAlign = dx >= 0 ? "left" : "right"; ctx.textBaseline = "middle";
+    ctx.fillText(text, ox, oy); ctx.globalAlpha = 1;
+  }
+  function drawNode(node, idx) {
+    var pulse = 1 + 0.24 * Math.sin(T * 0.003 + idx), rad = node.base * pulse;
+    ctx.fillStyle = col(node.status);
+    if (idx === hovered) { ctx.globalAlpha = 0.9; ctx.strokeStyle = WHITE; ctx.beginPath(); ctx.arc(node.px, node.py, rad + 5, 0, Math.PI * 2); ctx.stroke(); rad += 0.8; }
+    ctx.globalAlpha = node.status === "ok" ? 0.92 : node.status === "idle" ? 0.6 : 1;
+    ctx.beginPath(); ctx.arc(node.px, node.py, rad, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+  }
+
+  var T = 0;
+  function frame() {
+    T += 16; provSpin += 0.004;
+    if (!cw || !mnodes.length) { requestAnimationFrame(frame); return; }
+    layout();
+    var cx = cw / 2, cy = ch / 2, R = Math.min(cw, ch) * 0.44;
+    ctx.clearRect(0, 0, cw, ch);
+
+    ctx.fillStyle = FG;
+    for (var i = 0; i < stars.length; i++) { var st = stars[i]; ctx.globalAlpha = st.a * (0.55 + 0.45 * Math.sin(T * 0.001 * st.sp + st.tw)); ctx.fillRect(st.x, st.y, 1, 1); }
+    ctx.globalAlpha = 1;
+
+    ctx.strokeStyle = FG;
+    [[RF.repo, "REPOS"], [RF.wt, "WORKTREES"], [RF.task, "TASKS"]].forEach(function (g) {
+      ctx.globalAlpha = 0.045; ctx.beginPath(); ctx.arc(cx, cy, g[0] * R, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      ringLabel(cx, cy, R, g[0], g[1]);
+    });
+
+    for (var e = 0; e < mnodes.length; e++) {
+      var nd = mnodes[e]; if (nd.parent < 0) continue; var par = mnodes[nd.parent];
+      if (nd.kind === "prov") { ctx.globalAlpha = 0.1; ctx.strokeStyle = nd.status === "ok" ? FG : col(nd.status); ctx.lineWidth = 0.6; }
+      else if (nd.kind === "task") { ctx.globalAlpha = nd.status === "ok" ? 0.13 : 0.3; ctx.strokeStyle = col(nd.status); ctx.lineWidth = 1; }
+      else { ctx.globalAlpha = 0.16; ctx.strokeStyle = FG; ctx.lineWidth = 1; }
+      ctx.beginPath(); ctx.moveTo(par.px, par.py); ctx.lineTo(nd.px, nd.py); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+
+    if (T - lastComet > 650) spawnComet(T);
+    for (var k = comets.length - 1; k >= 0; k--) {
+      var cm = comets[k]; cm.t += cm.sp; if (cm.t >= 1) { comets.splice(k, 1); continue; }
+      var na = mnodes[cm.a], nb = mnodes[cm.b], ee = cm.t * cm.t * (3 - 2 * cm.t);
+      var x = na.px + (nb.px - na.px) * ee, y = na.py + (nb.py - na.py) * ee;
+      ctx.globalAlpha = 0.9 * (1 - Math.abs(cm.t - 0.5) * 1.2); ctx.fillStyle = col(cm.c);
+      ctx.beginPath(); ctx.arc(x, y, 1.7, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    for (var pn = 0; pn < mnodes.length; pn++) { if (mnodes[pn].kind === "prov") drawNode(mnodes[pn], pn); }
+    for (var g2 = 5; g2 >= 1; g2--) { ctx.globalAlpha = 0.05 * g2; ctx.fillStyle = WHITE; ctx.beginPath(); ctx.arc(cx, cy, g2 * 4 + 4, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    for (var nn = 0; nn < mnodes.length; nn++) { if (mnodes[nn].kind !== "prov") drawNode(mnodes[nn], nn); }
+
+    for (var li = 0; li < mnodes.length; li++) {
+      var nd2 = mnodes[li];
+      if (nd2.kind === "repo") drawLabel(nd2, nd2.label.toUpperCase(), 10, FG, true);
+      else if (nd2.kind === "wt") drawLabel(nd2, shortBranch(nd2.label), 9, MUTED, false);
+    }
+    ctx.globalAlpha = 0.85; ctx.fillStyle = WHITE; ctx.font = "700 10px ui-monospace, monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText(WS.name.toUpperCase(), cx, cy + 12); ctx.globalAlpha = 1;
+
+    requestAnimationFrame(frame);
+  }
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(wrap);
+  window.addEventListener("resize", resize);
+  requestAnimationFrame(frame);
+
+  /* ── boot ──────────────────────────────────────────────────────── */
+  renderCounters(); renderTree(); renderDetail(); renderAttn(); renderProvSum(); renderMemory();
+  var saved = "operations"; try { saved = localStorage.getItem("ar.view") || "operations"; } catch (e) {}
+  show(saved);
+})();
+</script>
+</body>
+</html>

@@ -145,12 +145,7 @@ class McpConfigTests(unittest.TestCase):
             self.assertEqual(
                 grepai["runtimeRoot"],
                 (
-                    root
-                    / "ar-coordination"
-                    / "providers"
-                    / "runners"
-                    / "grepai"
-                    / grepai_instance
+                    root / "ar-coordination" / "providers" / "runners" / "grepai" / grepai_instance
                 ).as_posix(),
             )
             self.assertEqual(grepai["instance"]["id"], grepai_instance)
@@ -279,9 +274,9 @@ class McpConfigTests(unittest.TestCase):
             config = load_config(path)
 
             self.assertEqual(config.repositories["agents-remember"].memory_root, internal_memory)
-            grepai_roots = lifecycle_settings_from_config(config)["contextProviders"][
-                "providers"
-            ]["grepai-memory"]["roots"]
+            grepai_roots = lifecycle_settings_from_config(config)["contextProviders"]["providers"][
+                "grepai-memory"
+            ]["roots"]
             self.assertEqual(
                 grepai_roots,
                 [{"projectId": "agents-remember", "path": internal_memory.as_posix()}],
@@ -314,7 +309,7 @@ class McpConfigTests(unittest.TestCase):
             root = Path(tmp_dir)
             payload = settings_payload(root)
             payload["repositories"]["agents-remember"]["contractPath"] = (
-                "tasks/agents-remember/task/contract.md"
+                "tasks/agents-remember/task/enclosures/leaf/series-contract.md"
             )
             path = root / "mcp-settings.json"
             write_json(path, payload)
@@ -323,7 +318,7 @@ class McpConfigTests(unittest.TestCase):
 
             contract_path = config.repositories["agents-remember"].contract_path
             assert contract_path is not None
-            self.assertEqual(contract_path.name, "contract.md")
+            self.assertEqual(contract_path.name, "series-contract.md")
 
     def test_memory_settings_include_cannot_escape_repo_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -378,7 +373,7 @@ class McpConfigTests(unittest.TestCase):
             root = Path(tmp_dir)
             payload = settings_payload(root)
             payload["repositories"]["agents-remember"]["contractPath"] = str(
-                root / "outside" / "contract.md"
+                root / "outside" / "series-contract.md"
             )
             path = root / "mcp-settings.json"
             write_json(path, payload)

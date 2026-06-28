@@ -1,4 +1,4 @@
-"""Dev-time conformance tests for public MCP tool response contracts.
+"""Dev-time conformance tests for MCP tool response contracts.
 
 Production code already validates every tool payload against its registered model
 in ``agents_remember.mcp.tools._tool_payload`` (``model_validate(...).model_dump(
@@ -6,8 +6,9 @@ mode="json", exclude_none=True)``). Strict models use ``extra="forbid"`` so
 controller drift fails loudly at runtime. These tests move that guarantee into the
 suite so drift is caught at dev time instead of in a live call.
 
-For every public tool we obtain a *representative* response payload by invoking the
-real ``*_payload`` builder against a temporary fixture workspace, then assert:
+For every response-modeled tool payload builder we obtain a *representative*
+response payload by invoking the real ``*_payload`` builder against a temporary
+fixture workspace, then assert:
 
 * the payload validates against the registered model with no error, and
 * round-tripping the payload through the model does not fabricate keys.
@@ -35,7 +36,13 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.mcp import tools
 from agents_remember.mcp.config import load_config
 from agents_remember.models.base import FlexibleResponseModel
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.observer import (
+    AmbientLifecycle,
+    EventStore,
+    install_ambient,
+    reset_ambient,
+)
 from test_config import settings_payload
 from test_worktree_support import (
     commit_file,
@@ -84,6 +91,9 @@ def _simple_payloads(config) -> dict[str, dict]:
         "ping": tools.ping_payload(),
         "server_info": tools.server_info_payload(config),
         "context_packet": tools.context_packet_payload(config, REPO),
+        "read_ar_files": tools.read_ar_files_payload(
+            config, REPO, [{"path": "README.md", "source": "full"}]
+        ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, REPO),
         "drift_check": tools.drift_check_payload(config, REPO),
@@ -151,6 +161,9 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_cleanup"] = tools.worktree_cleanup_payload(
         config, contract_path, dry_run=False
     )
+    payloads["lifecycle_finalize_task"] = tools.lifecycle_finalize_task_payload(
+        config, contract_path, dry_run=True
+    )
     abandon_start = tools.worktree_start_payload(
         config,
         REPO,
@@ -204,6 +217,153 @@ def _carryover_payloads(root: Path) -> dict[str, dict]:
     }
 
 
+def _lifecycle_payloads(root: Path) -> dict[str, dict]:
+    """Drive the ambient lifecycle through each signal, capturing every payload.
+
+    The signals require an installed ambient; a long heartbeat keeps the capture
+    deterministic, and the ambient is reset afterward so other suites see none.
+    ``lifecycle_block`` stays here as lower-level compatibility coverage; it is
+    not an advertised public MCP tool.
+    """
+    install_ambient(
+        AmbientLifecycle(EventStore(root / "logs" / "observer"), heartbeat_seconds=3600)
+    )
+    try:
+        return {
+            "lifecycle_start": tools.lifecycle_start_payload(),
+            "lifecycle_phase": tools.lifecycle_phase_payload("build"),
+            "lifecycle_block": tools.lifecycle_block_payload(
+                kind="decision", prompt="ok?", options=["a", "b"]
+            ),
+            "lifecycle_resume": tools.lifecycle_resume_payload(),
+            "lifecycle_end": tools.lifecycle_end_payload("completed"),
+            "switch_lifecycle": tools.switch_lifecycle_payload(),
+            # Captured last: switch_lifecycle leaves a fresh running lifecycle, the
+            # only state await_developer accepts. The notification does not self-dismiss
+            # (the choke point guards on its name), so its own payload reports
+            # awaiting-developer.
+            "lifecycle_turn_end_notification": tools.lifecycle_turn_end_notification_payload(
+                "Turn complete; your move."
+            ),
+        }
+    finally:
+        reset_ambient()
+
+
+def _task_doc_payloads(root: Path) -> dict[str, dict]:
+    """Author a representative task document (JSON-primary; markdown rendered)."""
+    config = _base_fixture(root)
+    return {
+        "task_doc": tools.task_doc_payload(
+            config,
+            repo_id=REPO,
+            operation="create",
+            task_name="demo-task",
+            fields={
+                "id": "DEMO",
+                "slug": "task",
+                "title": "Demo",
+                "kind": "light",
+                "repo": REPO,
+                "type": "Code",
+                "createdAt": "2026-01-01T00:00",
+                "objective": "demo",
+            },
+        )
+    }
+
+
+def _gate_payloads(config) -> dict[str, dict]:
+    """Control-plane gate substrate, including lower-level compatibility builders."""
+    install_ambient(
+        AmbientLifecycle(
+            EventStore(config.coordination_root / "logs" / "observer"),
+            heartbeat_seconds=3600,
+        )
+    )
+    try:
+        started = tools.lifecycle_start_payload()
+
+        def approve_lifecycle_gate(_seconds: float) -> None:
+            open_gates = [
+                gate
+                for gate in tools.gate_list_payload(
+                    config, lifecycle_id=started["lifecycleId"]
+                )["gates"]
+                if gate["state"] == "open"
+            ]
+            tools.gate_decide_payload(
+                config,
+                gate_id=open_gates[0]["id"],
+                lifecycle_id=started["lifecycleId"],
+                decision="approve",
+                decided_by="developer",
+                decided_via="dashboard",
+            )
+
+        lifecycle_gate = tools.lifecycle_gate_payload(
+            config,
+            kind="agent-question",
+            ask={"kind": "question", "prompt": "Continue?", "options": ["yes", "no"]},
+            packet={"summary": "demo gate"},
+            sleep=approve_lifecycle_gate,
+        )
+    finally:
+        reset_ambient()
+
+    created = tools.gate_create_payload(
+        config, kind="closeout-approval", lifecycle_id="gate-demo"
+    )
+    gate_id = created["gateId"]
+    return {
+        "lifecycle_gate": lifecycle_gate,
+        "gate_create": created,
+        "gate_decide": tools.gate_decide_payload(
+            config,
+            gate_id=gate_id,
+            lifecycle_id="gate-demo",
+            decision="approve",
+            decided_by="developer",
+            decided_via="dashboard",
+        ),
+        "gate_wait": tools.gate_wait_payload(
+            config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
+        ),
+        "gate_response_wait": tools.gate_response_wait_payload(
+            config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
+        ),
+        "gate_list": tools.gate_list_payload(config, lifecycle_id="gate-demo"),
+    }
+
+
+def _operator_inbox_payloads(config) -> dict[str, dict]:
+    """External-chat inbox substrate: post, poll, then consume one entry."""
+    posted = tools.operator_inbox_post_payload(
+        config,
+        lifecycle_id="inbox-demo",
+        agent_id="agent-a",
+        gate_id="gate-demo",
+        ask="Continue?",
+        response="Yes, proceed.",
+        created_by="developer",
+        created_via="dashboard",
+    )
+    return {
+        "operator_inbox_post": posted,
+        "operator_inbox_poll": tools.operator_inbox_poll_payload(
+            config,
+            lifecycle_id=None,
+            agent_id="agent-a",
+        ),
+        "operator_inbox_consume": tools.operator_inbox_consume_payload(
+            config,
+            entry_id=posted["entryId"],
+            consumed_by="model",
+            consumed_via="cli",
+        ),
+    }
+
+
 def _allowed_keys(model) -> set[str]:
     """Serialized keys the model is allowed to emit (field names plus aliases)."""
     allowed: set[str] = set()
@@ -223,12 +383,18 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(3)]
-        base, worktree, carryover = (Path(d) for d in cls._temp_dirs)
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(7)]
+        base, worktree, carryover, lifecycle, task_doc_root, gate_root, inbox_root = (
+            Path(d) for d in cls._temp_dirs
+        )
         cls.payloads = {}
         cls.payloads.update(_simple_payloads(_base_fixture(base)))
         cls.payloads.update(_worktree_payloads(worktree))
         cls.payloads.update(_carryover_payloads(carryover))
+        cls.payloads.update(_lifecycle_payloads(lifecycle))
+        cls.payloads.update(_task_doc_payloads(task_doc_root))
+        cls.payloads.update(_gate_payloads(_base_fixture(gate_root)))
+        cls.payloads.update(_operator_inbox_payloads(_base_fixture(inbox_root)))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -237,11 +403,11 @@ class ToolResponseConformanceTests(unittest.TestCase):
         for path in cls._temp_dirs:
             shutil.rmtree(path, ignore_errors=True)
 
-    def test_every_public_tool_has_a_representative_payload(self) -> None:
-        self.assertEqual(set(self.payloads), set(PUBLIC_TOOL_RESPONSE_MODELS))
+    def test_every_modeled_tool_has_a_representative_payload(self) -> None:
+        self.assertEqual(set(self.payloads), set(TOOL_RESPONSE_MODELS))
 
     def test_representative_payloads_conform_to_registered_models(self) -> None:
-        for tool_name, model in PUBLIC_TOOL_RESPONSE_MODELS.items():
+        for tool_name, model in TOOL_RESPONSE_MODELS.items():
             with self.subTest(tool=tool_name):
                 payload = self.payloads[tool_name]
                 # (a) The representative payload validates against the model.
@@ -265,7 +431,7 @@ class ToolResponseConformanceTests(unittest.TestCase):
                 )
 
     def test_strict_response_models_forbid_extra_fields(self) -> None:
-        for tool_name, model in PUBLIC_TOOL_RESPONSE_MODELS.items():
+        for tool_name, model in TOOL_RESPONSE_MODELS.items():
             with self.subTest(tool=tool_name):
                 # The response-model taxonomy decides strictness: anything not
                 # built on FlexibleResponseModel is a strict contract and must

@@ -19,6 +19,8 @@ def resolve_context_tool(
     *,
     repo_id: str,
     task_name: str | None = None,
+    parent_task: str | None = None,
+    leaf_id: str | None = None,
     contract_path: str | None = None,
     worktree_name: str | None = None,
     topology: str | None = None,
@@ -31,6 +33,8 @@ def resolve_context_tool(
         coordination_root=config.coordination_root,
         code_repository_root=repo.path,
         task_name=task_name,
+        parent_task=parent_task,
+        leaf_id=leaf_id,
         worktree_name=worktree_name,
         contract_path=require_within_coordination(config, contract_path, "contract_path")
         if contract_path

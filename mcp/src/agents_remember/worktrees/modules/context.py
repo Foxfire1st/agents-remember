@@ -16,6 +16,8 @@ def resolve_context(args: WorktreeArgs):
         coordination_root=args.coordination_root,
         code_repository_root=args.code_repository_root,
         task_name=getattr(args, "task_name", None),
+        parent_task=getattr(args, "parent_task", None),
+        leaf_id=getattr(args, "leaf_id", None),
         worktree_name=getattr(args, "worktree_name", None),
         contract_path=getattr(args, "contract_path", None),
     )

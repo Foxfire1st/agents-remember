@@ -18,6 +18,24 @@ from .core import (
     server_info_payload,
     skills_install_payload,
 )
+from .gates import (
+    gate_create_payload,
+    gate_decide_payload,
+    gate_list_payload,
+    gate_response_wait_payload,
+    gate_wait_payload,
+    lifecycle_gate_payload,
+)
+from .lifecycle import (
+    lifecycle_block_payload,
+    lifecycle_end_payload,
+    lifecycle_phase_payload,
+    lifecycle_resume_payload,
+    lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
+    switch_lifecycle_payload,
+)
+from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
     drift_check_payload,
     memory_baseline_adopt_payload,
@@ -27,6 +45,11 @@ from .memory import (
     memory_init_payload,
     memory_quality_check_payload,
     route_index_refresh_payload,
+)
+from .operator_inbox import (
+    operator_inbox_consume_payload,
+    operator_inbox_poll_payload,
+    operator_inbox_post_payload,
 )
 from .providers import (
     cgc_callees_payload,
@@ -41,6 +64,8 @@ from .providers import (
     provider_status_payload,
     provider_watchers_payload,
 )
+from .read_files import read_ar_files_payload
+from .task_doc import task_doc_payload
 from .worktree import (
     worktree_abandon_payload,
     worktree_attach_payload,
@@ -52,6 +77,10 @@ from .worktree import (
     worktree_status_payload,
     worktree_sync_payload,
 )
+
+# The split gate/block/wait payload builders are retained for internal
+# compatibility and tests. ``create_server`` advertises ``lifecycle_gate`` as the
+# public agent-facing gate junction.
 
 __all__ = [
     "PUBLIC_TOOLS",
@@ -67,23 +96,42 @@ __all__ = [
     "codex_benchmark_run_payload",
     "context_packet_payload",
     "drift_check_payload",
+    "gate_create_payload",
+    "gate_decide_payload",
+    "gate_list_payload",
+    "gate_response_wait_payload",
+    "gate_wait_payload",
     "grepai_search_payload",
     "grepai_trace_payload",
+    "lifecycle_block_payload",
+    "lifecycle_end_payload",
+    "lifecycle_finalize_task_payload",
+    "lifecycle_gate_payload",
+    "lifecycle_phase_payload",
+    "lifecycle_resume_payload",
+    "lifecycle_start_payload",
+    "lifecycle_turn_end_notification_payload",
     "memory_baseline_adopt_payload",
     "memory_baseline_status_payload",
     "memory_carryover_apply_payload",
     "memory_carryover_plan_payload",
     "memory_init_payload",
     "memory_quality_check_payload",
+    "operator_inbox_consume_payload",
+    "operator_inbox_poll_payload",
+    "operator_inbox_post_payload",
     "ping_payload",
     "provider_diagnostics_payload",
     "provider_status_payload",
     "provider_watchers_payload",
+    "read_ar_files_payload",
     "resolve_context_payload",
     "route_index_refresh_payload",
     "runtime_install_payload",
     "server_info_payload",
     "skills_install_payload",
+    "switch_lifecycle_payload",
+    "task_doc_payload",
     "worktree_abandon_payload",
     "worktree_attach_payload",
     "worktree_cleanup_payload",

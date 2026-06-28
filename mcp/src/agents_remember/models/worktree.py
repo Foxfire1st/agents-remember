@@ -43,8 +43,11 @@ NextTool = Literal[
 class WorktreeSummary(StrictResponseModel):
     state: WorktreeState
     contractPath: str | None = None
+    enclosurePath: str | None = None
     taskId: str | None = None
     taskName: str | None = None
+    leafId: str | None = None
+    kind: str | None = None
     workflowKind: WorkflowKind | None = None
     memoryMode: MemoryMode | None = None
     worktreeGroup: str | None = None
@@ -73,9 +76,16 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     state: str | None = None
     dryRun: bool | None = None
     contractPath: str | None = None
+    enclosurePath: str | None = None
     taskId: str | None = None
     taskName: str | None = None
+    leafId: str | None = None
+    kind: str | None = None
     worktreeName: str | None = None
+    # The lifecycle this enclosure anchors (design §1.1): worktree_start promotes
+    # it, worktree_attach resumes it. Emitted snake_case (lifecycle_id) like its
+    # siblings; declared here for wire discoverability.
+    lifecycleId: str | None = None
     # Background provider setup state (GitHub #53): worktree_start returns
     # 'starting' with a progressFile; worktree_status then projects the live
     # progress as running / stale (dead heartbeat) / ok /

@@ -1,0 +1,21 @@
+/* Design tokens — the podracer OKLCH palette (note 08), the global CSS-var layer. As of slice 5d
+   all component styling is co-located Panda css/recipes; these vars back index.css's base layer and
+   the `--glow-strength` referenced in a few Panda text-shadows. panda.config.ts mirrors this palette
+   as typed Panda tokens. State is carried by colour + silhouette, never chrome. */
+:root {
+  color-scheme: dark;
+
+  --bg: oklch(0.16 0.02 250);
+  --bg-panel: oklch(0.2 0.02 250);
+  --ink: oklch(0.92 0.03 90);
+  --grid: oklch(0.3 0.02 250);
+
+  --amber: oklch(0.82 0.16 75); /* nominal wireframe */
+  --cyan: oklch(0.85 0.13 200); /* progress / running */
+  --alarm: oklch(0.63 0.24 25); /* whole-silhouette alarm */
+  --mint: oklch(0.88 0.16 165); /* fresh-online / live */
+  --dormant: oklch(0.45 0.06 25); /* skeletal dark-red dormant */
+
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  --glow-strength: 1;
+}

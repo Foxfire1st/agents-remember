@@ -16,6 +16,15 @@ Planning stays in task artifacts. This package defines how onboarding itself is 
 
 Before maintaining onboarding, use `c-08-ar-coordination-context-resolver` to resolve the target repository's active coordination context. It must use the `Domain Documentation` category declared in the resolved `system/sources.md` for the onboarding slice being maintained, rather than assuming that adjacent onboarding alone is sufficient or hard-coding one particular documentation system into the skill.
 
+When onboarding maintenance is happening inside a `c-09-git-worktree-manager`
+worktree, check `worktree_status` before starting memory entries. If its
+`freshness` block reports that the recorded code or memory source branch moved,
+run `worktree_sync` before writing onboarding content unless that sync is blocked
+by conflicts or an explicit developer decision. Carrying the moved official line
+first keeps later onboarding updates and ledger rows on top of current source
+history instead of forcing a conflict-heavy carryover after the task is otherwise
+done.
+
 The `c-05-create-or-update-onboarding-files` skill remains the normal public entry point for create or update onboarding requests. When the request is route-level slice creation, refresh, move handling, or deletion cleanup, the `c-05-create-or-update-onboarding-files` skill should route the work to the `c-03-repo-bootstrap` skill `existing-memory-slice-maintenance` mode instead of reducing it to unrelated file-level updates.
 
 ## Routing
@@ -106,6 +115,7 @@ Existing onboarding is durable memory, not disposable generated output. Preserve
 17. Keep each route overview's `## Hot Path Summary` short and current; it is copied into generated indexes for `c-04-retrieval-strategy-router` skill discovery.
 18. Do not delete onboarding for moved, split, merged, or deleted source until checking whether its documented behavior can be moved into a current onboarding target.
 19. Body before metadata: a changed source file's sidecar (and the nearest governing route overview) needs a real content update plus an `Update History` entry, or an explicit `No content impact:` / `No route impact:` reviewed-no-impact history entry. Closeout enforces this and surfaces attested documents; header-only or unmarked history-only refreshes fail.
+20. In a worktree-backed task, run `worktree_status` and any needed `worktree_sync` before starting onboarding writes so memory entries are based on the current parent branch.
 
 ## Route Index Refresh
 

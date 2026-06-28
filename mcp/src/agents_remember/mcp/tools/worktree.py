@@ -27,6 +27,8 @@ def worktree_start_payload(
     task_name: str,
     worktree_name: str,
     *,
+    leaf_id: str | None = None,
+    parent_task: str | None = None,
     workflow_kind: str = "light-task",
     source_branch: str | None = None,
     work_branch: str | None = None,
@@ -45,6 +47,8 @@ def worktree_start_payload(
                 repo_id=repo_id,
                 task_name=task_name,
                 worktree_name=worktree_name,
+                leaf_id=leaf_id,
+                parent_task=parent_task,
                 workflow_kind=workflow_kind,
                 source_branch=source_branch,
                 work_branch=work_branch,
@@ -83,6 +87,9 @@ def worktree_attach_payload(
     *,
     task_name: str | None = None,
     contract_path: str | None = None,
+    leaf_id: str | None = None,
+    parent_task: str | None = None,
+    on_unsaved: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_attach",
@@ -91,6 +98,9 @@ def worktree_attach_payload(
             repo_id=repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
+            on_unsaved=on_unsaved,
         ),
     )
 
@@ -101,6 +111,8 @@ def worktree_status_payload(
     *,
     task_name: str | None = None,
     contract_path: str | None = None,
+    leaf_id: str | None = None,
+    parent_task: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_status",
@@ -109,6 +121,8 @@ def worktree_status_payload(
             repo_id=repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
         ),
     )
 

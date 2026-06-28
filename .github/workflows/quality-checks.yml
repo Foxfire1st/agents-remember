@@ -45,3 +45,43 @@ jobs:
       # fail; --fail-on-crap-threshold adds CRAP as the fourth hard gate.
       - name: Run quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)
         run: python -m agents_remember.code_quality.check --fail-on-crap-threshold
+
+  dashboard:
+    name: Dashboard frontend rail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Lint
+        working-directory: dashboard
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: dashboard
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: dashboard
+        run: npm run test
+
+      - name: Build
+        working-directory: dashboard
+        run: npm run build
+
+      # Catches a stale shipped bundle: the committed package_data/dashboard must match a
+      # fresh build (the same check the pre-commit/pre-push githooks run locally).
+      - name: Verify shipped bundle matches a fresh build
+        run: python3 scripts/sync-dashboard.py --check

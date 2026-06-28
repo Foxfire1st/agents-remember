@@ -38,6 +38,11 @@ inspected. Route retrieval through `c-04-retrieval-strategy-router` (see
 _Memory Retrieval Strategies_ below) before relying on onboarding, providers, or
 repository source.
 
+Until the build/job decision, read managed-repo source through the `read_ar_files` MCP tool
+rather than the native read tool — it pairs each file with its onboarding by construction and
+keeps the read trail observable. Native read is the edit precondition once building begins.
+Count your `read_ar_files` calls as retrieval evidence alongside CGC and GrepAI.
+
 ### Developer Clarifications
 
 When a developer clarifies an important concept, invariant, boundary, or
@@ -111,8 +116,10 @@ report no providers.
 - `Semantics`: Fuzzy search use GrepAI to search over onboardings. Leads to code routes & files using 1-to-1 file mapping backward.
 - `Relationship`: For code-relationsship questions use Code Graph Context (cgc).
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
-  branch-valid truths, behavioral expectations, or code intent are unknown. Use
-  onboarding plus bounded source confirmation.
+  branch-valid truths, behavioral expectations, or code intent are unknown. Use the
+  `read_ar_files` MCP tool for paired onboarding + bounded source confirmation: one call
+  batches each source file with its sidecar and auto-attaches the repository and governing
+  route overviews.
 
 Use `c-04-retrieval-strategy-router` to understand the full benefit of the strategies as they allow you to complete the task faster.
 

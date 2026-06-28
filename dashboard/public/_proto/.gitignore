@@ -1,0 +1,9 @@
+# Local-only sandbox artifacts — kept on disk, left out of the committed design reference.
+# These are regeneratable build intermediates + superseded design approaches. The committed
+# reference is podstage.html + SCENARIOS.md/DESIGN.md + the boomerang backdrop it uses + the
+# original source clip (blueprint-engine.mp4). Rebuild the reverse clip if ever needed with:
+#   ffmpeg -i blueprint-engine.mp4 -vf reverse -an blueprint-engine-rev.mp4
+blueprint-engine-rev.mp4
+podstage-warpcore-backup.html
+podstage-structural.html
+engine-h.svg

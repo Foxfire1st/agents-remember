@@ -13,6 +13,7 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
 )
 from agents_remember.providers import provider_setup
+from agents_remember.tasks import read_task_doc
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
@@ -33,9 +34,18 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.start_progress import clear_start_progress, write_start_progress
+from agents_remember.worktrees.task_resolver import (
+    resolve_active_task_root,
+    resolve_leaf_enclosure_contract,
+    series_contract_path,
+    slugify,
+)
 from agents_remember.worktrees.worktree_contract import (
+    ContractError,
     WorktreeContract,
     default_contract,
+    default_series_contract,
     load_contract,
     write_contract,
 )
@@ -59,7 +69,15 @@ def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
     context = resolve_context(args)
     if not args.task_name:
         raise RuntimeError("--task-name or --contract-path is required")
-    contract_path = context.task_root / "contract.md"
+    contract_path = resolve_leaf_enclosure_contract(
+        context.coordination_root,
+        context.code_repository_name,
+        args.task_name,
+        leaf_id=args.leaf_id,
+        parent_task=args.parent_task,
+    )
+    if contract_path is None:
+        raise RuntimeError("--task-name resolved no leaf enclosure; pass --leaf-id")
     return load_contract(contract_path)
 
 
@@ -93,14 +111,112 @@ def _external_memory_value(memory_mode: str, value: str) -> str:
     return value if memory_mode == "external" else ""
 
 
+def _task_root_has_master_artifact(task_root: Path) -> bool:
+    json_path = task_root / "task.json"
+    if json_path.exists():
+        try:
+            return read_task_doc(json_path).kind == "master"
+        except ValueError:
+            return False
+    markdown_path = task_root / "task.md"
+    if not markdown_path.exists():
+        return False
+    try:
+        head = markdown_path.read_text(encoding="utf-8")[:1000]
+    except OSError:
+        return False
+    return "**Type:** Master" in head
+
+
+def _ensure_branch(repo: Path, branch: str, source: str, *, dry_run: bool) -> None:
+    if branch_exists(repo, branch) or dry_run:
+        return
+    require_git(repo, ["branch", branch, source])
+
+
+def _parent_series_contract(
+    context, args: WorktreeArgs, memory_mode: str
+) -> WorktreeContract | None:
+    if not args.task_name:
+        return None
+    task_root = resolve_active_task_root(
+        context.coordination_root,
+        context.code_repository_name,
+        args.task_name,
+        parent_task=args.parent_task,
+    )
+    path = series_contract_path(task_root)
+    if not path.exists():
+        if not _task_root_has_master_artifact(task_root):
+            return None
+        repo = context.code_repository_root
+        protected_branch = args.source_branch or current_branch(repo)
+        integration_branch = f"ar/{slugify(args.task_name)}"
+        leaf_branch = args.work_branch or f"ar/{args.worktree_name}"
+        if leaf_branch == integration_branch:
+            raise RuntimeError(
+                "master-series leaf work branch would equal the integration branch; "
+                "choose a distinct worktree_name or work_branch"
+            )
+        _ensure_branch(repo, integration_branch, protected_branch, dry_run=args.dry_run)
+        memory_repo = _start_memory_repo(context, memory_mode)
+        memory_source_branch = _external_memory_value(memory_mode, protected_branch)
+        memory_work_branch = _external_memory_value(memory_mode, integration_branch)
+        if (
+            memory_repo is not None
+            and (memory_repo / ".git").exists()
+            and memory_source_branch
+            and memory_work_branch
+        ):
+            _ensure_branch(
+                memory_repo,
+                memory_work_branch,
+                memory_source_branch,
+                dry_run=args.dry_run,
+            )
+        contract = default_series_contract(
+            task_name=args.task_name,
+            repo_name=context.code_repository_name,
+            workflow_kind=args.workflow_kind,
+            memory_mode=memory_mode,
+            coordination_root=context.coordination_root,
+            code_repo_path=repo,
+            protected_branch=protected_branch,
+            integration_branch=integration_branch,
+            code_base_commit=head_commit(repo, protected_branch),
+            memory_repo_path=memory_repo,
+            memory_source_branch=memory_source_branch,
+            memory_work_branch=memory_work_branch,
+            memory_base_commit=_memory_base_commit(memory_repo),
+            parent_task_name=args.parent_task or "",
+            task_root=task_root,
+        )
+        if not args.dry_run:
+            write_contract(contract.contract_path, contract)
+        return contract
+    try:
+        contract = load_contract(path)
+    except ContractError as exc:
+        raise RuntimeError(f"parent task contract is not readable: {path}") from exc
+    if contract.kind != "series":
+        raise RuntimeError(f"parent task contract is not a series contract: {path}")
+    return contract
+
+
 def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
     assert args.task_name is not None
     assert args.worktree_name is not None
     repo = context.code_repository_root
-    source_branch = args.source_branch or current_branch(repo)
-    work_branch = args.work_branch or f"ar/{args.worktree_name}"
-    base_commit = head_commit(repo, source_branch)
     memory_mode = args.memory_mode or context.memory_mode
+    parent_series = _parent_series_contract(context, args, memory_mode)
+    source_branch = args.source_branch or (
+        parent_series.code_work_branch if parent_series is not None else current_branch(repo)
+    )
+    work_branch = args.work_branch or f"ar/{args.worktree_name}"
+    if args.dry_run and parent_series is not None and not branch_exists(repo, source_branch):
+        base_commit = parent_series.code_base_commit
+    else:
+        base_commit = head_commit(repo, source_branch)
     memory_repo = _start_memory_repo(context, memory_mode)
     memory_base = _memory_base_commit(memory_repo)
     return default_contract(
@@ -118,6 +234,10 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
         memory_source_branch=_external_memory_value(memory_mode, source_branch),
         memory_work_branch=_external_memory_value(memory_mode, work_branch),
         memory_base_commit=memory_base,
+        lifecycle_id=args.lifecycle_id,
+        leaf_id=args.leaf_id or args.worktree_name,
+        parent_task_name=parent_series.task_name if parent_series is not None else "",
+        parent_contract_path=parent_series.contract_path if parent_series is not None else None,
     )
 
 
@@ -219,7 +339,9 @@ def _started_result(
             "code_worktree": code_state,
             "memory": memory_state,
             "providers": provider_state,
+            "enclosure_path": contract.contract_path.as_posix(),
             "contract_path": contract.contract_path.as_posix(),
+            "leaf_id": contract.leaf_id,
             "task_artifact": contract.task_artifact.as_posix(),
             "contract": contract_payload(contract),
         },
@@ -283,7 +405,11 @@ def _long_path_preflight(contract: WorktreeContract) -> dict[str, object] | None
     checks: list[tuple[str, Path, Path, str]] = [
         ("code", contract.code_repo_path, contract.code_worktree, contract.code_source_branch)
     ]
-    if contract.memory_mode == "external" and contract.memory_repo_path and contract.memory_worktree:
+    if (
+        contract.memory_mode == "external"
+        and contract.memory_repo_path
+        and contract.memory_worktree
+    ):
         checks.append(
             (
                 "memory",
@@ -377,9 +503,7 @@ def _fast_forward_stale_branches(
             continue
         if dry_run:
             continue
-        repo = (
-            contract.code_repo_path if finding["side"] == "code" else contract.memory_repo_path
-        )
+        repo = contract.code_repo_path if finding["side"] == "code" else contract.memory_repo_path
         assert repo is not None
         branch = str(finding["branch"])
         upstream = str(finding["upstream"])
@@ -391,10 +515,76 @@ def _fast_forward_stale_branches(
             # checked out in another worktree, which lands in failures.
             result = run_git(repo, ["branch", "-f", branch, upstream])
         if result.returncode != 0:
-            failures.append(
-                {**finding, "recovery_error": (result.stderr or result.stdout).strip()}
-            )
+            failures.append({**finding, "recovery_error": (result.stderr or result.stdout).strip()})
     return failures
+
+
+def _record_start_block(
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    phase: str,
+    reason: str,
+    completed: tuple[str, ...],
+    choices: tuple[str, ...],
+) -> None:
+    """Record a pre-contract start block (slice 5e §5.4) so the dashboard can see a start gated
+    before its contract exists. Best-effort; skipped on dry runs."""
+    if args.dry_run or args.worktree_name is None:
+        return
+    write_start_progress(
+        context.coordination_root,
+        repo_name=contract.repo_name,
+        task_name=contract.task_name,
+        worktree_name=args.worktree_name,
+        worktree_group=contract.worktree_group.as_posix(),
+        phase=phase,
+        memory_mode=contract.memory_mode,
+        code_source_branch=contract.code_source_branch,
+        code_base_commit=contract.code_base_commit,
+        code_repo_path=contract.code_repo_path.as_posix(),
+        code_worktree=contract.code_worktree.as_posix(),
+        blocked_reason=reason,
+        completed_phases=completed,
+        choices=choices,
+    )
+
+
+def _clear_start_block(context, contract: WorktreeContract, args: WorktreeArgs) -> None:
+    """The contract now anchors the enclosure; drop the transient start-progress file."""
+    if args.worktree_name is None:
+        return
+    clear_start_progress(context.coordination_root, contract.repo_name, args.worktree_name)
+
+
+def _record_start_progress(
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    phase: str,
+    completed: tuple[str, ...],
+) -> None:
+    """Record a happy-path pre-contract start beat (§9) so the Engine Room can observe the enclosure
+    assembling rather than popping in at contract-write. Non-blocked (``blocked_reason`` stays None);
+    best-effort; skipped on dry runs."""
+    if args.dry_run or args.worktree_name is None:
+        return
+    write_start_progress(
+        context.coordination_root,
+        repo_name=contract.repo_name,
+        task_name=contract.task_name,
+        worktree_name=args.worktree_name,
+        worktree_group=contract.worktree_group.as_posix(),
+        phase=phase,
+        memory_mode=contract.memory_mode,
+        code_source_branch=contract.code_source_branch,
+        code_base_commit=contract.code_base_commit,
+        code_repo_path=contract.code_repo_path.as_posix(),
+        code_worktree=contract.code_worktree.as_posix(),
+        completed_phases=completed,
+    )
 
 
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -415,6 +605,15 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
     stale_base_block = _stale_base_preflight(context, contract, args)
     if stale_base_block is not None:
+        _record_start_block(
+            context,
+            contract,
+            args,
+            phase="stale-base-blocked",
+            reason=str(stale_base_block.get("summary", "")),
+            completed=(),
+            choices=(),
+        )
         return WorktreeCommandResult(2, stale_base_block)
     if args.stale_base_choice == "fast-forward":
         # A fast-forward recovery may have moved the source branches; rebuild the
@@ -424,6 +623,7 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     long_path_block = _long_path_preflight(contract)
     if long_path_block is not None:
         return WorktreeCommandResult(2, long_path_block)
+    _record_start_progress(context, contract, args, phase="preflight", completed=())
 
     code_state = ensure_worktree(
         repo,
@@ -432,12 +632,34 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
         contract.code_source_branch,
         args.dry_run,
     )
+    _record_start_progress(context, contract, args, phase="code-worktree", completed=("preflight",))
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":
+        raw_choices = memory_state.get("choices")
+        _record_start_block(
+            context,
+            contract,
+            args,
+            phase="memory-blocked",
+            reason=str(memory_state.get("reason", "")),
+            completed=("preflight", "code-worktree"),
+            choices=tuple(str(choice) for choice in raw_choices)
+            if isinstance(raw_choices, list)
+            else (),
+        )
         return _blocked_memory_start_result(context, args, code_state, memory_state)
     contract = _contract_after_memory_start(contract, memory_state)
     provider_plan = plan_providers_for_start(context, contract, args)
     if provider_plan["state"] == "blocked":
+        _record_start_block(
+            context,
+            contract,
+            args,
+            phase="provider-blocked",
+            reason=str(provider_plan.get("reason", "")),
+            completed=("preflight", "code-worktree", "memory-compatible"),
+            choices=(),
+        )
         return _blocked_provider_start_result(
             context, args, code_state, memory_state, provider_plan
         )
@@ -445,6 +667,7 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     # anchor worktree_status polls while the background thread runs (GitHub #53).
     if not args.dry_run:
         write_contract(contract.contract_path, contract)
+        _clear_start_block(context, contract, args)
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(
@@ -647,9 +870,7 @@ def _provider_enablement_state(
     cgc_enabled = bool(settings) and provider_setup.provider_enabled(
         settings, "codegraphcontext-code"
     )
-    grepai_enabled = bool(settings) and provider_setup.provider_enabled(
-        settings, "grepai-memory"
-    )
+    grepai_enabled = bool(settings) and provider_setup.provider_enabled(settings, "grepai-memory")
     grepai_worktree_enabled = grepai_enabled and target_memory_root is not None
     if cgc_enabled or grepai_worktree_enabled:
         return _enabled_provider_state(cgc_enabled, grepai_worktree_enabled)
@@ -733,9 +954,7 @@ def _provider_setup_request(
     )
 
 
-def prepare_memory_for_start(
-    contract: WorktreeContract, args: WorktreeArgs
-) -> dict[str, object]:
+def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, object]:
     if contract.memory_mode == "internal":
         return {"state": "internal", "reason": "memory lives in the code worktree"}
     if contract.memory_mode == "disabled":
@@ -799,9 +1018,7 @@ def _ensure_memory_source_branch(contract: WorktreeContract, dry_run: bool) -> d
     }
 
 
-def _sync_worktree_memory_mtimes(
-    contract: WorktreeContract, dry_run: bool
-) -> dict[str, object]:
+def _sync_worktree_memory_mtimes(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
     """Mirror source memory-repo file mtimes onto the freshly checked-out worktree.
 
     `git checkout` stamps every file with the current time. grepai's watcher skips

@@ -14,13 +14,18 @@ def worktree_status_packet(contract_path: Path | None) -> dict[str, Any]:
         return {"state": "inactive"}
     resolved = contract_path.resolve()
     if not resolved.exists():
-        return {"state": "missingContract", "contractPath": resolved.as_posix()}
+        return {
+            "state": "missingContract",
+            "contractPath": resolved.as_posix(),
+            "enclosurePath": resolved.as_posix(),
+        }
     try:
         contract = load_contract(resolved)
     except ContractError as error:
         return {
             "state": "invalidContract",
             "contractPath": resolved.as_posix(),
+            "enclosurePath": resolved.as_posix(),
             "error": str(error),
         }
     return {
@@ -35,7 +40,10 @@ def _packet_from_status_payload(payload: dict[str, object]) -> dict[str, Any]:
         "taskName": payload["task_name"],
         "workflowKind": payload["workflow_kind"],
         "memoryMode": payload["memory_mode"],
+        "kind": payload["kind"],
+        "leafId": payload["leaf_id"],
         "contractPath": payload["contract_path"],
+        "enclosurePath": payload["enclosure_path"],
         "worktreeGroup": payload["worktree_group"],
         "codeWorktree": payload["code_worktree"],
         "codeWorktreeExists": payload["code_worktree_exists"],

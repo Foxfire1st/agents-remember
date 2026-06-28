@@ -12,6 +12,7 @@ from typing import Any
 
 # Leaf import; see backend.py for the aggregator-cycle rationale.
 from agents_remember.providers.context_common import ContextProviderError
+from agents_remember.providers.grepai.context.constants import GREPAI_OLLAMA_DEFAULT_PORT
 from agents_remember.providers.grepai.lifecycle.backend import grepai_project_migration
 from agents_remember.providers.grepai.lifecycle.compose import (
     grepai_compose_render,
@@ -330,9 +331,10 @@ def grepai_embedder_host_port(
     if existing is not None:
         return existing
     configured_port = embedder["httpHostPort"]
+    preferred_port = int(GREPAI_OLLAMA_DEFAULT_PORT)
     if args.dry_run:
-        return 11434 if str(configured_port) == "auto" else int(configured_port)
-    return allocate_host_port(embedder["httpHost"], configured_port, 11434)
+        return preferred_port if str(configured_port) == "auto" else int(configured_port)
+    return allocate_host_port(embedder["httpHost"], configured_port, preferred_port)
 
 
 def grepai_embedder_dry_run_result(

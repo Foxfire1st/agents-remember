@@ -6,6 +6,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
+from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
 
 from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
@@ -20,23 +21,38 @@ from .tools import (
     codex_benchmark_run_payload,
     context_packet_payload,
     drift_check_payload,
+    gate_decide_payload,
+    gate_list_payload,
     grepai_search_payload,
     grepai_trace_payload,
+    lifecycle_end_payload,
+    lifecycle_finalize_task_payload,
+    lifecycle_gate_payload,
+    lifecycle_phase_payload,
+    lifecycle_resume_payload,
+    lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
     memory_carryover_apply_payload,
     memory_carryover_plan_payload,
     memory_init_payload,
     memory_quality_check_payload,
+    operator_inbox_consume_payload,
+    operator_inbox_poll_payload,
+    operator_inbox_post_payload,
     ping_payload,
     provider_diagnostics_payload,
     provider_status_payload,
     provider_watchers_payload,
+    read_ar_files_payload,
     resolve_context_payload,
     route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
     skills_install_payload,
+    switch_lifecycle_payload,
+    task_doc_payload,
     worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
@@ -51,6 +67,9 @@ from .tools import (
 
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
+    # One ambient lifecycle per server process; the _tool_payload choke point
+    # tags tool calls onto it once a lifecycle is started.
+    install_ambient(AmbientLifecycle(EventStore(observer_root(config))))
     server = FastMCP("Agents Remember")
 
     @server.tool()
@@ -86,6 +105,28 @@ def create_server(config: McpRuntimeConfig) -> Any:
         )
 
     @server.tool()
+    def read_ar_files(
+        repo_id: str,
+        files: list[dict[str, Any]],
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Read-only batch read of up to 5 repo-relative paths inside an AR-managed repo,
+        each paired with its file-level onboarding. Per file pass {"path": "...", "source":
+        "full" | {"startLine": N, "endLine": M}, "onboarding": false?}; the response returns
+        {path, status, source?, onboarding?} where status is the onboarding-lookup outcome
+        (found | missing | disabled | unsupported | not_requested) and source is the full file
+        or the exact requested range (omitted for absent or non-UTF-8 files). It also
+        auto-attaches the repo overview and the governing route-overview chain, deduplicated
+        per session (served once, re-served only when changed; pass refresh=true to force
+        re-serve, e.g. after a compaction). Route-index rule: a file inside sourceScope but
+        absent from coveredFiles reports missing without probing. In a managed repo this is
+        the read for the research phase (the lifecycle up to the build/job decision): use it
+        instead of a native read to get each file paired with its onboarding plus the
+        repository and governing route overviews. Native read is the edit precondition once
+        building begins."""
+        return read_ar_files_payload(config, repo_id, files, refresh=refresh)
+
+    @server.tool()
     def runtime_install(
         dry_run: bool = False,
         include_benchmarks: bool = False,
@@ -118,6 +159,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def resolve_context(
         repo_id: str,
         task_name: str | None = None,
+        parent_task: str | None = None,
+        leaf_id: str | None = None,
         contract_path: str | None = None,
         worktree_name: str | None = None,
         topology: str | None = None,
@@ -129,6 +172,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             repo_id,
             task_name=task_name,
+            parent_task=parent_task,
+            leaf_id=leaf_id,
             contract_path=contract_path,
             worktree_name=worktree_name,
             topology=topology,
@@ -406,6 +451,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str,
         worktree_name: str,
+        leaf_id: str | None = None,
+        parent_task: str | None = None,
         workflow_kind: str = "light-task",
         source_branch: str | None = None,
         work_branch: str | None = None,
@@ -440,6 +487,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id,
             task_name,
             worktree_name,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
             workflow_kind=workflow_kind,
             source_branch=source_branch,
             work_branch=work_branch,
@@ -456,14 +505,21 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str | None = None,
         contract_path: str | None = None,
+        leaf_id: str | None = None,
+        parent_task: str | None = None,
+        on_unsaved: str | None = None,
     ) -> dict[str, Any]:
-        """Re-attach to an existing task contract without mutating git. Read-only; resume a task by
-        task_name or contract_path."""
+        """Re-attach to an existing task contract without mutating git, resuming its lifecycle.
+        Read-only; resume a task by task_name or contract_path. If an unsaved fleeting lifecycle is
+        active, on_unsaved='save' (promote) or 'discard' (abandon) resolves the save gate."""
         return worktree_attach_payload(
             config,
             repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
+            on_unsaved=on_unsaved,
         )
 
     @server.tool()
@@ -471,6 +527,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str,
         task_name: str | None = None,
         contract_path: str | None = None,
+        leaf_id: str | None = None,
+        parent_task: str | None = None,
     ) -> dict[str, Any]:
         """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only.
         While background provider setup runs, the providers block carries the live phase,
@@ -481,6 +539,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id,
             task_name=task_name,
             contract_path=contract_path,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
         )
 
     @server.tool()
@@ -587,6 +647,31 @@ def create_server(config: McpRuntimeConfig) -> Any:
         worktrees and unmerged branches (reporting the commits); force=true discards them
         (git worktree remove --force, git branch -D). Preview with dry_run=true."""
         return worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)
+
+    @server.tool()
+    def lifecycle_finalize_task(
+        contract_path: str,
+        task_doc_path: str | None = None,
+        master_doc_path: str | None = None,
+        subtask_number: str = "",
+        dry_run: bool = False,
+        teardown_providers: bool = True,
+    ) -> dict[str, Any]:
+        """Finalize one parent-child task lifecycle edge. The task's landed commit must be
+        reachable from the contract's local target/source branch; PR-gated flows must complete the
+        PR merge and pull first, making the proof structurally identical to a non-PR edge. After
+        landed-state and memory carryover checks, this runs or verifies cleanup and reconciles the
+        supplied JSON-primary task documents. No squash-merge equivalence is attempted. Preview with
+        dry_run=true."""
+        return lifecycle_finalize_task_payload(
+            config,
+            contract_path,
+            task_doc_path=task_doc_path,
+            master_doc_path=master_doc_path,
+            subtask_number=subtask_number,
+            dry_run=dry_run,
+            teardown_providers=teardown_providers,
+        )
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:
@@ -724,6 +809,194 @@ def create_server(config: McpRuntimeConfig) -> Any:
             skill_exposure_mode=skill_exposure_mode,
             provider_timeout=provider_timeout,
             codex_sandbox=codex_sandbox,
+        )
+
+    @server.tool()
+    def lifecycle_start() -> dict[str, Any]:
+        """Begin a new session lifecycle and become its running owner. Guarded: rejected
+        (with a reminder naming the active lifecycle) when one is already active in this
+        session -- end or switch it first. Takes no identifier; the server mints and tracks
+        the id. Signal this once governance is confirmed at the trust checkpoint."""
+        return lifecycle_start_payload()
+
+    @server.tool()
+    def lifecycle_resume() -> dict[str, Any]:
+        """Resume the active lifecycle from blocked back to running once the gate or question
+        that blocked it is resolved."""
+        return lifecycle_resume_payload()
+
+    @server.tool()
+    def lifecycle_turn_end_notification(summary: str) -> dict[str, Any]:
+        """Notify the developer the turn is complete and stop -- no wait, no gate; the next AR
+        tool next turn resumes automatically."""
+        return lifecycle_turn_end_notification_payload(summary)
+
+    @server.tool()
+    def lifecycle_end(outcome: str) -> dict[str, Any]:
+        """End the active lifecycle. outcome is 'completed' (the human declared done) or
+        'abandoned' (otherwise). Clears the session's active lifecycle."""
+        return lifecycle_end_payload(outcome)
+
+    @server.tool()
+    def switch_lifecycle(on_unsaved: str | None = None) -> dict[str, Any]:
+        """Leave the current lifecycle and begin a fresh one. A persistent lifecycle is paused;
+        leaving an unsaved fleeting one needs on_unsaved='save' (promote) or 'discard' (abandon).
+        The model never handles ids; resuming an existing lifecycle is worktree_attach."""
+        return switch_lifecycle_payload(on_unsaved)
+
+    @server.tool()
+    def lifecycle_phase(phase: str) -> dict[str, Any]:
+        """Move the active lifecycle along its phase axis (orthogonal to state): one of
+        request | trust-checkpoint | reframe-research | decide | build | close."""
+        return lifecycle_phase_payload(phase)
+
+    @server.tool()
+    def task_doc(
+        repo_id: str,
+        operation: str,
+        task_name: str | None = None,
+        contract_path: str | None = None,
+        slug: str | None = None,
+        fields: dict[str, Any] | None = None,
+        step: dict[str, Any] | None = None,
+        decision: dict[str, Any] | None = None,
+        subtask: dict[str, Any] | None = None,
+        section: dict[str, Any] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Author the JSON-primary task document (ar-task-document/v1) and re-render its
+        markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
+        parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
+
+        operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'set_subtask' | 'set_section' |
+        'append_decision' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        contract for the lifecycle key) or contract_path; pass slug for a series sub-task
+        ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
+        title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
+        steps, ... — a master takes subTasks + ordered sections instead of steps); 'replace' takes a
+        full replacement document in fields and rewrites the existing JSON+markdown after schema
+        validation; 'set_step' takes
+        step={id, title, status, parent?, note?}; 'set_subtask' (master) takes subtask={number, name,
+        file?, status?, scope?}; 'set_section' (master) takes section={heading, kind?, body?};
+        'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
+        scalar/list updates; 'set_status' takes fields.status. dry_run=true builds + validates and
+        returns rendered/diff/wouldLose WITHOUT writing — the preview before adopting a hand .md."""
+        return task_doc_payload(
+            config,
+            repo_id=repo_id,
+            operation=operation,
+            task_name=task_name,
+            contract_path=contract_path,
+            slug=slug,
+            fields=fields,
+            step=step,
+            decision=decision,
+            subtask=subtask,
+            section=section,
+            dry_run=dry_run,
+        )
+
+    @server.tool()
+    def lifecycle_gate(
+        kind: str,
+        ask: dict[str, Any] | None = None,
+        lifecycle_id: str | None = None,
+        enclosure: str | None = None,
+        repo_id: str | None = None,
+        packet: dict[str, Any] | None = None,
+        required_decision: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Public lifecycle-gate junction for agents. Creates the durable typed gate,
+        blocks the active lifecycle with the developer-facing ask, and waits for the
+        developer decision or gate-specific response in one operation. kind is the dashboard junction
+        (plan-approval, worktree-intent, closeout-approval, etc.); ask.kind is the
+        answer shape (decision, question, conflict). Do not add a separate wait call
+        as live gate choreography."""
+        return lifecycle_gate_payload(
+            config,
+            kind=kind,
+            ask=ask,
+            lifecycle_id=lifecycle_id,
+            enclosure=enclosure,
+            repo_id=repo_id,
+            packet=packet,
+            required_decision=required_decision,
+        )
+
+    @server.tool()
+    def gate_decide(
+        gate_id: str,
+        decision: str,
+        lifecycle_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a decision on an open gate (decision: approve | reject | request-revision
+        | cancel). Append-only -- the decision is a new snapshot, never an overwrite. Over
+        MCP the decision is attributed to the model via the cli; the dashboard records
+        developer/dashboard decisions through its own path. That attribution is what a later
+        enforcement slice checks (a commit gate needs a developer-attributed approval), so an
+        agent recording a model decision here never counts as developer approval."""
+        return gate_decide_payload(
+            config,
+            gate_id=gate_id,
+            lifecycle_id=lifecycle_id,
+            decision=decision,
+            decided_by="model",
+            decided_via="cli",
+            note=note,
+        )
+
+    @server.tool()
+    def gate_list(lifecycle_id: str | None = None) -> dict[str, Any]:
+        """List the current (folded) gates for a lifecycle, or the workspace gates when no
+        lifecycle id is given. Read-only."""
+        return gate_list_payload(config, lifecycle_id=lifecycle_id)
+
+    @server.tool()
+    def operator_inbox_post(
+        ask: str,
+        response: str,
+        lifecycle_id: str | None = None,
+        agent_id: str | None = None,
+        gate_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Queue an operator response for an external chat to poll. Supply lifecycle_id
+        and/or agent_id as the mailbox key. Over MCP this route is attributed to the
+        model via cli; trusted dashboard code can call the payload builder directly with
+        developer/dashboard attribution."""
+        return operator_inbox_post_payload(
+            config,
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
+            gate_id=gate_id,
+            ask=ask,
+            response=response,
+            created_by="model",
+            created_via="cli",
+        )
+
+    @server.tool()
+    def operator_inbox_poll(
+        lifecycle_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """List pending external-chat inbox entries for a lifecycle_id and/or agent_id
+        mailbox key. Consuming an entry is explicit via operator_inbox_consume."""
+        return operator_inbox_poll_payload(
+            config,
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
+        )
+
+    @server.tool()
+    def operator_inbox_consume(entry_id: str) -> dict[str, Any]:
+        """Mark an external-chat inbox entry consumed. The entry remains in the append-only
+        inbox log; repeated consume calls are idempotent."""
+        return operator_inbox_consume_payload(
+            config,
+            entry_id=entry_id,
+            consumed_by="model",
+            consumed_via="cli",
         )
 
     return server

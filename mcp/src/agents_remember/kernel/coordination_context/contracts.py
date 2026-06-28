@@ -3,10 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agents_remember.worktrees.task_resolver import (
+    SERIES_CONTRACT_FILENAME,
+    resolve_active_task_root,
+    resolve_leaf_enclosure_contract,
+    series_contract_path,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     load_contract,
-    task_root_candidates,
     worktree_group_for,
 )
 
@@ -16,11 +21,19 @@ def resolve_contract(
     coordination_root: Path,
     code_repository_name: str,
     task_name: str | None,
+    parent_task: str | None = None,
+    leaf_id: str | None = None,
     worktree_name: str | None = None,
 ) -> tuple[Any | None, Path | None]:
     candidate = contract_path.resolve() if contract_path else None
     if candidate is None and task_name:
-        candidate = find_task_contract(coordination_root, code_repository_name, task_name)
+        candidate = find_task_contract(
+            coordination_root,
+            code_repository_name,
+            task_name,
+            parent_task=parent_task,
+            leaf_id=leaf_id,
+        )
     if candidate is None and worktree_name:
         candidate = find_worktree_contract(coordination_root, code_repository_name, worktree_name)
     if candidate is None:
@@ -34,12 +47,27 @@ def resolve_contract(
 
 
 def find_task_contract(
-    coordination_root: Path, code_repository_name: str, task_name: str
+    coordination_root: Path,
+    code_repository_name: str,
+    task_name: str,
+    *,
+    parent_task: str | None = None,
+    leaf_id: str | None = None,
 ) -> Path | None:
-    for task_root in task_root_candidates(coordination_root, code_repository_name, task_name):
-        possible = task_root / "contract.md"
-        if possible.exists():
-            return possible
+    if leaf_id:
+        return resolve_leaf_enclosure_contract(
+            coordination_root,
+            code_repository_name,
+            task_name,
+            leaf_id=leaf_id,
+            parent_task=parent_task,
+        )
+    task_root = resolve_active_task_root(
+        coordination_root, code_repository_name, task_name, parent_task=parent_task
+    )
+    possible = series_contract_path(task_root)
+    if possible.exists():
+        return possible
     return None
 
 
@@ -58,7 +86,9 @@ def find_worktree_contract(
     tasks_root = coordination_root / "tasks" / code_repository_name
     if not tasks_root.is_dir():
         return None
-    for contract_file in sorted(tasks_root.glob("*/contract.md")):
+    # The series-contract.md is canonical and nests under master + leaf enclosures, so search
+    # recursively (main's original flat `*/contract.md` glob predates the enclosure layout).
+    for contract_file in sorted(tasks_root.rglob(SERIES_CONTRACT_FILENAME)):
         try:
             contract = load_contract(contract_file)
         except (ContractError, OSError):

@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-14T09:01:00+00:00",
+  "lifecycles": [
+    {
+      "id": "sim-replay-lifecycle",
+      "state": "blocked",
+      "phase": "build",
+      "fleeting": false,
+      "enclosure": "sim-enclosure",
+      "repoId": "agents-remember",
+      "scope": "agents-remember",
+      "tokens": 1200,
+      "startedAt": "2026-06-14T09:00:00+00:00",
+      "lastEventTs": "2026-06-14T09:00:40+00:00",
+      "inferred": false,
+      "ask": { "question": "approve the gate?" },
+      "actions": [
+        { "action": "resume", "enabled": true },
+        { "action": "end", "enabled": true }
+      ],
+      "tokenSeries": [{ "ts": "2026-06-14T09:00:30+00:00", "cumulative": 1200 }]
+    },
+    {
+      "id": "fleeting-001",
+      "state": "running",
+      "phase": "reframe-research",
+      "fleeting": true,
+      "tokens": 0,
+      "startedAt": "2026-06-14T09:00:50+00:00",
+      "lastEventTs": "2026-06-14T09:00:55+00:00",
+      "inferred": false,
+      "actions": [],
+      "tokenSeries": []
+    }
+  ],
+  "enclosures": [
+    {
+      "enclosure": "sim-enclosure",
+      "taskId": "SIM-1",
+      "taskName": "sim-replay",
+      "repoName": "agents-remember",
+      "lifecycleId": "sim-replay-lifecycle",
+      "worktreeGroup": "sim-group",
+      "humanReviewStatus": "pending",
+      "closeoutStatus": "not-started",
+      "integrationStatus": "not-started",
+      "cleanup": "pending",
+      "actions": []
+    }
+  ],
+  "providers": [
+    { "id": "codegraphcontext-code", "state": "ready", "ok": true, "watcherUp": true, "indexingState": "indexed" },
+    {
+      "id": "grepai-memory",
+      "state": "ready",
+      "ok": true,
+      "watcherUp": true,
+      "indexingState": "indexed",
+      "snapshotStaleSeconds": 3.5
+    }
+  ],
+  "metrics": {
+    "lifecycleCount": 2,
+    "runningCount": 1,
+    "blockedCount": 1,
+    "pausedCount": 0,
+    "totalTokens": 1200,
+    "stalenessHistogram": { "fresh": 10, "aging": 2 }
+  },
+  "analytics": {
+    "driftSnapshots": [
+      {
+        "repository": "agents-remember",
+        "branch": "main",
+        "counts": { "ok": 300, "drifted": 0 },
+        "actionableCount": 0,
+        "snapshotStaleSeconds": 12.0
+      }
+    ],
+    "stalestSidecars": [],
+    "setupSummaries": [],
+    "setupProgress": [],
+    "routeCoverage": [],
+    "toolReports": [],
+    "ledgers": [
+      {
+        "repository": "agents-remember",
+        "closeoutCount": 7,
+        "lastVerifiedCodeCommit": "135bb8c",
+        "baseCodeCommit": "6f1a7e9"
+      }
+    ],
+    "taskDocuments": [],
+    "attentionQueue": [
+      {
+        "id": "blocked-gate:sim-replay-lifecycle",
+        "kind": "blocked-gate",
+        "severity": "warn",
+        "lane": "lifecycle",
+        "title": "Gate — input needed",
+        "detail": "approve the gate?",
+        "waitSeconds": 20,
+        "lifecycleId": "sim-replay-lifecycle",
+        "enclosure": "sim-enclosure",
+        "repoId": "agents-remember"
+      }
+    ]
+  }
+}

@@ -4,11 +4,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from agents_remember.kernel.git_freshness import ahead_behind
+from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.git import (
-    contract_has_worktree_changes,
+    run_git,
     worktree_dirty,
 )
+from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -30,7 +32,11 @@ def next_guidance(
 
 
 def contract_next_args(contract: WorktreeContract, **extra: object) -> dict[str, object]:
-    return {"contract_path": contract.contract_path.as_posix(), **extra}
+    return {
+        "enclosure_path": contract.contract_path.as_posix(),
+        "contract_path": contract.contract_path.as_posix(),
+        **extra,
+    }
 
 
 def contract_payload(contract: WorktreeContract) -> dict[str, object]:
@@ -43,11 +49,43 @@ def contract_payload(contract: WorktreeContract) -> dict[str, object]:
     return data
 
 
+def carryover_done(contract: WorktreeContract) -> tuple[bool, str]:
+    """Has the parked memory been carried into official memory? -> ``(done, carryoverDoneAt)`` (05m).
+
+    The existing ``memory_carryover_apply`` is contract-decoupled and leaves no contract stamp, so the
+    honest signal is the official ledger itself: a successful carry prepends a row to the official
+    ``memory.md`` mapping the landed code commit -> the carried memory commit. We read that ledger and
+    look the landed commit up with :func:`find_mapping`; the carried memory commit's ``%cI`` is the
+    milestone time. Internal/disabled memory has nothing to carry, so it is reported done -- the
+    carryover route + cleanup guard are external-only no-ops there.
+    """
+    if contract.memory_mode != "external" or contract.memory_repo_path is None:
+        return (True, "")
+    landed = contract.integrated_code_commit or contract.code_commit
+    ledger_path = contract.memory_repo_path / "memory.md"
+    if not landed or not ledger_path.exists():
+        return (False, "")
+    try:
+        row = find_mapping(load_ledger(ledger_path), landed)
+    except LedgerError:
+        return (False, "")
+    if row is None:
+        return (False, "")
+    dated = run_git(contract.memory_repo_path, ["show", "-s", "--format=%cI", row.memory_commit])
+    return (True, dated.stdout.strip() if dated.returncode == 0 else "")
+
+
 def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
     if contract.cleanup == "completed":
         return {
             "phase": "cleanup-completed",
             "summary": "Worktree task lifecycle is complete and cleanup has already run.",
+            **next_guidance("done"),
+        }
+    if contract.cleanup == "abandoned":
+        return {
+            "phase": "abandoned",
+            "summary": "Worktree abandoned — provider stack reclaimed; no further action.",
             **next_guidance("done"),
         }
     if contract.integration_status == "blocked":
@@ -61,26 +99,43 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
             ),
         }
     if contract.integration_status == "completed":
+        carried, carryover_done_at = carryover_done(contract)
+        if not carried:
+            # 05m: carryover must run while the worktree (its parked memory) still exists -- before
+            # cleanup deletes it. Route the existing memory_carryover_apply (its own plan->apply gate
+            # stays intact); cleanup hard-guards on this same signal.
+            return {
+                "phase": "carryover-pending",
+                "summary": "Integration completed; carry the parked memory home before cleanup.",
+                **next_guidance(
+                    "request_carryover_decision",
+                    tool="memory_carryover_apply",
+                    args={
+                        "repo_id": contract.repo_name,
+                        "source_memory": contract.memory_worktree.as_posix()
+                        if contract.memory_worktree
+                        else "",
+                        "official_code_ref": contract.integrated_code_commit
+                        or contract.code_commit,
+                    },
+                    required_args=["intent_note"],
+                ),
+            }
         return {
             "phase": "cleanup-pending",
-            "summary": "Integration completed; cleanup is still pending.",
+            "summary": "Carryover completed; cleanup is still pending.",
+            # surfaced onto EngineProcessNode.carryoverDoneAt for the dashboard (05m; 5k renders)
+            "carryoverDoneAt": carryover_done_at,
             **next_guidance(
                 "request_cleanup_decision",
                 tool="worktree_cleanup",
                 args=contract_next_args(contract, dry_run=True),
             ),
         }
-    if contract_has_worktree_changes(contract):
-        return {
-            "phase": "commit-approval-pending",
-            "summary": "Worktree changes are present; prepare a closeout preview and ask for explicit commit approval before creating commits.",
-            **next_guidance(
-                "request_commit_approval",
-                tool="worktree_closeout_preview",
-                args=contract_next_args(contract),
-                required_args=["code_commit_message"],
-            ),
-        }
+    # slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
+    # closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
+    # adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
+    # `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
     if contract.closeout_status == "completed":
         return {
             "phase": "integration-pending",
@@ -174,7 +229,13 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "code_repository_name": contract.repo_name,
         "workflow_kind": contract.workflow_kind,
         "memory_mode": contract.memory_mode,
+        "kind": contract.kind,
+        "leaf_id": contract.leaf_id,
+        "enclosure_path": contract.contract_path.as_posix(),
         "contract_path": contract.contract_path.as_posix(),
+        "parent_contract_path": contract.parent_contract_path.as_posix()
+        if contract.parent_contract_path
+        else "",
         "worktree_group": contract.worktree_group.as_posix(),
         "code_worktree": contract.code_worktree.as_posix(),
         "code_worktree_exists": contract.code_worktree.exists(),
@@ -190,6 +251,7 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
         "closeout_status": contract.closeout_status,
         "integration_status": contract.integration_status,
         "cleanup": contract.cleanup,
+        "lifecycle_id": contract.lifecycle_id,
     }
     providers = provider_async.provider_setup_status(contract)
     if providers is not None:
@@ -197,5 +259,8 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
     freshness = base_freshness(contract)
     if freshness is not None:
         payload["freshness"] = freshness
+    landing = landing_refs(contract)
+    if landing is not None:
+        payload["landing"] = landing
     payload.update(guidance)
     return payload

@@ -23,7 +23,7 @@ All light-task artifacts live under the `c-08-ar-coordination-context-resolver` 
 <task-root>/<task-slug>/task.md
 ```
 
-Create this wrapper folder as soon as the task class, name, and workflow variables are clear. That can and should happen before any `c-09-git-worktree-manager` worktree is created. If the task later becomes worktree-backed, the `c-09-git-worktree-manager` skill places `contract.md` beside `task.md` in the same wrapper folder.
+Create this wrapper folder as soon as the task class, name, and workflow variables are clear. That can and should happen before any `c-09-git-worktree-manager` worktree is created. If the task later becomes worktree-backed, the `c-09-git-worktree-manager` skill places its leaf contract at `enclosures/<leaf-id>/series-contract.md` under the wrapper folder.
 
 ### 2. Reuse an existing active task when appropriate
 
@@ -74,7 +74,7 @@ steps derive from it rather than replace it.
 
 ### 7. Write `task.md`
 
-Use `template.md` as the canonical scaffold and write it to `<task-wrapper>/task.md`.
+Use `template.md` as the canonical scaffold. The task document is **JSON-primary**: author it with the `task_doc` MCP tool, which writes the `ar-task-document/v1` JSON and renders `task.md` / `<slug>.md`. `template.md` is the render spec, so do not hand-edit a tool-managed `task.md` — edit the JSON through `task_doc` and let it re-render. (A series *master* file stays hand-authored markdown for now.)
 
 Write every checkbox on its own line. Under a parent step, indent nested checklist items by two spaces and keep the verification checkbox nested under the step it validates rather than emitting it as a same-level sibling.
 
@@ -84,7 +84,7 @@ The file must include:
 2. requirements
 3. design sized to the request per `tasks/AGENTS.md`, or a note that no design reasoning is needed
 4. implementation steps with one checkbox per line and nested checkbox items indented by two spaces under the parent step
-5. proposed code examples for each distinct implementation change when code changes are in scope
+5. proposed code examples for each distinct implementation change when code changes are in scope; if examples are deferred to the plan gate, record that intent via `codeExamplesNote` so the render distinguishes deferred from none-needed
 6. decision log
 7. open questions
 8. references
@@ -158,7 +158,7 @@ When the approved plan has been fully implemented:
 2. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
 3. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
 4. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
-5. set the task status to `Completed` only after the implementation cycle is finished and any required worktree closeout has received explicit commit approval
+5. leave worktree-backed task status below `Completed` after closeout; `lifecycle_finalize_task` sets completion after the landed commit is proven on the parent branch and cleanup/finalization is approved
 
 ## Phase 3 — Close
 
@@ -173,7 +173,7 @@ When all planned work is complete:
 1. present what was done, any deviations, and any deferred items
 2. verify that the Phase 2 completion summary still reflects the final state accurately
 3. confirm that durable findings discovered during implementation were routed through `c-05-create-or-update-onboarding-files` rather than left implicit in chat history
-4. for worktree-backed tasks, confirm whether the current state is still awaiting commit approval, already closed out, awaiting integration, or awaiting cleanup
+4. for worktree-backed tasks, confirm whether the current state is still awaiting commit approval, closed out, awaiting integration, awaiting PR/pull/carryover, or ready for lifecycle finalization
 
 ### 2. Cross-reference check
 
@@ -232,14 +232,13 @@ When the work outgrows a single-page plan, escalate to a **master + light sub-ta
 wrapper folder with a master `task.md` (scaffold in `master-template.md`) plus flat, numbered sub-task
 files `NN_<name>.md` in execution order.
 
-Run the series as **one task, one workflow, one worktree**:
+Run the series as **one master integration branch plus leaf enclosure worktrees**:
 
-1. open a single `c-09-git-worktree-manager` worktree for the whole series (never one per sub-task)
-2. implement each sub-task slice, then commit it via its own `c-09-git-worktree-manager` closeout behind an explicit commit
-   gate — multiple commits accumulate on the worktree branch as slices complete
-3. keep the worktree open across slices; the test suite + listed checks run green before each commit
-4. when every sub-task is committed, **integrate + clean up once** and let the master perform the
-   single version bump / release
+1. create or reuse the master root `series-contract.md`; it represents the integration branch and is not itself a worktree
+2. start one leaf enclosure per active sub-task at `enclosures/<leaf-id>/series-contract.md`
+3. implement each sub-task slice in its own worktree, then close it out behind an explicit commit gate
+4. integrate each leaf branch back into the master integration branch and finalize that leaf edge
+5. when every sub-task has landed, the master performs the single version bump / release and lands the integration branch through the repo's normal policy
 
 The master owns only the final release step; sub-tasks never bump the version.
 
@@ -249,8 +248,8 @@ A single light task is the right tool while its implementation plan fits on one 
 outgrows that — broad cross-repo or high-risk changes, or several distinct slices that each need their
 own checklist and commit — escalate to a **master + light sub-task series** (see *Master Task Series*
 above and `master-template.md`) rather than forcing it into one light task. The series is still light
-sub-tasks; it adds a master `task.md` to sequence them, one shared worktree, a commit per slice, and a
-single release at the end.
+sub-tasks; it adds a master `task.md` to sequence them, a master integration branch, leaf enclosure
+worktrees for the active slices, and a single release at the end.
 
 ```
 Developer request
@@ -260,7 +259,7 @@ Developer request
        │
       ├─ task wrapper under `<task-root>/<task-slug>/`
       ├─ `task.md` inside the wrapper
-      ├─ worktree-backed tasks add `contract.md` beside `task.md`
+      ├─ worktree-backed tasks add `enclosures/<leaf-id>/series-contract.md`
       ├─ approval gate before implementation
       └─ live checkbox checklist during execution
        │

@@ -76,7 +76,9 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         "--topology", choices=("internal", "external"), help="Optional topology override."
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
-    parser.add_argument("--contract-path", type=Path, help="Path to an existing contract.md.")
+    parser.add_argument(
+        "--contract-path", type=Path, help="Path to an existing series-contract.md."
+    )
     parser.add_argument("--task-name", help="Task name used for task folder resolution.")
 
 
