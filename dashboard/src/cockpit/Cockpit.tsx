@@ -14,6 +14,7 @@ import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
+import { FileViewer } from "../panels/file-viewer/FileViewer";
 import { Hangar } from "../panels/Hangar";
 import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/LifecycleList";
@@ -28,10 +29,11 @@ import { Topology } from "../panels/Topology";
 // Slice 5f S1 (§4.1): the "machine map" views (Engine Room / Topology) and the Chats terminal
 // (slice 6e) drop the rails and span the full body width; the top-bar caution stays visible so an
 // alarm is never hidden.
-type View = "operations" | "engine" | "memory" | "topology" | "hangar" | "chats";
+type View = "operations" | "files" | "engine" | "memory" | "topology" | "hangar" | "chats";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "operations", label: "Operations" },
+  { id: "files", label: "File Viewer" },
   { id: "engine", label: "Engine Room" },
   { id: "memory", label: "Memory" },
   { id: "topology", label: "Topology" },
@@ -166,6 +168,10 @@ const chatsLayer = css({
   minHeight: "0",
   minWidth: "0",
 });
+// The File Viewer (slice L2) is kept mounted across view switches too (hidden via display, never
+// unmounted) so its repo/scope selection, open file, expanded trees, and view-mode survive a tab
+// switch instead of resetting — same rationale as `chatsLayer`, and the same layout, so it reuses it.
+const filesLayer = chatsLayer;
 
 // Cockpit wires the live SSE streams, then renders the presentational shell. The shell is split
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
@@ -193,7 +199,7 @@ export function CockpitShell() {
 
   // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
   // layout breathes.
-  const fullBleed = view === "engine" || view === "topology" || view === "chats";
+  const fullBleed = view === "files" || view === "engine" || view === "topology" || view === "chats";
 
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
@@ -227,7 +233,18 @@ export function CockpitShell() {
           </motion.aside>
         )}
         <main className={cx(viewport, "viewport")} data-view={view}>
-          {view !== "chats" && <ViewBody view={view} selectedId={selectedId} onOpen={open} />}
+          {view !== "chats" && view !== "files" && (
+            <ViewBody view={view} selectedId={selectedId} onOpen={open} />
+          )}
+          {/* The File Viewer is never unmounted — only hidden — so its repo/scope selection, open
+              file, expanded trees, and view-mode survive a view switch instead of resetting. */}
+          <div
+            className={filesLayer}
+            style={{ display: view === "files" ? "flex" : "none" }}
+            aria-hidden={view !== "files"}
+          >
+            <FileViewer />
+          </div>
           {/* Chats is never unmounted — only hidden — so the xterm buffer + live WebSocket survive a
               view switch instead of being re-created empty. See `chatsLayer`. */}
           <div
@@ -276,8 +293,8 @@ function ViewBody({
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
-    // "chats" is intentionally not here — Chats is kept mounted in CockpitShell (hidden via CSS) so
-    // the live terminal survives a view switch; routing it through this switch would unmount it.
+    // "files" and "chats" are intentionally not here — both are kept mounted in CockpitShell (hidden
+    // via CSS) so their state survives a view switch; routing them through this switch would unmount them.
     case "operations":
     default:
       return <DetailPanel selectedId={selectedId} onOpenLifecycle={onOpen} />;

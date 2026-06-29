@@ -16,6 +16,18 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.0",
+    "@codemirror/view": "^6.43.4",
+    "@headless-tree/core": "^1.7.0",
+    "@headless-tree/react": "^1.7.0",
+    "@lezer/highlight": "^1.2.3",
     "@react-three/fiber": "^9.6.1",
     "@tanstack/react-virtual": "^3.14.4",
     "@testing-library/react": "^16.3.2",
@@ -28,6 +40,7 @@
     "react-aria-components": "^1.18.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^3.0.6",
     "remark-gfm": "^4.0.1",
     "three": "^0.184.0",
     "zustand": "^5.0.0"
