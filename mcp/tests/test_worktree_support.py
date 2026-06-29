@@ -463,6 +463,25 @@ def integrated_external_contract_fixture(root: Path):
 
 
 class WorktreeSupportTests(unittest.TestCase):
+    def test_memory_base_for_source_uses_source_branch_tip_not_head(self) -> None:
+        # Regression (L3): worktree_start must record the memory base from the source branch the
+        # worktree is created off, NOT the memory repo's current HEAD (which may sit on an unrelated
+        # in-flight branch). Reading HEAD recorded a divergent base that broke closeout's
+        # "memory source branch moved" preflight.
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_repo = Path(tmp) / "memory"
+            init_repo(memory_repo, "main")
+            main_tip = commit_file(memory_repo, "memory.md", "official\n", "official tip")
+            git(memory_repo, "checkout", "-b", "other-task")
+            head_tip = commit_file(memory_repo, "memory.md", "other\n", "unrelated in-flight work")
+            self.assertNotEqual(main_tip, head_tip)
+            # repo HEAD is on 'other-task', but the base for a 'main'-sourced worktree is main's tip
+            self.assertEqual(worktree_start._memory_base_for_source(memory_repo, "main"), main_tip)
+            # no source branch (internal/disabled memory) -> falls back to current HEAD
+            self.assertEqual(worktree_start._memory_base_for_source(memory_repo, ""), head_tip)
+            # no memory repo -> empty
+            self.assertEqual(worktree_start._memory_base_for_source(None, "main"), "")
+
     def test_master_start_creates_integration_contract_and_leaf_enclosure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -730,6 +749,29 @@ class WorktreeSupportTests(unittest.TestCase):
 
             missing = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-y")
             self.assertIsNone(missing)
+
+    def test_find_worktree_contract_skips_archived_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract = self._write_task_contract(
+                coordination_root,
+                code_repo,
+                task_name="task-archived",
+                worktree_name="worktree-archived",
+            )
+            # Move the (group-matching) contract under 0_archive/: its recorded
+            # worktree_group still matches, so only the archive guard should keep
+            # find_worktree_contract from resurrecting a retired task.
+            tasks_root = coordination_root / "tasks" / "repo-a"
+            archived_dir = tasks_root / "0_archive" / "task-archived"
+            archived_dir.mkdir(parents=True, exist_ok=True)
+            contract.contract_path.rename(archived_dir / contract.contract_path.name)
+
+            found = resolver.find_worktree_contract(
+                coordination_root, "repo-a", "worktree-archived"
+            )
+            self.assertIsNone(found)
 
     def test_worktree_provider_start_passes_grepai_worktree_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

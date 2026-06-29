@@ -47,6 +47,7 @@ VALID_OPERATIONS = (
     "set_status",
     "set_step",
     "set_subtask",
+    "remove_subtask",
     "set_section",
     "append_decision",
     "set_field",
@@ -105,6 +106,9 @@ def task_doc_tool(
         json_path = _existing_json(task_root, slug)
         doc = read_task_doc(json_path)
         return _result(operation, doc, json_path, markdown_path_for(task_root, doc))
+
+    if operation == "remove_subtask":
+        return _remove_subtask(task_root, slug, subtask, dry_run)
 
     if operation == "create":
         doc = _create(payload_fields, contract, task_root)
@@ -215,7 +219,17 @@ def _build_doc(
     task_root: Path,
 ) -> TaskDocument:
     data = dict(fields)
-    data.setdefault("kind", "light")
+    if data.get("kind") == "light":
+        raise TaskDocError(
+            "light task documents are no longer supported — author a master, or a "
+            "subTask (leaf) under a master. Every task is wrapped master/leaf, even a "
+            "single-file change."
+        )
+    if "kind" not in data:
+        # Master/leaf only — there is no "light" default. A create against a leaf
+        # contract is a subTask; anything else (no contract, or a standalone
+        # top-level task) is a master.
+        data["kind"] = "subTask" if (contract is not None and contract.kind == "leaf") else "master"
     if contract is not None:
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
         if contract.kind == "leaf" and contract.lifecycle_id and data.get("kind") != "master":
@@ -350,6 +364,63 @@ def _upsert_section(data: dict[str, Any], section: dict[str, Any]) -> None:
         sections.append(new_section)
     else:
         existing.update(updates)
+
+
+def _remove_subtask(
+    task_root: Path,
+    slug: str | None,
+    subtask: dict[str, Any] | None,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Remove a sub-task row from a master and (by default) delete the leaf doc it points at.
+
+    ``remove_subtask`` completes task-doc CRUD: it drops the ``SubTaskRef`` by ``number`` from the
+    master ``subTasks`` index and deletes the referenced leaf document (``<slug>.json`` + ``.md``)
+    -- "remove means remove" -- unless ``subtask.keep_file`` is set, in which case only the index
+    row is removed and the leaf doc is left on disk.
+    """
+    if not subtask or not subtask.get("number"):
+        raise TaskDocError("remove_subtask requires subtask.number")
+    number = str(subtask["number"])
+    keep_file = bool(subtask.get("keep_file"))
+    doc = read_task_doc(_existing_json(task_root, slug))
+    if doc.kind != "master":
+        raise TaskDocError("remove_subtask is only valid for a master document")
+    data = doc.model_dump(by_alias=True)
+    refs: list[dict[str, Any]] = data.get("subTasks", [])
+    match = next((ref for ref in refs if ref.get("number") == number), None)
+    if match is None:
+        raise TaskDocError(f"remove_subtask: subtask {number!r} not found")
+    data["subTasks"] = [ref for ref in refs if ref.get("number") != number]
+    updated = _validate(data)
+    leaf_files = _leaf_doc_files(task_root, match)
+    if dry_run:
+        result = _preview("remove_subtask", updated, task_root)
+        result["removedSubtask"] = number
+        result["wouldDeleteFiles"] = (
+            [] if keep_file else [path.as_posix() for path in leaf_files if path.exists()]
+        )
+        return result
+    json_path, markdown_path = write_task_docs(task_root, [updated])[0]
+    deleted: list[str] = []
+    if not keep_file:
+        for path in leaf_files:
+            if path.exists():
+                path.unlink()
+                deleted.append(path.as_posix())
+    result = _result("remove_subtask", updated, json_path, markdown_path)
+    result["removedSubtask"] = number
+    result["deletedFiles"] = deleted
+    return result
+
+
+def _leaf_doc_files(task_root: Path, ref: dict[str, Any]) -> list[Path]:
+    """The leaf sub-task's JSON + markdown files implied by a master ``SubTaskRef.file``."""
+    file_name = ref.get("file") or ""
+    if not file_name:
+        return []
+    markdown = task_root / file_name
+    return [markdown.with_suffix(".json"), markdown]
 
 
 def _validate(data: dict[str, Any]) -> TaskDocument:

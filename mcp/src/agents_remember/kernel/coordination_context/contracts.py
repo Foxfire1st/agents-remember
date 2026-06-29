@@ -5,6 +5,7 @@ from typing import Any
 
 from agents_remember.worktrees.task_resolver import (
     SERIES_CONTRACT_FILENAME,
+    is_archived_path,
     resolve_active_task_root,
     resolve_leaf_enclosure_contract,
     series_contract_path,
@@ -77,10 +78,12 @@ def find_worktree_contract(
     """Locate a task contract from ``worktree_name`` when no task name is known.
 
     ``worktree_name`` cannot be reversed to ``task_name`` (``slugify`` preserves both
-    ``-`` and ``_``, so the prefix boundary is lossy), and ``contract.md`` lives at
-    ``tasks/<repo>/<task_name>/contract.md`` rather than inside the worktree dir. The
-    lossless join key is the derived worktree-group folder name matched against each
-    contract's recorded ``coordination.worktree_group``.
+    ``-`` and ``_``, so the prefix boundary is lossy), and the canonical
+    ``series-contract.md`` lives at ``tasks/<repo>/<task_name>/series-contract.md`` and
+    nests further under master + ``enclosures/<leaf-id>/`` rather than inside the
+    worktree dir. The lossless join key is the derived worktree-group folder name
+    matched against each contract's recorded ``coordination.worktree_group``. Archived
+    (``0_archive/``) contracts are skipped so a retired task cannot shadow an active one.
     """
     target = worktree_group_for(coordination_root, code_repository_name, worktree_name).name
     tasks_root = coordination_root / "tasks" / code_repository_name
@@ -89,6 +92,8 @@ def find_worktree_contract(
     # The series-contract.md is canonical and nests under master + leaf enclosures, so search
     # recursively (main's original flat `*/contract.md` glob predates the enclosure layout).
     for contract_file in sorted(tasks_root.rglob(SERIES_CONTRACT_FILENAME)):
+        if is_archived_path(contract_file):
+            continue
         try:
             contract = load_contract(contract_file)
         except (ContractError, OSError):
