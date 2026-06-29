@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from agents_remember.kernel import filesystem
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -100,7 +101,9 @@ def longest_tracked_path_length(repo: Path, ref: str = "HEAD") -> int:
         result = run_git(repo, ["ls-tree", "-r", "--name-only", "HEAD"])
     if result.returncode != 0:
         return 0
-    return max((len(line.strip()) for line in result.stdout.splitlines() if line.strip()), default=0)
+    return max(
+        (len(line.strip()) for line in result.stdout.splitlines() if line.strip()), default=0
+    )
 
 
 def commit_text_or_none(repo: Path, ref: str, relative_path: str) -> str | None:
@@ -142,3 +145,58 @@ def committed_changed_paths(repo: Path, base_commit: str, verified_commit: str) 
     if verified_commit and verified_commit != base_commit:
         changed &= _diff_paths(repo, verified_commit)
     return sorted(path for path in changed if filesystem.is_file(repo / path))
+
+
+def _rename_aware_path(field: str) -> str:
+    """The post-rename path from a numstat path field (handles ``a => b`` and ``p/{a => b}/q``)."""
+    field = field.strip()
+    if " => " not in field:
+        return field.replace("\\", "/")
+    if "{" in field and "}" in field:
+        prefix, rest = field.split("{", 1)
+        inner, suffix = rest.split("}", 1)
+        new = inner.split(" => ", 1)[1]
+        return f"{prefix}{new}{suffix}".replace("\\", "/")
+    return field.split(" => ", 1)[1].replace("\\", "/")
+
+
+def changed_files_with_counts(
+    repo: Path, base: str, head: str | None = None
+) -> list[dict[str, Any]]:
+    """Per-file change-set ``base``->``head`` (``head=None`` -> the working tree).
+
+    Each entry is ``{path, insertions, deletions, status}``. Unlike
+    :func:`changed_worktree_paths` / :func:`committed_changed_paths` this KEEPS
+    deletions (status ``D``) and reports per-file insertion/deletion counts (``None``
+    for binary files, whose numstat shows ``-``); in working-tree mode untracked files
+    are reported as additions (status ``A``). ``status`` is the git letter
+    (``A``/``M``/``D``/``R``/``C``). Paths are posix, sorted.
+    """
+    rng = [base] if head is None else [base, head]
+    status: dict[str, str] = {}
+    for line in require_git(repo, ["diff", "--name-status", "--find-renames", *rng]).splitlines():
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        status[fields[-1].replace("\\", "/")] = fields[0][:1]
+    out: list[dict[str, Any]] = []
+    for line in require_git(repo, ["diff", "--numstat", "--find-renames", *rng]).splitlines():
+        if not line.strip():
+            continue
+        ins, dels, raw_path = line.split("\t", 2)
+        path = _rename_aware_path(raw_path)
+        out.append(
+            {
+                "path": path,
+                "insertions": None if ins == "-" else int(ins),
+                "deletions": None if dels == "-" else int(dels),
+                "status": status.get(path, "M"),
+            }
+        )
+    if head is None:
+        for raw in require_git(repo, ["ls-files", "--others", "--exclude-standard"]).splitlines():
+            rel = raw.strip().replace("\\", "/")
+            if rel and filesystem.is_file(repo / rel):
+                line_count = len((repo / rel).read_text(errors="replace").splitlines())
+                out.append({"path": rel, "insertions": line_count, "deletions": 0, "status": "A"})
+    return sorted(out, key=lambda entry: str(entry["path"]))

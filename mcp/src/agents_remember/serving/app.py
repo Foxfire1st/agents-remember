@@ -69,6 +69,7 @@ from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.serving.actions import ActionRequest, evaluate_action
+from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harnesses import (
@@ -107,13 +108,9 @@ async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]
     """
     seq, snapshot = projector.current()
     if snapshot is not None:
-        yield ServerSentEvent(
-            data=_encode(snapshot), event="snapshot", id=str(seq), retry=2000
-        )
+        yield ServerSentEvent(data=_encode(snapshot), event="snapshot", id=str(seq), retry=2000)
     async for seq, delta in projector.subscribe():
-        yield ServerSentEvent(
-            data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000
-        )
+        yield ServerSentEvent(data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000)
 
 
 _TERMINAL_EXIT_FRAME = json.dumps({"type": "exit"})
@@ -169,9 +166,7 @@ def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
                 host.resize(session, cols=cols, rows=rows)
 
 
-def _apply_terminal_session_input(
-    host: TerminalHost, session: TerminalSession, text: str
-) -> None:
+def _apply_terminal_session_input(host: TerminalHost, session: TerminalSession, text: str) -> None:
     """Apply one client text frame to a concrete PTY client."""
     try:
         message = json.loads(text)
@@ -191,9 +186,7 @@ def _apply_terminal_session_input(
                 host.resize_session(session, cols=cols, rows=rows)
 
 
-async def _terminal_to_socket(
-    websocket: WebSocket, outbound: asyncio.Queue[bytes | None]
-) -> None:
+async def _terminal_to_socket(websocket: WebSocket, outbound: asyncio.Queue[bytes | None]) -> None:
     """Forward queued PTY output frames to the browser until the EOF sentinel (``None``)."""
     while True:
         chunk = await outbound.get()
@@ -541,7 +534,9 @@ def create_app(
                 created_via="dashboard",
             )
         except ValueError as exc:
-            return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
+            return JSONResponse(
+                content={"status": "bad-address", "detail": str(exc)}, status_code=400
+            )
         return JSONResponse(content=payload, status_code=200)
 
     @app.post("/api/operator-inbox/{entry_id}/dismiss")
@@ -551,9 +546,7 @@ def create_app(
             return JSONResponse(
                 content={"status": "not-found", "entryId": entry_id}, status_code=404
             )
-        return JSONResponse(
-            content={"status": "dismissed", "entryId": entry_id}, status_code=200
-        )
+        return JSONResponse(content={"status": "dismissed", "entryId": entry_id}, status_code=200)
 
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:
@@ -595,8 +588,7 @@ def create_app(
         # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
         return {
             "harnesses": [
-                {"id": h.id, "name": h.name, "detected": h.detected}
-                for h in detect_harnesses()
+                {"id": h.id, "name": h.name, "detected": h.detected} for h in detect_harnesses()
             ]
         }
 
@@ -615,9 +607,7 @@ def create_app(
                 harness=request.harness,
             )
         except ValueError as exc:
-            return JSONResponse(
-                content={"status": "bad-kind", "detail": str(exc)}, status_code=400
-            )
+            return JSONResponse(content={"status": "bad-kind", "detail": str(exc)}, status_code=400)
         kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
         opened = host.ensure(
             session,
@@ -630,7 +620,9 @@ def create_app(
         )
         attached_at = now_iso()
         existing = catalog.get(session)
-        label = request.label or (existing.label if existing else _terminal_label(kind, request.harness, session))
+        label = request.label or (
+            existing.label if existing else _terminal_label(kind, request.harness, session)
+        )
         entry = TerminalCatalogEntry(
             id=opened.sid,
             label=label,
@@ -706,12 +698,17 @@ def create_app(
         if len(body) > _MAX_IMAGE_BYTES:
             return JSONResponse(content={"status": "too-large"}, status_code=413)
         if not body or not _looks_like_image(body, ext):
-            return JSONResponse(content={"status": "bad-type"}, status_code=400)  # empty / not an image
+            return JSONResponse(
+                content={"status": "bad-type"}, status_code=400
+            )  # empty / not an image
         dest = cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
+        dest.write_bytes(
+            body
+        )  # flush before the path is injected -- the harness validates existence
         return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
 
     register_files_routes(app, config)
+    register_changeset_routes(app, config)
     mount_static(app)
     return app
