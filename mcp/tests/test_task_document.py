@@ -1136,6 +1136,77 @@ class MasterControllerTests(unittest.TestCase):
         with self.assertRaises(TaskDocError):
             self._op("set_section", section={"body": "no heading"})
 
+    def _author_leaf(self, *, number: str = "1", slug: str = "01_a") -> tuple[Path, Path]:
+        leaf = task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="series",
+            fields={
+                "id": number,
+                "slug": slug,
+                "title": f"Leaf {number}",
+                "kind": "subTask",
+                "master": "task.md",
+                "repo": "agents-remember",
+                "createdAt": "2026-01-01T00:00",
+            },
+        )
+        return Path(str(leaf["docPath"])), Path(str(leaf["renderedPath"]))
+
+    def test_remove_subtask_deletes_leaf_doc_and_row(self) -> None:
+        # remove means remove: the master row AND the leaf doc (json + md) are gone.
+        self._create()
+        leaf_json, leaf_md = self._author_leaf()
+        self.assertTrue(leaf_json.exists() and leaf_md.exists())
+        result = self._op("remove_subtask", subtask={"number": "1"})
+        self.assertEqual(result["removedSubtask"], "1")
+        master = read_task_doc(Path(str(result["docPath"])))
+        self.assertEqual([s.number for s in master.subTasks], [])
+        self.assertFalse(leaf_json.exists())
+        self.assertFalse(leaf_md.exists())
+        self.assertIn(leaf_json.as_posix(), result["deletedFiles"])
+
+    def test_remove_subtask_keep_file_retains_leaf_doc(self) -> None:
+        # keep_file drops the index row but leaves the leaf doc on disk.
+        self._create()
+        leaf_json, leaf_md = self._author_leaf()
+        result = self._op("remove_subtask", subtask={"number": "1", "keep_file": True})
+        master = read_task_doc(Path(str(result["docPath"])))
+        self.assertEqual([s.number for s in master.subTasks], [])
+        self.assertTrue(leaf_json.exists() and leaf_md.exists())
+        self.assertEqual(result["deletedFiles"], [])
+
+    def test_remove_subtask_dry_run_previews_without_deleting(self) -> None:
+        self._create()
+        leaf_json, leaf_md = self._author_leaf()
+        result = self._op("remove_subtask", subtask={"number": "1"}, dry_run=True)
+        self.assertTrue(result["dryRun"])
+        self.assertIn(leaf_json.as_posix(), result["wouldDeleteFiles"])
+        self.assertTrue(leaf_json.exists() and leaf_md.exists())
+        master = read_task_doc(Path(str(result["docPath"])))
+        self.assertEqual([s.number for s in master.subTasks], ["1"])
+
+    def test_remove_subtask_absent_or_no_number_raises(self) -> None:
+        self._create()
+        with self.assertRaises(TaskDocError):
+            self._op("remove_subtask", subtask={"number": "ghost"})
+        with self.assertRaises(TaskDocError):
+            self._op("remove_subtask", subtask={"name": "no number"})
+
+    def test_remove_subtask_rejects_non_master(self) -> None:
+        self._create()
+        self._author_leaf()
+        with self.assertRaises(TaskDocError):
+            task_doc_tool(
+                self.cfg,
+                repo_id="agents-remember",
+                operation="remove_subtask",
+                task_name="series",
+                slug="01_a",
+                subtask={"number": "1"},
+            )
+
 
 class RegistrationTests(unittest.TestCase):
     def setUp(self) -> None:
