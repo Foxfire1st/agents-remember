@@ -898,6 +898,74 @@ class ControllerTests(unittest.TestCase):
         result = self._create()  # no lifecycleId in fields
         self.assertEqual(result["lifecycleId"], "LC-CONTRACT")
 
+    def test_create_refuses_light_and_defaults_master_without_contract(self) -> None:
+        base = {
+            "id": "K1",
+            "slug": "task",
+            "title": "Kind",
+            "repo": "agents-remember",
+            "createdAt": "2026-01-01T00:00",
+        }
+        # Explicit light is refused: every task is wrapped master/leaf, even a single-file change.
+        with self.assertRaises(TaskDocError):
+            task_doc_tool(
+                self.cfg,
+                repo_id="agents-remember",
+                operation="create",
+                task_name="kind-x",
+                fields={**base, "kind": "light"},
+            )
+        # No contract + no kind defaults to a standalone master (not the retired "light" default).
+        created = task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="kind-x",
+            fields=base,
+        )
+        self.assertEqual(created["kind"], "master")
+        # replace shares _build_doc, so it refuses light on the same path.
+        with self.assertRaises(TaskDocError):
+            task_doc_tool(
+                self.cfg,
+                repo_id="agents-remember",
+                operation="replace",
+                task_name="kind-x",
+                slug="task",
+                fields={**base, "kind": "light"},
+            )
+
+    def test_create_defaults_subtask_under_leaf_contract(self) -> None:
+        contract = default_contract(
+            task_name="leaf-x",
+            repo_name="agents-remember",
+            workflow_kind="chat-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=self.coord,
+            code_source_branch="main",
+            code_work_branch="wb",
+            code_base_commit="abc123",
+            worktree_name="leaf-x",
+            lifecycle_id="LC-LEAF",
+        )
+        write_contract(contract.contract_path, contract)
+        # A bare create against a leaf contract is the leaf sub-task (context-aware default).
+        result = task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="create",
+            task_name="leaf-x",
+            fields={
+                "id": "L1",
+                "slug": "01_leaf",
+                "title": "Leaf",
+                "repo": "agents-remember",
+                "createdAt": "2026-01-01T00:00",
+            },
+        )
+        self.assertEqual(result["kind"], "subTask")
+
     def test_resolve_by_contract_path(self) -> None:
         created = self._create()
         task_root = Path(str(created["docPath"])).parent
@@ -1013,6 +1081,8 @@ class MasterControllerTests(unittest.TestCase):
             self._op("set_step", step={"id": "S1", "title": "x"})
 
     def test_subtask_op_rejects_non_master_but_section_allows_freeform(self) -> None:
+        # A subTask leaf (the non-master kind now that "light" is no longer authorable). Its
+        # slug is distinct from "task" so master-sync does not treat its own task.json as a master.
         task_doc_tool(
             self.cfg,
             repo_id="agents-remember",
@@ -1020,9 +1090,9 @@ class MasterControllerTests(unittest.TestCase):
             task_name="lite",
             fields={
                 "id": "L",
-                "slug": "task",
+                "slug": "01_leaf",
                 "title": "L",
-                "kind": "light",
+                "kind": "subTask",
                 "repo": "r",
                 "createdAt": "2026-01-01T00:00",
             },
@@ -1034,6 +1104,7 @@ class MasterControllerTests(unittest.TestCase):
                 repo_id="agents-remember",
                 operation="set_subtask",
                 task_name="lite",
+                slug="01_leaf",
                 subtask={"number": "1", "name": "x"},
             )
         # set_section on a leaf adds a freeform extra section (R4)
@@ -1042,6 +1113,7 @@ class MasterControllerTests(unittest.TestCase):
             repo_id="agents-remember",
             operation="set_section",
             task_name="lite",
+            slug="01_leaf",
             section={"heading": "Status history", "body": "old."},
         )
         doc = read_task_doc(Path(str(result["docPath"])))
@@ -1053,6 +1125,7 @@ class MasterControllerTests(unittest.TestCase):
                 repo_id="agents-remember",
                 operation="set_section",
                 task_name="lite",
+                slug="01_leaf",
                 section={"heading": "X", "kind": "subTasks"},
             )
 
@@ -1084,7 +1157,7 @@ class RegistrationTests(unittest.TestCase):
                 "id": "R1",
                 "slug": "task",
                 "title": "Reg",
-                "kind": "light",
+                "kind": "master",
                 "repo": "agents-remember",
                 "createdAt": "2026-01-01T00:00",
             },

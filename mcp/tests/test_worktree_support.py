@@ -731,6 +731,29 @@ class WorktreeSupportTests(unittest.TestCase):
             missing = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-y")
             self.assertIsNone(missing)
 
+    def test_find_worktree_contract_skips_archived_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo, coordination_root = self._external_memory_skeleton(root)
+            contract = self._write_task_contract(
+                coordination_root,
+                code_repo,
+                task_name="task-archived",
+                worktree_name="worktree-archived",
+            )
+            # Move the (group-matching) contract under 0_archive/: its recorded
+            # worktree_group still matches, so only the archive guard should keep
+            # find_worktree_contract from resurrecting a retired task.
+            tasks_root = coordination_root / "tasks" / "repo-a"
+            archived_dir = tasks_root / "0_archive" / "task-archived"
+            archived_dir.mkdir(parents=True, exist_ok=True)
+            contract.contract_path.rename(archived_dir / contract.contract_path.name)
+
+            found = resolver.find_worktree_contract(
+                coordination_root, "repo-a", "worktree-archived"
+            )
+            self.assertIsNone(found)
+
     def test_worktree_provider_start_passes_grepai_worktree_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

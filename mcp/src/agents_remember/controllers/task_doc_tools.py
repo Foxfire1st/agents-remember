@@ -215,7 +215,17 @@ def _build_doc(
     task_root: Path,
 ) -> TaskDocument:
     data = dict(fields)
-    data.setdefault("kind", "light")
+    if data.get("kind") == "light":
+        raise TaskDocError(
+            "light task documents are no longer supported — author a master, or a "
+            "subTask (leaf) under a master. Every task is wrapped master/leaf, even a "
+            "single-file change."
+        )
+    if "kind" not in data:
+        # Master/leaf only — there is no "light" default. A create against a leaf
+        # contract is a subTask; anything else (no contract, or a standalone
+        # top-level task) is a master.
+        data["kind"] = "subTask" if (contract is not None and contract.kind == "leaf") else "master"
     if contract is not None:
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
         if contract.kind == "leaf" and contract.lifecycle_id and data.get("kind") != "master":
