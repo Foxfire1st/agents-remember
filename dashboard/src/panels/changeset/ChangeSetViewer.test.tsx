@@ -7,6 +7,14 @@ import { GALLERY } from "../../dev/fixtures";
 import { DetailPanel } from "../DetailPanel";
 import { ChangeSetViewer } from "./ChangeSetViewer";
 
+// Mock the diff column so the screen tests never construct a CodeMirror MergeView in jsdom
+// (matching the L2 approach — the live editor render is covered by build + typecheck).
+vi.mock("./ChangeSetPane", () => ({
+  ChangeSetPane: ({ diff }: { diff: { path: string } }) => (
+    <div data-testid="changeset-pane">{diff.path}</div>
+  ),
+}));
+
 const TASK_CHANGESET = {
   scope: "wt-a",
   code: [{ path: "dashboard/src/x.ts", insertions: 3, deletions: 1, status: "M", hasSidecar: true }],
@@ -16,9 +24,18 @@ const TASK_CHANGESET = {
 const MASTER_CHANGESET = {
   master: "browser-dashboard",
   leaves: [{ leafId: "260628-l1", counters: { code: { files: 1, insertions: 3, deletions: 1 }, memory: { files: 0, insertions: 0, deletions: 0 } } }],
-  code: [{ path: "a.ts", insertions: 3, deletions: 1, status: "M", leafCount: 1 }],
+  // Net diff (master base -> series tip): plain ChangedFile rows, no leafCount.
+  code: [{ path: "a.ts", insertions: 3, deletions: 1, status: "M" }],
   memory: [],
   counters: { code: { files: 1, insertions: 3, deletions: 1 }, memory: { files: 0, insertions: 0, deletions: 0 } },
+};
+const FILE_DIFF = {
+  scope: "browser-dashboard",
+  kind: "code",
+  path: "a.ts",
+  language: "typescript",
+  before: { content: "old\n" },
+  after: { content: "old\nnew\n" },
 };
 
 // A URL-aware fetch stub: the change-set endpoints return our fixtures; everything else is empty.
@@ -26,11 +43,13 @@ function stubChangeset() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      const body = url.includes("/api/changeset/master")
-        ? MASTER_CHANGESET
-        : url.includes("/api/changeset/task")
-          ? TASK_CHANGESET
-          : {};
+      const body = url.includes("/api/changeset/file-diff")
+        ? FILE_DIFF
+        : url.includes("/api/changeset/master")
+          ? MASTER_CHANGESET
+          : url.includes("/api/changeset/task")
+            ? TASK_CHANGESET
+            : {};
       return { ok: true, status: 200, json: async () => body } as unknown as Response;
     }),
   );
@@ -69,15 +88,19 @@ describe("ChangeSetViewer screen", () => {
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the accumulated-summary placeholder in master mode (no single scope to diff)", async () => {
+  it("opens a per-file NET diff from a clickable row in master mode", async () => {
     stubChangeset();
-    const { findByTestId, container } = render(
+    const { findByTestId, getByText, container } = render(
       <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
     );
     await findByTestId("changeset-counters");
+    // master mode now lists the net changed files with the normal "select a file" placeholder
+    // (not the old accumulated-summary message), and the rows are clickable.
     expect(container.querySelector('[data-testid="pane-placeholder"]')?.textContent).toContain(
-      "Accumulated series summary",
+      "Select a changed file",
     );
+    fireEvent.click(getByText("a.ts"));
+    expect((await findByTestId("changeset-pane")).textContent).toBe("a.ts");
   });
 });
 

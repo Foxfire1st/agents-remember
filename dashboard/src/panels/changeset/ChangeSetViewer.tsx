@@ -17,6 +17,7 @@ import {
   type TaskChangeset,
   fileDiff,
   masterChangeset,
+  masterFileDiff,
   taskChangeset,
 } from "../../data/changeset";
 import { FilesApiError } from "../../data/files";
@@ -176,14 +177,19 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
           return code ? { kind: "code" as const, path: code } : null;
         })();
 
+  // Master mode diffs the NET series range (master base -> tip) via `master`; a leaf diffs its
+  // enclosure `scope`. Both feed the same MergeView.
+  const loadDiff = (kind: "code" | "memory", path: string) =>
+    master ? masterFileDiff(repo, master, kind, path) : fileDiff(repo, scope ?? "", kind, path);
+
   const open = (kind: "code" | "memory", file: Row, withPartner = false) => {
-    if (isMaster || !scope) return; // accumulated summary has no single scope to diff
+    if (!isMaster && !scope) return;
     setActive({ kind, path: file.path, hasSidecar: file.hasSidecar });
     setDiff(null);
     setPartner(null);
-    void fileDiff(repo, scope, kind, file.path).then(setDiff, () => setDiff(null));
+    void loadDiff(kind, file.path).then(setDiff, () => setDiff(null));
     const partnerRef = withPartner ? partnerOf(kind, file.path, file.hasSidecar) : null;
-    if (partnerRef) void fileDiff(repo, scope, partnerRef.kind, partnerRef.path).then(setPartner, () => setPartner(null));
+    if (partnerRef) void loadDiff(partnerRef.kind, partnerRef.path).then(setPartner, () => setPartner(null));
   };
 
   const counters = data?.counters;
@@ -195,7 +201,7 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
           ← back
         </button>
         <span className={title}>
-          change-set · {isMaster ? `series ${master}` : scope} {isMaster ? "(accumulated)" : ""}
+          change-set · {isMaster ? `series ${master}` : scope} {isMaster ? "· net since series start" : ""}
         </span>
         {counters ? (
           <span className={counterRow} data-testid="changeset-counters">
@@ -223,12 +229,12 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
                 <div className={sectionHead}>changed code ({data?.code.length ?? 0})</div>
                 {(data?.code ?? []).map((f) => (
                   <div key={f.path} className={row} data-active={active?.kind === "code" && active.path === f.path}>
-                    <button type="button" className={rowMain} onClick={() => open("code", f)} disabled={isMaster}>
+                    <button type="button" className={rowMain} onClick={() => open("code", f)}>
                       <span className={statusChip}>{f.status}</span>
                       <span className={pathText}>{f.path}</span>
                       <Counts file={f} />
                     </button>
-                    {!isMaster && f.hasSidecar ? (
+                    {f.hasSidecar ? (
                       <button
                         type="button"
                         className={sidecarBtn}
@@ -246,12 +252,12 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
                 <div className={sectionHead}>changed onboarding ({data?.memory.length ?? 0})</div>
                 {(data?.memory ?? []).map((f) => (
                   <div key={f.path} className={row} data-active={active?.kind === "memory" && active.path === f.path}>
-                    <button type="button" className={rowMain} onClick={() => open("memory", f)} disabled={isMaster}>
+                    <button type="button" className={rowMain} onClick={() => open("memory", f)}>
                       <span className={statusChip}>{f.status}</span>
                       <span className={pathText}>{f.path}</span>
                       <Counts file={f} />
                     </button>
-                    {!isMaster && partnerOf("memory", f.path) ? (
+                    {partnerOf("memory", f.path) ? (
                       <button
                         type="button"
                         className={sidecarBtn}
@@ -272,9 +278,7 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
               <ChangeSetPane diff={diff} keyPrefix="changeset.main" />
             ) : (
               <div className={placeholder} data-testid="pane-placeholder">
-                {isMaster
-                  ? "Accumulated series summary — open a specific task for per-file diffs"
-                  : "Select a changed file"}
+                Select a changed file
               </div>
             )}
           </Panel>

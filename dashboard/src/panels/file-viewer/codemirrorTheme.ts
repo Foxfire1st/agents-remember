@@ -29,12 +29,20 @@ const chrome = EditorView.theme(
 const highlight = HighlightStyle.define([
   { tag: t.keyword, color: "var(--amber)" },
   { tag: [t.string, t.special(t.string)], color: "var(--mint)" },
-  { tag: [t.comment, t.lineComment, t.blockComment], color: "var(--grid)", fontStyle: "italic" },
+  // Dimmed-but-readable ink, NOT --grid (the 0.30-L gutter/border colour, which is near-invisible
+  // on the 0.16-L background); a mid-lightness ink/bg blend keeps comments legible yet recessive.
+  {
+    tag: [t.comment, t.lineComment, t.blockComment],
+    color: "color-mix(in oklab, var(--ink) 60%, var(--bg))",
+    fontStyle: "italic",
+  },
   { tag: [t.number, t.bool, t.null], color: "var(--cyan)" },
   { tag: [t.function(t.variableName), t.definition(t.variableName)], color: "var(--cyan)" },
   { tag: [t.typeName, t.className, t.tagName, t.namespace], color: "var(--amber)" },
   { tag: [t.propertyName, t.attributeName], color: "var(--ink)" },
-  { tag: [t.operator, t.punctuation, t.bracket], color: "var(--grid)" },
+  // Punctuation/brackets/operators: readable but recessive (just under identifier brightness) —
+  // NOT --grid (the gutter/border tone, near-invisible on the bg). Gutter line numbers keep --grid.
+  { tag: [t.operator, t.punctuation, t.bracket], color: "color-mix(in oklab, var(--ink) 75%, var(--bg))" },
 ]);
 
 // The read-only theme bundle: chrome + syntax tokens.

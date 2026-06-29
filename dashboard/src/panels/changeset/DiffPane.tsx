@@ -18,8 +18,14 @@ const host = css({
   height: "100%",
   minHeight: "0",
   overflow: "hidden",
-  "& .cm-editor": { height: "100%" },
-  "& .cm-mergeView, & .cm-mergeViewEditors": { height: "100%" },
+  // Inline (unifiedMergeView) / single-editor mode: a DIRECT .cm-editor fills the host and its own
+  // .cm-scroller scrolls (like FilePane). Scoped to the direct child so it does NOT clamp the
+  // editors nested inside a split MergeView.
+  "& > .cm-editor": { height: "100%" },
+  // Split (MergeView) mode: .cm-mergeView IS the scroll container — its own theme sets
+  // overflowY:auto and forces the inner editors' scrollers to overflow:visible (they grow to full
+  // content height). Bounding it to 100% (and NOT clamping the inner editors) is what lets it scroll.
+  "& .cm-mergeView": { height: "100%" },
 });
 
 export type DiffMode = "split" | "inline";

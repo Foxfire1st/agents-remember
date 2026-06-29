@@ -3,7 +3,7 @@
 ``changed_files_with_counts`` is covered over real git repos (modify/add/delete/binary,
 plus a committed rename); ``task_changeset`` / ``file_diff`` / ``master_changeset`` are
 covered over a code (+ memory) worktree pair driven by a written leaf contract, so the
-counts, sidecar pairing, before/after content, and master accumulation are real.
+counts, sidecar pairing, before/after content, and the master NET series diff are real.
 """
 
 from __future__ import annotations
@@ -19,7 +19,12 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.serving import files, scope
-from agents_remember.serving.changeset import file_diff, master_changeset, task_changeset
+from agents_remember.serving.changeset import (
+    file_diff,
+    master_changeset,
+    master_file_diff,
+    task_changeset,
+)
 from agents_remember.serving.scope import FileScope
 from agents_remember.worktrees.modules.git import changed_files_with_counts
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
@@ -237,36 +242,86 @@ class MasterChangesetTests(unittest.TestCase):
             transcript_root=self.tmp / "logs",
             repositories={"R": RepositoryScope(repo_id="R", path=self.tmp / "ws" / "R")},
         )
+        # The series code repo: a base, then two commits past it -- the NET is base -> tip,
+        # NOT a sum of the per-commit (leaf) diffs.
+        self.code = self.tmp / "series-code"
+        _init_repo(self.code)
+        (self.code / "shared.py").write_text("base\n", encoding="utf-8")
+        (self.code / "gone.py").write_text("x\n", encoding="utf-8")
+        self.base = _commit_all(self.code, "series base")
+        (self.code / "shared.py").write_text("base\nl1\n", encoding="utf-8")  # +1
+        (self.code / "added.py").write_text("a\n", encoding="utf-8")
+        _commit_all(self.code, "c1")
+        (self.code / "shared.py").write_text("base\nl1\nl2\n", encoding="utf-8")  # +1 (net +2)
+        (self.code / "gone.py").unlink()
+        _commit_all(self.code, "c2")
+        # The master (series) root contract at tasks/<repo>/<master>/series-contract.md.
+        self.master_contract = self.coord / "tasks" / "R" / "t" / "series-contract.md"
+        write_contract(
+            self.master_contract,
+            WorktreeContract(
+                task_id="T",
+                task_name="t",
+                repo_name="R",
+                workflow_kind="light-task",
+                memory_mode="disabled",
+                coordination_root=self.coord,
+                task_root=self.coord / "tasks" / "R" / "t",
+                contract_path=self.master_contract,
+                task_artifact=self.coord / "tasks" / "R" / "t" / "task.md",
+                worktree_group=self.master_contract.parent,
+                code_repo_path=self.code,
+                code_source_branch="main",
+                code_work_branch="work",
+                code_base_commit=self.base,
+                code_worktree=self.code,
+                kind="series",
+            ),
+        )
+        # A leaf enclosure so the per-leaf breakdown is populated alongside the net diff.
+        leaf_code = self.tmp / "l1"
+        _init_repo(leaf_code)
+        (leaf_code / "f.py").write_text("a\n", encoding="utf-8")
+        leaf_base = _commit_all(leaf_code, "leaf base")
+        (leaf_code / "f.py").write_text("a\nb\n", encoding="utf-8")  # +1 working
+        _write_leaf_contract(
+            self.coord / "tasks" / "R" / "t" / "enclosures" / "l1" / "series-contract.md",
+            coord=self.coord,
+            code=leaf_code,
+            code_base=leaf_base,
+            leaf_id="l1",
+        )
 
     def tearDown(self) -> None:
         self._dir.cleanup()
 
-    def _leaf(self, leaf_id: str, shared_extra: str) -> None:
-        code = self.tmp / leaf_id
-        _init_repo(code)
-        (code / "shared.py").write_text("base\n", encoding="utf-8")
-        base = _commit_all(code, "base")
-        (code / "shared.py").write_text("base\n" + shared_extra, encoding="utf-8")
-        (code / f"{leaf_id}.py").write_text("x\n", encoding="utf-8")  # unique untracked add
-        contract_path = (
-            self.coord / "tasks" / "R" / "t" / "enclosures" / leaf_id / "series-contract.md"
-        )
-        _write_leaf_contract(
-            contract_path, coord=self.coord, code=code, code_base=base, leaf_id=leaf_id
-        )
-
-    def test_accumulates_and_dedups_shared_path(self) -> None:
-        self._leaf("l1", "one\n")  # shared.py +1
-        self._leaf("l2", "two\nthree\n")  # shared.py +2
+    def test_master_net_diff_not_sum(self) -> None:
         body = master_changeset(self.config, "R", "t")
         code = _by_path(body["code"])
-        self.assertEqual(code["shared.py"]["insertions"], 3)  # 1 + 2 summed
-        self.assertEqual(code["shared.py"]["leafCount"], 2)  # touched by both leaves
-        self.assertIn("l1.py", code)
-        self.assertIn("l2.py", code)
-        self.assertEqual(body["counters"]["code"]["files"], 3)  # shared + l1 + l2
-        self.assertEqual(body["counters"]["code"]["insertions"], 5)  # 3 + 1 + 1
-        self.assertEqual({lf["leafId"] for lf in body["leaves"]}, {"l1", "l2"})
+        # shared.py is +2 across the whole base..tip range (one coherent diff), added.py is an
+        # add, gone.py a delete -- and net entries carry no per-leaf leafCount.
+        self.assertEqual(code["shared.py"]["insertions"], 2)
+        self.assertNotIn("leafCount", code["shared.py"])
+        self.assertEqual(code["added.py"]["status"], "A")
+        self.assertEqual(code["gone.py"]["status"], "D")
+        self.assertEqual(body["counters"]["code"]["files"], 3)
+        self.assertEqual(body["counters"]["code"]["insertions"], 3)  # shared +2, added +1
+
+    def test_master_file_diff_base_to_tip(self) -> None:
+        body = master_file_diff(self.config, "R", "t", "code", "shared.py")
+        self.assertEqual(body["before"]["content"], "base\n")  # at the master base
+        self.assertEqual(body["after"]["content"], "base\nl1\nl2\n")  # at the series tip
+        self.assertEqual(body["kind"], "code")
+        self.assertEqual(body["scope"], "t")
+
+    def test_master_keeps_per_leaf_breakdown(self) -> None:
+        body = master_changeset(self.config, "R", "t")
+        self.assertEqual({lf["leafId"] for lf in body["leaves"]}, {"l1"})
+
+    def test_unknown_master_degrades_to_empty(self) -> None:
+        body = master_changeset(self.config, "R", "nope")
+        self.assertEqual(body["code"], [])
+        self.assertEqual(body["counters"]["code"]["files"], 0)
 
 
 class ScopeExtractionTests(unittest.TestCase):

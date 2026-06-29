@@ -39,13 +39,14 @@ export interface FileDiff {
   before: { content: string } | null;
   after: { content: string } | null;
 }
-// `masterChangeset` — the series master's accumulated change-set: each file carries `leafCount`
-// (how many leaves touched it), plus a per-leaf counter breakdown.
+// `masterChangeset` — the series master's NET change-set: the single `git diff <master-base> ->
+// <series-tip>` for code + memory (so each file is inspectable, unlike a sum of leaves), plus a
+// per-leaf counter breakdown alongside.
 export interface MasterChangeset {
   master: string;
   leaves: { leafId: string; counters: { code: ChangeCounters; memory: ChangeCounters } }[];
-  code: (ChangedFile & { leafCount: number })[];
-  memory: (ChangedFile & { leafCount: number })[];
+  code: ChangedFile[];
+  memory: ChangedFile[];
   counters: { code: ChangeCounters; memory: ChangeCounters };
 }
 
@@ -67,3 +68,14 @@ export const masterChangeset = (
   base = "",
 ): Promise<MasterChangeset> =>
   getJson<MasterChangeset>(`${base}/api/changeset/master?${qs({ repo, master })}`);
+
+// `masterFileDiff` — BEFORE (master base) + AFTER (series tip) content for one file in the net
+// series diff. Same /api/changeset/file-diff route, with `master` instead of an enclosure `scope`.
+export const masterFileDiff = (
+  repo: string,
+  master: string,
+  kind: "code" | "memory",
+  path: string,
+  base = "",
+): Promise<FileDiff> =>
+  getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, kind, path })}`);
