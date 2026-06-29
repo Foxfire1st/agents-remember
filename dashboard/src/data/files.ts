@@ -79,7 +79,9 @@ export class FilesApiError extends Error {
   }
 }
 
-async function getJson<T>(url: string): Promise<T> {
+// Shared by the L1 files client and the L3 change-set client (data/changeset.ts) so the
+// serving error idiom (404 unknown-repo/unknown-scope/not-found, 400 bad-path) is mapped once.
+export async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { status?: string };
@@ -88,7 +90,8 @@ async function getJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-const qs = (params: Record<string, string>): string => new URLSearchParams(params).toString();
+export const qs = (params: Record<string, string>): string =>
+  new URLSearchParams(params).toString();
 
 export const fetchRepos = (base = ""): Promise<RepoCatalog> =>
   getJson<RepoCatalog>(`${base}/api/files/repos`);

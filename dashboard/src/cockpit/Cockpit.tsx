@@ -10,6 +10,7 @@ import { lifecycleIdForSelection, lifecycleSelectionKey } from "../data/taskIden
 import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
 import { Chats } from "../panels/Chats";
+import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
 import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
@@ -192,6 +193,10 @@ export function Cockpit() {
 export function CockpitShell() {
   const [view, setView] = useState<View>("operations");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The Change-Set Viewer (L4) is a task-scoped TAKEOVER: when set, it replaces the railed body
+  // full-bleed; the screen's back link clears it, restoring the rails + Operations. A mode-bar
+  // switch or an open() also clears it (the takeover is transient, not a standing tab).
+  const [changeSet, setChangeSet] = useState<ChangeSetTarget | null>(null);
   const animate = useShouldAnimate();
   const selectedLifecycleId = useDashboard((s) =>
     lifecycleIdForSelection(selectedId, s.lifecycles, s.analytics),
@@ -204,12 +209,19 @@ export function CockpitShell() {
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
   const open = (id: string) => {
+    setChangeSet(null); // leaving the change-set takeover for a selected node
     setSelectedId(
       id.startsWith("taskdoc:") || id.startsWith("series:") || id.startsWith("lifecycle:")
         ? id
         : lifecycleSelectionKey(id),
     );
     setView("operations");
+  };
+
+  // Mode-bar switches exit the takeover too (it is not one of the standing views).
+  const changeView = (next: View) => {
+    setChangeSet(null);
+    setView(next);
   };
 
   // Gated fade-in when the rails return (reduced-motion / data-effects=off → no tween). Leaving to
@@ -220,6 +232,13 @@ export function CockpitShell() {
     <div className={cx(shell, "cockpit--shell")}>
       <div className="crt-overlay" aria-hidden="true" />
       <TopBar />
+      {changeSet ? (
+        <div className={cx(bodyGrid({ bleed: true }), "shell__body")} data-fullbleed={true}>
+          <main className={cx(viewport, "viewport")} data-view="changeset">
+            <ChangeSetViewer {...changeSet} onBack={() => setChangeSet(null)} />
+          </main>
+        </div>
+      ) : (
       <div className={cx(bodyGrid({ bleed: fullBleed }), "shell__body")} data-fullbleed={fullBleed}>
         {!fullBleed && (
           <motion.aside
@@ -234,7 +253,7 @@ export function CockpitShell() {
         )}
         <main className={cx(viewport, "viewport")} data-view={view}>
           {view !== "chats" && view !== "files" && (
-            <ViewBody view={view} selectedId={selectedId} onOpen={open} />
+            <ViewBody view={view} selectedId={selectedId} onOpen={open} onOpenChangeSet={setChangeSet} />
           )}
           {/* The File Viewer is never unmounted — only hidden — so its repo/scope selection, open
               file, expanded trees, and view-mode survive a view switch instead of resetting. */}
@@ -266,7 +285,8 @@ export function CockpitShell() {
           </motion.aside>
         )}
       </div>
-      <ModeBar items={VIEWS} value={view} onChange={setView} label="Views" />
+      )}
+      <ModeBar items={VIEWS} value={view} onChange={changeView} label="Views" />
       {/* Slice 6f: a cockpit-wide composer that a text selection raises — send the selection (+ a
           message) to a chat session as a context package. Mounted once here so it works on every view;
           renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
@@ -279,10 +299,12 @@ function ViewBody({
   view,
   selectedId,
   onOpen,
+  onOpenChangeSet,
 }: {
   view: View;
   selectedId: string | null;
   onOpen: (id: string) => void;
+  onOpenChangeSet: (target: ChangeSetTarget) => void;
 }) {
   switch (view) {
     case "engine":
@@ -297,7 +319,13 @@ function ViewBody({
     // via CSS) so their state survives a view switch; routing them through this switch would unmount them.
     case "operations":
     default:
-      return <DetailPanel selectedId={selectedId} onOpenLifecycle={onOpen} />;
+      return (
+        <DetailPanel
+          selectedId={selectedId}
+          onOpenLifecycle={onOpen}
+          onOpenChangeSet={onOpenChangeSet}
+        />
+      );
   }
 }
 

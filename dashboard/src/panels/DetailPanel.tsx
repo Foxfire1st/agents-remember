@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
+import { type ChangeCounters, masterChangeset, taskChangeset } from "../data/changeset";
 import { useDashboard } from "../data/store";
 import { parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
 import {
@@ -191,6 +192,26 @@ const laneMeta = css({
   color: "muted",
 });
 
+const changeSetBar = css({ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.4rem" });
+const changeSetBtn = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  fontSize: "0.72rem",
+  fontFamily: "mono",
+  color: "cyan",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.15rem",
+  cursor: "pointer",
+  _hover: { borderColor: "cyan", color: "ink" },
+});
+const changeSetCounts = css({ color: "muted" });
+
 const tokensRow = css({ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" });
 const label = css({
   fontSize: "0.72rem",
@@ -294,14 +315,18 @@ const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
 export function DetailPanel({
   selectedId,
   onOpenLifecycle,
+  onOpenChangeSet,
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
+  // Open the L4 Change-Set Viewer takeover for a task (scope) or its series master.
+  onOpenChangeSet?: (target: { repo: string; scope?: string; master?: string }) => void;
 }) {
   const jump = onOpenLifecycle ?? (() => {});
   const lifecycles = useDashboard((s) => s.lifecycles);
   const analytics = useDashboard((s) => s.analytics);
   const enclosures = useDashboard((s) => s.enclosures);
+  const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
   const providers = useDashboard((s) => s.providers);
   // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
   const [openSlug, setOpenSlug] = useState<string | null>(null);
@@ -547,6 +572,24 @@ export function DetailPanel({
       {enclosure ? (
         <div className={spine}>
           <div className={spineHead}>worktree · {groupName || enclosure.repoName}</div>
+          {onOpenChangeSet ? (
+            <div className={changeSetBar}>
+              {activeWorktreeGroups.includes(groupName) ? (
+                <ChangeSetButton
+                  target={{ repo: enclosure.repoName, scope: groupName }}
+                  label="change-set"
+                  onOpen={onOpenChangeSet}
+                />
+              ) : null}
+              {enclosure.taskName ? (
+                <ChangeSetButton
+                  target={{ repo: enclosure.repoName, master: enclosure.taskName }}
+                  label="series"
+                  onOpen={onOpenChangeSet}
+                />
+              ) : null}
+            </div>
+          ) : null}
           <div className={lanes}>
             <SpineLane
               kind="code"
@@ -569,6 +612,53 @@ export function DetailPanel({
         <TokenGauge series={activeLifecycle.tokenSeries} />
       </div>
     </Panel>
+  );
+}
+
+// A change-set entry button (L4): fetches its target's counters (task scope or series master) and
+// opens the Change-Set Viewer takeover. A failed fetch — e.g. a completed task with no live
+// worktree (the L3 /task endpoint 404s) — hides the counts but keeps the button; clicking still
+// opens the screen, which shows the error / accumulated summary. Deps are the stable target ids, so
+// the per-second projection re-render does not re-fetch.
+function ChangeSetButton({
+  target,
+  label,
+  onOpen,
+}: {
+  target: { repo: string; scope?: string; master?: string };
+  label: string;
+  onOpen: (target: { repo: string; scope?: string; master?: string }) => void;
+}) {
+  const [counters, setCounters] = useState<{ code: ChangeCounters; memory: ChangeCounters } | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    setCounters(null);
+    const req = target.master
+      ? masterChangeset(target.repo, target.master)
+      : taskChangeset(target.repo, target.scope ?? "");
+    void req.then(
+      (d) => live && setCounters(d.counters),
+      () => live && setCounters(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [target.repo, target.scope, target.master]);
+  const total = counters
+    ? `+${counters.code.insertions + counters.memory.insertions} −${counters.code.deletions + counters.memory.deletions}`
+    : null;
+  return (
+    <button
+      type="button"
+      className={changeSetBtn}
+      onClick={() => onOpen(target)}
+      data-testid="open-changeset"
+    >
+      ⇄ {label}
+      {total ? <span className={changeSetCounts}>{total}</span> : null}
+    </button>
   );
 }
 
