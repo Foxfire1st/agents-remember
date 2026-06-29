@@ -13,6 +13,13 @@ whose worktree is gone (the commits live on the source repo after integration).
 CodeMirror MergeView ``a``/``b`` directly. ``master`` is the NET ``base -> series-tip``
 diff (one coherent range, inspectable per file), with a per-leaf counter breakdown
 alongside. Mainline has no base, so a mainline scope is a 404.
+
+L4a adds the doc-reader views: a ``leaf`` change-set resolved by leaf-id from the persisted
+enclosure contract (so it works with no live worktree, for a completed leaf) in one of two
+modes -- ``committed`` (``base -> code_commit``, the leaf's landed delta) or ``working``
+(``worktree-HEAD -> worktree``, the UNCOMMITTED delta only, live worktree required). These ride
+the same ``/api/changeset/{task,file-diff}`` routes via a ``leaf`` + ``mode`` selector, returning
+the ``task_changeset`` shape. Selection precedence is ``leaf > master > scope``.
 """
 
 from __future__ import annotations
@@ -32,7 +39,7 @@ from agents_remember.worktrees.modules.git import (
     commit_text_or_none,
     head_commit,
 )
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
+from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts, slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -249,17 +256,211 @@ def master_file_diff(
     }
 
 
+def _load_leaf_contract(
+    config: McpRuntimeConfig, repo_id: str, master: str, leaf: str
+) -> WorktreeContract | None:
+    """The leaf enclosure contract for ``leaf`` under ``master``, resolved by leaf-id, or None.
+
+    Matched by ``slugify(leaf) == contract.leaf_id`` over the persisted enclosure contracts, so it
+    keeps resolving after the leaf's worktree is cleaned up (the contract outlives the worktree).
+    ``master`` scopes the search to one series (matched against the contract's parent/task name) so a
+    leaf-id that recurs across series cannot collide. ``leaf`` is confined to a single path segment.
+    """
+    if not leaf or "/" in leaf or "\\" in leaf or leaf.startswith("."):
+        return None
+    want = slugify(leaf)
+    for path in iter_leaf_enclosure_contracts(config.coordination_root / "tasks"):
+        try:
+            contract = load_contract(path)
+        except (ContractError, OSError):
+            continue
+        if contract.repo_name != repo_id or contract.cleanup == "abandoned":
+            continue
+        if master not in (contract.parent_task_name, contract.task_name):
+            continue
+        if contract.leaf_id == want:
+            return contract
+    return None
+
+
+def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[dict[str, Any]]:
+    """One side's (code or memory) change-set for a leaf view ``mode``.
+
+    ``committed`` = ``base -> code_commit`` (the leaf's LANDED delta); a still-live leaf whose
+    ``code_commit`` is not written yet falls back to the worktree's HEAD (committed-so-far, NOT the
+    dirty tree). ``working`` = ``worktree-HEAD -> worktree`` (the UNCOMMITTED delta only) and requires
+    a live worktree. Two-commit diffs run against the source repo (durable, and it shares the
+    worktree's object store) so ``committed`` keeps working after the worktree is cleaned up.
+    """
+    if memory:
+        worktree, repo = contract.memory_worktree, contract.memory_repo_path
+        base, committed = contract.memory_base_commit, contract.memory_content_commit
+    else:
+        worktree, repo = contract.code_worktree, contract.code_repo_path
+        base, committed = contract.code_base_commit, contract.code_commit
+    live = worktree is not None and worktree.exists()
+    if mode == "working":
+        # No worktree on this side (e.g. memory disabled) -> nothing to show, like task_changeset's
+        # memory degradation. The code-side liveness that makes ``working`` meaningful is enforced once
+        # in leaf_changeset, so a missing memory worktree never fails the whole view.
+        if not live:
+            return []
+        return changed_files_with_counts(worktree, head_commit(worktree, "HEAD"), None)
+    if not base:
+        return []
+    head = committed or (head_commit(worktree, "HEAD") if live else "")
+    if not head:
+        return []
+    diff_repo = repo if repo is not None else worktree
+    if diff_repo is None:
+        return []
+    return changed_files_with_counts(diff_repo, base, head)
+
+
+def _leaf_onboarding_root(contract: WorktreeContract, mode: str) -> Path | None:
+    """The onboarding root for sidecar pairing: the live worktree's for ``working``, else the repo's."""
+    if mode == "working":
+        candidates = [contract.memory_worktree, contract.memory_repo_path]
+    else:
+        candidates = [contract.memory_repo_path, contract.memory_worktree]
+    for cand in candidates:
+        if cand is not None and (cand / "onboarding").is_dir():
+            return cand / "onboarding"
+    return None
+
+
+def leaf_changeset(
+    config: McpRuntimeConfig, repo_id: str, master: str, leaf: str, mode: str
+) -> dict[str, Any]:
+    """A leaf's change-set in one ``mode`` (``committed`` or ``working``), resolved by leaf-id.
+
+    Returns the same shape as :func:`task_changeset` (so the L4 viewer renders it unchanged): the
+    code + memory changed-file lists with counts, code files tagged ``hasSidecar``. ``committed``
+    works with no live worktree (a completed leaf); ``working`` requires one (404 otherwise).
+    """
+    contract = _load_leaf_contract(config, repo_id, master, leaf)
+    if contract is None:
+        raise FileNotFoundError(f"no leaf contract for {leaf!r}")
+    if mode == "working" and not (
+        contract.code_worktree is not None and contract.code_worktree.exists()
+    ):
+        raise FileNotFoundError("no live worktree for the working change-set")
+    code = _leaf_range(contract, memory=False, mode=mode)
+    memory = _leaf_range(contract, memory=True, mode=mode)
+    onboarding_root = _leaf_onboarding_root(contract, mode)
+    for entry in code:
+        entry["hasSidecar"] = (
+            onboarding_root is not None
+            and route_sidecar_status(onboarding_root, str(entry["path"])) == "present"
+        )
+    return {
+        "scope": contract.leaf_id,
+        "mode": mode,
+        "code": code,
+        "memory": memory,
+        "counters": {"code": _sum(code), "memory": _sum(memory)},
+    }
+
+
+def leaf_file_diff(
+    config: McpRuntimeConfig, repo_id: str, master: str, leaf: str, kind: str, rel: str, mode: str
+) -> dict[str, Any]:
+    """BEFORE + AFTER content for one file in a leaf's ``committed`` or ``working`` change-set.
+
+    ``committed`` = ``base`` vs ``code_commit`` (or the worktree HEAD when live and not yet
+    committed). ``working`` = the worktree HEAD vs the (dirty) worktree file. Mirrors
+    :func:`file_diff`'s response so the L4 MergeView feeds it directly.
+    """
+    contract = _load_leaf_contract(config, repo_id, master, leaf)
+    if contract is None:
+        raise FileNotFoundError(f"no leaf contract for {leaf!r}")
+    if kind == "memory":
+        worktree, repo = contract.memory_worktree, contract.memory_repo_path
+        base, committed = contract.memory_base_commit, contract.memory_content_commit
+    else:
+        worktree, repo = contract.code_worktree, contract.code_repo_path
+        base, committed = contract.code_base_commit, contract.code_commit
+    live = worktree is not None and worktree.exists()
+    if mode == "working":
+        if not live:
+            raise FileNotFoundError("no live worktree for the working change-set")
+        relp = confine_rel(worktree, rel)
+        before = commit_text_or_none(worktree, head_commit(worktree, "HEAD"), relp)
+        after_path = worktree / relp
+        after = after_path.read_text(errors="replace") if after_path.is_file() else None
+    else:
+        head = committed or (head_commit(worktree, "HEAD") if live else "")
+        diff_repo = repo if repo is not None else worktree
+        if diff_repo is None or not base or not head:
+            raise FileNotFoundError(rel)
+        relp = confine_rel(diff_repo, rel)
+        before = commit_text_or_none(diff_repo, base, relp)
+        after = commit_text_or_none(diff_repo, head, relp)
+    return {
+        "scope": contract.leaf_id,
+        "kind": "memory" if kind == "memory" else "code",
+        "path": relp,
+        "language": language_for(Path(relp)),
+        "before": {"content": before} if before is not None else None,
+        "after": {"content": after} if after is not None else None,
+    }
+
+
+def _leaf_json(produce: Any, master: str, mode: str) -> Response:
+    """Validate the leaf selector, then run ``produce`` with the change-set 400/404 status idiom.
+
+    A leaf change-set is qualified by ``master`` (which scopes the contract search) and needs an
+    explicit ``mode`` -- so the selector is explicit and validated, not inferred from which optional
+    param happens to be present. A leaf without ``master`` or with an unknown ``mode`` is a 400.
+    """
+    if not master:
+        return JSONResponse(
+            {"status": "bad-request", "detail": "leaf change-set needs master"}, status_code=400
+        )
+    if mode not in ("committed", "working"):
+        return JSONResponse(
+            {"status": "bad-request", "detail": "leaf change-set needs mode=committed|working"},
+            status_code=400,
+        )
+    try:
+        return JSONResponse(produce(), status_code=200)
+    except AuthorityError as err:
+        return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
+    except FileNotFoundError as err:
+        return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
+
+
 def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
-    """Register the read-only change-set routes. Must be called BEFORE the greedy static mount."""
+    """Register the read-only change-set routes. Must be called BEFORE the greedy static mount.
+
+    The change-set is selected by precedence ``leaf > master > scope`` (a ``leaf`` view is the per-leaf
+    committed/working delta, ``master`` the series net, ``scope`` one active enclosure). ``leaf`` is
+    qualified by ``master`` and requires a ``mode``; both ``leaf`` and ``master`` go through the
+    JSONResponse 400/404 idiom rather than ``run_scoped``.
+    """
 
     @app.get("/api/changeset/task")
-    def api_changeset_task(repo: str, scope: str = "mainline") -> Response:
+    def api_changeset_task(
+        repo: str, scope: str = "mainline", master: str = "", leaf: str = "", mode: str = ""
+    ) -> Response:
+        if leaf:
+            return _leaf_json(lambda: leaf_changeset(config, repo, master, leaf, mode), master, mode)
         return run_scoped(task_changeset, config, repo, scope)
 
     @app.get("/api/changeset/file-diff")
     def api_changeset_file_diff(
-        repo: str, scope: str = "mainline", kind: str = "code", path: str = "", master: str = ""
+        repo: str,
+        scope: str = "mainline",
+        kind: str = "code",
+        path: str = "",
+        master: str = "",
+        leaf: str = "",
+        mode: str = "",
     ) -> Response:
+        if leaf:
+            return _leaf_json(
+                lambda: leaf_file_diff(config, repo, master, leaf, kind, path, mode), master, mode
+            )
         if master:
             # Series net diff (master base -> source-branch tip); no enclosure scope, so it does
             # not go through run_scoped -- map its domain errors to the same status idiom.

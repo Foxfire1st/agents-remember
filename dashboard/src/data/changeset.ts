@@ -79,3 +79,33 @@ export const masterFileDiff = (
   base = "",
 ): Promise<FileDiff> =>
   getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, kind, path })}`);
+
+// L4a leaf views — a single leaf's change-set straight off its enclosure contract (so it works
+// with NO live worktree, unlike `taskChangeset`'s scope). `mode`:
+//   committed — the leaf's LANDED delta (base -> code_commit); always available.
+//   working   — the UNCOMMITTED delta only (worktree HEAD -> dirty tree); live enclosures only.
+// `master` qualifies the leaf (scopes the contract search to one series). Returns the
+// `taskChangeset` shape (the extra `mode` echo is harmless), so the viewer renders it unchanged.
+export type LeafMode = "committed" | "working";
+
+export const leafChangeset = (
+  repo: string,
+  master: string,
+  leaf: string,
+  mode: LeafMode,
+  base = "",
+): Promise<TaskChangeset> =>
+  getJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, master, leaf, mode })}`);
+
+// `leafFileDiff` — BEFORE + AFTER for one file in a leaf's committed/working change-set. Same
+// /api/changeset/file-diff route, with `leaf` + `mode` (+ the qualifying `master`).
+export const leafFileDiff = (
+  repo: string,
+  master: string,
+  leaf: string,
+  kind: "code" | "memory",
+  path: string,
+  mode: LeafMode,
+  base = "",
+): Promise<FileDiff> =>
+  getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, leaf, kind, path, mode })}`);

@@ -26,6 +26,21 @@ const host = css({
   // overflowY:auto and forces the inner editors' scrollers to overflow:visible (they grow to full
   // content height). Bounding it to 100% (and NOT clamping the inner editors) is what lets it scroll.
   "& .cm-mergeView": { height: "100%" },
+  // L4a: changed text reads as a full-height highlight RECTANGLE, not @codemirror/merge's default thin
+  // bottom underline (developer preference — far more legible). TWO things make it a box: the HEIGHT —
+  // a `bottom / 100% 16px` band fills the line box (the default uses ~2px → a line) — and the COLOR —
+  // deliberately DARK, muted fills (low-lightness green for additions, red for deletions), NOT the
+  // bright `--mint`/`--amber` FOREGROUND tokens, which as a background would wash out the light diff
+  // text. `!important` is required to beat @codemirror/merge's own runtime-injected theme rule
+  // (`.ͼN.cm-merge-b .cm-changedText`), which outranks a plain host-scoped selector. Split mode marks
+  // deletions in the `a` editor (the `.cm-merge-a` rule) and additions in `b`; inline (unifiedMergeView)
+  // marks additions in place — both covered by the general rule.
+  "& .cm-changedText": {
+    background: "linear-gradient(#255a25aa, #255a25aa) bottom / 100% 16px no-repeat !important",
+  },
+  "& .cm-merge-a .cm-changedText": {
+    background: "linear-gradient(#5a2525aa, #5a2525aa) bottom / 100% 16px no-repeat !important",
+  },
 });
 
 export type DiffMode = "split" | "inline";

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
-import { type ChangeCounters, masterChangeset, taskChangeset } from "../data/changeset";
+import { type ChangeCounters, leafChangeset, masterChangeset, taskChangeset } from "../data/changeset";
 import { useDashboard } from "../data/store";
 import { parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
 import {
@@ -27,6 +27,7 @@ import type {
   TaskSubTaskRefNode,
 } from "../types/projection";
 
+import type { ChangeSetTarget } from "./changeset/ChangeSetViewer";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
 import { GateResponder } from "./GateResponder";
 
@@ -319,8 +320,8 @@ export function DetailPanel({
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
-  // Open the L4 Change-Set Viewer takeover for a task (scope) or its series master.
-  onOpenChangeSet?: (target: { repo: string; scope?: string; master?: string }) => void;
+  // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view (L4a).
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   const jump = onOpenLifecycle ?? (() => {});
   const lifecycles = useDashboard((s) => s.lifecycles);
@@ -395,17 +396,18 @@ export function DetailPanel({
         <div className={where}>task document · {selectedTaskDoc.repository}</div>
         {selectedTaskDoc.kind === "master" ? (
           openDoc ? (
-            <TaskReader doc={openDoc} />
+            <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
           ) : (
             <MasterOverview
               doc={masterDocWithSeriesTokens(selectedTaskDoc, analytics?.series ?? [])}
               sliceDocs={sliceDocs}
               onOpen={setOpenSlug}
               onJump={jump}
+              onOpenChangeSet={onOpenChangeSet}
             />
           )
         ) : (
-          <TaskReader doc={selectedTaskDoc} />
+          <TaskReader doc={selectedTaskDoc} onOpenChangeSet={onOpenChangeSet} />
         )}
       </Panel>
     );
@@ -445,13 +447,14 @@ export function DetailPanel({
       <Panel testid="detail-panel" head={head} className={sizing}>
         <div className={where}>series master · {selectedSeries.repository}</div>
         {openDoc ? (
-          <TaskReader doc={openDoc} />
+          <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
         ) : (
           <MasterOverview
             doc={seriesDoc}
             sliceDocs={seriesSlices}
             onOpen={setOpenSlug}
             onJump={jump}
+            onOpenChangeSet={onOpenChangeSet}
           />
         )}
       </Panel>
@@ -550,13 +553,14 @@ export function DetailPanel({
       ) : null}
 
       {openDoc ? (
-        <TaskReader doc={openDoc} />
+        <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
       ) : seriesDoc ? (
         <MasterOverview
           doc={seriesDoc}
           sliceDocs={seriesSlices}
           onOpen={setOpenSlug}
           onJump={jump}
+          onOpenChangeSet={onOpenChangeSet}
         />
       ) : master ? (
         <MasterOverview
@@ -564,9 +568,10 @@ export function DetailPanel({
           sliceDocs={slices}
           onOpen={setOpenSlug}
           onJump={jump}
+          onOpenChangeSet={onOpenChangeSet}
         />
       ) : (
-        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} />
+        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} />
       )}
 
       {enclosure ? (
@@ -615,19 +620,19 @@ export function DetailPanel({
   );
 }
 
-// A change-set entry button (L4): fetches its target's counters (task scope or series master) and
-// opens the Change-Set Viewer takeover. A failed fetch — e.g. a completed task with no live
-// worktree (the L3 /task endpoint 404s) — hides the counts but keeps the button; clicking still
-// opens the screen, which shows the error / accumulated summary. Deps are the stable target ids, so
-// the per-second projection re-render does not re-fetch.
+// A change-set entry button (L4): fetches its target's counters (enclosure scope, series master, or
+// a leaf view — L4a) and opens the Change-Set Viewer takeover. A failed fetch — e.g. a `working`
+// view whose worktree is gone (404) — hides the counts but keeps the button; clicking still opens
+// the screen, which shows the error. Deps are the stable target ids, so the per-second projection
+// re-render does not re-fetch.
 function ChangeSetButton({
   target,
   label,
   onOpen,
 }: {
-  target: { repo: string; scope?: string; master?: string };
+  target: ChangeSetTarget;
   label: string;
-  onOpen: (target: { repo: string; scope?: string; master?: string }) => void;
+  onOpen: (target: ChangeSetTarget) => void;
 }) {
   const [counters, setCounters] = useState<{ code: ChangeCounters; memory: ChangeCounters } | null>(
     null,
@@ -635,9 +640,11 @@ function ChangeSetButton({
   useEffect(() => {
     let live = true;
     setCounters(null);
-    const req = target.master
-      ? masterChangeset(target.repo, target.master)
-      : taskChangeset(target.repo, target.scope ?? "");
+    const req = target.leaf
+      ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
+      : target.master
+        ? masterChangeset(target.repo, target.master)
+        : taskChangeset(target.repo, target.scope ?? "");
     void req.then(
       (d) => live && setCounters(d.counters),
       () => live && setCounters(null),
@@ -645,7 +652,7 @@ function ChangeSetButton({
     return () => {
       live = false;
     };
-  }, [target.repo, target.scope, target.master]);
+  }, [target.repo, target.scope, target.master, target.leaf, target.mode]);
   const total = counters
     ? `+${counters.code.insertions + counters.memory.insertions} −${counters.code.deletions + counters.memory.deletions}`
     : null;
@@ -659,6 +666,63 @@ function ChangeSetButton({
       ⇄ {label}
       {total ? <span className={changeSetCounts}>{total}</span> : null}
     </button>
+  );
+}
+
+// The task folder name = the `master` key for the change-set API (it matches the series contract dir
+// and the leaf contract's parent/task name). Derived from any sibling doc's path.
+const dirName = (docPath: string): string => pathDir(docPath).split("/").filter(Boolean).pop() ?? "";
+
+// L4a: the change-set bar shown on a task-document READER (master or leaf), with identity taken from
+// the doc node — so it appears with NO active enclosure (closing the L4 gap, where the buttons only
+// lived on the live enclosure spine). A master gets the SERIES net button; a leaf gets COMMITTED
+// (always — its landed delta) plus WORKING (only while its enclosure is live — the uncommitted
+// delta). Liveness is read from the store here, so callers thread only `onOpen`.
+function DocChangeSetBar({
+  kind,
+  repo,
+  master,
+  leaf,
+  onOpen,
+}: {
+  kind: "master" | "leaf";
+  repo: string;
+  master: string;
+  leaf?: string;
+  onOpen?: (target: ChangeSetTarget) => void;
+}) {
+  const enclosures = useDashboard((s) => s.enclosures);
+  const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
+  if (!onOpen || !repo || !master) return null;
+  if (kind === "master") {
+    return (
+      <div className={changeSetBar}>
+        <ChangeSetButton target={{ repo, master }} label="series" onOpen={onOpen} />
+      </div>
+    );
+  }
+  if (!leaf) return null;
+  const live = Object.values(enclosures).some(
+    (e) =>
+      e.repoName === repo &&
+      e.leafId.toLowerCase() === leaf.toLowerCase() &&
+      activeWorktreeGroups.includes(e.worktreeGroup.split("/").filter(Boolean).pop() ?? ""),
+  );
+  return (
+    <div className={changeSetBar}>
+      <ChangeSetButton
+        target={{ repo, master, leaf, mode: "committed" }}
+        label="committed"
+        onOpen={onOpen}
+      />
+      {live ? (
+        <ChangeSetButton
+          target={{ repo, master, leaf, mode: "working" }}
+          label="working"
+          onOpen={onOpen}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -690,6 +754,7 @@ type MasterDocView = Pick<
   | "decisions"
   | "masterLifecycleId"
   | "docPath"
+  | "repository"
 > & { seriesTokenTotal?: number };
 
 const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
@@ -701,6 +766,7 @@ const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   sections: seriesNode.sections,
   decisions: seriesNode.decisions,
   docPath: seriesNode.docPath,
+  repository: seriesNode.repository,
   seriesTokenTotal: seriesNode.seriesTokenTotal,
 });
 
@@ -717,10 +783,12 @@ function TaskContent({
   docs,
   onOpen,
   onJump,
+  onOpenChangeSet,
 }: {
   docs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this task.</p>;
@@ -728,10 +796,18 @@ function TaskContent({
   const master = docs.find((doc) => doc.kind === "master");
   const sliceDocs = docs.filter((doc) => doc.kind !== "master");
   if (master) {
-    return <MasterOverview doc={master} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />;
+    return (
+      <MasterOverview
+        doc={master}
+        sliceDocs={sliceDocs}
+        onOpen={onOpen}
+        onJump={onJump}
+        onOpenChangeSet={onOpenChangeSet}
+      />
+    );
   }
   if (sliceDocs.length === 1) {
-    return <TaskReader doc={sliceDocs[0]} />;
+    return <TaskReader doc={sliceDocs[0]} onOpenChangeSet={onOpenChangeSet} />;
   }
   return <SliceList sliceDocs={sliceDocs} onOpen={onOpen} />;
 }
@@ -744,11 +820,13 @@ function MasterOverview({
   sliceDocs,
   onOpen,
   onJump,
+  onOpenChangeSet,
 }: {
   doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   return (
     <div className={taskdoc}>
@@ -757,6 +835,12 @@ function MasterOverview({
         <span className={taskdocTitle}>{doc.title}</span>
         <span className={taskdocStatus}>{doc.status}</span>
       </div>
+      <DocChangeSetBar
+        kind="master"
+        repo={doc.repository}
+        master={dirName(doc.docPath)}
+        onOpen={onOpenChangeSet}
+      />
       <MasterTokenSummary total={doc.seriesTokenTotal} />
       {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
@@ -982,7 +1066,13 @@ function SpineLane({
   );
 }
 
-function TaskReader({ doc }: { doc: TaskDocNode }) {
+function TaskReader({
+  doc,
+  onOpenChangeSet,
+}: {
+  doc: TaskDocNode;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+}) {
   const progress = topLevelStepProgress(doc);
   return (
     <div className={taskdoc}>
@@ -992,6 +1082,13 @@ function TaskReader({ doc }: { doc: TaskDocNode }) {
         <span className={taskdocStatus}>{doc.status}</span>
         <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
       </div>
+      <DocChangeSetBar
+        kind="leaf"
+        repo={doc.repository}
+        master={dirName(doc.docPath)}
+        leaf={doc.id}
+        onOpen={onOpenChangeSet}
+      />
       {doc.steps.length > 0 ? (
         <Section title="Progress">
           <StepList steps={doc.steps} />

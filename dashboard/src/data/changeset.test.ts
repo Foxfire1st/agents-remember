@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fileDiff, masterChangeset, taskChangeset } from "./changeset";
+import { fileDiff, leafChangeset, leafFileDiff, masterChangeset, taskChangeset } from "./changeset";
 import { FilesApiError } from "./files";
 
 function stubFetch(payload: unknown, ok = true, status = 200) {
@@ -26,6 +26,26 @@ describe("data/changeset client", () => {
     );
     expect(urls[2]).toBe(
       "/api/changeset/master?repo=agents-remember&master=260628_operations-integration",
+    );
+  });
+
+  it("builds the L4a leaf committed/working URLs (same task & file-diff routes, leaf+mode selector)", async () => {
+    const fn = stubFetch({});
+    await leafChangeset("agents-remember", "260628_operations-integration", "260628-L4a", "committed");
+    await leafFileDiff(
+      "agents-remember",
+      "260628_operations-integration",
+      "260628-L4a",
+      "code",
+      "mcp/x.py",
+      "working",
+    );
+    const urls = (fn.mock.calls as unknown as string[][]).map((c) => c[0]);
+    expect(urls[0]).toBe(
+      "/api/changeset/task?repo=agents-remember&master=260628_operations-integration&leaf=260628-L4a&mode=committed",
+    );
+    expect(urls[1]).toBe(
+      "/api/changeset/file-diff?repo=agents-remember&master=260628_operations-integration&leaf=260628-L4a&kind=code&path=mcp%2Fx.py&mode=working",
     );
   });
 

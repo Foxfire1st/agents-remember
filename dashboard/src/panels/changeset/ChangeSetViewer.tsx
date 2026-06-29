@@ -3,9 +3,10 @@
 //   column 1  two rows — changed CODE files / changed ONBOARDING files (counts + status)
 //   column 2  the selected file's diff (ChangeSetPane, always visible once a row is picked)
 //   column 3  the code<->sidecar partner, opened from a "split" affordance
-// A `scope` (one active enclosure) drives the full per-file diff via the L3 file-diff endpoint; a
-// `master` drives the ACCUMULATED series summary (counts + leafCount), where per-file diffs are not
-// available (the accumulation spans leaves, so there is no single scope to diff against — L3).
+// The target selects the range (precedence leaf > master > scope), all rendered the same way and all
+// inspectable per file: a `scope` (one active enclosure) = base->worktree; a `master` = the series
+// NET base->tip; a `leaf` (+ `mode`) = that leaf's committed (base->code_commit) or working
+// (HEAD->worktree, uncommitted) delta — the L4a doc-reader views, which need no live enclosure.
 import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
@@ -13,9 +14,12 @@ import { css } from "../../../styled-system/css";
 import {
   type ChangedFile,
   type FileDiff,
+  type LeafMode,
   type MasterChangeset,
   type TaskChangeset,
   fileDiff,
+  leafChangeset,
+  leafFileDiff,
   masterChangeset,
   masterFileDiff,
   taskChangeset,
@@ -25,8 +29,10 @@ import { ChangeSetPane } from "./ChangeSetPane";
 
 export interface ChangeSetTarget {
   repo: string;
-  scope?: string; // one active enclosure (full diff)
-  master?: string; // a series master (accumulated summary)
+  scope?: string; // one active enclosure (full base->worktree diff)
+  master?: string; // a series master (net base->tip); also QUALIFIES a `leaf`
+  leaf?: string; // a single leaf (committed/working), resolved by leaf-id; needs `master` + `mode`
+  mode?: LeafMode; // committed = landed delta (base->code_commit), working = uncommitted delta (live)
 }
 
 const screen = css({
@@ -142,13 +148,16 @@ function partnerCodePath(memPath: string): string | null {
   return base;
 }
 
-export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget & { onBack: () => void }) {
+export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: ChangeSetTarget & { onBack: () => void }) {
   const [data, setData] = useState<TaskChangeset | MasterChangeset | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<{ kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null>(null);
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [partner, setPartner] = useState<FileDiff | null>(null);
-  const isMaster = Boolean(master);
+  // Selection precedence leaf > master > scope: a `leaf` is one leaf's committed/working delta
+  // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
+  const isLeaf = Boolean(leaf);
+  const isSeries = Boolean(master) && !leaf;
 
   useEffect(() => {
     let live = true;
@@ -157,7 +166,11 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
     setActive(null);
     setDiff(null);
     setPartner(null);
-    const req = master ? masterChangeset(repo, master) : taskChangeset(repo, scope ?? "");
+    const req = leaf
+      ? leafChangeset(repo, master ?? "", leaf, mode ?? "committed")
+      : master
+        ? masterChangeset(repo, master)
+        : taskChangeset(repo, scope ?? "");
     void req.then(
       (d) => live && setData(d),
       (e: unknown) => live && setError(e instanceof FilesApiError ? `${e.code} (${e.httpStatus})` : "Failed to load change-set"),
@@ -165,7 +178,34 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
     return () => {
       live = false;
     };
-  }, [repo, scope, master]);
+  }, [repo, scope, master, leaf, mode]);
+
+  // L4a: the WORKING view is the LIVE uncommitted delta, so it must not be a frozen snapshot taken
+  // when the button was clicked. Poll the change-set on an interval so a file edited *after* opening
+  // appears in the list (and the counters track), AND re-fetch the file currently open in the diff
+  // column so an edit to the file you are LOOKING AT updates in place. The open-diff re-fetch is cheap
+  // and non-disruptive: CodeMirror only rebuilds when the before/after content actually changed, so an
+  // unchanged poll is a no-op (no flicker / scroll-reset) — it only re-renders when that file is the
+  // one edited, which is exactly when you want it to. Only `working` polls — committed/series/scope
+  // are immutable snapshots of committed state. (A server push would need a worktree watcher + SSE; a
+  // client interval is self-contained and enough on localhost.)
+  useEffect(() => {
+    if (mode !== "working" || !leaf) return;
+    const m = master ?? "";
+    const id = setInterval(() => {
+      void leafChangeset(repo, m, leaf, "working").then(
+        (d) => setData(d),
+        () => {}, // a transient fetch error (e.g. mid-git-op) keeps the last good list
+      );
+      if (active) {
+        void leafFileDiff(repo, m, leaf, active.kind, active.path, "working").then(
+          (d) => setDiff(d),
+          () => {},
+        );
+      }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [mode, leaf, repo, master, active]);
 
   const partnerOf = (kind: "code" | "memory", path: string, hasSidecar?: boolean) =>
     kind === "code"
@@ -177,13 +217,17 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
           return code ? { kind: "code" as const, path: code } : null;
         })();
 
-  // Master mode diffs the NET series range (master base -> tip) via `master`; a leaf diffs its
-  // enclosure `scope`. Both feed the same MergeView.
+  // Each selector diffs its own range, all into the same MergeView: a leaf its committed/working
+  // range, `master` the NET series range (base -> tip), an enclosure `scope` its base -> worktree.
   const loadDiff = (kind: "code" | "memory", path: string) =>
-    master ? masterFileDiff(repo, master, kind, path) : fileDiff(repo, scope ?? "", kind, path);
+    leaf
+      ? leafFileDiff(repo, master ?? "", leaf, kind, path, mode ?? "committed")
+      : master
+        ? masterFileDiff(repo, master, kind, path)
+        : fileDiff(repo, scope ?? "", kind, path);
 
   const open = (kind: "code" | "memory", file: Row, withPartner = false) => {
-    if (!isMaster && !scope) return;
+    if (!leaf && !master && !scope) return;
     setActive({ kind, path: file.path, hasSidecar: file.hasSidecar });
     setDiff(null);
     setPartner(null);
@@ -193,6 +237,13 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
   };
 
   const counters = data?.counters;
+  const headerLabel = isLeaf
+    ? mode === "working"
+      ? `working · ${leaf} · uncommitted`
+      : `committed · ${leaf}`
+    : isSeries
+      ? `series ${master} · net since series start`
+      : (scope ?? "");
 
   return (
     <div className={screen} data-testid="changeset-viewer">
@@ -200,9 +251,7 @@ export function ChangeSetViewer({ repo, scope, master, onBack }: ChangeSetTarget
         <button type="button" className={back} onClick={onBack} data-testid="changeset-back">
           ← back
         </button>
-        <span className={title}>
-          change-set · {isMaster ? `series ${master}` : scope} {isMaster ? "· net since series start" : ""}
-        </span>
+        <span className={title}>change-set · {headerLabel}</span>
         {counters ? (
           <span className={counterRow} data-testid="changeset-counters">
             <span>

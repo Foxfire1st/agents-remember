@@ -238,8 +238,17 @@ export function CockpitShell() {
             <ChangeSetViewer {...changeSet} onBack={() => setChangeSet(null)} />
           </main>
         </div>
-      ) : (
-      <div className={cx(bodyGrid({ bleed: fullBleed }), "shell__body")} data-fullbleed={fullBleed}>
+      ) : null}
+      {/* The railed body is never UNMOUNTED while the change-set takeover shows — only hidden — so the
+          DetailPanel's drill state (which leaf you were reading) survives. The viewer's back link then
+          returns you exactly where you opened it from (a drilled leaf, not a reset to the master
+          overview). Same hidden-not-unmounted pattern as the File Viewer + Chats layers below. */}
+      <div
+        className={cx(bodyGrid({ bleed: fullBleed }), "shell__body")}
+        data-fullbleed={fullBleed}
+        style={changeSet ? { display: "none" } : undefined}
+        aria-hidden={changeSet ? true : undefined}
+      >
         {!fullBleed && (
           <motion.aside
             key="rail-left"
@@ -285,7 +294,6 @@ export function CockpitShell() {
           </motion.aside>
         )}
       </div>
-      )}
       <ModeBar items={VIEWS} value={view} onChange={changeView} label="Views" />
       {/* Slice 6f: a cockpit-wide composer that a text selection raises — send the selection (+ a
           message) to a chat session as a context package. Mounted once here so it works on every view;

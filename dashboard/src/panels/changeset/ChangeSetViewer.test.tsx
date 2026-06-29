@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CockpitShell } from "../../cockpit/Cockpit";
@@ -86,6 +86,86 @@ describe("ChangeSetViewer screen", () => {
     );
     fireEvent.click(await findByTestId("changeset-back"));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads a leaf committed change-set via the task route, labels it, and is per-file inspectable", async () => {
+    stubChangeset(); // /api/changeset/task (which the leaf view rides) returns TASK_CHANGESET
+    const { findByTestId, getByText, container } = render(
+      <ChangeSetViewer
+        repo="agents-remember"
+        master="260628_operations-integration"
+        leaf="260628-l4a"
+        mode="committed"
+        onBack={vi.fn()}
+      />,
+    );
+    await findByTestId("changeset-counters");
+    // the header distinguishes the committed leaf view from a series / enclosure scope
+    expect(container.querySelector('[data-testid="changeset-viewer"]')?.textContent).toContain(
+      "committed · 260628-l4a",
+    );
+    // unlike the old master summary, leaf rows ARE clickable into a per-file diff (leaf+mode
+    // file-diff). The stubbed file-diff fixture resolves to "a.ts", proving the click opened a pane.
+    fireEvent.click(getByText("dashboard/src/x.ts"));
+    expect((await findByTestId("changeset-pane")).textContent).toBe("a.ts");
+  });
+
+  it("labels the working leaf view as uncommitted", async () => {
+    stubChangeset();
+    const { findByTestId, container } = render(
+      <ChangeSetViewer
+        repo="agents-remember"
+        master="260628_operations-integration"
+        leaf="260628-l4a"
+        mode="working"
+        onBack={vi.fn()}
+      />,
+    );
+    await findByTestId("changeset-counters");
+    expect(container.querySelector('[data-testid="changeset-viewer"]')?.textContent).toContain(
+      "working · 260628-l4a · uncommitted",
+    );
+  });
+
+  it("auto-polls the working view — the list AND the open file — but never committed/series", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn(
+      async () => ({ ok: true, status: 200, json: async () => TASK_CHANGESET }) as unknown as Response,
+    );
+    vi.stubGlobal("fetch", fetchFn);
+    const countOf = (frag: string) =>
+      (fetchFn.mock.calls as unknown as string[][]).filter((c) => String(c[0]).includes(frag)).length;
+
+    // working: initial load, open a file, then let one interval tick fire.
+    const working = render(
+      <ChangeSetViewer repo="r" master="m" leaf="l" mode="working" onBack={vi.fn()} />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0); // the initial change-set load resolves + renders the list
+    });
+    fireEvent.click(working.getByText("dashboard/src/x.ts")); // open a code file's diff
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2600);
+    });
+    expect(countOf("/api/changeset/task")).toBeGreaterThanOrEqual(2); // list: load + poll
+    expect(countOf("/api/changeset/file-diff")).toBeGreaterThanOrEqual(2); // open diff: click + poll
+    working.unmount();
+
+    // committed: same interactions, but neither the list nor the open diff polls.
+    fetchFn.mockClear();
+    const committed = render(
+      <ChangeSetViewer repo="r" master="m" leaf="l" mode="committed" onBack={vi.fn()} />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(committed.getByText("dashboard/src/x.ts"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2600);
+    });
+    expect(countOf("/api/changeset/task")).toBe(1); // load only
+    expect(countOf("/api/changeset/file-diff")).toBe(1); // click only, no poll
+    vi.useRealTimers();
   });
 
   it("opens a per-file NET diff from a clickable row in master mode", async () => {

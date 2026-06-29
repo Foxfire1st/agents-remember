@@ -17,12 +17,18 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.serving import files, scope
 from agents_remember.serving.changeset import (
     file_diff,
+    leaf_changeset,
+    leaf_file_diff,
     master_changeset,
     master_file_diff,
+    register_changeset_routes,
     task_changeset,
 )
 from agents_remember.serving.scope import FileScope
@@ -322,6 +328,223 @@ class MasterChangesetTests(unittest.TestCase):
         body = master_changeset(self.config, "R", "nope")
         self.assertEqual(body["code"], [])
         self.assertEqual(body["counters"]["code"]["files"], 0)
+
+
+def _leaf_config(tmp: Path) -> McpRuntimeConfig:
+    coord = tmp / "coord"
+    return McpRuntimeConfig(
+        config_path=tmp / "settings.json",
+        coordination_root=coord,
+        workspace_root=tmp / "ws",
+        transcript_root=tmp / "logs",
+        repositories={"R": RepositoryScope(repo_id="R", path=tmp / "ws" / "R")},
+    )
+
+
+def _write_leaf(
+    config: McpRuntimeConfig,
+    leaf_id: str,
+    *,
+    code: Path,
+    code_base: str,
+    code_worktree: Path,
+    code_commit: str = "",
+    parent_task_name: str = "t",
+) -> Path:
+    """A leaf enclosure contract under tasks/R/<master>/enclosures/<leaf>/ for the leaf views."""
+    path = (
+        config.coordination_root
+        / "tasks"
+        / "R"
+        / parent_task_name
+        / "enclosures"
+        / leaf_id
+        / "series-contract.md"
+    )
+    write_contract(
+        path,
+        WorktreeContract(
+            task_id="T",
+            task_name=parent_task_name,
+            repo_name="R",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=config.coordination_root,
+            task_root=config.coordination_root / "tasks" / "R" / parent_task_name,
+            contract_path=path,
+            task_artifact=config.coordination_root / "tasks" / "R" / parent_task_name / "task.md",
+            worktree_group=path.parent,
+            code_repo_path=code,
+            code_source_branch="main",
+            code_work_branch="work",
+            code_base_commit=code_base,
+            code_commit=code_commit,
+            code_worktree=code_worktree,
+            kind="leaf",
+            leaf_id=leaf_id,
+            parent_task_name=parent_task_name,
+        ),
+    )
+    return path
+
+
+class LeafChangesetTests(unittest.TestCase):
+    """The L4a leaf views: committed (base -> code_commit) and working (HEAD -> dirty worktree)."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.config = _leaf_config(self.tmp)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def _committed_repo(self) -> tuple[Path, str, str]:
+        code = self.tmp / "code"
+        _init_repo(code)
+        (code / "f.py").write_text("a\n", encoding="utf-8")
+        base = _commit_all(code, "base")
+        (code / "f.py").write_text("a\nb\n", encoding="utf-8")  # +1
+        (code / "g.py").write_text("g\n", encoding="utf-8")  # add
+        commit = _commit_all(code, "leaf work")
+        return code, base, commit
+
+    def test_committed_landed_delta_without_live_worktree(self) -> None:
+        # A completed/cleaned leaf: the worktree is gone, but the contract's commits live on the repo,
+        # so committed still diffs base -> code_commit. `leaf` is given mixed-case to prove slugify.
+        code, base, commit = self._committed_repo()
+        _write_leaf(self.config, "260628-l4a", code=code, code_base=base, code_commit=commit,
+                    code_worktree=self.tmp / "gone")
+        body = leaf_changeset(self.config, "R", "t", "260628-L4a", "committed")
+        files = _by_path(body["code"])
+        self.assertEqual(body["mode"], "committed")
+        self.assertEqual(files["f.py"]["insertions"], 1)
+        self.assertEqual(files["g.py"]["status"], "A")
+        self.assertEqual(body["counters"]["code"]["files"], 2)
+
+    def test_committed_falls_back_to_worktree_head_when_uncommitted(self) -> None:
+        # No code_commit yet (in-flight leaf), but a live worktree: committed = base -> worktree HEAD,
+        # NOT the dirty tree.
+        code = self.tmp / "code"
+        _init_repo(code)
+        (code / "f.py").write_text("a\n", encoding="utf-8")
+        base = _commit_all(code, "base")
+        (code / "f.py").write_text("a\nb\n", encoding="utf-8")
+        _commit_all(code, "committed in worktree")
+        (code / "f.py").write_text("a\nb\nDIRTY\n", encoding="utf-8")  # dirty — must be excluded
+        _write_leaf(self.config, "l2", code=code, code_base=base, code_worktree=code)
+        files = _by_path(leaf_changeset(self.config, "R", "t", "l2", "committed")["code"])
+        self.assertEqual(files["f.py"]["insertions"], 1)  # just the committed "b"
+
+    def test_working_is_uncommitted_delta_only(self) -> None:
+        code = self.tmp / "code"
+        _init_repo(code)
+        (code / "f.py").write_text("a\n", encoding="utf-8")
+        base = _commit_all(code, "base")
+        (code / "f.py").write_text("a\nb\n", encoding="utf-8")
+        commit = _commit_all(code, "committed work")
+        (code / "f.py").write_text("a\nb\nc\n", encoding="utf-8")  # dirty +1 over HEAD
+        (code / "dirty_new.py").write_text("n\n", encoding="utf-8")  # untracked
+        _write_leaf(self.config, "l1", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        body = leaf_changeset(self.config, "R", "t", "l1", "working")
+        files = _by_path(body["code"])
+        self.assertEqual(body["mode"], "working")
+        self.assertEqual(files["f.py"]["insertions"], 1)  # only the uncommitted "c", not "b"
+        self.assertEqual(files["dirty_new.py"]["status"], "A")
+
+    def test_working_without_live_worktree_raises(self) -> None:
+        code, base, commit = self._committed_repo()
+        _write_leaf(self.config, "l3", code=code, code_base=base, code_commit=commit,
+                    code_worktree=self.tmp / "gone")
+        with self.assertRaises(FileNotFoundError):
+            leaf_changeset(self.config, "R", "t", "l3", "working")
+
+    def test_unknown_leaf_raises(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            leaf_changeset(self.config, "R", "t", "nope", "committed")
+
+    def test_leaf_is_scoped_by_master(self) -> None:
+        code, base, commit = self._committed_repo()
+        _write_leaf(self.config, "l4", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        with self.assertRaises(FileNotFoundError):  # right leaf-id, wrong master
+            leaf_changeset(self.config, "R", "other-master", "l4", "committed")
+
+    def test_leaf_file_diff_committed_base_to_commit(self) -> None:
+        code, base, commit = self._committed_repo()
+        _write_leaf(self.config, "l5", code=code, code_base=base, code_commit=commit,
+                    code_worktree=self.tmp / "gone")
+        body = leaf_file_diff(self.config, "R", "t", "l5", "code", "f.py", "committed")
+        self.assertEqual(body["before"]["content"], "a\n")
+        self.assertEqual(body["after"]["content"], "a\nb\n")
+        self.assertEqual(body["language"], "python")
+
+    def test_leaf_file_diff_working_head_to_dirty(self) -> None:
+        code = self.tmp / "code"
+        _init_repo(code)
+        (code / "f.py").write_text("a\n", encoding="utf-8")
+        base = _commit_all(code, "base")
+        (code / "f.py").write_text("a\nb\n", encoding="utf-8")
+        commit = _commit_all(code, "committed")
+        (code / "f.py").write_text("a\nb\nc\n", encoding="utf-8")  # dirty
+        _write_leaf(self.config, "l6", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        body = leaf_file_diff(self.config, "R", "t", "l6", "code", "f.py", "working")
+        self.assertEqual(body["before"]["content"], "a\nb\n")  # at worktree HEAD
+        self.assertEqual(body["after"]["content"], "a\nb\nc\n")  # the dirty worktree
+
+
+class LeafChangesetRouteTests(unittest.TestCase):
+    """The leaf+mode selector validation on /api/changeset/task (precedence leaf > master > scope)."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.config = _leaf_config(self.tmp)
+        code = self.tmp / "code"
+        _init_repo(code)
+        (code / "f.py").write_text("a\n", encoding="utf-8")
+        base = _commit_all(code, "base")
+        (code / "f.py").write_text("a\nb\n", encoding="utf-8")
+        commit = _commit_all(code, "work")
+        _write_leaf(self.config, "ok", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        _write_leaf(self.config, "gonewt", code=code, code_base=base, code_commit=commit,
+                    code_worktree=self.tmp / "gone")
+        app = FastAPI()
+        register_changeset_routes(app, self.config)
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def test_leaf_without_master_is_400(self) -> None:
+        r = self.client.get("/api/changeset/task", params={"repo": "R", "leaf": "ok", "mode": "committed"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_leaf_with_bad_mode_is_400(self) -> None:
+        r = self.client.get(
+            "/api/changeset/task", params={"repo": "R", "master": "t", "leaf": "ok", "mode": "bogus"}
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_leaf_committed_is_200(self) -> None:
+        r = self.client.get(
+            "/api/changeset/task", params={"repo": "R", "master": "t", "leaf": "ok", "mode": "committed"}
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["mode"], "committed")
+
+    def test_working_without_worktree_is_404(self) -> None:
+        r = self.client.get(
+            "/api/changeset/task", params={"repo": "R", "master": "t", "leaf": "gonewt", "mode": "working"}
+        )
+        self.assertEqual(r.status_code, 404)
+
+    def test_file_diff_leaf_committed_is_200(self) -> None:
+        r = self.client.get(
+            "/api/changeset/file-diff",
+            params={"repo": "R", "master": "t", "leaf": "ok", "kind": "code", "path": "f.py", "mode": "committed"},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["after"]["content"], "a\nb\n")
 
 
 class ScopeExtractionTests(unittest.TestCase):

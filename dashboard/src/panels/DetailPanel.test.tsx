@@ -408,8 +408,30 @@ function seedPromotedLeaf() {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   dashboardStore.getState().reset();
 });
+
+// ChangeSetButton fetches its counters on mount; a tiny stub keeps the doc-reader-bar tests from
+// touching a real fetch (the counts are incidental — these tests assert the buttons + click target).
+function stubCounters() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            counters: {
+              code: { files: 0, insertions: 0, deletions: 0 },
+              memory: { files: 0, insertions: 0, deletions: 0 },
+            },
+          }),
+        }) as unknown as Response,
+    ),
+  );
+}
 
 describe("DetailPanel gate respond (task 11)", () => {
   it("renders the gate respond drawer with the full request packet", () => {
@@ -793,5 +815,128 @@ describe("DetailPanel promoted lifecycle identity", () => {
     expect(onOpenLifecycle).toHaveBeenCalledWith(
       "taskdoc:/tasks/260610_browser-dashboard/task.json",
     );
+  });
+});
+
+describe("DetailPanel doc-reader change-set bar (L4a)", () => {
+  const leafPath = "/tasks/agents-remember/260628_operations-integration/04a_changeset-everywhere.json";
+
+  it("shows a committed button on a leaf doc reader (no live enclosure) and opens the leaf target", () => {
+    stubCounters();
+    const doc = taskDoc({
+      id: "260628-L4a",
+      lifecycleId: undefined,
+      kind: "subTask",
+      title: "Change-set everywhere",
+      repository: "agents-remember",
+      docPath: leafPath,
+      objective: "Leaf objective.",
+    });
+    seedTaskDocuments([doc]);
+    const onOpenChangeSet = vi.fn();
+    const { getAllByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
+    );
+    // identity comes from the doc node, so the bar shows with NO active enclosure (the L4 gap);
+    // committed is always present, working only when live -> exactly one button here.
+    const buttons = getAllByTestId("open-changeset");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain("committed");
+    fireEvent.click(buttons[0]);
+    expect(onOpenChangeSet).toHaveBeenCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+      leaf: "260628-L4a",
+      mode: "committed",
+    });
+  });
+
+  it("shows a series button on a master doc reader", () => {
+    stubCounters();
+    const master = taskDoc({
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Operations Integration",
+      repository: "agents-remember",
+      docPath: "/tasks/agents-remember/260628_operations-integration/task.json",
+      objective: "Master objective.",
+    });
+    seedTaskDocuments([master]);
+    const onOpenChangeSet = vi.fn();
+    const { getAllByTestId } = render(
+      <DetailPanel
+        selectedId="taskdoc:/tasks/agents-remember/260628_operations-integration/task.json"
+        onOpenChangeSet={onOpenChangeSet}
+      />,
+    );
+    const buttons = getAllByTestId("open-changeset");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain("series");
+    fireEvent.click(buttons[0]);
+    expect(onOpenChangeSet).toHaveBeenCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+    });
+  });
+
+  it("adds a working button when the leaf's enclosure is live", () => {
+    stubCounters();
+    const doc = taskDoc({
+      id: "260628-l4a",
+      lifecycleId: undefined,
+      kind: "subTask",
+      title: "Change-set everywhere",
+      repository: "agents-remember",
+      docPath: leafPath,
+    });
+    seedProjection({
+      enclosures: [
+        enclosure({
+          enclosure: "/contracts/l4a",
+          lifecycleId: "X",
+          leafId: "260628-l4a",
+          repoName: "agents-remember",
+          taskName: "260628_operations-integration",
+          worktreeGroup: "/worktrees/changeset-everywhere-ar",
+        }),
+      ],
+      activeWorktreeGroups: ["changeset-everywhere-ar"],
+      analytics: {
+        driftSnapshots: [],
+        stalestSidecars: [],
+        setupSummaries: [],
+        setupProgress: [],
+        routeCoverage: [],
+        toolReports: [],
+        ledgers: [],
+        taskDocuments: [doc],
+        series: [],
+        attentionQueue: [],
+        engineProcesses: [],
+      },
+    });
+    const onOpenChangeSet = vi.fn();
+    const { getAllByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
+    );
+    const labels = getAllByTestId("open-changeset").map((b) => b.textContent ?? "");
+    expect(labels).toHaveLength(2);
+    expect(labels.some((t) => t.includes("committed"))).toBe(true);
+    expect(labels.some((t) => t.includes("working"))).toBe(true);
+  });
+
+  it("omits the bar entirely when no onOpenChangeSet handler is wired", () => {
+    stubCounters();
+    const doc = taskDoc({
+      id: "260628-L4a",
+      lifecycleId: undefined,
+      kind: "subTask",
+      title: "Change-set everywhere",
+      repository: "agents-remember",
+      docPath: leafPath,
+    });
+    seedTaskDocuments([doc]);
+    const { queryAllByTestId } = render(<DetailPanel selectedId={`taskdoc:${leafPath}`} />);
+    expect(queryAllByTestId("open-changeset")).toHaveLength(0);
   });
 });
