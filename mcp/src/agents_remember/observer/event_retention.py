@@ -61,8 +61,21 @@ def initial_event_offsets(root: Path, *, now: datetime) -> dict[str, int]:
     return offsets
 
 
-def prune_expired_lifecycle_event_logs(root: Path, *, now: datetime) -> list[Path]:
-    """Delete lifecycle event logs that have gone dormant past their inactivity TTL."""
+def prune_expired_lifecycle_event_logs(
+    root: Path,
+    *,
+    now: datetime,
+    protected_lifecycle_ids: frozenset[str] | set[str] = frozenset(),
+) -> list[Path]:
+    """Delete lifecycle event logs that have gone dormant past their inactivity TTL.
+
+    ``protected_lifecycle_ids`` are exempt from pruning regardless of inactivity: the dashboard passes
+    the lifecycle ids of every leaf in a not-yet-retired master series (see
+    ``worktree_provider_admission.series_retained_lifecycle_ids``), so a running durable task — and all
+    of its sibling leaves — keep their full event history until the whole series is archived (plus a
+    grace window). This supersedes the per-log inactivity TTL for durable, enclosure-backed work; only
+    fleeting/standalone logs are still retired by inactivity alone.
+    """
     lifecycles_dir = root / "lifecycles"
     if not lifecycles_dir.is_dir():
         return []
@@ -71,6 +84,8 @@ def prune_expired_lifecycle_event_logs(root: Path, *, now: datetime) -> list[Pat
         path = entry / "events.jsonl"
         if not entry.is_dir() or not path.is_file():
             continue
+        if entry.name in protected_lifecycle_ids:
+            continue  # part of a live master series -> never pruned by inactivity
         if not lifecycle_is_dormant(path, now=now):
             continue
         path.unlink()

@@ -621,6 +621,142 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.host.ensured, [])
 
+    def test_post_open_claims_leaf_and_persists_it(self) -> None:
+        leaf = "agents-remember/260628_operations-integration/260628-L5"
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["leafKey"], leaf)
+        entry = self.catalog.get("term-1")
+        assert entry is not None
+        self.assertEqual(entry.leaf_key, leaf)
+
+    def test_post_open_null_leaf_still_works(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post("/api/terminal/term-1", json={"kind": "terminal"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["leafKey"])
+        entry = self.catalog.get("term-1")
+        assert entry is not None
+        self.assertIsNone(entry.leaf_key)
+
+    def test_post_open_409_when_leaf_taken_by_other_running_session(self) -> None:
+        leaf = "repo/master/leaf-1"
+        with TestClient(self.app) as client:
+            first = client.post("/api/terminal/owner", json={"kind": "terminal", "leafKey": leaf})
+            self.assertEqual(first.status_code, 200)
+            # A second session claiming the same leaf is refused; its own session is never spawned.
+            second = client.post(
+                "/api/terminal/intruder", json={"kind": "terminal", "leafKey": leaf}
+            )
+        self.assertEqual(second.status_code, 409)
+        body = second.json()
+        self.assertEqual(body["status"], "leaf-taken")
+        self.assertEqual(body["leafKey"], leaf)
+        self.assertEqual(body["session"], "owner")
+        self.assertIsNone(self.catalog.get("intruder"))  # no row created for the refused claim
+        self.assertEqual([e["sid"] for e in self.host.ensured], ["owner"])
+
+    def test_post_open_reclaims_own_leaf_on_reopen(self) -> None:
+        leaf = "repo/master/leaf-1"
+        with TestClient(self.app) as client:
+            client.post("/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf})
+            # Re-opening the SAME session with the SAME leaf is allowed (not a conflict with itself).
+            response = client.post(
+                "/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["leafKey"], leaf)
+
+    def test_attach_leaf_binds_existing_session_when_free(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
+        with TestClient(self.app) as client:
+            response = client.post("/api/terminal/live/attach-leaf", json={"leafKey": leaf})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["leafKey"], leaf)
+        entry = self.catalog.get("live")
+        assert entry is not None
+        self.assertEqual(entry.leaf_key, leaf)
+
+    def test_attach_leaf_409_when_taken_by_other_running_session(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_catalog_entry("owner", cwd=self.tmp, tmux_name="ar-owner"))
+        self.catalog.upsert(
+            _catalog_entry("seeker", cwd=self.tmp, tmux_name="ar-seeker").with_leaf_key(None)
+        )
+        with TestClient(self.app) as client:
+            client.post("/api/terminal/owner/attach-leaf", json={"leafKey": leaf})
+            response = client.post("/api/terminal/seeker/attach-leaf", json={"leafKey": leaf})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "leaf-taken")
+        seeker = self.catalog.get("seeker")
+        assert seeker is not None
+        self.assertIsNone(seeker.leaf_key)  # the refused attach left it unbound
+
+    def test_attach_leaf_404_for_unknown_session(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/ghost/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "unknown-session")
+
+    def test_attach_leaf_404_for_terminated_session(self) -> None:
+        self.catalog.upsert(_catalog_entry("dead", cwd=self.tmp, status="terminated"))
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/dead/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
+            )
+        self.assertEqual(response.status_code, 404)
+
+    def test_terminal_shares_a_leaf_with_its_chat_but_two_chats_conflict(self) -> None:
+        # L5 fix 2: uniqueness is per (leaf, role). A terminal must not 409 against the leaf's chat,
+        # but a second agent chat (and a second terminal) for the same leaf still conflicts.
+        leaf = "repo/master/leaf-1"
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            chat = client.post(
+                "/api/terminal/chat-1",
+                json={"kind": "harness", "harness": "claude", "leafKey": leaf},
+            )
+            self.assertEqual(chat.status_code, 200)
+            # A terminal on the SAME leaf is allowed alongside the chat (no 409).
+            term = client.post("/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf})
+            self.assertEqual(term.status_code, 200)
+            self.assertEqual(term.json()["leafKey"], leaf)
+            # A second chat is refused -- the chat slot is taken by chat-1.
+            second_chat = client.post(
+                "/api/terminal/chat-2",
+                json={"kind": "harness", "harness": "claude", "leafKey": leaf},
+            )
+            self.assertEqual(second_chat.status_code, 409)
+            self.assertEqual(second_chat.json()["session"], "chat-1")
+            # A second terminal is refused too -- the terminal slot is taken by term-1.
+            second_term = client.post(
+                "/api/terminal/term-2", json={"kind": "terminal", "leafKey": leaf}
+            )
+            self.assertEqual(second_term.status_code, 409)
+            self.assertEqual(second_term.json()["session"], "term-1")
+
+    def test_attach_leaf_terminal_does_not_conflict_with_existing_chat(self) -> None:
+        # The attach-leaf path is role-scoped too: a terminal can claim a leaf already held by a chat.
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(
+            _catalog_entry("term", cwd=self.tmp, tmux_name="ar-term").with_leaf_key(None)
+        )
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            client.post(
+                "/api/terminal/chat-1",
+                json={"kind": "harness", "harness": "claude", "leafKey": leaf},
+            )
+            response = client.post("/api/terminal/term/attach-leaf", json={"leafKey": leaf})
+        self.assertEqual(response.status_code, 200)
+        entry = self.catalog.get("term")
+        assert entry is not None
+        self.assertEqual(entry.leaf_key, leaf)
+
     def test_get_harnesses_lists_supported_set_with_detection(self) -> None:
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
             response = client.get("/api/harnesses")

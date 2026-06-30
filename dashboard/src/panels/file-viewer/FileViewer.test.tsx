@@ -33,11 +33,11 @@ describe("File Viewer center tab", () => {
     expect(container.querySelector(".rail--left")).toBeNull();
   });
 
-  it("shows the stable code-side placeholder before any file is selected", () => {
+  it("shows the empty-state backdrop prompt before any file is selected", () => {
     const { container } = render(<FileViewer />);
     expect(container.querySelector('[data-testid="file-viewer"]')).not.toBeNull();
-    const placeholders = [...container.querySelectorAll('[data-testid="pane-placeholder"]')];
-    expect(placeholders.some((p) => p.textContent?.includes("Select a code file"))).toBe(true);
+    // The siege-tank empty-state backdrop fills the pane (no per-side placeholders) until a file opens.
+    expect(container.textContent).toContain("Select a code file");
   });
 
   it("keeps the File Viewer mounted (hidden) on other views so its state survives a switch", () => {

@@ -65,6 +65,34 @@ describe("SessionList (6e-2c)", () => {
     expect(onSelect).toHaveBeenCalledWith("b");
   });
 
+  it("truncates a long name and exposes the full name via a hover title (fix 4)", () => {
+    const longLabel =
+      "Claude Code working on the sidebar chat attachment leaf for the operations integration series";
+    const { getByTitle } = render(
+      <SessionList
+        sessions={[{ id: "a", label: longLabel }]}
+        activeId="a"
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    // The label span carries the full text as a `title` so the CSS ellipsis stays readable on hover.
+    expect(getByTitle(longLabel)).not.toBeNull();
+  });
+
+  it("includes the bound leaf name in the hover title (fix 4)", () => {
+    const { getByTitle } = render(
+      <SessionList
+        sessions={[{ id: "a", label: "Claude Code 1", leafKey: "repo/master/leaf-1" }]}
+        activeId="a"
+        onSelect={() => {}}
+        onTerminate={() => {}}
+        leafNameFor={() => "Sidebar chat"}
+      />,
+    );
+    expect(getByTitle("Claude Code 1 · Sidebar chat")).not.toBeNull();
+  });
+
   it("the row terminate action reports the destructive action separately", () => {
     const onSelect = vi.fn();
     const onTerminate = vi.fn();

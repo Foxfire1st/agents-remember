@@ -10,11 +10,12 @@ readers (provider current-state + worktree enclosures).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -99,6 +100,7 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
     admitted_worktree_groups,
+    series_retained_lifecycle_ids,
 )
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
@@ -256,6 +258,76 @@ class WorktreeProviderAdmissionTests(unittest.TestCase):
         ]
 
         self.assertEqual(active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"close-ar"})
+
+    def test_active_group_survives_a_pruned_lifecycle_log(self) -> None:
+        # The regression: a running worktree (cleanup pending) whose lifecycle event log was retired for
+        # inactivity must STILL be active — admission keys on the durable enclosure, not the prunable
+        # log. Both the Engine Room set and the provider set recover the live group with NO log present.
+        enclosures = [
+            _enclosure(
+                lifecycleId="LCGONE",
+                worktreeGroup="/coord/worktrees/repo/live-ar",
+                closeoutStatus="not-started",
+                integrationStatus="not-started",
+                cleanup="pending",
+            )
+        ]
+        logs: list[list[Event]] = []  # the log was pruned -> no events project for LCGONE
+        self.assertEqual(active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"live-ar"})
+        self.assertEqual(admitted_worktree_groups(enclosures, logs, now=FRESH), {"live-ar"})
+
+
+class SeriesRetentionTests(unittest.TestCase):
+    """`series_retained_lifecycle_ids`: a master series' events survive until the series is retired."""
+
+    def _leaf(
+        self, lifecycle_id: str, master: str, cleanup: str, *, enclosure: str = "/c.md", repo: str = "r"
+    ) -> EnclosureNode:
+        return _enclosure(
+            lifecycleId=lifecycle_id,
+            taskName=master,
+            repoName=repo,
+            cleanup=cleanup,
+            enclosure=enclosure,
+        )
+
+    def test_live_master_protects_every_leaf_including_archived_siblings(self) -> None:
+        enclosures = [
+            self._leaf("LCA", "260628_x", "pending"),
+            self._leaf("LCB", "260628_x", "completed"),  # archived sibling of a LIVE master
+            self._leaf("LCC", "260628_y", "pending"),  # a different, also-live master
+        ]
+        self.assertEqual(
+            series_retained_lifecycle_ids(enclosures, now=FRESH), {"LCA", "LCB", "LCC"}
+        )
+
+    def test_fully_archived_master_without_readable_timestamp_is_released(self) -> None:
+        enclosures = [
+            self._leaf("LCA", "260628_x", "completed", enclosure="/does-not-exist.md"),
+            self._leaf("LCB", "260628_x", "abandoned", enclosure="/nope.md"),
+        ]
+        self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), set())
+
+    def test_archived_master_is_retained_within_grace_then_released_after(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = Path(tmp) / "series-contract.md"
+            contract.write_text("x", encoding="utf-8")
+            enclosures = [self._leaf("LCA", "260628_z", "completed", enclosure=str(contract))]
+
+            # Finalized one day before now -> inside the one-week grace -> still retained.
+            within = (FRESH - timedelta(days=1)).timestamp()
+            os.utime(contract, (within, within))
+            self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), {"LCA"})
+
+            # Finalized eight days before now -> past the grace -> released for pruning.
+            past = (FRESH - timedelta(days=8)).timestamp()
+            os.utime(contract, (past, past))
+            self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), set())
+
+    def test_enclosure_without_taskname_is_not_series_protected(self) -> None:
+        # A fleeting/standalone enclosure (no master task) keeps the ordinary inactivity TTL.
+        enclosures = [self._leaf("LCA", "", "pending")]
+        self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), set())
 
 
 class FoldTests(unittest.TestCase):

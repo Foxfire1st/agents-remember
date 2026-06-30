@@ -212,8 +212,15 @@ export function FileViewer() {
         if (p.kind === "sidecar" && p.exists) {
           openCode({ name: p.codePath.split("/").pop() ?? "", path: p.codePath, kind: "file" });
         } else {
+          // An overview/entities/index doc has no code partner — render its OWN markdown instead of an
+          // empty placeholder (a route overview must be readable). Fall back to the placeholder only if
+          // the body could not be read (binary/unreadable) or there is genuinely no onboarding here.
           setCode(null);
-          setSidecar({ state: "overview" });
+          setSidecar(
+            p.kind === "overview" && p.body != null
+              ? { state: "markdown", body: p.body }
+              : { state: "overview" },
+          );
         }
       })
       .catch((e) => setError(describeError(e)));

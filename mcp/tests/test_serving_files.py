@@ -193,6 +193,8 @@ class PairingTests(unittest.TestCase):
         body = resolve_partner(self.scope, "overview.md")
         self.assertEqual(body["kind"], "overview")
         self.assertEqual(body["route"], "")
+        # A partnerless overview carries its own markdown so the reader can render it (not a placeholder).
+        self.assertEqual(body["body"], "# repo overview\n")
 
 
 class CatalogTests(unittest.TestCase):

@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 TerminalSessionKind = Literal["terminal", "harness"]
 TerminalSessionStatus = Literal["running", "exited", "terminated"]
+# The leaf-uniqueness role: a plain shell (``kind == "terminal"``) is a TERMINAL; any agent harness
+# is a CHAT. Uniqueness is per (leaf, role) -- at most one running chat AND one running terminal per
+# leaf -- so an agent chat and a scratch terminal can share a leaf without colliding (L5 fix 2).
+TerminalSessionRole = Literal["chat", "terminal"]
+
+
+def role_for_kind(kind: TerminalSessionKind) -> TerminalSessionRole:
+    """The leaf-uniqueness role for a launch ``kind``: a shell is a terminal, a harness is a chat."""
+    return "terminal" if kind == "terminal" else "chat"
 
 
 @dataclass(frozen=True)
@@ -28,6 +40,11 @@ class TerminalCatalogEntry:
     last_attached_at: str
     status: TerminalSessionStatus
     terminated_at: str | None = None
+    # The durable leaf-identity key (qualified leaf id ``repo/master/leaf-id``), opaque to the
+    # backend: the catalog is the leaf->chat registry. Written only when set (like ``harness`` /
+    # ``lifecycleId`` / ``terminatedAt``) so legacy rows with no ``leafKey`` read back as ``None``
+    # -- no schema bump, migration-safe. A chat claims a leaf at open/attach, enclosure-independent.
+    leaf_key: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -50,6 +67,7 @@ class TerminalCatalogEntry:
             terminated_at=(
                 str(data["terminatedAt"]) if data.get("terminatedAt") is not None else None
             ),
+            leaf_key=str(data["leafKey"]) if data.get("leafKey") is not None else None,
         )
 
     def to_json(self) -> dict[str, object]:
@@ -70,6 +88,8 @@ class TerminalCatalogEntry:
             data["lifecycleId"] = self.lifecycle_id
         if self.terminated_at is not None:
             data["terminatedAt"] = self.terminated_at
+        if self.leaf_key is not None:
+            data["leafKey"] = self.leaf_key
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
@@ -86,6 +106,7 @@ class TerminalCatalogEntry:
             last_attached_at=attached_at,
             status="running",
             terminated_at=None,
+            leaf_key=self.leaf_key,
         )
 
     def with_status(
@@ -104,7 +125,17 @@ class TerminalCatalogEntry:
             last_attached_at=self.last_attached_at,
             status=status,
             terminated_at=at if status == "terminated" else self.terminated_at,
+            leaf_key=self.leaf_key,
         )
+
+    def with_leaf_key(self, leaf_key: str | None) -> TerminalCatalogEntry:
+        """A copy bound to ``leaf_key`` (or unbound when ``None``); the leaf-attach write point."""
+        return replace(self, leaf_key=leaf_key)
+
+    @property
+    def role(self) -> TerminalSessionRole:
+        """This session's leaf-uniqueness role, derived from its kind (chat vs. terminal)."""
+        return role_for_kind(self.kind)
 
 
 def terminal_catalog_path(coordination_root: Path) -> Path:
@@ -118,6 +149,13 @@ class TerminalCatalog:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        # Serialize the read-modify-write within the process. FastAPI runs sync handlers in a threadpool,
+        # so concurrent open/attach/terminate/refresh requests would otherwise each read a stale snapshot
+        # and clobber one another (lost updates) — and, with the old shared temp file, interleave their
+        # bytes into a torn file that then 500s every reader. The unique-temp + atomic replace in `_write`
+        # keeps any single write valid even across processes; this lock makes concurrent mutations in THIS
+        # process compose instead of racing. (RLock so a mutator may call another lock-taking helper.)
+        self._lock = threading.RLock()
 
     def list(self, *, include_terminated: bool = False) -> list[TerminalCatalogEntry]:
         entries = self._read()
@@ -128,48 +166,82 @@ class TerminalCatalog:
     def get(self, session_id: str) -> TerminalCatalogEntry | None:
         return next((entry for entry in self._read() if entry.id == session_id), None)
 
+    def active_for_leaf(
+        self, leaf_key: str, *, role: TerminalSessionRole = "chat"
+    ) -> TerminalCatalogEntry | None:
+        """The single RUNNING session of ``role`` that owns ``leaf_key``, or ``None``.
+
+        Uniqueness is per (leaf, role): a leaf may hold at most one running chat AND one running
+        terminal, so the probe is role-scoped (the default ``"chat"`` is the agent slot). ``list()``
+        already excludes terminated rows; gating on ``status == "running"`` means an exited/terminated
+        session frees its leaf (a stale ``running`` row is downgraded by ``_refresh_catalog_entries``
+        when the tmux session is gone). This is the server-authoritative uniqueness probe the opener +
+        attach-leaf routes call immediately before an upsert.
+        """
+        return next(
+            (
+                entry
+                for entry in self.list()
+                if entry.leaf_key == leaf_key
+                and entry.status == "running"
+                and entry.role == role
+            ),
+            None,
+        )
+
     def upsert(self, entry: TerminalCatalogEntry) -> None:
-        entries = [current for current in self._read() if current.id != entry.id]
-        entries.append(entry)
-        self._write(entries)
+        with self._lock:
+            entries = [current for current in self._read() if current.id != entry.id]
+            entries.append(entry)
+            self._write(entries)
 
     def mark_attached(self, session_id: str, attached_at: str) -> TerminalCatalogEntry | None:
-        entry = self.get(session_id)
-        if entry is None:
-            return None
-        updated = entry.with_attachment(attached_at)
-        self.upsert(updated)
-        return updated
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            updated = entries[index].with_attachment(attached_at)
+            entries[index] = updated
+            self._write(entries)
+            return updated
 
     def mark_exited(self, session_id: str) -> TerminalCatalogEntry | None:
-        entry = self.get(session_id)
-        if entry is None:
-            return None
-        if entry.status == "terminated":
-            return entry
-        updated = entry.with_status("exited")
-        self.upsert(updated)
-        return updated
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            entry = entries[index]
+            if entry.status == "terminated":
+                return entry
+            updated = entry.with_status("exited")
+            entries[index] = updated
+            self._write(entries)
+            return updated
 
     def mark_terminated(
         self, session_id: str, terminated_at: str
     ) -> TerminalCatalogEntry | None:
-        entry = self.get(session_id)
-        if entry is None:
-            return None
-        updated = entry.with_status("terminated", at=terminated_at)
-        self.upsert(updated)
-        return updated
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            updated = entries[index].with_status("terminated", at=terminated_at)
+            entries[index] = updated
+            self._write(entries)
+            return updated
 
     def _read(self) -> list[TerminalCatalogEntry]:
         if not self.path.exists():
             return []
-        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        raw = _load_catalog_json(self.path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            raise ValueError(f"terminal catalog must be a JSON object: {self.path}")
+            return []
         sessions = raw.get("sessions", [])
         if not isinstance(sessions, list):
-            raise ValueError(f"terminal catalog sessions must be a list: {self.path}")
+            return []
         return [
             TerminalCatalogEntry.from_json(item)
             for item in sessions
@@ -178,13 +250,46 @@ class TerminalCatalog:
 
     def _write(self, entries: list[TerminalCatalogEntry]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(f".{self.path.name}.tmp")
+        # A UNIQUE temp per write (pid + uuid): a shared fixed-name temp let concurrent writers — even two
+        # request threads in one process — interleave their bytes into a torn file. With a private temp +
+        # atomic os.replace, every reader sees a complete file; the worst case is a lost update, never
+        # corruption. The temp is removed if the write fails so a crash never leaves a partial sibling.
+        tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.{uuid4().hex}.tmp")
         payload = {
             "schema": "ar-dashboard-terminal-sessions/v1",
             "sessions": [entry.to_json() for entry in sorted(entries, key=lambda e: e.created_at)],
         }
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(tmp, self.path)
+        try:
+            tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            os.replace(tmp, self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            raise
+
+
+def _index_of(entries: list[TerminalCatalogEntry], session_id: str) -> int | None:
+    """The position of ``session_id`` in ``entries`` (for an in-place status update), or ``None``."""
+    return next((i for i, entry in enumerate(entries) if entry.id == session_id), None)
+
+
+def _load_catalog_json(text: str) -> object:
+    """Parse the catalog JSON, self-healing from a torn write instead of 500-ing the whole dashboard.
+
+    A legacy fixed-temp write (or two dashboards on one coordination root) could leave a valid object
+    followed by ``Extra data`` -- a partial duplicate fragment from an interleaved write. Recover the first
+    complete object (the real catalog; the trailing fragment is the torn tail). Unparseable content degrades
+    to an empty catalog so a corrupt file is treated as "no sessions" and the next write overwrites it clean.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text.lstrip())
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return obj
 
 
 def _status(raw: object) -> TerminalSessionStatus:

@@ -71,11 +71,9 @@ describe("ChangeSetViewer screen", () => {
     // col1: the changed code + onboarding rows from the stubbed task change-set.
     expect(getByText("dashboard/src/x.ts")).not.toBeNull();
     expect(getByText("onboarding/dashboard/src/x.ts.md")).not.toBeNull();
-    // counters summarise both sides; col2 shows the stable "select a file" placeholder.
+    // counters summarise both sides; col2 shows the empty-state backdrop prompt until a file is picked.
     expect(container.querySelector('[data-testid="changeset-counters"]')?.textContent).toContain("+3");
-    expect(container.querySelector('[data-testid="pane-placeholder"]')?.textContent).toContain(
-      "Select a changed file",
-    );
+    expect(container.textContent).toContain("Select a changed file");
   });
 
   it("calls onBack when the back link is clicked", async () => {
@@ -174,11 +172,9 @@ describe("ChangeSetViewer screen", () => {
       <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
     );
     await findByTestId("changeset-counters");
-    // master mode now lists the net changed files with the normal "select a file" placeholder
+    // master mode now lists the net changed files with the normal empty-state backdrop prompt
     // (not the old accumulated-summary message), and the rows are clickable.
-    expect(container.querySelector('[data-testid="pane-placeholder"]')?.textContent).toContain(
-      "Select a changed file",
-    );
+    expect(container.textContent).toContain("Select a changed file");
     fireEvent.click(getByText("a.ts"));
     expect((await findByTestId("changeset-pane")).textContent).toBe("a.ts");
   });

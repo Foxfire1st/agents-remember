@@ -7,6 +7,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { css } from "../../../styled-system/css";
 import type { FileContent } from "../../data/files";
 import { Markdown } from "../../grammar/Markdown";
+import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
 import { FilePane } from "./FilePane";
 
 // What the right (sidecar) pane shows, derived by the FileViewer from L1 pairing.
@@ -95,10 +96,27 @@ export function DualPane({
   sidecar: SidecarView;
   split: boolean;
 }) {
-  if (!split) {
+  // Nothing opened yet: a faint effects-gated boomerang backdrop fills the whole pane (mirrors the
+  // Operations / Chats empty states), replacing the per-side "select a file" placeholders until a code
+  // file or onboarding doc is opened.
+  if (code === null && sidecar.state === "empty") {
     return (
       <div className={fill} data-testid="dual-pane">
-        <CodeSide code={code} />
+        {/* The siege-tank clip reads darker than the battlecruiser/adjutant loops, so it gets a touch
+            more presence (0.18) than the shared 0.14 default to feel comparably bright on screen. */}
+        <EmptyStateBackdrop src="/assets/sc2-siege-tank-boomerang.mp4" opacity={0.18}>
+          Select a code file from the tree — or open an onboarding doc to read it.
+        </EmptyStateBackdrop>
+      </div>
+    );
+  }
+  // A partnerless overview (markdown, no code) fills the pane on its own — in single mode the sidecar
+  // side is never shown, so without this an overview opened from the onboarding tree would be invisible.
+  const overviewOnly = code === null && sidecar.state === "markdown";
+  if (!split || overviewOnly) {
+    return (
+      <div className={fill} data-testid="dual-pane">
+        {overviewOnly ? <SidecarSide sidecar={sidecar} /> : <CodeSide code={code} />}
       </div>
     );
   }

@@ -48,14 +48,33 @@ const content = css({
   fontSize: "0.82rem",
 });
 
-export function EmptyStateBackdrop({ src, children }: { src: string; children: ReactNode }) {
+export function EmptyStateBackdrop({
+  src,
+  children,
+  opacity,
+}: {
+  src: string;
+  children: ReactNode;
+  // Override the default faint 0.14 wash (set in `backdropVideo`) when a particular clip reads darker
+  // and needs a touch more presence — e.g. the File/Diff viewer's siege-tank loop.
+  opacity?: number;
+}) {
   const animate = useShouldAnimate();
 
   return (
     <div className={canvas}>
       {animate ? (
         <div className={backdrop} aria-hidden="true" data-testid="empty-backdrop">
-          <video className={backdropVideo} src={src} autoPlay loop muted playsInline preload="auto" />
+          <video
+            className={backdropVideo}
+            style={opacity != null ? { opacity } : undefined}
+            src={src}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+          />
         </div>
       ) : null}
       <div className={content}>{children}</div>

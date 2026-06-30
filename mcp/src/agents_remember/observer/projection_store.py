@@ -56,6 +56,7 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
     admitted_worktree_groups,
+    series_retained_lifecycle_ids,
 )
 from agents_remember.providers.status import refresh_current_provider_state
 
@@ -148,10 +149,17 @@ def project_and_write(
     moment = now or datetime.now(UTC)
     root = observer_root(config)
     coordination_root = config.coordination_root
-    prune_expired_lifecycle_event_logs(root, now=moment)
+    # Read the durable enclosures FIRST so retention is enclosure-aware: a not-yet-retired master
+    # series protects every one of its leaves' event logs from the inactivity TTL (a running durable
+    # task must never lose its history just because it has been a while since its last lifecycle event).
+    enclosures = read_enclosures(coordination_root)
+    prune_expired_lifecycle_event_logs(
+        root,
+        now=moment,
+        protected_lifecycle_ids=series_retained_lifecycle_ids(enclosures, now=moment),
+    )
     lifecycle_logs = read_lifecycle_logs(root)
     sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces_cached(config, moment)
-    enclosures = read_enclosures(coordination_root)
     provider_groups = admitted_worktree_groups(enclosures, lifecycle_logs, now=moment)
     engine_groups = active_enclosure_worktree_groups(enclosures, lifecycle_logs, now=moment)
     prune_orphaned_drift_snapshots(config)

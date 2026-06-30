@@ -178,14 +178,45 @@ def resolve_onboarding(scope: FileScope, code_rel: str) -> dict[str, Any]:
     return {"scope": scope.scope_id, "codePath": rel, "body": body, **meta}
 
 
+def _onboarding_doc_body(scope: FileScope, rel: str) -> str | None:
+    """The raw text of a partnerless onboarding doc (overview/entities/index) so the reader can render
+    it directly — a route overview has no code partner to pair through. Size-capped + binary-tolerant
+    like ``read_file``; a missing/unreadable/binary file yields ``None`` (the reader falls back to a
+    placeholder)."""
+    if scope.onboarding_root is None:
+        return None
+    try:
+        path = _resolve_within(scope.onboarding_root, rel)
+        if not path.is_file():
+            return None
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    try:
+        return raw[:_MAX_FILE_BYTES].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def resolve_partner(scope: FileScope, onboarding_rel: str) -> dict[str, Any]:
-    """Reverse pairing: a sidecar -> its partner code path, or an overview-without-code node."""
+    """Reverse pairing: a sidecar -> its partner code path, or an overview-without-code node.
+
+    An overview / entities / index doc has no code partner, so it carries its own ``body`` instead —
+    the File Viewer renders that markdown directly rather than showing an empty 'no code partner'
+    placeholder (a route overview must be readable, not just a tree leaf you cannot open).
+    """
     if scope.onboarding_root is None:
         return {"scope": scope.scope_id, "onboardingPath": onboarding_rel, "kind": "none"}
     rel = confine_rel(scope.onboarding_root, onboarding_rel)
     if not is_file_sidecar(rel):
         route = rel.rsplit("/", 1)[0] if "/" in rel else ""
-        return {"scope": scope.scope_id, "onboardingPath": rel, "kind": "overview", "route": route}
+        return {
+            "scope": scope.scope_id,
+            "onboardingPath": rel,
+            "kind": "overview",
+            "route": route,
+            "body": _onboarding_doc_body(scope, rel),
+        }
     code_path = source_path_from_sidecar(rel)
     return {
         "scope": scope.scope_id,

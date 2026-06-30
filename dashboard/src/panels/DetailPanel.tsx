@@ -8,14 +8,17 @@ import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
   parseTaskSelection,
+  qualifiedLeafKey,
   taskDocsForLifecycle,
   taskLabel,
+  type TaskSelection,
 } from "../data/taskIdentity";
 import { Markdown } from "../grammar/Markdown";
 import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
 import { TokenGauge } from "../grammar/TokenGauge";
 import type {
+  LifecycleProjection,
   Phase,
   ProviderNode,
   SeriesNode,
@@ -317,11 +320,16 @@ export function DetailPanel({
   selectedId,
   onOpenLifecycle,
   onOpenChangeSet,
+  onViewLeaf,
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
   // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view (L4a).
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  // Report the QUALIFIED LEAF ID of the leaf the panel is actually SHOWING — a drilled sub-task or a
+  // directly-opened leaf doc — so the rail chat + "attach to leaf" key by that leaf, not the master
+  // (L5 fix 1). `undefined` while only a master/series overview (or the empty state) is shown.
+  onViewLeaf?: (leafKey: string | undefined) => void;
 }) {
   const jump = onOpenLifecycle ?? (() => {});
   const lifecycles = useDashboard((s) => s.lifecycles);
@@ -361,6 +369,24 @@ export function DetailPanel({
           (selectedIsRootTask && item.seriesId === selectedEnclosure?.taskName),
       )
     : undefined;
+
+  // The leaf the panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc), mirroring
+  // the render branches below — a master/series overview shows no single leaf. Reported up so the rail
+  // chat + "attach to leaf" key by this leaf, never the master (L5 fix 1).
+  const viewedLeafDoc = displayedLeafDoc({
+    selection,
+    allDocs,
+    selectedTaskDoc,
+    lifecycle,
+    selectedSeries,
+    openSlug,
+  });
+  const viewedLeafKey =
+    viewedLeafDoc && viewedLeafDoc.kind !== "master" ? qualifiedLeafKey(viewedLeafDoc) : undefined;
+  // `onViewLeaf` is a stable setter from CockpitShell; re-report only when the resolved leaf changes.
+  useEffect(() => {
+    onViewLeaf?.(viewedLeafKey);
+  }, [viewedLeafKey, onViewLeaf]);
 
   if (selectedTaskDoc && !lifecycle) {
     const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
@@ -416,7 +442,9 @@ export function DetailPanel({
   if (!lifecycle && !selectedSeries) {
     return (
       <Panel testid="detail-panel" title="Detail" className={sizing} fill>
-        <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">
+        {/* Bumped to 0.18 (from the shared 0.14 default) for a touch more presence, matching the
+            File/Diff viewer's siege-tank backdrop. */}
+        <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4" opacity={0.18}>
           Select a task to inspect its phase, gate, and tokens.
         </EmptyStateBackdrop>
       </Panel>
@@ -738,6 +766,58 @@ const sliceForRef = (
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
 const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
+
+// The leaf doc the panel renders a full reader for — the single source of the viewed-leaf key (L5
+// fix 1). Mirrors the DetailPanel render branches exactly: a drilled sub-task (openSlug), a directly
+// opened leaf doc, or a lone slice; a master/series overview or the empty state yields undefined.
+function displayedLeafDoc({
+  allDocs,
+  selectedTaskDoc,
+  lifecycle,
+  selectedSeries,
+  openSlug,
+}: {
+  selection: TaskSelection | null;
+  allDocs: TaskDocNode[];
+  selectedTaskDoc: TaskDocNode | undefined;
+  lifecycle: LifecycleProjection | undefined;
+  selectedSeries: SeriesNode | undefined;
+  openSlug: string | null;
+}): TaskDocNode | undefined {
+  // Branch 1: a task-doc selection with no live lifecycle.
+  if (selectedTaskDoc && !lifecycle) {
+    if (selectedTaskDoc.kind === "master") {
+      const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
+      return openSlug ? sliceForSlug(sliceDocs, openSlug) : undefined;
+    }
+    return selectedTaskDoc;
+  }
+  // Branch 2: nothing resolved -> empty state.
+  if (!lifecycle && !selectedSeries) return undefined;
+  // Branch 3: a master-less series selection.
+  if (!lifecycle && selectedSeries) {
+    const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
+    return openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
+  }
+  // Branch 4: a live lifecycle.
+  if (!lifecycle) return undefined;
+  const docs =
+    selectedTaskDoc?.lifecycleId === lifecycle.id
+      ? [selectedTaskDoc]
+      : taskDocsForLifecycle(lifecycle, allDocs);
+  const master = docs.find((doc) => doc.kind === "master");
+  const slices = master
+    ? seriesSliceDocs(allDocs, master.docPath)
+    : docs.filter((doc) => doc.kind !== "master");
+  const contentSlices = selectedSeries
+    ? seriesSliceDocs(allDocs, selectedSeries.docPath)
+    : slices;
+  const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
+  if (openDoc) return openDoc;
+  if (selectedSeries || master) return undefined; // a master / series overview shows no single leaf
+  const nonMaster = docs.filter((doc) => doc.kind !== "master");
+  return nonMaster.length === 1 ? nonMaster[0] : undefined;
+}
 const topLevelStepProgress = (doc: TaskDocNode): { done: number; total: number } => ({
   done: doc.steps.filter((step) => step.status === "done").length,
   total: doc.steps.length,

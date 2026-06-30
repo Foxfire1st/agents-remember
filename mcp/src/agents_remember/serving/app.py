@@ -85,6 +85,8 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
     TerminalSessionKind,
+    TerminalSessionRole,
+    role_for_kind,
     terminal_catalog_path,
 )
 
@@ -266,6 +268,15 @@ class TerminalOpenRequest(BaseModel):
     harness: str | None = None
     label: str | None = None
     lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
+    # The durable leaf-identity key the chat claims at open (qualified leaf id ``repo/master/leaf-id``).
+    # Opaque to the backend; persisted on the catalog entry, uniqueness-checked before the spawn.
+    leaf_key: str | None = Field(default=None, alias="leafKey")
+
+
+class TerminalAttachLeafRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}/attach-leaf``: claim a leaf for an existing session."""
+
+    leaf_key: str = Field(alias="leafKey")
 
 
 class OperatorInboxPostRequest(BaseModel):
@@ -316,6 +327,34 @@ def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: st
 
 def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
     return entry.to_json()
+
+
+def _claim_leaf_or_409(
+    catalog: TerminalCatalog,
+    leaf_key: str | None,
+    session_id: str,
+    *,
+    role: TerminalSessionRole,
+) -> JSONResponse | None:
+    """Server-authoritative uniqueness: at most one RUNNING session per (leaf, role) (the guard).
+
+    Uniqueness is scoped to ``role`` (chat vs. terminal): a leaf may hold one agent chat AND one
+    plain terminal at once, so opening a terminal never 409s against the leaf's chat and vice versa.
+    Returns a ``409 leaf-taken`` response when ``leaf_key`` is already owned by a *different* running
+    session of the SAME role, else ``None`` (free, or already this session's). Called immediately
+    before an upsert in the single-process FastAPI app + atomic JSON store, so the check-then-write is
+    effectively atomic; the client guard in ``data/sessions.ts`` is only advisory. ``leaf_key`` is
+    opaque (a leaf key or a reserved ``master:<...>`` key flow identically).
+    """
+    if not leaf_key:
+        return None
+    owner = catalog.active_for_leaf(leaf_key, role=role)
+    if owner is not None and owner.id != session_id:
+        return JSONResponse(
+            content={"status": "leaf-taken", "leafKey": leaf_key, "session": owner.id},
+            status_code=409,
+        )
+    return None
 
 
 def _refresh_catalog_entries(
@@ -609,6 +648,14 @@ def create_app(
         except ValueError as exc:
             return JSONResponse(content={"status": "bad-kind", "detail": str(exc)}, status_code=400)
         kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
+        # Claim the leaf before spawning: a taken leaf is refused 409 so two chats never mingle on
+        # one leaf (contradicting file writes). Scoped to the launch role so a terminal can sit beside
+        # the leaf's agent chat. Enclosure-independent -- no worktree required.
+        conflict = _claim_leaf_or_409(
+            catalog, request.leaf_key, session, role=role_for_kind(kind)
+        )
+        if conflict is not None:
+            return conflict
         opened = host.ensure(
             session,
             cwd=cwd,
@@ -635,6 +682,9 @@ def create_app(
             created_at=existing.created_at if existing is not None else attached_at,
             last_attached_at=attached_at,
             status="running",
+            # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already
+            # owns (a re-open / reconnect must not silently drop the leaf binding).
+            leaf_key=request.leaf_key or (existing.leaf_key if existing is not None else None),
         )
         catalog.upsert(entry)
         return JSONResponse(
@@ -644,10 +694,31 @@ def create_app(
                 "kind": request.kind,
                 "harness": request.harness,
                 "lifecycleId": request.lifecycle_id,
+                "leafKey": entry.leaf_key,
                 "cwd": str(opened.cwd),
                 "tmuxName": opened.tmux_name,
                 "status": "running",
             },
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/attach-leaf")
+    def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
+        # L5: claim a leaf for an EXISTING session from the Chats page (enclosure-free, no respawn).
+        # 404 if the session is unknown or terminated (a terminated chat cannot hold a leaf); 409 if a
+        # different running chat already owns the leaf; else persist the leaf_key and report it.
+        entry = catalog.get(session)
+        if entry is None or entry.status == "terminated":
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        # Scope uniqueness to the existing session's role so attaching a terminal to a leaf that
+        # already has an agent chat is allowed (and vice versa).
+        conflict = _claim_leaf_or_409(catalog, request.leaf_key, session, role=entry.role)
+        if conflict is not None:
+            return conflict
+        updated = entry.with_leaf_key(request.leaf_key)
+        catalog.upsert(updated)
+        return JSONResponse(
+            content={"session": session, "status": "attached", "leafKey": request.leaf_key},
             status_code=200,
         )
 

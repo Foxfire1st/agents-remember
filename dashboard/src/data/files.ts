@@ -64,7 +64,8 @@ export interface ForwardPairing extends OnboardingMeta {
 // Reverse pairing: a sidecar -> its partner code path, an overview node, or nothing.
 export type ReversePairing =
   | { scope: Scope; onboardingPath: string; kind: "sidecar"; codePath: string; exists: boolean }
-  | { scope: Scope; onboardingPath: string; kind: "overview"; route: string }
+  // A partnerless overview/entities/index doc carries its own markdown so the reader can render it.
+  | { scope: Scope; onboardingPath: string; kind: "overview"; route: string; body: string | null }
   | { scope: Scope; onboardingPath: string; kind: "none" };
 
 // The serving layer maps domain errors to a status-string JSONResponse

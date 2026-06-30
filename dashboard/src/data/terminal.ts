@@ -233,6 +233,8 @@ export interface TerminalSessionInfo {
   kind: TerminalOpenKind;
   harness?: string;
   lifecycleId?: string;
+  /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat claims. */
+  leafKey?: string;
   cwd: string;
   tmuxName: string;
   createdAt: string;
@@ -244,6 +246,7 @@ export interface TerminalSessionInfo {
 interface OpenTerminalOptions {
   label?: string;
   lifecycleId?: string;
+  leafKey?: string;
 }
 
 /**
@@ -299,6 +302,7 @@ export async function openTerminalSession(
       ...(harness ? { harness } : {}),
       ...(options.label ? { label: options.label } : {}),
       ...(options.lifecycleId ? { lifecycleId: options.lifecycleId } : {}),
+      ...(options.leafKey ? { leafKey: options.leafKey } : {}),
     };
     const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
       method: "POST",
@@ -319,6 +323,36 @@ export async function terminateTerminalSession(sessionId: string, base = ""): Pr
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+/** The outcome of a leaf-attach POST: bound, refused (the leaf already has a running chat), or failed. */
+export type AttachLeafResult = "ok" | "leaf-taken" | "error";
+
+/**
+ * Claim a free leaf for an EXISTING session (slice L5): `POST /api/terminal/{id}/attach-leaf {leafKey}`.
+ * The server is the uniqueness arbiter — `200` binds the leaf, `409` means another running chat already
+ * owns it (`"leaf-taken"`), any other status / network failure is `"error"`. Enclosure-independent.
+ */
+export async function attachSessionToLeaf(
+  sessionId: string,
+  leafKey: string,
+  base = "",
+): Promise<AttachLeafResult> {
+  try {
+    const response = await fetch(
+      `${base}/api/terminal/${encodeURIComponent(sessionId)}/attach-leaf`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leafKey }),
+      },
+    );
+    if (response.ok) return "ok";
+    if (response.status === 409) return "leaf-taken";
+    return "error";
+  } catch {
+    return "error";
   }
 }
 

@@ -25,6 +25,7 @@ import {
   taskChangeset,
 } from "../../data/changeset";
 import { FilesApiError } from "../../data/files";
+import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
 import { ChangeSetPane } from "./ChangeSetPane";
 
 export interface ChangeSetTarget {
@@ -93,8 +94,10 @@ const row = css({
   alignItems: "center",
   gap: "0.3rem",
   paddingInline: "0.6rem",
-  _hover: { background: "bg" },
-  "&[data-active=true]": { background: "bg" },
+  // Match the File Viewer tree's selected/hover amber wash — the old `background: bg` active state was
+  // indistinguishable from the panel, so the selected file looked unselected.
+  _hover: { background: "color-mix(in oklab, var(--amber) 12%, transparent)" },
+  "&[data-active=true]": { background: "color-mix(in oklab, var(--amber) 20%, transparent)" },
 });
 const rowMain = css({
   flex: "1",
@@ -128,6 +131,8 @@ const sidecarBtn = css({
 });
 const handle = css({ width: "3px", flexShrink: "0", background: "grid", cursor: "col-resize", _hover: { background: "amber" } });
 const placeholder = css({ height: "100%", display: "grid", placeItems: "center", padding: "1rem", color: "muted", fontSize: "0.8rem", textAlign: "center" });
+// EmptyStateBackdrop's flex:1 canvas needs a flex-column host to fill the diff Panel.
+const emptyHost = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
 
 type Row = ChangedFile & { leafCount?: number };
 
@@ -326,8 +331,12 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
             {diff ? (
               <ChangeSetPane diff={diff} keyPrefix="changeset.main" />
             ) : (
-              <div className={placeholder} data-testid="pane-placeholder">
-                Select a changed file
+              // No file picked yet: the same faint boomerang backdrop the File Viewer / Operations use.
+              <div className={emptyHost}>
+                {/* Brighter than the shared 0.14 default — the siege-tank clip reads darker; matches DualPane. */}
+                <EmptyStateBackdrop src="/assets/sc2-siege-tank-boomerang.mp4" opacity={0.18}>
+                  Select a changed file
+                </EmptyStateBackdrop>
               </div>
             )}
           </Panel>

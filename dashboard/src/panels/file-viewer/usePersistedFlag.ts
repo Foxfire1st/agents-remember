@@ -23,3 +23,29 @@ export function usePersistedFlag(
 
   return [value, set];
 }
+
+// The numeric sibling of usePersistedFlag — a number useState backed by localStorage. The cockpit's
+// resizable rails persist their pixel widths through this so a dragged column survives a page reload.
+// A non-finite stored value (corrupt key) falls back instead of poisoning the layout with NaN.
+export function usePersistedNumber(
+  key: string,
+  fallback: number,
+): [number, (next: number) => void] {
+  const [value, setValue] = useState<number>(() => {
+    if (typeof window === "undefined") return fallback;
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  });
+
+  const set = useCallback(
+    (next: number) => {
+      setValue(next);
+      if (typeof window !== "undefined") window.localStorage.setItem(key, String(next));
+    },
+    [key],
+  );
+
+  return [value, set];
+}

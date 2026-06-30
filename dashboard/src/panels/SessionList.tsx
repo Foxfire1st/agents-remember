@@ -98,11 +98,14 @@ export function SessionList({
   activeId,
   onSelect,
   onTerminate,
+  leafNameFor,
 }: {
   sessions: OpenSession[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onTerminate: (id: string) => void;
+  /** Resolve a bound session's leaf name (task-doc title, fallback leaf id) for the "who works on what" label. */
+  leafNameFor?: (leafKey: string) => string;
 }) {
   const stopRowSelection = (event: MouseEvent<HTMLButtonElement> | PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -120,14 +123,29 @@ export function SessionList({
       }}
       items={sessions}
     >
-      {(session) => (
+      {(session) => {
+        const leafName = session.leafKey
+          ? (leafNameFor?.(session.leafKey) ?? session.leafKey)
+          : undefined;
+        // The full, untruncated name for the hover title (the label, plus its bound leaf) — the row
+        // text-overflow-ellipses, so the title is how a long name stays readable (fix 4).
+        const fullName = leafName ? `${session.label} · ${leafName}` : session.label;
+        return (
         <GridListItem
           id={session.id}
           textValue={session.label}
           className={row}
           data-testid={`chats-session-${session.id}`}
         >
-          <span className={label}>{session.label}</span>
+          <span className={label} title={fullName}>
+            {session.label}
+            {leafName ? (
+              <span data-testid={`chats-session-leaf-${session.id}`}>
+                {" · "}
+                {leafName}
+              </span>
+            ) : null}
+          </span>
           {session.lifecycleId ? <span className={badge}>{session.lifecycleId}</span> : null}
           {session.status && session.status !== "running" ? (
             <span className={statusBadge}>{session.status}</span>
@@ -147,7 +165,8 @@ export function SessionList({
             </button>
           </span>
         </GridListItem>
-      )}
+        );
+      }}
     </GridList>
   );
 }
