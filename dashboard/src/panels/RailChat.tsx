@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { css } from "../../styled-system/css";
 import {
   createSession,
+  deliverToSession,
   notifySessionCatalogChanged,
   registerConnection,
   sendToSession,
@@ -20,8 +21,8 @@ import {
   terminateTerminalSession,
   type HarnessInfo,
 } from "../data/terminal";
-import { buildTaskTree, leafIdFromKey } from "../data/taskIdentity";
-import type { TaskDocNode } from "../types/projection";
+import { buildTaskTree, leafIdFromKey, qualifiedLeafKey } from "../data/taskIdentity";
+import type { EngineProcessNode, TaskDocNode, TaskStepNode } from "../types/projection";
 import { LeafAttachPicker } from "./LeafAttachPicker";
 import { SessionComposer } from "./SessionComposer";
 
@@ -155,6 +156,12 @@ const attachError = css({
   paddingInline: "0.2rem",
   flexShrink: 0,
 });
+const contextNote = css({
+  fontSize: "0.68rem",
+  color: "amber",
+  paddingInline: "0.2rem",
+  flexShrink: 0,
+});
 const terminateButton = css({
   flexShrink: 0,
   font: "inherit",
@@ -177,21 +184,82 @@ function isRunning(session: OpenSession): boolean {
   return (session.status ?? "running") === "running";
 }
 
+function stepLine(step: TaskStepNode): string {
+  return `- [${step.status}] ${step.id ? `${step.id} -- ` : ""}${step.title}`;
+}
+
+function findLeafProcess(
+  leafKey: string,
+  doc: TaskDocNode,
+  engineProcesses: EngineProcessNode[],
+): EngineProcessNode | undefined {
+  const leafId = leafIdFromKey(leafKey).toLowerCase();
+  return engineProcesses.find(
+    (node) =>
+      (doc.lifecycleId && node.lifecycleId === doc.lifecycleId) ||
+      node.leafId.toLowerCase() === leafId,
+  );
+}
+
+function buildLeafContextPackage({
+  leafKey,
+  taskDocuments,
+  engineProcesses,
+}: {
+  leafKey: string;
+  taskDocuments: TaskDocNode[];
+  engineProcesses: EngineProcessNode[];
+}): string | null {
+  const doc = taskDocuments.find((item) => qualifiedLeafKey(item) === leafKey);
+  if (!doc) return null;
+  const process = findLeafProcess(leafKey, doc, engineProcesses);
+  const lines = [
+    "Leaf context",
+    "",
+    `Task: ${doc.id} -- ${doc.title}`,
+    `Status: ${doc.status}`,
+    `Leaf key: ${leafKey}`,
+    `Task document: ${doc.docPath}`,
+    doc.lifecycleId ? `Lifecycle: ${doc.lifecycleId}` : null,
+    process?.worktreeGroup ? `Worktree group: ${process.worktreeGroup}` : null,
+    process?.codeWorktree.path ? `Code worktree: ${process.codeWorktree.path}` : null,
+    process?.memoryWorktree?.path ? `Memory worktree: ${process.memoryWorktree.path}` : null,
+    "",
+    "Objective",
+    doc.objective || "(none projected)",
+    "",
+    "Requirements",
+    ...(doc.requirements.length > 0
+      ? doc.requirements.map((item) => `- ${item}`)
+      : ["- (none projected)"]),
+    "",
+    "Top-level steps",
+    ...(doc.steps.length > 0 ? doc.steps.map(stepLine) : ["- (none projected)"]),
+    "",
+    "Instruction",
+    "Attach yourself to this lifecycle/leaf before working. Use this task document as the scope anchor.",
+  ];
+  return lines.filter((line): line is string => line !== null).join("\n");
+}
+
 export function RailChat({
   leafKey,
   selectedLifecycleId,
   taskDocuments = [],
+  engineProcesses = [],
   contextMaster,
 }: {
   leafKey?: string;
   selectedLifecycleId?: string;
   taskDocuments?: TaskDocNode[];
+  engineProcesses?: EngineProcessNode[];
   contextMaster?: string;
 }) {
   const sessions = useSessions((state) => state.sessions);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   // A transient note for a refused leaf attach (the server's 409 leaf-taken).
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
+  const [leafContextNote, setLeafContextNote] = useState<string | null>(null);
 
   // Detection-driven: the server reports which supported harnesses are installed; "start chat" offers
   // one button per detected harness (Claude Code / Codex / Pi.dev). `[]` (no backend) leaves only the
@@ -238,9 +306,20 @@ export function RailChat({
 
   const detected = harnesses.filter((harness) => harness.detected);
 
+  const deliverLeafContext = async (sessionId: string, lk: string) => {
+    setLeafContextNote(null);
+    const packet = buildLeafContextPackage({ leafKey: lk, taskDocuments, engineProcesses });
+    if (!packet) return;
+    const status = await deliverToSession(sessionId, packet);
+    if (status === "unconfirmed") setLeafContextNote("context delivery unconfirmed");
+  };
+
   // Start is NEVER gated on a leaf: pass the viewed leaf (may be undefined → an unattached/free chat).
   const startChat = (harness: HarnessInfo) => {
-    void createSession(harness.name, "harness", harness.id, selectedLifecycleId, leafKey);
+    void (async () => {
+      const sessionId = await createSession(harness.name, "harness", harness.id, selectedLifecycleId, leafKey);
+      if (leafKey) await deliverLeafContext(sessionId, leafKey);
+    })();
   };
   const openTerminal = () => {
     void createSession("Terminal", "terminal", undefined, selectedLifecycleId, leafKey);
@@ -263,6 +342,7 @@ export function RailChat({
     if (result === "ok") {
       sessionStore.getState().setLeaf(sessionId, lk);
       notifySessionCatalogChanged("create", sessionId);
+      await deliverLeafContext(sessionId, lk);
     } else if (result === "leaf-taken") {
       setLeafAttachError("leaf already has a chat");
     } else {
@@ -310,6 +390,11 @@ export function RailChat({
       <header className={heading} data-testid="rail-chat-heading">
         {leafKey ? `Chat · ${leafIdFromKey(leafKey)}` : "Chat"}
       </header>
+      {leafContextNote ? (
+        <span className={contextNote} data-testid="rail-leaf-context-note" role="status">
+          {leafContextNote}
+        </span>
+      ) : null}
       <div className={terminalArea}>
         {!chatSession && !terminalSession ? (
           <div className={empty} data-testid="rail-chat-empty">

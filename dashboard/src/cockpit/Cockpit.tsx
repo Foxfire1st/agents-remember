@@ -32,11 +32,12 @@ import { MemoryMirror } from "../panels/MemoryMirror";
 import { RailChat } from "../panels/RailChat";
 import { usePersistedFlag, usePersistedNumber } from "../panels/file-viewer/usePersistedFlag";
 import { Topology } from "../panels/Topology";
-import type { TaskDocNode } from "../types/projection";
+import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 
 // A stable empty array so the `analytics?.taskDocuments ?? …` selector never returns a fresh reference
 // (which would churn the zustand snapshot and re-render every tick).
 const EMPTY_TASK_DOCS: TaskDocNode[] = [];
+const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 
 // The cockpit shell (model C, slice 5c): persistent command chrome that never hides the alarms —
 // a top status bar, a left rail (attention queue + lifecycle list = the master-caution, always
@@ -348,6 +349,7 @@ export function CockpitShell() {
   // unmount (a full-bleed view switch) and reaches both the rail and the Chats page.
   const [viewedLeafKey, setViewedLeafKey] = useState<string | undefined>(undefined);
   const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
   // The master folder of the current selection — pre-drills the leaf-attach picker to the task in context.
   const contextMaster = useDashboard((s) =>
     masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
@@ -478,6 +480,7 @@ export function CockpitShell() {
                 leafKey={viewedLeafKey}
                 selectedLifecycleId={selectedLifecycleId}
                 taskDocuments={taskDocuments}
+                engineProcesses={engineProcesses}
                 contextMaster={contextMaster}
               />
             )}

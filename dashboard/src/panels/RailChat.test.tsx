@@ -1,22 +1,69 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { findSessionForLeaf, sessionStore } from "../data/sessions";
-import type { TaskDocNode } from "../types/projection";
+import { deliverToSession, findSessionForLeaf, sessionStore } from "../data/sessions";
+import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
+
+vi.mock("../data/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/sessions")>();
+  return { ...actual, deliverToSession: vi.fn() };
+});
 
 // A minimal task-doc whose qualified leaf id (`repo / dir(docPath) basename / id`) equals LEAF_KEY.
 // `kind: "subTask"` marks it as a leaf so the "Attach to leaf ▾" picker lists it.
 function leafDoc(): TaskDocNode {
   return {
     id: "260628-L5",
+    lifecycleId: "lc-l5",
     repository: "agents-remember",
     kind: "subTask",
+    status: "planning",
     docPath: "/tasks/agents-remember/260628_operations-integration/05_sidebar-chat-attachment.json",
     title: "Sidebar chat attachment",
+    objective: "Bind a chat to a durable leaf identity.",
+    requirements: ["Start from the selected leaf.", "Do not inject on rejected attach."],
+    steps: [
+      { id: "S1", title: "Wire the leaf registry", status: "done", substeps: [] },
+      { id: "S2", title: "Add the rail chat", status: "inProgress", substeps: [] },
+    ],
   } as unknown as TaskDocNode;
+}
+
+function engineProcess(): EngineProcessNode {
+  return {
+    id: "enc",
+    enclosure: "enc",
+    worktreeGroup: "/worktrees/sidebar-chat-ar",
+    taskId: "260628_OPERATIONS-INTEGRATION",
+    leafId: "260628-l5",
+    taskName: "260628_operations-integration",
+    repoName: "agents-remember",
+    lifecycleId: "lc-l5",
+    phase: "worktree-started",
+    health: "nominal",
+    codeSource: { factState: "observed" },
+    codeWorktree: { path: "/worktrees/sidebar-chat-ar/sidebar-chat", factState: "observed" },
+    memoryMode: "external",
+    memoryWorktree: { path: "/worktrees/sidebar-chat-ar/memory-sidebar-chat", factState: "observed" },
+    ledgerRows: [],
+    ledgerRowCount: 0,
+    humanReviewStatus: "pending-review",
+    closeoutStatus: "not-started",
+    integrationStatus: "not-started",
+    cleanup: "pending",
+    completedPhases: [],
+    failedPhases: [],
+    seedFallback: false,
+    providers: [],
+    edges: [],
+    actions: [],
+    summary: "ready",
+    missingFacts: [],
+    sourceFiles: [],
+  } as unknown as EngineProcessNode;
 }
 
 // Mock the lazy Terminal so opening a session never pulls xterm (a canvas probe) into jsdom; the stub
@@ -45,8 +92,13 @@ class FakeBroadcastChannel {
   }
 }
 
+beforeEach(() => {
+  vi.mocked(deliverToSession).mockResolvedValue("delivered");
+});
+
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   vi.unstubAllGlobals();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
   FakeBroadcastChannel.reset();
@@ -97,6 +149,36 @@ describe("RailChat start affordances (L5 fix 2)", () => {
       expect(session?.harness).toBe("claude");
     });
   });
+
+  it("delivers leaf context after starting an agent chat on the viewed leaf", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "chat-id" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }),
+          });
+        }
+        return Promise.resolve({ ok: true });
+      }),
+    );
+
+    const { findByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[engineProcess()]} />,
+    );
+    fireEvent.click(await findByTestId("rail-start-chat-claude"));
+
+    await waitFor(() => expect(deliverToSession).toHaveBeenCalledWith("chat-id", expect.any(String)));
+    const packet = vi.mocked(deliverToSession).mock.calls[0]?.[1] ?? "";
+    expect(packet).toContain("Task: 260628-L5 -- Sidebar chat attachment");
+    expect(packet).toContain(`Leaf key: ${LEAF_KEY}`);
+    expect(packet).toContain("Lifecycle: lc-l5");
+    expect(packet).toContain("Code worktree: /worktrees/sidebar-chat-ar/sidebar-chat");
+    expect(packet).toContain("- [done] S1 -- Wire the leaf registry");
+  });
 });
 
 describe("RailChat create from anywhere (L5)", () => {
@@ -140,9 +222,10 @@ describe("RailChat create from anywhere (L5)", () => {
       const free = sessionStore.getState().sessions.find((s) => s.kind === "harness" && !s.leafKey);
       expect(free?.harness).toBe("claude");
     });
+    expect(deliverToSession).not.toHaveBeenCalled();
   });
 
-  it("offers an attach-to-leaf picker for a free chat and binds the picked leaf on 200", async () => {
+  it("offers an attach-to-leaf picker for a free chat, binds the picked leaf, and delivers context", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -157,7 +240,9 @@ describe("RailChat create from anywhere (L5)", () => {
       { id: "f1", label: "Claude Code 1", kind: "harness", harness: "claude", status: "running" },
     ]);
 
-    const { findByTestId } = render(<RailChat taskDocuments={[leafDoc()]} />); // NO leafKey
+    const { findByTestId } = render(
+      <RailChat taskDocuments={[leafDoc()]} engineProcesses={[engineProcess()]} />,
+    ); // NO leafKey
     // Drill-down picker: open it, then pick the leaf (a lone leaf with no master doc shows at top level).
     fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
     const leaf = await findByTestId("rail-attach-leaf-picker-leaf");
@@ -166,6 +251,8 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(leaf);
 
     await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
+    await waitFor(() => expect(deliverToSession).toHaveBeenCalledWith("f1", expect.any(String)));
+    expect(vi.mocked(deliverToSession).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
   });
 
   it("surfaces a note when the picked leaf is already taken (409) and does not bind", async () => {
@@ -190,6 +277,31 @@ describe("RailChat create from anywhere (L5)", () => {
     const note = await findByTestId("rail-leaf-attach-error");
     expect(note.textContent).toContain("leaf already has a chat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
+    expect(deliverToSession).not.toHaveBeenCalled();
+  });
+
+  it("surfaces unconfirmed context delivery after a successful leaf bind", async () => {
+    vi.mocked(deliverToSession).mockResolvedValue("unconfirmed");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/terminal/f1/attach-leaf")) {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        }
+        return Promise.reject(new Error("no backend"));
+      }),
+    );
+    sessionStore.getState().hydrate([
+      { id: "f1", label: "Claude Code 1", kind: "harness", harness: "claude", status: "running" },
+    ]);
+
+    const { findByTestId } = render(<RailChat taskDocuments={[leafDoc()]} />);
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker-leaf"));
+
+    const note = await findByTestId("rail-leaf-context-note");
+    expect(note.textContent).toContain("context delivery unconfirmed");
   });
 });
 
