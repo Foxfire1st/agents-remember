@@ -3,8 +3,8 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { css } from "../../styled-system/css";
 import {
   createSession,
-  deliverToSession,
   notifySessionCatalogChanged,
+  pasteDraftToSession,
   registerConnection,
   sendToSession,
   sessionRole,
@@ -310,7 +310,7 @@ export function RailChat({
     setLeafContextNote(null);
     const packet = buildLeafContextPackage({ leafKey: lk, taskDocuments, engineProcesses });
     if (!packet) return;
-    const status = await deliverToSession(sessionId, packet);
+    const status = await pasteDraftToSession(sessionId, packet);
     if (status === "unconfirmed") setLeafContextNote("context delivery unconfirmed");
   };
 

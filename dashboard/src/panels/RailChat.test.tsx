@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deliverToSession, findSessionForLeaf, sessionStore } from "../data/sessions";
+import { findSessionForLeaf, pasteDraftToSession, sessionStore } from "../data/sessions";
 import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
@@ -9,7 +9,7 @@ const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
 
 vi.mock("../data/sessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/sessions")>();
-  return { ...actual, deliverToSession: vi.fn() };
+  return { ...actual, pasteDraftToSession: vi.fn() };
 });
 
 // A minimal task-doc whose qualified leaf id (`repo / dir(docPath) basename / id`) equals LEAF_KEY.
@@ -93,7 +93,7 @@ class FakeBroadcastChannel {
 }
 
 beforeEach(() => {
-  vi.mocked(deliverToSession).mockResolvedValue("delivered");
+  vi.mocked(pasteDraftToSession).mockResolvedValue("delivered");
 });
 
 afterEach(() => {
@@ -171,8 +171,8 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     );
     fireEvent.click(await findByTestId("rail-start-chat-claude"));
 
-    await waitFor(() => expect(deliverToSession).toHaveBeenCalledWith("chat-id", expect.any(String)));
-    const packet = vi.mocked(deliverToSession).mock.calls[0]?.[1] ?? "";
+    await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("chat-id", expect.any(String)));
+    const packet = vi.mocked(pasteDraftToSession).mock.calls[0]?.[1] ?? "";
     expect(packet).toContain("Task: 260628-L5 -- Sidebar chat attachment");
     expect(packet).toContain(`Leaf key: ${LEAF_KEY}`);
     expect(packet).toContain("Lifecycle: lc-l5");
@@ -222,7 +222,7 @@ describe("RailChat create from anywhere (L5)", () => {
       const free = sessionStore.getState().sessions.find((s) => s.kind === "harness" && !s.leafKey);
       expect(free?.harness).toBe("claude");
     });
-    expect(deliverToSession).not.toHaveBeenCalled();
+    expect(pasteDraftToSession).not.toHaveBeenCalled();
   });
 
   it("offers an attach-to-leaf picker for a free chat, binds the picked leaf, and delivers context", async () => {
@@ -251,8 +251,8 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(leaf);
 
     await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
-    await waitFor(() => expect(deliverToSession).toHaveBeenCalledWith("f1", expect.any(String)));
-    expect(vi.mocked(deliverToSession).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
+    await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("f1", expect.any(String)));
+    expect(vi.mocked(pasteDraftToSession).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
   });
 
   it("surfaces a note when the picked leaf is already taken (409) and does not bind", async () => {
@@ -277,11 +277,11 @@ describe("RailChat create from anywhere (L5)", () => {
     const note = await findByTestId("rail-leaf-attach-error");
     expect(note.textContent).toContain("leaf already has a chat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
-    expect(deliverToSession).not.toHaveBeenCalled();
+    expect(pasteDraftToSession).not.toHaveBeenCalled();
   });
 
   it("surfaces unconfirmed context delivery after a successful leaf bind", async () => {
-    vi.mocked(deliverToSession).mockResolvedValue("unconfirmed");
+    vi.mocked(pasteDraftToSession).mockResolvedValue("unconfirmed");
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {

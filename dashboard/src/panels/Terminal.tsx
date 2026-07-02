@@ -22,6 +22,7 @@ const host = css({
   borderRadius: "3px",
   overflow: "hidden",
   "& .xterm": { height: "100%" },
+  "& .xterm-viewport": { overflowY: "auto !important" },
 });
 
 // A dark VT theme keyed to the cockpit's CRT palette (xterm needs concrete colours, not tokens).
@@ -69,6 +70,7 @@ export function Terminal({
       fontSize: 13,
       theme: THEME,
       convertEol: false,
+      scrollback: 5000,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

@@ -7,6 +7,7 @@ import {
   findSessionForLifecycle,
   fromTerminalSessionInfo,
   notifySessionCatalogChanged,
+  pasteDraftToSession,
   registerConnection,
   sendToSession,
   sessionStore,
@@ -378,6 +379,17 @@ describe("connection registry + deliverToSession (6f hardening)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("pastes a draft package without sending Enter", async () => {
+    const conn = fakeConn();
+    const raw = "draft\x1abody\x1b[200~tail";
+    registerConnection("draft-1", conn);
+
+    await expect(pasteDraftToSession("draft-1", raw)).resolves.toBe("delivered");
+
+    expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]);
+    registerConnection("draft-1", null);
   });
 
   it("resolves 'unconfirmed' (never hangs) when a terminal never registers", async () => {

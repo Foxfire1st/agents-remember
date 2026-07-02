@@ -404,6 +404,18 @@ function waitForConnection(id: string): Promise<TerminalConnection | null> {
 export type DeliveryStatus = "delivered" | "unconfirmed";
 
 /**
+ * Paste a context package into a session without submitting it. Used by the leaf-bind handoff where the
+ * operator needs to add their own instruction before pressing Enter.
+ */
+export async function pasteDraftToSession(id: string, packageText: string): Promise<DeliveryStatus> {
+  const conn = await waitForConnection(id);
+  if (!conn) return "unconfirmed";
+  await conn.whenReady();
+  conn.sendInput(bracketedPaste(sanitizeForInjection(packageText)));
+  return "delivered";
+}
+
+/**
  * Deliver a context package to a session and confirm it submitted (slice 6f hardening). Waits for the
  * session's terminal to register (bounded — see {@link waitForConnection}) and its harness to settle,
  * injects the package as ONE *sanitized* bracketed paste (control bytes — incl. the `0x1a` suspend byte —
