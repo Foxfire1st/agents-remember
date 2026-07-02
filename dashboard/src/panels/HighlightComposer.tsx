@@ -6,6 +6,8 @@ import { useSelectionCapture } from "../data/selection";
 import {
   createSession,
   deliverToSession,
+  findSessionForLeaf,
+  pasteDraftToSession,
   sessionStore,
   useSessions,
   type DeliveryStatus,
@@ -167,11 +169,33 @@ type Target =
   | { key: string; kind: "session"; id: string; label: string }
   | { key: string; kind: "create"; harnessId?: string; prefix: string; label: string };
 
+function buildContextPackage({
+  selectionText,
+  note,
+  imagePath,
+}: {
+  selectionText: string;
+  note?: string;
+  imagePath?: string | null;
+}): string {
+  const parts = note?.trim() ? [note.trim(), ""] : [];
+  parts.push("--- from the dashboard ---", selectionText);
+  // Carry an image by path: Claude Code auto-attaches an on-disk image path it finds in the message.
+  // Follow-up (deferred): if the session cwd contains a space, the path auto-attach may split on it;
+  // paths here are space-free, the robust fix is a space-free pastes root (tracked, non-blocking).
+  if (imagePath) parts.push("", `Screenshot for context: ${imagePath}`);
+  return parts.join("\n");
+}
+
 export function HighlightComposer({
   selectedLifecycleId,
+  viewedLeafKey,
+  leafChatActive = false,
   onSent,
 }: {
   selectedLifecycleId?: string;
+  viewedLeafKey?: string;
+  leafChatActive?: boolean;
   onSent?: () => void;
 }) {
   const { selection, clear } = useSelectionCapture();
@@ -188,6 +212,8 @@ export function HighlightComposer({
   // The resolved delivery target, captured on the first Send so a Retry re-delivers to the SAME session
   // (and reuses the uploaded image) instead of creating a new chat / re-uploading each attempt.
   const deliveryRef = useRef<{ id: string; imagePath: string | null } | null>(null);
+  const directPasteRef = useRef<string | null>(null);
+  const [failedDirectPasteKey, setFailedDirectPasteKey] = useState<string | null>(null);
 
   // Detected harnesses become "new chat" options so a created chat is an agent, not a shell. Fetched
   // once — the composer stays mounted in CockpitShell (it just renders null without a selection).
@@ -209,6 +235,8 @@ export function HighlightComposer({
     setStatus(null);
     sendingRef.current = false;
     deliveryRef.current = null;
+    directPasteRef.current = null;
+    setFailedDirectPasteKey(null);
   }, [selection]);
 
   // Preview a pasted screenshot; revoke the object URL when it changes or the composer unmounts.
@@ -220,7 +248,45 @@ export function HighlightComposer({
     [imagePreviewUrl],
   );
 
+  const directLeafChat =
+    selection &&
+    leafChatActive &&
+    viewedLeafKey &&
+    selection.leafKey === viewedLeafKey
+      ? findSessionForLeaf(viewedLeafKey, "chat")
+      : undefined;
+  const directPasteKey =
+    selection && directLeafChat
+      ? [
+          directLeafChat.id,
+          selection.leafKey,
+          selection.text,
+          selection.rect.left,
+          selection.rect.top,
+          selection.rect.width,
+          selection.rect.height,
+        ].join("|")
+      : null;
+
+  useEffect(() => {
+    if (!selection || !directLeafChat || !directPasteKey || failedDirectPasteKey === directPasteKey) return;
+    if (directPasteRef.current === directPasteKey) return;
+    directPasteRef.current = directPasteKey;
+    void pasteDraftToSession(
+      directLeafChat.id,
+      buildContextPackage({ selectionText: selection.text }),
+    ).then((result) => {
+      if (directPasteRef.current !== directPasteKey) return;
+      if (result === "delivered") {
+        clear();
+      } else {
+        setFailedDirectPasteKey(directPasteKey);
+      }
+    });
+  }, [clear, directLeafChat, directPasteKey, failedDirectPasteKey, selection]);
+
   if (!selection) return null;
+  if (directLeafChat && failedDirectPasteKey !== directPasteKey) return null;
 
   // Targets: every open chat, then a create option per detected harness, then a plain shell.
   const routedSessions = selectedLifecycleId
@@ -246,17 +312,6 @@ export function HighlightComposer({
   const dismiss = () => {
     clear();
     setMode("pill");
-  };
-
-  const buildPackage = (imagePath?: string | null): string => {
-    const note = message.trim();
-    const parts = note ? [note, ""] : [];
-    parts.push("--- from the dashboard ---", selection.text);
-    // Carry an image by path: Claude Code auto-attaches an on-disk image path it finds in the message.
-    // Follow-up (deferred): if the session cwd contains a space, the path auto-attach may split on it;
-    // paths here are space-free, the robust fix is a space-free pastes root (tracked, non-blocking).
-    if (imagePath) parts.push("", `Screenshot for context: ${imagePath}`);
-    return parts.join("\n");
   };
 
   const finish = () => {
@@ -302,7 +357,10 @@ export function HighlightComposer({
         }
         ctx.imagePath = path;
       }
-      const result: DeliveryStatus = await deliverToSession(ctx.id, buildPackage(ctx.imagePath));
+      const result: DeliveryStatus = await deliverToSession(
+        ctx.id,
+        buildContextPackage({ selectionText: selection.text, note: message, imagePath: ctx.imagePath }),
+      );
       if (result === "delivered") finish();
       else setStatus("unconfirmed");
     } finally {

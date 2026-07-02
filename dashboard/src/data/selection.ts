@@ -11,18 +11,28 @@ export interface SelectionContext {
   text: string;
   /** The selection's viewport rect — the anchor the composer popover positions against. */
   rect: DOMRect;
+  /** Qualified leaf key when the selection belongs to an open task reader. */
+  leafKey?: string;
 }
 
 // A selection is ignored when its anchor sits inside the terminal host (xterm owns its own selection),
 // the composer itself (its content must not re-raise it), or an editable field.
 const IGNORE_SELECTOR =
   '[data-testid="terminal-host"], [data-highlight-composer], input, textarea, [contenteditable="true"]';
+const TASK_LEAF_SELECTOR = "[data-task-leaf-key]";
+
+function elementFor(node: Node | null | undefined): Element | null {
+  if (!node) return null;
+  return node instanceof Element ? node : node.parentElement;
+}
 
 /** True when `node` sits inside an ignored region (terminal host / composer / editable field). */
 export function isIgnoredAnchor(node: Node | null | undefined): boolean {
-  if (!node) return false;
-  const el = node instanceof Element ? node : node.parentElement;
-  return el?.closest(IGNORE_SELECTOR) != null;
+  return elementFor(node)?.closest(IGNORE_SELECTOR) != null;
+}
+
+function leafKeyForAnchor(node: Node | null | undefined): string | undefined {
+  return elementFor(node)?.closest(TASK_LEAF_SELECTOR)?.getAttribute("data-task-leaf-key") ?? undefined;
 }
 
 /** Derive the composer's context from a `Selection`, or `null` when there is nothing to send. */
@@ -30,7 +40,12 @@ export function readSelection(selection: Selection | null): SelectionContext | n
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
   const text = selection.toString().trim();
   if (text.length === 0 || isIgnoredAnchor(selection.anchorNode)) return null;
-  return { text, rect: selection.getRangeAt(0).getBoundingClientRect() };
+  const leafKey = leafKeyForAnchor(selection.anchorNode);
+  return {
+    text,
+    rect: selection.getRangeAt(0).getBoundingClientRect(),
+    ...(leafKey ? { leafKey } : {}),
+  };
 }
 
 /**

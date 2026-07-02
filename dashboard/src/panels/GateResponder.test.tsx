@@ -144,23 +144,13 @@ describe("GateResponder", () => {
     });
   });
 
-  it("keeps Chat message-only and does not record a gate decision", async () => {
+  it("does not render the obsolete message-only Chat response path", async () => {
     const { getByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
 
     fireEvent.click(getByTestId("gate-respond-open"));
-    fireEvent.click(getByTestId("gate-respond-chat"));
-    fireEvent.change(getByTestId("gate-respond-text"), { target: { value: "Use a clearer commit message first." } });
-    fireEvent.click(getByTestId("gate-respond-send"));
-
-    await waitFor(() =>
-      expect(postOperatorInbox).toHaveBeenCalledWith({
-        lifecycleId: "LC1",
-        gateId: "G1",
-        ask: expect.stringContaining("Ship it?"),
-        response: "Use a clearer commit message first.",
-      }),
-    );
+    expect(() => getByTestId("gate-respond-chat")).toThrow();
     expect(postGateDecision).not.toHaveBeenCalled();
+    expect(postOperatorInbox).not.toHaveBeenCalled();
   });
 
   it("dismisses the current gate without notifying the agent", async () => {

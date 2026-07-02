@@ -571,12 +571,12 @@ export function DetailPanel({
         ))}
       </ol>
 
-      {activeLifecycle.gate || activeLifecycle.ask ? (
+      {activeLifecycle.gate ? (
         <GateResponder
           lifecycleId={activeLifecycle.id}
           gateNode={activeLifecycle.gate}
           ask={activeLifecycle.ask}
-          testId={activeLifecycle.gate ? "gate-review" : "gate-banner"}
+          testId="gate-review"
         />
       ) : null}
 
@@ -1154,8 +1154,9 @@ function TaskReader({
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   const progress = topLevelStepProgress(doc);
+  const leafKey = qualifiedLeafKey(doc);
   return (
-    <div className={taskdoc}>
+    <div className={taskdoc} data-task-leaf-key={leafKey}>
       <div className={taskdocHead}>
         <span className={badge}>{doc.kind}</span>
         <span className={taskdocTitle}>{doc.title}</span>

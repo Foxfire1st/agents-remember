@@ -31,7 +31,7 @@ import {
 
 export { isWorktreeGateKind } from "./GateResponderText";
 
-type ResponseMode = "no" | "chat";
+type ResponseMode = "no";
 type GateDecisionVerb = "approve" | "reject" | "cancel";
 
 const MIN_REQUEST_HEIGHT = 480;
@@ -286,13 +286,6 @@ export function GateResponder({
     }
   });
 
-  const chat = () => void runAction(async () => {
-    const text = draft.trim();
-    if (!text) return;
-    setRecordedDecision(false);
-    if (await notifyAgent(text)) resetAndClose();
-  });
-
   const dismiss = () => void runAction(async () => {
     setMode(null);
     setRecordedDecision(false);
@@ -346,9 +339,7 @@ export function GateResponder({
 
   const note = statusText(status, attachedSession?.label, recordedDecision);
   const statusIsError = status === "unconfirmed" || status === "inbox-error" || status === "decision-error" || status === "stale-gate" || status === "no-open-gate";
-  const sendCurrentDraft = mode === "no" ? reject : chat;
-  const sendLabel = mode === "no" ? "Reject" : "Send";
-  const fieldCopy = mode === "no" ? "Reason for rejection" : "Chat response";
+  const fieldCopy = "Reason for rejection";
 
   return (
     <div className={cx(shell, compact ? compactShell : undefined)} data-testid={testId}>
@@ -425,14 +416,6 @@ export function GateResponder({
             </Button>
             <Button
               className={respondButton}
-              onPress={() => openDraft("chat")}
-              isDisabled={busy}
-              data-testid="gate-respond-chat"
-            >
-              Chat
-            </Button>
-            <Button
-              className={respondButton}
               onPress={dismiss}
               isDisabled={busy || !gateNode}
               data-testid="gate-respond-dismiss"
@@ -467,11 +450,11 @@ export function GateResponder({
             {mode ? (
               <Button
                 className={respondButton}
-                onPress={sendCurrentDraft}
+                onPress={reject}
                 isDisabled={busy || !draft.trim()}
                 data-testid="gate-respond-send"
               >
-                {busy ? "Sending..." : sendLabel}
+                {busy ? "Sending..." : "Reject"}
               </Button>
             ) : null}
           </div>

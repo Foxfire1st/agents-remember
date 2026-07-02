@@ -491,7 +491,12 @@ export function CockpitShell() {
       {/* Slice 6f: a cockpit-wide composer that a text selection raises — send the selection (+ a
           message) to a chat session as a context package. Mounted once here so it works on every view;
           renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
-      <HighlightComposer selectedLifecycleId={selectedLifecycleId} onSent={() => setView("chats")} />
+      <HighlightComposer
+        selectedLifecycleId={selectedLifecycleId}
+        viewedLeafKey={viewedLeafKey}
+        leafChatActive={!fullBleed && railView === "chat"}
+        onSent={() => setView("chats")}
+      />
     </div>
   );
 }

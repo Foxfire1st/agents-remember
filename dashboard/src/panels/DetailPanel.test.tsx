@@ -444,12 +444,13 @@ describe("DetailPanel gate respond (task 11)", () => {
     expect(getByTestId("gate-request").textContent).toContain("Changed paths");
   });
 
-  it("renders the proto-gate ask through the same respond surface", () => {
+  it("does not render the obsolete task-local response box for ask-only attention details", () => {
     seed("blocked");
     const { getByTestId, queryByTestId } = render(<DetailPanel selectedId="plan-002" />);
     expect(queryByTestId("gate-review")).toBeNull();
-    expect(getByTestId("gate-banner").textContent).toContain("Approve the plan?");
-    expect(getByTestId("gate-respond-open")).toBeTruthy();
+    expect(queryByTestId("gate-banner")).toBeNull();
+    expect(queryByTestId("gate-respond-open")).toBeNull();
+    expect(getByTestId("detail-panel").textContent).toContain("persistent worktree");
   });
 });
 
