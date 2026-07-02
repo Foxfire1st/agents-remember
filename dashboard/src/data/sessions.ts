@@ -4,6 +4,7 @@ import { createStore } from "zustand/vanilla";
 import {
   bracketedPaste,
   openTerminalSession,
+  pasteAndConfirm,
   sanitizeForInjection,
   submitAndConfirm,
   type TerminalConnection,
@@ -405,14 +406,14 @@ export type DeliveryStatus = "delivered" | "unconfirmed";
 
 /**
  * Paste a context package into a session without submitting it. Used by the leaf-bind handoff where the
- * operator needs to add their own instruction before pressing Enter.
+ * operator needs to add their own instruction before pressing Enter. Delivery is confirmed, not assumed:
+ * {@link pasteAndConfirm} retries through the harness boot window (Claude Code discards stdin while
+ * booting) and only reports "delivered" once the composer echoed the draft.
  */
 export async function pasteDraftToSession(id: string, packageText: string): Promise<DeliveryStatus> {
   const conn = await waitForConnection(id);
   if (!conn) return "unconfirmed";
-  await conn.whenReady();
-  conn.sendInput(bracketedPaste(sanitizeForInjection(packageText)));
-  return "delivered";
+  return (await pasteAndConfirm(conn, packageText)) ? "delivered" : "unconfirmed";
 }
 
 /**

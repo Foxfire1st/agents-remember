@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     terminalOptions: vi.fn(),
     bufferType: "normal",
     baseY: 120,
+    mouseTrackingMode: "none",
   };
 });
 
@@ -41,6 +42,10 @@ vi.mock("@xterm/xterm", () => ({
         },
       },
     };
+
+    get modes() {
+      return { mouseTrackingMode: mocks.mouseTrackingMode };
+    }
 
     constructor(options: unknown) {
       mocks.terminalOptions(options);
@@ -72,6 +77,7 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.bufferType = "normal";
   mocks.baseY = 120;
+  mocks.mouseTrackingMode = "none";
 });
 
 describe("Terminal", () => {
@@ -140,6 +146,36 @@ describe("Terminal", () => {
     expect(mocks.connection.sendInput).toHaveBeenCalledWith("\x1b[5~");
     expect(event.defaultPrevented).toBe(true);
     expect(parentWheel).not.toHaveBeenCalled();
+  });
+
+  it("leaves wheel events to xterm when the application tracks the mouse", () => {
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready: Promise.resolve() },
+    });
+    mocks.bufferType = "alternate";
+    mocks.baseY = 0;
+    mocks.mouseTrackingMode = "vt200";
+    const parentWheel = vi.fn();
+
+    const { getByTestId } = render(
+      <div onWheel={parentWheel}>
+        <Terminal sessionId="s1" />
+      </div>,
+    );
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -120,
+    });
+
+    getByTestId("terminal-host").dispatchEvent(event);
+
+    // Not intercepted: xterm's own path reports the wheel as mouse events to the app (tmux/TUI).
+    expect(mocks.scrollLines).not.toHaveBeenCalled();
+    expect(mocks.connection.sendInput).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(parentWheel).toHaveBeenCalled();
   });
 
   it("swallows partial pixel wheel movement before it reaches terminal input", () => {

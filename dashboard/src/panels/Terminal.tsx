@@ -126,6 +126,12 @@ export function Terminal({
     let applicationWheelLineRemainder = 0;
     const handleWheel = (event: WheelEvent) => {
       if (event.deltaY === 0) return;
+      // App-managed wheel: when the attached application tracks the mouse (tmux with `mouse on`,
+      // mouse-aware TUIs), xterm's native path reports the wheel as mouse events the app scrolls
+      // with — tmux scrolls its pane history for normal-buffer apps and passes the events through
+      // to panes that requested them. Synthesizing PageUp/PageDown here instead would only scroll
+      // TUIs that happen to bind those keys.
+      if (term.modes.mouseTrackingMode !== "none") return;
       const [lines, nextPixelRemainder] = wheelScrollLines(event, term.rows, wheelPixelRemainder);
       wheelPixelRemainder = nextPixelRemainder;
       if (lines !== 0) {
@@ -141,9 +147,10 @@ export function Terminal({
       if (event.cancelable) event.preventDefault();
       event.stopPropagation();
     };
-    // This rail is a transcript surface: normal scrollback scrolls xterm's viewport. Agent TUIs run in
-    // the alternate buffer, where xterm has no scrollback and otherwise maps wheel to arrow history, so
-    // translate wheel steps to page navigation there.
+    // Wheel precedence: an app that tracks the mouse owns the wheel (xterm reports it as mouse
+    // events); otherwise normal scrollback scrolls xterm's viewport; otherwise (alternate buffer,
+    // no mouse tracking) translate wheel steps to page navigation instead of xterm's default
+    // wheel-to-arrow-history mapping.
     node.addEventListener("wheel", handleWheel, { passive: false, capture: true });
 
     const dataSub = term.onData((data) => conn.sendInput(data));

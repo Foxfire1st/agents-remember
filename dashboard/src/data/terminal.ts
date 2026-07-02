@@ -125,6 +125,51 @@ export async function submitAndConfirm(conn: TerminalConnection): Promise<boolea
   return false;
 }
 
+const PASTE_ECHO_MS = 4000; // a ready composer echoes a paste (content or a paste chip) well within this
+const PASTE_RETRY_DELAY_MS = 500; // breather between attempts so retries don't hammer a booting harness
+const PASTE_BOOT_DEADLINE_MS = 30000; // give a slow harness boot (MCP loading) this long to accept a paste
+
+/** Poll `lastOutputAt` until it advances past `baseline` (echo observed) or `timeoutMs` elapses. */
+async function outputAdvanced(
+  conn: TerminalConnection,
+  baseline: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (conn.lastOutputAt() > baseline) return true;
+    await _delay(150);
+  }
+  return conn.lastOutputAt() > baseline;
+}
+
+/**
+ * Paste a package as an editable draft and confirm the composer accepted it — no Enter is ever sent.
+ * A single fire-and-forget paste is unreliable: a booting harness (Claude Code loading MCP servers)
+ * silently DISCARDS stdin until its composer mounts, and tmux masks every readiness signal from the
+ * client (it enables bracketed paste and the alternate screen for all clients unconditionally, and
+ * exposes no pane-level composer state). So: wait for an output-quiet window (`whenReady`), paste,
+ * and watch for the paste's own echo (the draft render or a `[Pasted text #N]` chip) past the
+ * pre-paste baseline. No echo means the paste was discarded — retry in the next quiet window until
+ * {@link PASTE_BOOT_DEADLINE_MS}. The long {@link PASTE_ECHO_MS} window doubles as a late-echo catch
+ * so a paste the harness queued (rather than discarded) is not re-sent as a duplicate.
+ */
+export async function pasteAndConfirm(
+  conn: TerminalConnection,
+  packageText: string,
+): Promise<boolean> {
+  const payload = bracketedPaste(sanitizeForInjection(packageText));
+  const startedAt = Date.now();
+  do {
+    await conn.whenReady(); // paste only into an output-quiet window, never a repainting boot screen
+    const baseline = conn.lastOutputAt();
+    conn.sendInput(payload);
+    if (await outputAdvanced(conn, baseline, PASTE_ECHO_MS)) return true; // composer echoed the draft
+    await _delay(PASTE_RETRY_DELAY_MS);
+  } while (Date.now() - startedAt < PASTE_BOOT_DEADLINE_MS);
+  return false; // never accepted — the caller surfaces the unconfirmed-delivery note
+}
+
 /**
  * Open a WebSocket to the 6d bridge and pump it into `sink`. **Binary** frames are raw PTY bytes
  * (written verbatim — the VT stream xterm renders); a `{type:"exit"}` text frame or a socket close

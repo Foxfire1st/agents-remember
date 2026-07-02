@@ -92,6 +92,9 @@ TmuxKiller = Callable[[str], None]
 TmuxCreator = Callable[[str, Path, Sequence[str]], None]
 """Create a detached tmux session for a fixed harness argv."""
 
+TmuxConfigurer = Callable[[str], None]
+"""Apply dashboard session options (mouse mode) to an existing tmux session name."""
+
 
 def _tmux_has_session(name: str) -> bool:
     """Whether tmux currently knows ``name``.
@@ -136,6 +139,27 @@ def _tmux_create_detached(name: str, cwd: Path, harness: Sequence[str]) -> None:
         stderr=subprocess.DEVNULL,
         timeout=_TERMINATE_TIMEOUT,
     )
+
+
+def _tmux_enable_mouse(name: str) -> None:
+    """Enable per-session mouse mode; no-op when tmux or the session is absent (idempotent).
+
+    With ``mouse on`` tmux requests mouse tracking from the attached client, so browser wheel
+    input reaches tmux as mouse reports: tmux scrolls its own pane history (copy-mode) for
+    normal-buffer TUIs (Codex) and passes the events through to panes whose app requested mouse
+    tracking itself (Claude Code). Without it, wheel movement can only be guessed into key
+    presses the inner TUI may not bind. Tradeoff: pane text selection needs Shift+drag while
+    mouse reporting is active.
+    """
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(
+            ["tmux", "set-option", "-t", name, "mouse", "on"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_TERMINATE_TIMEOUT,
+        )
 
 
 @dataclass
@@ -263,11 +287,13 @@ class TerminalHost:
         tmux_probe: TmuxProbe | None = None,
         tmux_killer: TmuxKiller | None = None,
         tmux_creator: TmuxCreator | None = None,
+        tmux_configurer: TmuxConfigurer | None = None,
     ) -> None:
         self._spawn: Spawner = spawn or _spawn_pty
         self._tmux_probe: TmuxProbe = tmux_probe or _tmux_has_session
         self._tmux_killer: TmuxKiller = tmux_killer or _tmux_kill_session
         self._tmux_creator: TmuxCreator = tmux_creator or _tmux_create_detached
+        self._tmux_configurer: TmuxConfigurer = tmux_configurer or _tmux_enable_mouse
         self._sessions: dict[str, TerminalSession] = {}
 
     def open(
@@ -318,6 +344,9 @@ class TerminalHost:
         tmux_name = name or _tmux_session_name(sid)
         if not self.has_session(tmux_name):
             self._tmux_creator(tmux_name, root, harness)
+        # Session options are (re-)asserted on every ensure so pre-existing durable sessions
+        # created before an option was introduced pick it up too.
+        self._tmux_configurer(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
@@ -344,7 +373,7 @@ class TerminalHost:
         attached to the same tmux server-side session. The catalog/tmux name remains the durable identity;
         this returned object is a per-connection handle closed with :meth:`close_session`.
         """
-        return self._spawn_session(
+        session = self._spawn_session(
             sid,
             cwd=cwd,
             command=command,
@@ -352,6 +381,9 @@ class TerminalHost:
             name=name,
             suspend_unsafe=suspend_unsafe,
         )
+        # Attach targets an existing durable session, so option assertion cannot race creation here.
+        self._tmux_configurer(session.tmux_name)
+        return session
 
     def get(self, sid: str) -> TerminalSession | None:
         """The live session for ``sid``, or ``None`` if never opened / already closed."""

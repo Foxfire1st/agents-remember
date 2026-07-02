@@ -381,15 +381,43 @@ describe("connection registry + deliverToSession (6f hardening)", () => {
     }
   });
 
-  it("pastes a draft package without sending Enter", async () => {
-    const conn = fakeConn();
-    const raw = "draft\x1abody\x1b[200~tail";
-    registerConnection("draft-1", conn);
+  it("pastes a draft package without sending Enter and confirms via the draft echo", async () => {
+    vi.useFakeTimers();
+    try {
+      const conn = fakeConn();
+      const raw = "draft\x1abody\x1b[200~tail";
+      registerConnection("draft-1", conn);
 
-    await expect(pasteDraftToSession("draft-1", raw)).resolves.toBe("delivered");
+      const done = pasteDraftToSession("draft-1", raw);
+      await vi.advanceTimersByTimeAsync(0); // whenReady resolves → the draft paste goes out
+      expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]);
+      conn.outputAt = 1; // the composer echoes the draft (reopened L6: delivery is confirmed, not assumed)
+      await vi.advanceTimersByTimeAsync(300);
+      expect(await done).toBe("delivered");
 
-    expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]);
-    registerConnection("draft-1", null);
+      expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]); // ONE paste, no Enter
+      registerConnection("draft-1", null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a draft paste 'unconfirmed' when the harness never echoes it (boot discard)", async () => {
+    vi.useFakeTimers();
+    try {
+      const conn = fakeConn();
+      registerConnection("draft-2", conn);
+
+      const done = pasteDraftToSession("draft-2", "pkg");
+      await vi.advanceTimersByTimeAsync(36_000); // past the paste boot deadline with no echo
+      expect(await done).toBe("unconfirmed");
+
+      expect(conn.inputs.length).toBeGreaterThanOrEqual(2); // it retried through the boot window
+      expect(conn.inputs).not.toContain("\r"); // draft-only: never submits on the operator's behalf
+      registerConnection("draft-2", null);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("resolves 'unconfirmed' (never hangs) when a terminal never registers", async () => {

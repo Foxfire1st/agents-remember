@@ -158,11 +158,13 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.existing_tmux: set[str] = set()
         self.killed_tmux: list[str] = []
         self.created_tmux: list[tuple[str, Path, tuple[str, ...]]] = []
+        self.configured_tmux: list[str] = []
         self.host = TerminalHost(
             spawn=self.spawner,
             tmux_probe=self.existing_tmux.__contains__,
             tmux_killer=self.killed_tmux.append,
             tmux_creator=self._create_tmux,
+            tmux_configurer=self.configured_tmux.append,
         )
         self.tmp = Path(tempfile.mkdtemp())
 
@@ -204,6 +206,8 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertIsNot(first, durable)
         self.assertIsNot(second, first)
         self.assertEqual(self.host.sessions(), [durable])
+        # Every attach re-asserts session options against the existing durable session.
+        self.assertEqual(self.configured_tmux, [durable.tmux_name, durable.tmux_name])
         self.host.close_session(first)
         self.assertIs(self.host.get("lc1"), durable)
         self.assertTrue(second.is_alive)
@@ -217,6 +221,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertEqual(binding.command, ("cat",))
         self.assertEqual(binding.lifecycle_id, "LC-1")
         self.assertEqual(self.created_tmux, [("ar-lc1", self.tmp, ("cat",))])
+        self.assertEqual(self.configured_tmux, ["ar-lc1"])  # session options asserted post-create
         self.assertIsNone(self.host.get("lc1"))
         self.assertEqual(self.host.sessions(), [])
 
@@ -227,6 +232,8 @@ class TerminalHostRegistryTests(unittest.TestCase):
 
         self.assertEqual(binding.tmux_name, "ar-lc1")
         self.assertEqual(self.created_tmux, [])
+        # Options are re-asserted on ensure so durable sessions predating an option pick it up.
+        self.assertEqual(self.configured_tmux, ["ar-lc1"])
 
     def test_open_replaces_dead_session(self) -> None:
         first = self.host.open("lc1", cwd=self.tmp, command=["cat"])
