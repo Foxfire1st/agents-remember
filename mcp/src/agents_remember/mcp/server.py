@@ -54,6 +54,7 @@ from .tools import (
     skills_install_payload,
     switch_lifecycle_payload,
     task_doc_payload,
+    task_reopen_payload,
     worktree_abandon_payload,
     worktree_attach_payload,
     worktree_cleanup_payload,
@@ -662,6 +663,20 @@ def create_server(config: McpRuntimeConfig) -> Any:
         worktrees and unmerged branches (reporting the commits); force=true discards them
         (git worktree remove --force, git branch -D). Preview with dry_run=true."""
         return worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)
+
+    @server.tool()
+    def task_reopen(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
+        """Reopen a COMPLETED leaf under its exact same leaf id (no -rN suffix). A state
+        reset, not a worktree creator: the enclosure contract's review/closeout/integration
+        state returns to virgin (cleanup=reopened, stale lifecycle binding cleared) and the
+        leaf's task document goes back to planning (lifecycleId cleared, master sub-task
+        index entry flipped, audit decision appended). MUTATING (contract + task docs; no
+        git effects). Refuses masters, in-flight leaves, and leaves whose worktrees still
+        exist. Afterwards: edit the doc's steps via task_doc, then run a NORMAL
+        worktree_start with the same leaf id — it recreates worktrees/branches off the
+        current source tips, promotes/mints a fresh lifecycle, and restamps the doc, so
+        doc/chat/dashboard bindings hold by construction. Preview with dry_run=true."""
+        return task_reopen_payload(config, contract_path, dry_run=dry_run)
 
     @server.tool()
     def lifecycle_finalize_task(

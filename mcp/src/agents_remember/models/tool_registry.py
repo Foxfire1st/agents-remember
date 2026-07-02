@@ -78,7 +78,7 @@ from agents_remember.models.providers import (
 from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
-from agents_remember.models.task_doc import TaskDocResponse
+from agents_remember.models.task_doc import TaskDocResponse, TaskReopenResponse
 from agents_remember.models.terminal import AttachTerminalSessionToLeafResponse
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
@@ -135,6 +135,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "worktree_integrate": WorktreeIntegrateResponse,
     "worktree_cleanup": WorktreeCleanupResponse,
     "worktree_abandon": WorktreeAbandonResponse,
+    "task_reopen": TaskReopenResponse,
     "memory_baseline_status": MemoryBaselineStatusResponse,
     "memory_baseline_adopt": MemoryBaselineAdoptResponse,
     "memory_carryover_plan": MemoryCarryoverPlanResponse,

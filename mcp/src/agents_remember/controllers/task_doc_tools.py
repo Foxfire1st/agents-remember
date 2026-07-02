@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agents_remember.controllers._guards import require_within_coordination
 from agents_remember.errors import AgentsRememberError
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.tasks import (
@@ -28,6 +29,7 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.master_sync import MasterSyncError, MasterSyncPlan, plan_master_sync
+from agents_remember.tasks.reopen import reopen_task
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
     is_enclosure_contract,
@@ -470,3 +472,23 @@ def _master_sync_payload(
         payload["diff"] = rendered["diff"]
         payload["wouldLose"] = rendered["wouldLose"]
     return payload
+
+
+def task_reopen_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Reopen a completed leaf task under its exact same leaf id (L11).
+
+    Task-domain sibling of ``task_doc``: it resets the leaf's enclosure contract and
+    task document back to planning; recreating the worktrees stays ``worktree_start``'s
+    job. The response keeps the worktree-command shape (contract state fields), so it
+    validates against a ``WorktreeCommandResponse`` subclass in the registry.
+    """
+    result = reopen_task(
+        require_within_coordination(config, contract_path, "contract_path"),
+        dry_run=dry_run,
+    )
+    return {**result.payload, "ok": result.returncode == 0, "operation": "task_reopen"}

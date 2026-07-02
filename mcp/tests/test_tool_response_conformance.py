@@ -181,6 +181,11 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_abandon"] = tools.worktree_abandon_payload(
         config, abandon_start["contract_path"], dry_run=False, force=True
     )
+    # Reopen the fully landed demo-task leaf (closeout+integrate+cleanup completed above) —
+    # after the finalize preview so its landed-commit proof still saw the completed contract.
+    payloads["task_reopen"] = tools.task_reopen_payload(
+        config, contract_path, dry_run=False
+    )
     return payloads
 
 

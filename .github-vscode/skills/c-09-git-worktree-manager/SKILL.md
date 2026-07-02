@@ -30,6 +30,7 @@ worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_c
 worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_integrate(contract_path="<enclosure series-contract.md>", strategy="ff-only")
 worktree_cleanup(contract_path="<enclosure series-contract.md>")
+task_reopen(contract_path="<enclosure series-contract.md>", dry_run=true)
 lifecycle_finalize_task(contract_path="<enclosure series-contract.md>", task_doc_path="<task.json>", master_doc_path="<parent task.json>", subtask_number="<N>", dry_run=true)
 ```
 
@@ -253,6 +254,20 @@ task itself complete and does not recursively complete ancestors; each parent-ch
 edge is finalized separately.
 
 Cleanup is idempotent. If the worktrees or merged branches are already gone, it reports the already-clean state instead of failing. If Git refuses to delete an unmerged branch, cleanup leaves that branch in place and reports it for developer review.
+
+## Reopening A Completed Leaf
+
+Reopening reuses the EXACT same leaf id — never mint a suffixed leaf (`…-r1`).
+`task_reopen(contract_path=…)` is a state reset, not a worktree creator: it refuses
+anything but a fully landed leaf (closeout, integration, and cleanup completed, worktrees
+gone), then resets the contract's review/closeout/integration state, clears the stale
+lifecycle binding, marks `cleanup: reopened`, and puts the leaf's task document back to
+`planning` (master index entry flipped, audit decision appended). Preview with
+`dry_run=true` first. Afterwards: edit the doc's steps via `task_doc` (add, change, or
+untick work), then run a NORMAL `worktree_start` with the same leaf id — it recreates the
+worktrees off the current source tips, promotes/mints a fresh lifecycle, and restamps the
+doc's `lifecycleId`, so doc, chat, and dashboard bindings hold by construction. Implementation
+then proceeds as usual, including closeout → integrate → finalize.
 
 ## Boundaries
 

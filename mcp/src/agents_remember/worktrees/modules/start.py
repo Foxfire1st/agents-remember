@@ -14,6 +14,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.providers import provider_setup
 from agents_remember.tasks import read_task_doc
+from agents_remember.tasks.leaf_doc import restamp_leaf_doc_lifecycle
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
@@ -594,9 +595,10 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
     if contract.contract_path.exists():
         existing = load_contract(contract.contract_path)
-        # An abandoned contract is a tombstone: its worktrees/branches were discarded,
-        # so start must recreate fresh rather than attach to a dead binding.
-        if existing.cleanup != "abandoned":
+        # An abandoned contract is a tombstone and a reopened one (L11) is a reset:
+        # either way its worktrees/branches are gone, so start must recreate fresh
+        # rather than attach to a dead binding.
+        if existing.cleanup not in ("abandoned", "reopened"):
             if args.retry_provider_setup:
                 return _retry_provider_setup_result(context, existing, args)
             return WorktreeCommandResult(
@@ -668,6 +670,14 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if not args.dry_run:
         write_contract(contract.contract_path, contract)
         _clear_start_block(context, contract, args)
+        # Explicit-linkage restamp (L11): a leaf whose doc already exists — a
+        # reopened leaf, or one whose doc points at a finalized lifecycle — must
+        # follow THIS enclosure's fresh lifecycle. First starts are a no-op (the
+        # doc is authored afterwards, stamped by task_doc against the contract).
+        if contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
+            restamp_leaf_doc_lifecycle(
+                contract.task_root, contract.leaf_id, contract.lifecycle_id
+            )
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(

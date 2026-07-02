@@ -623,26 +623,23 @@ function enclosureForDoc(
   const dir = pathDir(doc.docPath);
   // Enclosure leaf ids are lowercase directory names (enclosures/260628-l7/) while doc ids are
   // uppercase (260628-L7): every leafId comparison here is case-insensitive, matching the
-  // normalization RailChat and the change-set bar already use.
+  // normalization RailChat and the change-set bar already use. Exact joins only: since
+  // task_reopen (L11), reopening a leaf reuses its EXACT leaf id, so the old `-rN`
+  // suffix admission heuristic is gone.
   const stem = pathStem(doc.docPath).toLowerCase();
   const docId = doc.id ? doc.id.toLowerCase() : undefined;
   return enclosures.find((enclosure) => {
     if (enclosure.taskRoot !== dir) return false;
     const leafId = enclosure.leafId.toLowerCase();
-    if (leafId === stem) return true;
-    if (docId && leafId === docId) return true;
-    // Reopening a finalized task spins up a fresh worktree whose leafId is the original slug (or id)
-    // plus a cycle suffix (e.g. `…-r1`) and shares the doc's lifecycle. Require BOTH the shared
-    // lifecycle AND that suffixed-slug shape, so a doc never grabs an unrelated enclosure that merely
-    // runs under the same (master) lifecycle — otherwise the reopened work renders as a parent-less
-    // standalone phantom instead of nesting under its master.
-    if (!doc.lifecycleId || enclosure.lifecycleId !== doc.lifecycleId) return false;
-    return leafId.startsWith(`${stem}-`) || Boolean(docId && leafId.startsWith(`${docId}-`));
+    return leafId === stem || (docId !== undefined && leafId === docId);
   });
 }
 
 function isActiveEnclosure(enclosure: Pick<EnclosureNode, "cleanup">): boolean {
-  return enclosure.cleanup !== "completed";
+  // "completed" is a retired leaf, "abandoned" a discarded one — neither is active work.
+  // A "reopened" enclosure (L11) IS active: the leaf is back in planning awaiting its
+  // worktree_start, and its doc row must render like any other planned leaf.
+  return enclosure.cleanup !== "completed" && enclosure.cleanup !== "abandoned";
 }
 
 function topLevelStepProgress(doc: TaskDocNode): { done: number; total: number } {

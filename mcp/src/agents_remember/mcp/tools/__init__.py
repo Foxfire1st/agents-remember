@@ -65,7 +65,7 @@ from .providers import (
     provider_watchers_payload,
 )
 from .read_files import read_ar_files_payload
-from .task_doc import task_doc_payload
+from .task_doc import task_doc_payload, task_reopen_payload
 from .terminal import attach_terminal_session_to_leaf_payload
 from .worktree import (
     worktree_abandon_payload,
@@ -134,6 +134,7 @@ __all__ = [
     "skills_install_payload",
     "switch_lifecycle_payload",
     "task_doc_payload",
+    "task_reopen_payload",
     "worktree_abandon_payload",
     "worktree_attach_payload",
     "worktree_cleanup_payload",

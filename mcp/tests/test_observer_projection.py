@@ -723,6 +723,49 @@ class WorkspaceTests(unittest.TestCase):
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
 
+    def test_persistent_synthesis_skips_abandoned_and_reopened_enclosures(self) -> None:
+        # No worktree, no persistent lifecycle (L11): an abandoned enclosure's worktrees were
+        # discarded and a reopened one awaits its next worktree_start — neither may synthesize
+        # a paused zombie into the operations tree.
+        proj = project_workspace(
+            [],
+            enclosures=[
+                _enclosure(enclosure="/a.md", lifecycleId="LC-GONE", cleanup="abandoned"),
+                _enclosure(enclosure="/b.md", lifecycleId="", cleanup="reopened"),
+                _enclosure(enclosure="/c.md", lifecycleId="", cleanup="pending"),
+            ],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.enclosure for lc in proj.lifecycles], ["/c.md"])
+
+    def test_abandoned_enclosure_terminalizes_its_event_backed_lifecycle(self) -> None:
+        # worktree_abandon records cleanup=abandoned in the contract but may not own the
+        # lifecycle's event log (the ambient dies with a server restart), and the store's
+        # single-writer invariant forbids a foreign lifecycle.ended append — so the READER
+        # projects the terminal state from the contract (L11).
+        log = [
+            _started(lifecycle_id="LC-DEAD", ts=T0),
+            _event(
+                "lifecycle.promoted",
+                lifecycle_id="LC-DEAD",
+                ts="2026-06-13T18:00:05+00:00",
+                trust="observed",
+                actor="system",
+                enclosure="/c.md",
+                repo_id="r",
+                scope="r",
+            ),
+        ]
+        proj = project_workspace(
+            [log],
+            enclosures=[_enclosure(lifecycleId="LC-DEAD", cleanup="abandoned")],
+            providers=[],
+            now=FRESH,
+        )
+        dead = next(lc for lc in proj.lifecycles if lc.id == "LC-DEAD")
+        self.assertEqual(dead.state, "abandoned")
+
     def test_stale_persistent_lifecycle_without_enclosure_is_removed(self) -> None:
         proj = project_workspace(
             [

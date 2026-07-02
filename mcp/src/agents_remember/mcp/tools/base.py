@@ -58,6 +58,7 @@ PUBLIC_TOOLS = (
     "lifecycle_phase",
     "lifecycle_finalize_task",
     "task_doc",
+    "task_reopen",
     "lifecycle_gate",
     "gate_decide",
     "gate_list",

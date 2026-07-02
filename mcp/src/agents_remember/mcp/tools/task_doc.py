@@ -1,10 +1,10 @@
-"""Payload builder for the ``task_doc`` authoring tool."""
+"""Payload builders for the task-domain tools (``task_doc``, ``task_reopen``)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.task_doc_tools import task_doc_tool
+from agents_remember.controllers.task_doc_tools import task_doc_tool, task_reopen_tool
 
 from ..config import McpRuntimeConfig
 from .base import _tool_payload
@@ -39,6 +39,22 @@ def task_doc_payload(
             decision=decision,
             subtask=subtask,
             section=section,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def task_reopen_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "task_reopen",
+        task_reopen_tool(
+            config,
+            contract_path=contract_path,
             dry_run=dry_run,
         ),
     )
