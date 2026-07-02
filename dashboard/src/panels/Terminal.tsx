@@ -42,8 +42,11 @@ const THEME = {
 };
 
 const WHEEL_PIXELS_PER_LINE = 40;
+const APPLICATION_SCROLL_LINES_PER_STEP = 3;
 const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
+const PAGE_UP_SEQUENCE = "\x1b[5~";
+const PAGE_DOWN_SEQUENCE = "\x1b[6~";
 
 function cursorShouldBlink(): boolean {
   return typeof document === "undefined" || document.documentElement.dataset.effects !== "off";
@@ -63,6 +66,20 @@ function wheelScrollLines(event: WheelEvent, rows: number, pixelRemainder: numbe
   const pixels = pixelRemainder + event.deltaY;
   const lines = Math.trunc(pixels / WHEEL_PIXELS_PER_LINE);
   return [lines, pixels - lines * WHEEL_PIXELS_PER_LINE];
+}
+
+function applicationScrollInput(lines: number, lineRemainder: number): [string, number] {
+  const nextLineRemainder = lineRemainder + lines;
+  const steps = Math.trunc(nextLineRemainder / APPLICATION_SCROLL_LINES_PER_STEP);
+  if (steps === 0) return ["", nextLineRemainder];
+  return [
+    (steps < 0 ? PAGE_UP_SEQUENCE : PAGE_DOWN_SEQUENCE).repeat(Math.abs(steps)),
+    nextLineRemainder - steps * APPLICATION_SCROLL_LINES_PER_STEP,
+  ];
+}
+
+function hasViewportScrollback(term: XtermTerminal): boolean {
+  return term.buffer.active.type === "normal" && term.buffer.active.baseY > 0;
 }
 
 export function Terminal({
@@ -95,19 +112,6 @@ export function Terminal({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(node);
-    let wheelPixelRemainder = 0;
-    const handleWheel = (event: WheelEvent) => {
-      if (event.deltaY === 0) return;
-      const [lines, nextPixelRemainder] = wheelScrollLines(event, term.rows, wheelPixelRemainder);
-      wheelPixelRemainder = nextPixelRemainder;
-      if (lines !== 0) term.scrollLines(lines);
-      if (event.cancelable) event.preventDefault();
-      event.stopPropagation();
-    };
-    // This rail is a transcript surface: wheel input should always scroll xterm's viewport, even
-    // when xterm would otherwise translate it into PTY up/down input because the buffer cannot scroll.
-    node.addEventListener("wheel", handleWheel, { passive: false, capture: true });
-
     const conn = connectTerminal(
       sessionId,
       {
@@ -117,6 +121,30 @@ export function Terminal({
       socketFactory ? { socketFactory } : {},
     );
     onConnRef.current?.(conn);
+
+    let wheelPixelRemainder = 0;
+    let applicationWheelLineRemainder = 0;
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      const [lines, nextPixelRemainder] = wheelScrollLines(event, term.rows, wheelPixelRemainder);
+      wheelPixelRemainder = nextPixelRemainder;
+      if (lines !== 0) {
+        if (hasViewportScrollback(term)) {
+          applicationWheelLineRemainder = 0;
+          term.scrollLines(lines);
+        } else {
+          const [input, nextLineRemainder] = applicationScrollInput(lines, applicationWheelLineRemainder);
+          applicationWheelLineRemainder = nextLineRemainder;
+          if (input) conn.sendInput(input);
+        }
+      }
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+    // This rail is a transcript surface: normal scrollback scrolls xterm's viewport. Agent TUIs run in
+    // the alternate buffer, where xterm has no scrollback and otherwise maps wheel to arrow history, so
+    // translate wheel steps to page navigation there.
+    node.addEventListener("wheel", handleWheel, { passive: false, capture: true });
 
     const dataSub = term.onData((data) => conn.sendInput(data));
     // Fit to the host + keep the PTY winsize in lockstep (the one known Mode B2 risk). A single fit

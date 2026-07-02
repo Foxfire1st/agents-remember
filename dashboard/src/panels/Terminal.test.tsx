@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => {
     fit: vi.fn(),
     scrollLines: vi.fn(),
     terminalOptions: vi.fn(),
+    bufferType: "normal",
+    baseY: 120,
   };
 });
 
@@ -29,6 +31,16 @@ vi.mock("@xterm/xterm", () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
+    buffer = {
+      active: {
+        get type() {
+          return mocks.bufferType;
+        },
+        get baseY() {
+          return mocks.baseY;
+        },
+      },
+    };
 
     constructor(options: unknown) {
       mocks.terminalOptions(options);
@@ -58,6 +70,8 @@ vi.mock("../data/terminal", async () => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mocks.bufferType = "normal";
+  mocks.baseY = 120;
 });
 
 describe("Terminal", () => {
@@ -98,6 +112,34 @@ describe("Terminal", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(parentWheel).not.toHaveBeenCalled();
     expect(mocks.connection.sendInput).not.toHaveBeenCalled();
+  });
+
+  it("maps wheel events to page navigation when the terminal is in the alternate buffer", () => {
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready: Promise.resolve() },
+    });
+    mocks.bufferType = "alternate";
+    mocks.baseY = 0;
+    const parentWheel = vi.fn();
+
+    const { getByTestId } = render(
+      <div onWheel={parentWheel}>
+        <Terminal sessionId="s1" />
+      </div>,
+    );
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -120,
+    });
+
+    getByTestId("terminal-host").dispatchEvent(event);
+
+    expect(mocks.scrollLines).not.toHaveBeenCalled();
+    expect(mocks.connection.sendInput).toHaveBeenCalledWith("\x1b[5~");
+    expect(event.defaultPrevented).toBe(true);
+    expect(parentWheel).not.toHaveBeenCalled();
   });
 
   it("swallows partial pixel wheel movement before it reaches terminal input", () => {
