@@ -400,6 +400,58 @@ class TerminalHostSuspendScopingTests(unittest.TestCase):
             self.host.write("ghost", b"\x1a\x1a")
 
 
+class TerminalHostCopyModeCancelTests(unittest.TestCase):
+    """Typing after wheel scrolling cancels tmux copy-mode ONCE so keys land in the pane app at the
+    live bottom; mouse reports themselves pass through without cancelling."""
+
+    def setUp(self) -> None:
+        self.spawner = _PipeWriteSpawner()
+        self.cancelled: list[str] = []
+        self.host = TerminalHost(spawn=self.spawner, tmux_mode_canceller=self.cancelled.append)
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        self.host.shutdown()
+        for read_fd in self.spawner.read_fds:
+            with contextlib.suppress(OSError):
+                os.close(read_fd)
+
+    def test_mouse_reports_pass_through_without_cancel(self) -> None:
+        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.write("m", b"\x1b[<64;10;5M\x1b[<65;10;6m")
+        self.assertEqual(self.cancelled, [])
+        self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"\x1b[<64;10;5M\x1b[<65;10;6m")
+
+    def test_typing_without_prior_mouse_never_cancels(self) -> None:
+        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.write("m", b"hello")
+        self.assertEqual(self.cancelled, [])
+        self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"hello")
+
+    def test_first_typing_after_mouse_cancels_copy_mode_once(self) -> None:
+        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.write("m", b"\x1b[<64;10;5M")  # wheel-up: tmux may now be in copy-mode
+        self.host.write("m", b"h")  # first typed byte cancels, then passes through
+        self.host.write("m", b"i")  # further typing does not cancel again
+        self.assertEqual(self.cancelled, ["ar-m"])
+        self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"\x1b[<64;10;5Mhi")
+
+    def test_mouse_after_typing_rearms_the_cancel(self) -> None:
+        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.write("m", b"\x1b[<64;10;5M")
+        self.host.write("m", b"a")
+        self.host.write("m", b"\x1b[<64;10;5M")
+        self.host.write("m", b"b")
+        self.assertEqual(self.cancelled, ["ar-m", "ar-m"])
+
+    def test_mixed_mouse_and_typing_frame_counts_as_typing(self) -> None:
+        # A frame that is not purely mouse reports is treated as typing: cancel while armed.
+        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.write("m", b"\x1b[<64;10;5M")
+        self.host.write("m", b"\x1b[<64;10;5Mx")
+        self.assertEqual(self.cancelled, ["ar-m"])
+
+
 @unittest.skipUnless(
     _HAS_TMUX_TERMINAL,
     "needs tmux and a TERM entry with clear capability for the end-to-end persistence path",
