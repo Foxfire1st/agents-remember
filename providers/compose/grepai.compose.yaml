@@ -1,6 +1,10 @@
 services:
   postgres:
     restart: unless-stopped
+    # L12 memory cap: the semantic index store idles around 80MiB; 512m is a hard
+    # ceiling so a pathological query load degrades itself, not the host. Data lives
+    # on the volume and survives an OOM recycle.
+    mem_limit: 512m
     environment:
       POSTGRES_USER: grepai
       POSTGRES_PASSWORD: grepai
@@ -13,9 +17,16 @@ services:
 
   ollama:
     restart: unless-stopped
+    # L12 memory cap: embedding-model load spikes well above the ~410MiB steady state,
+    # so ollama gets 2g — a ceiling for the model, not the host.
+    mem_limit: 2g
 
   watcher:
     restart: unless-stopped
+    # L12 memory cap (incident 2026-07-03, same policy as the cgc watchers): watchers
+    # are capped at 512m so unbounded growth OOM-recycles the process under
+    # unless-stopped instead of exhausting RAM and swap; the index survives in postgres.
+    mem_limit: 512m
     entrypoint: ["grepai"]
     depends_on:
       postgres:

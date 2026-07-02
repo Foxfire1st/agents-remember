@@ -9,7 +9,8 @@ CGC_PIN = "codegraphcontext==0.4.10"
 CGC_RUNNER_IMAGE_REPOSITORY = "agents-remember/codegraphcontext"
 # Bump when the runner Docker layer changes without a cgc version change
 # (runtime_install skips building image tags that already exist).
-CGC_RUNNER_IMAGE_LAYER_REVISION = "ar1"
+# ar2 (L12): ships the watcher timer-pop patch.
+CGC_RUNNER_IMAGE_LAYER_REVISION = "ar2"
 CGC_WATCHER_CONTAINER_PREFIX = "ar-cgc-watcher"
 CGC_NETWORK_NAME = "ar-cgc-code"
 CGC_REQUIREMENTS = (
@@ -20,6 +21,7 @@ CGC_REQUIREMENTS = (
 )
 CGC_CGCIGNORE_PATCH_ID = "codegraphcontext-0.4.10-cgcignore-runtime-root-v2"
 CGC_DELETE_PATCH_ID = "codegraphcontext-0.4.10-windows-delete-prefix-v1"
+CGC_TIMER_POP_PATCH_ID = "codegraphcontext-0.4.10-watcher-timer-pop-v1"
 CGC_GRAPH_BUILDER_EXTENSIONS_PATCH_ID = "codegraphcontext-0.4.10-cpp-cc-td-extensions-v1"
 CGC_DISCOVERY_EXTENSIONS_PATCH_ID = "codegraphcontext-0.4.10-td-generic-discovery-v1"
 CGC_VIZ_REPO_QUERY_PATCH_ID = "codegraphcontext-0.4.10-viz-repo-query-v1"
@@ -109,6 +111,45 @@ CGC_PATCHED_SNIPPET = f"""    if local_cgcignore_path is None:
             local_cgcignore_path = ignore_root / ".cgcignore"
         if not local_cgcignore_path.exists():
             ensure_default_cgcignore(local_cgcignore_path, default_patterns)
+"""
+
+# Per-repo managed watch/index exclusions (L12). These feed the generated settings'
+# per-root ``cgcignorePatterns`` (the hook _cgcignore_patterns_from_settings reads), so
+# they land in the materialized .cgcignore under "# Repo-specific managed exclusions".
+# agents-remember: the dashboard bundle under package_data is a COMMITTED build artifact
+# (megabyte-scale minified JS with a supported .js suffix) — .gitignore cannot exclude it
+# and every rebuild otherwise triggers a full incremental re-index cascade per asset.
+CGC_REPO_CGCIGNORE_EXTRAS: dict[str, tuple[str, ...]] = {
+    "agents-remember": ("mcp/src/agents_remember/package_data/",),
+}
+
+CGC_TIMER_POP_PATCH_MARKER = (
+    "Agents Remember patch: pop fired debounce timers so the per-path dict stays bounded"
+)
+CGC_TIMER_POP_ORIGINAL_SNIPPET = """        # If a timer already exists for this path, cancel it.
+        if event_path in self.timers:
+            self.timers[event_path].cancel()
+        # Create and start a new timer.
+        timer = threading.Timer(self.debounce_interval, action)
+        timer.start()
+        self.timers[event_path] = timer
+"""
+CGC_TIMER_POP_PATCHED_SNIPPET = f"""        # If a timer already exists for this path, cancel it.
+        if event_path in self.timers:
+            self.timers[event_path].cancel()
+        # {CGC_TIMER_POP_PATCH_MARKER}.
+        timer = None
+
+        def _run_and_forget():
+            try:
+                action()
+            finally:
+                if self.timers.get(event_path) is timer:
+                    self.timers.pop(event_path, None)
+
+        timer = threading.Timer(self.debounce_interval, _run_and_forget)
+        timer.start()
+        self.timers[event_path] = timer
 """
 
 CGC_DELETE_PATCH_MARKER = (

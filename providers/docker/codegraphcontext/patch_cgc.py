@@ -112,6 +112,13 @@ operations = [
         ],
         "patched": "        run_server(host=\"127.0.0.1\", port=port, static_dir=str(static_dir), default_route=default_route)\n",
     },
+    {
+        "file": "core/watcher.py",
+        "originals": [
+            "        # If a timer already exists for this path, cancel it.\n        if event_path in self.timers:\n            self.timers[event_path].cancel()\n        # Create and start a new timer.\n        timer = threading.Timer(self.debounce_interval, action)\n        timer.start()\n        self.timers[event_path] = timer\n"
+        ],
+        "patched": "        # If a timer already exists for this path, cancel it.\n        if event_path in self.timers:\n            self.timers[event_path].cancel()\n        # Agents Remember patch: pop fired debounce timers so the per-path dict stays bounded.\n        timer = None\n\n        def _run_and_forget():\n            try:\n                action()\n            finally:\n                if self.timers.get(event_path) is timer:\n                    self.timers.pop(event_path, None)\n\n        timer = threading.Timer(self.debounce_interval, _run_and_forget)\n        timer.start()\n        self.timers[event_path] = timer\n",
+    },
 ]
 
 for operation in operations:

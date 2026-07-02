@@ -58,6 +58,12 @@ class LifecycleSettingsDerivationTests(unittest.TestCase):
         generated = cgc["runtime"]["runner"]["image"]
         self.assertEqual(generated, cgc_runner_image())
         self.assertRegex(generated, r":[\d.]+-\w+$")  # version-layerrevision
+        # L12: per-repo managed exclusions ride the generated roots so the materialized
+        # .cgcignore excludes the committed dashboard bundle from watch/index work.
+        ar_root = next(r for r in cgc["roots"] if r["repoId"] == "agents-remember")
+        self.assertEqual(
+            ar_root["cgcignorePatterns"], ["mcp/src/agents_remember/package_data/"]
+        )
 
 
 class McpConfigTests(unittest.TestCase):

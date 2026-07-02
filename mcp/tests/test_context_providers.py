@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -29,6 +30,9 @@ from agents_remember.providers.context import (
     CGC_ORIGINAL_SNIPPET,
     CGC_PATCH_MARKER,
     CGC_REQUIREMENTS,
+    CGC_TIMER_POP_ORIGINAL_SNIPPET,
+    CGC_TIMER_POP_PATCH_MARKER,
+    CGC_TIMER_POP_PATCHED_SNIPPET,
     CGC_VIZ_CLI_ROUTE_PATCH_ID,
     CGC_VIZ_CLI_ROUTE_PATCH_MARKER,
     CGC_VIZ_CLI_RUN_ORIGINAL_SNIPPET,
@@ -49,6 +53,7 @@ from agents_remember.providers.context import (
     apply_cgc_delete_patch,
     apply_cgc_discovery_extensions_patch,
     apply_cgc_graph_builder_extensions_patch,
+    apply_cgc_timer_pop_patch,
     apply_cgc_viz_cli_route_patch,
     apply_cgc_viz_repo_query_patch,
     apply_cgc_viz_server_route_patch,
@@ -59,6 +64,7 @@ from agents_remember.providers.context import (
     cgc_graph_builder_extensions_patch_applied,
     cgc_runtime_layout,
     cgc_runtime_layout_from_provider_settings,
+    cgc_timer_pop_patch_applied,
     cgc_viz_cli_route_patch_applied,
     cgc_viz_repo_query_patch_applied,
     cgc_viz_server_route_patch_applied,
@@ -76,6 +82,7 @@ from agents_remember.providers.context import (
     to_container_path,
     write_grepai_workspace_config,
 )
+from agents_remember.providers.lifecycle.compose_runtime import provider_asset_text
 
 
 class ContextProviderLayoutTests(unittest.TestCase):
@@ -235,6 +242,12 @@ class ContextProviderLayoutTests(unittest.TestCase):
             self.assertIn("/samples", cgcignore_text)
             self.assertIn(".tmp_drt", cgcignore_text)
             self.assertIn("tools/ffmpeg/", cgcignore_text)
+            # L12: the live `cgc watch` reads the HOME-scoped GLOBAL context file, so the
+            # enrichment must be materialized there too — byte-identical to the runtime copy.
+            global_cgcignore = (
+                layout.run_root / "home" / ".codegraphcontext" / "global" / ".cgcignore"
+            )
+            self.assertEqual(global_cgcignore.read_text(encoding="utf-8"), cgcignore_text)
             self.assertTrue(layout.logs_root.is_dir())
             self.assertTrue(layout.run_root.is_dir())
 
@@ -576,6 +589,28 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 "if not local_cgcignore_path.exists():", target.read_text(encoding="utf-8")
             )
             self.assertFalse(apply_cgc_cgcignore_patch(target))
+
+    def test_cgc_timer_pop_patch_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "watcher.py"
+            target.write_text(
+                f"    def _debounce(self, event_path, action):\n{CGC_TIMER_POP_ORIGINAL_SNIPPET}",
+                encoding="utf-8",
+            )
+
+            self.assertTrue(apply_cgc_timer_pop_patch(target))
+            self.assertTrue(cgc_timer_pop_patch_applied(target))
+            text = target.read_text(encoding="utf-8")
+            self.assertIn(CGC_TIMER_POP_PATCH_MARKER, text)
+            self.assertIn("self.timers.pop(event_path, None)", text)
+            self.assertFalse(apply_cgc_timer_pop_patch(target))
+
+    def test_patch_script_carries_the_timer_pop_operation(self) -> None:
+        # The image-build patch script (patch_cgc.py asset) and the in-package snippets are
+        # two sources for the same patch; this pins them together so they cannot drift.
+        script = provider_asset_text("docker", "codegraphcontext", "patch_cgc.py")
+        self.assertIn(json.dumps(CGC_TIMER_POP_ORIGINAL_SNIPPET), script)
+        self.assertIn(json.dumps(CGC_TIMER_POP_PATCHED_SNIPPET), script)
 
     def test_cgc_delete_patch_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
