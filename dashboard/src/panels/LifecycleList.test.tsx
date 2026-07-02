@@ -262,6 +262,46 @@ describe("LifecycleList task labels", () => {
     expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='0']")).toBeTruthy();
   });
 
+  it("admits an active leaf doc whose enclosure leafId differs from the doc id only by case (L10)", () => {
+    // The real series shape: enclosure leaf ids are lowercase directory names (260628-l7) while doc
+    // ids are uppercase (260628-L7) and the docPath stem is a numbered slug matching neither.
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({ id: "LC-L7", repoId: "agents-remember", enclosure: "/contracts/l7" }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/l7",
+            lifecycleId: "LC-L7",
+            leafId: "260628-l7",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "260628-L7",
+              lifecycleId: "LC-L7",
+              title: "CGC Dependency Command Repair",
+              docPath: "/tasks/260610_browser-dashboard/07_cgc-dependency-command-repair.json",
+            }),
+          ],
+        },
+      }),
+    );
+
+    const onSelect = vi.fn();
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+
+    // The doc renders as a task-document row (bound through its enclosure), not a bare runtime
+    // lifecycle fallback row: clicking it selects the taskdoc, not the lifecycle id.
+    fireEvent.click(getByText(/CGC Dependency Command Repair/));
+    expect(onSelect).toHaveBeenCalledWith(
+      "taskdoc:/tasks/260610_browser-dashboard/07_cgc-dependency-command-repair.json",
+    );
+  });
+
   it("nests numbered leaf docs whose enclosure leaf id is shorter than the task file stem", () => {
     const onSelect = vi.fn();
     seed(

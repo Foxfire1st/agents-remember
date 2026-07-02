@@ -621,21 +621,23 @@ function enclosureForDoc(
   enclosures: EnclosureNode[],
 ): EnclosureNode | undefined {
   const dir = pathDir(doc.docPath);
-  const stem = pathStem(doc.docPath);
+  // Enclosure leaf ids are lowercase directory names (enclosures/260628-l7/) while doc ids are
+  // uppercase (260628-L7): every leafId comparison here is case-insensitive, matching the
+  // normalization RailChat and the change-set bar already use.
+  const stem = pathStem(doc.docPath).toLowerCase();
+  const docId = doc.id ? doc.id.toLowerCase() : undefined;
   return enclosures.find((enclosure) => {
     if (enclosure.taskRoot !== dir) return false;
-    if (enclosure.leafId === stem) return true;
-    if (doc.id && enclosure.leafId === doc.id) return true;
+    const leafId = enclosure.leafId.toLowerCase();
+    if (leafId === stem) return true;
+    if (docId && leafId === docId) return true;
     // Reopening a finalized task spins up a fresh worktree whose leafId is the original slug (or id)
-    // plus a cycle suffix (e.g. `…-s7`) and shares the doc's lifecycle. Require BOTH the shared
+    // plus a cycle suffix (e.g. `…-r1`) and shares the doc's lifecycle. Require BOTH the shared
     // lifecycle AND that suffixed-slug shape, so a doc never grabs an unrelated enclosure that merely
     // runs under the same (master) lifecycle — otherwise the reopened work renders as a parent-less
     // standalone phantom instead of nesting under its master.
     if (!doc.lifecycleId || enclosure.lifecycleId !== doc.lifecycleId) return false;
-    return (
-      enclosure.leafId.startsWith(`${stem}-`) ||
-      Boolean(doc.id && enclosure.leafId.startsWith(`${doc.id}-`))
-    );
+    return leafId.startsWith(`${stem}-`) || Boolean(docId && leafId.startsWith(`${docId}-`));
   });
 }
 

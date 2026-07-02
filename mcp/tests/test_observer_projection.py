@@ -2614,6 +2614,42 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(node.lifecycleId, "LC-LEAF")
         self.assertEqual(node.docPath, (root / f"{leaf_id}.json").as_posix())
 
+    def test_resolves_leaf_doc_lifecycle_from_doc_id_case_insensitively(self) -> None:
+        # The real-world series shape (L10 regression): the enclosure leaf id is the lowercase
+        # enclosures/ directory name ("260628-l7"), the doc slug is a numbered filename that never
+        # matches it, the doc id is uppercase ("260628-L7"), and the doc carries no lifecycleId and
+        # no enclosures[] refs. The doc must still bind to the enclosure's lifecycle.
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        contract = default_contract(
+            task_name="demo",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=self.coord / "repos" / "repo-a",
+            code_source_branch="ar/demo",
+            code_work_branch="ar/demo-leaf",
+            code_base_commit="abc123",
+            worktree_name="cgc-dependency-command-repair",
+            leaf_id="260628-l7",
+            lifecycle_id="LC-LEAF-CASE",
+        )
+        write_contract(contract.contract_path, contract)
+        write_task_doc(
+            root,
+            self._doc(
+                id="260628-L7",
+                slug="07_cgc-dependency-command-repair",
+                kind="subTask",
+                steps=[{"id": "S1", "title": "a", "status": "inProgress"}],
+            ),
+        )
+
+        [node] = read_task_documents(self.coord, enclosures=read_enclosures(self.coord), now=FRESH)
+
+        self.assertEqual(node.lifecycleId, "LC-LEAF-CASE")
+        self.assertEqual(node.id, "260628-L7")
+
     def _master(self) -> TaskDocument:
         return TaskDocument.model_validate(
             {
