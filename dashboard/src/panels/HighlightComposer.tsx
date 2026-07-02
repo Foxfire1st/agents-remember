@@ -16,12 +16,16 @@ import { fetchHarnesses, uploadSessionImage, type HarnessInfo } from "../data/te
 
 // Slice 6f — "send a context package by highlighting". Two stages, like a code editor's selection
 // toolbar: (1) selecting cockpit content (on mouse-up) raises a small **"Add to chat"** pill anchored
-// to it; (2) clicking the pill opens the composer box, which stays open until the operator clicks
-// outside it or Sends. The composer lives on a *snapshot* of the selection (`useSelectionCapture`), so
-// clicking into the message box never dismisses it. A selection only ever *raises* the pill; nothing
-// reaches an agent until Send (the no-silent-action invariant). The target control offers the open
-// chats **and** a create option per detected harness (so a new chat is an agent, not a shell into the
-// void). Delivered as a bracketed paste + a trailing Enter over the live B2 `{type:stdin}` channel.
+// to it; (2) clicking the pill acts. With an obvious leaf-chat target (the selection sits inside the
+// viewed leaf's task reader while that leaf's rail chat is active with a bound chat, L8), the click
+// pastes the context straight into that chat's DRAFT — no target selector, no message box, no Enter —
+// and a failed paste opens the composer instead. Without one, the click opens the composer box, which
+// stays open until the operator clicks outside it or Sends. The composer lives on a *snapshot* of the
+// selection (`useSelectionCapture`), so clicking into the message box never dismisses it. A selection
+// only ever *raises* the pill; nothing reaches an agent until the pill/Send click (the no-silent-action
+// invariant). The target control offers the open chats **and** a create option per detected harness (so
+// a new chat is an agent, not a shell into the void). Composer sends deliver as a bracketed paste + a
+// trailing Enter over the live B2 `{type:stdin}` channel.
 const popover = css({ maxWidth: "min(32rem, 94vw)" });
 const dialog = css({
   display: "flex",
@@ -212,8 +216,6 @@ export function HighlightComposer({
   // The resolved delivery target, captured on the first Send so a Retry re-delivers to the SAME session
   // (and reuses the uploaded image) instead of creating a new chat / re-uploading each attempt.
   const deliveryRef = useRef<{ id: string; imagePath: string | null } | null>(null);
-  const directPasteRef = useRef<string | null>(null);
-  const [failedDirectPasteKey, setFailedDirectPasteKey] = useState<string | null>(null);
 
   // Detected harnesses become "new chat" options so a created chat is an agent, not a shell. Fetched
   // once — the composer stays mounted in CockpitShell (it just renders null without a selection).
@@ -235,8 +237,6 @@ export function HighlightComposer({
     setStatus(null);
     sendingRef.current = false;
     deliveryRef.current = null;
-    directPasteRef.current = null;
-    setFailedDirectPasteKey(null);
   }, [selection]);
 
   // Preview a pasted screenshot; revoke the object URL when it changes or the composer unmounts.
@@ -248,6 +248,9 @@ export function HighlightComposer({
     [imagePreviewUrl],
   );
 
+  // The obvious leaf-chat target: the selection sits inside the viewed leaf's task reader while that
+  // leaf's rail chat is active with a bound running chat. Only the pill CLICK acts on it — a selection
+  // never pastes by itself, so the interaction stays visible and intentional.
   const directLeafChat =
     selection &&
     leafChatActive &&
@@ -255,38 +258,8 @@ export function HighlightComposer({
     selection.leafKey === viewedLeafKey
       ? findSessionForLeaf(viewedLeafKey, "chat")
       : undefined;
-  const directPasteKey =
-    selection && directLeafChat
-      ? [
-          directLeafChat.id,
-          selection.leafKey,
-          selection.text,
-          selection.rect.left,
-          selection.rect.top,
-          selection.rect.width,
-          selection.rect.height,
-        ].join("|")
-      : null;
-
-  useEffect(() => {
-    if (!selection || !directLeafChat || !directPasteKey || failedDirectPasteKey === directPasteKey) return;
-    if (directPasteRef.current === directPasteKey) return;
-    directPasteRef.current = directPasteKey;
-    void pasteDraftToSession(
-      directLeafChat.id,
-      buildContextPackage({ selectionText: selection.text }),
-    ).then((result) => {
-      if (directPasteRef.current !== directPasteKey) return;
-      if (result === "delivered") {
-        clear();
-      } else {
-        setFailedDirectPasteKey(directPasteKey);
-      }
-    });
-  }, [clear, directLeafChat, directPasteKey, failedDirectPasteKey, selection]);
 
   if (!selection) return null;
-  if (directLeafChat && failedDirectPasteKey !== directPasteKey) return null;
 
   // Targets: every open chat, then a create option per detected harness, then a plain shell.
   const routedSessions = selectedLifecycleId
@@ -312,6 +285,26 @@ export function HighlightComposer({
   const dismiss = () => {
     clear();
     setMode("pill");
+  };
+
+  // Direct leaf-chat paste (L8 correction): the "Add to chat" pill click pastes the highlighted context
+  // straight into the adjacent leaf chat's draft — no target selector, no message box, no auto-submit.
+  // A failed paste opens the generic composer instead of dying silently.
+  const directPaste = (targetId: string) => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    setStatus("sending");
+    void pasteDraftToSession(targetId, buildContextPackage({ selectionText: selection.text })).then(
+      (result) => {
+        sendingRef.current = false;
+        setStatus(null);
+        if (result === "delivered") {
+          clear();
+        } else {
+          setMode("composer");
+        }
+      },
+    );
   };
 
   const finish = () => {
@@ -399,7 +392,12 @@ export function HighlightComposer({
           data-testid="highlight-composer"
         >
           {mode === "pill" ? (
-            <Button className={addButton} onPress={() => setMode("composer")} data-testid="highlight-add-to-chat">
+            <Button
+              className={addButton}
+              isDisabled={status === "sending"}
+              onPress={() => (directLeafChat ? directPaste(directLeafChat.id) : setMode("composer"))}
+              data-testid="highlight-add-to-chat"
+            >
               <ChatIcon />
               Add to chat
             </Button>

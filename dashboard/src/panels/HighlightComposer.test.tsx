@@ -130,22 +130,39 @@ describe("HighlightComposer (6f-1)", () => {
     );
   });
 
-  it("pastes directly into the viewed leaf chat when the selection belongs to that leaf", async () => {
+  it("pill click pastes directly into the viewed leaf chat — a selection alone never pastes", async () => {
     const leafKey = "repo/master/L8";
     vi.mocked(useSelectionCapture).mockReturnValue({ selection: { ...SELECTION, leafKey }, clear });
     sessionStore.getState().hydrate([
       { id: "leaf-chat", label: "Claude Code 1", kind: "harness", leafKey, status: "running" },
     ]);
-    const { queryByTestId } = render(
+    const { findByTestId, queryByTestId } = render(
       <HighlightComposer viewedLeafKey={leafKey} leafChatActive />,
     );
 
+    const pill = await findByTestId("highlight-add-to-chat"); // the affordance stays visible
+    expect(pasteDraftToSession).not.toHaveBeenCalled(); // no auto-paste on selection
+    fireEvent.click(pill);
     await waitFor(() =>
       expect(pasteDraftToSession).toHaveBeenCalledWith("leaf-chat", expect.stringContaining("a blocked finding")),
     );
-    expect(queryByTestId("highlight-add-to-chat")).toBeNull();
-    expect(deliverToSession).not.toHaveBeenCalled();
-    expect(clear).toHaveBeenCalled();
+    expect(queryByTestId("highlight-send")).toBeNull(); // no selector/composer stage
+    expect(deliverToSession).not.toHaveBeenCalled(); // draft only, no submit
+    await waitFor(() => expect(clear).toHaveBeenCalled()); // dismissed after the confirmed paste
+  });
+
+  it("opens the generic composer when the direct pill paste is not confirmed", async () => {
+    const leafKey = "repo/master/L8";
+    vi.mocked(pasteDraftToSession).mockResolvedValue("unconfirmed");
+    vi.mocked(useSelectionCapture).mockReturnValue({ selection: { ...SELECTION, leafKey }, clear });
+    sessionStore.getState().hydrate([
+      { id: "leaf-chat", label: "Claude Code 1", kind: "harness", leafKey, status: "running" },
+    ]);
+    const { findByTestId } = render(<HighlightComposer viewedLeafKey={leafKey} leafChatActive />);
+
+    fireEvent.click(await findByTestId("highlight-add-to-chat"));
+    expect(await findByTestId("highlight-send")).not.toBeNull(); // fell back to the visible composer
+    expect(clear).not.toHaveBeenCalled();
   });
 
   it("keeps the generic composer fallback when the selected text is outside the viewed leaf", async () => {
