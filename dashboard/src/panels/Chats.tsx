@@ -154,6 +154,7 @@ const statusPanel = css({
 });
 
 const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
+const CATALOG_REFRESH_INTERVAL_MS = 2500;
 
 function readLastActiveSessionId(): string | null {
   try {
@@ -267,6 +268,13 @@ export function Chats({
   );
 
   useEffect(() => {
+    const interval = window.setInterval(() => {
+      void hydrateTerminalSessionsFromCatalog(false);
+    }, CATALOG_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     writeLastActiveSessionId(activeId);
   }, [activeId]);
 
@@ -292,17 +300,16 @@ export function Chats({
     sessionStore.getState().setLifecycle(activeSession.id, selectedLifecycleId);
   };
 
-  // Attach the active (unattached) session to ANY chosen leaf via the server (the uniqueness arbiter) —
-  // NOT just the leaf you happen to be viewing, so a free chat made anywhere is attachable from the
-  // picker. On success bind the leaf locally + broadcast the catalog change so the shared rail instance
-  // picks it up; on 409 the leaf already has a running chat, so surface a note instead of binding.
+  // Attach or move the active session to ANY chosen leaf via the server (the uniqueness arbiter) — NOT
+  // just the leaf you happen to be viewing. On success bind the leaf locally + broadcast the catalog
+  // change; on 409 the leaf already has a same-role running session, so surface a note instead of binding.
   const attachActiveLeaf = async (leafKey: string) => {
-    if (!activeSession || activeSession.leafKey || !leafKey) return;
+    if (!activeSession || !leafKey || activeSession.leafKey === leafKey) return;
     setLeafAttachError(null);
     const result = await attachSessionToLeaf(activeSession.id, leafKey);
     if (result === "ok") {
-      sessionStore.getState().setLeaf(activeSession.id, leafKey);
-      notifySessionCatalogChanged("create", activeSession.id);
+      sessionStore.getState().applyLeafAssignment(activeSession.id, leafKey);
+      notifySessionCatalogChanged("leaf", activeSession.id);
     } else if (result === "leaf-taken") {
       setLeafAttachError("leaf already has a chat");
     } else {
@@ -368,12 +375,14 @@ export function Chats({
           <span className={attachBadge} data-testid="chats-leaf-badge">
             leaf {leafNameFor(activeSession.leafKey)}
           </span>
-        ) : activeSession && leafTree.length > 0 ? (
+        ) : null}
+        {activeSession && leafTree.length > 0 ? (
           <LeafAttachPicker
             tree={leafTree}
             contextMaster={pickerContextMaster}
             onPick={(leafKey) => void attachActiveLeaf(leafKey)}
             testId="chats-attach-leaf-picker"
+            label={activeSession.leafKey ? "Move leaf" : "Attach to leaf"}
             align="left"
           />
         ) : null}

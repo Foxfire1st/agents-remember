@@ -79,6 +79,7 @@ from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.task_doc import TaskDocResponse
+from agents_remember.models.terminal import AttachTerminalSessionToLeafResponse
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
@@ -106,6 +107,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "server_info": ServerInfoResponse,
     "context_packet": ContextPacketV2,
     "read_ar_files": ReadArFilesResponse,
+    "attach_terminal_session_to_leaf": AttachTerminalSessionToLeafResponse,
     "runtime_install": RuntimeInstallResponse,
     "resolve_context": ResolveContextResponse,
     "drift_check": DriftCheckResponse,

@@ -66,6 +66,7 @@ from .providers import (
 )
 from .read_files import read_ar_files_payload
 from .task_doc import task_doc_payload
+from .terminal import attach_terminal_session_to_leaf_payload
 from .worktree import (
     worktree_abandon_payload,
     worktree_attach_payload,
@@ -86,6 +87,7 @@ __all__ = [
     "PUBLIC_TOOLS",
     "RESERVED_TOOLS",
     "TRANSPORT",
+    "attach_terminal_session_to_leaf_payload",
     "cgc_callees_payload",
     "cgc_callers_payload",
     "cgc_complexity_payload",

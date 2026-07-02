@@ -199,6 +199,18 @@ describe("sessionStore (6e hardening)", () => {
     expect(sessionStore.getState().sessions.find((s) => s.id === "seeker")?.leafKey).toBeUndefined();
   });
 
+  it("applies a server-authoritative leaf assignment over a stale local same-role owner", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().add("Chat", "owner");
+    sessionStore.getState().add("Chat", "seeker");
+    sessionStore.getState().setLeaf("owner", leaf);
+
+    sessionStore.getState().applyLeafAssignment("seeker", leaf);
+
+    expect(findSessionForLeaf(leaf)?.id).toBe("seeker");
+    expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.leafKey).toBeUndefined();
+  });
+
   it("frees a leaf so an exited owner no longer blocks a new bind", () => {
     const leaf = "repo/master/leaf-1";
     sessionStore.getState().hydrate([{ id: "dead", label: "Chat 1", leafKey: leaf, status: "exited" }]);
@@ -311,13 +323,13 @@ describe("session catalog cross-tab sync", () => {
     FakeBroadcastChannel.dispatch({
       type: "terminal-catalog-changed",
       source: "other-tab",
-      reason: "terminate",
-      sessionId: "gone",
+      reason: "leaf",
+      sessionId: "moved",
     });
     notifySessionCatalogChanged("create", "created");
     unsubscribe();
 
-    expect(seen).toEqual(["terminate:gone"]);
+    expect(seen).toEqual(["leaf:moved"]);
     expect(FakeBroadcastChannel.messages).toEqual([
       expect.objectContaining({
         type: "terminal-catalog-changed",

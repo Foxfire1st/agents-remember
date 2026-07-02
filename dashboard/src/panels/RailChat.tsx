@@ -337,11 +337,13 @@ export function RailChat({
   const leafTree = buildTaskTree(taskDocuments);
   const attachChatToLeaf = async (sessionId: string, lk: string) => {
     if (!lk) return;
+    const current = sessionStore.getState().sessions.find((session) => session.id === sessionId);
+    if (current?.leafKey === lk) return;
     setLeafAttachError(null);
     const result = await attachSessionToLeaf(sessionId, lk);
     if (result === "ok") {
-      sessionStore.getState().setLeaf(sessionId, lk);
-      notifySessionCatalogChanged("create", sessionId);
+      sessionStore.getState().applyLeafAssignment(sessionId, lk);
+      notifySessionCatalogChanged("leaf", sessionId);
       await deliverLeafContext(sessionId, lk);
     } else if (result === "leaf-taken") {
       setLeafAttachError("leaf already has a chat");
@@ -408,14 +410,15 @@ export function RailChat({
           </div>
         ) : (
           <>
-            {freeChat ? (
+            {chatSession && leafTree.length > 0 ? (
               <div className={slotBar} data-testid="rail-attach-row">
-                <span>Free chat —</span>
+                {freeChat ? <span>Free chat —</span> : null}
                 <LeafAttachPicker
                   tree={leafTree}
                   contextMaster={contextMaster}
-                  onPick={(lk) => void attachChatToLeaf(freeChat.id, lk)}
+                  onPick={(lk) => void attachChatToLeaf(chatSession.id, lk)}
                   testId="rail-attach-leaf-picker"
+                  label={chatSession.leafKey ? "Move leaf" : "Attach to leaf"}
                   align="right"
                 />
                 {leafAttachError ? (

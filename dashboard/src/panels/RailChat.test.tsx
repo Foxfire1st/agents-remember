@@ -6,6 +6,7 @@ import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
+const SECOND_LEAF_KEY = "agents-remember/260628_operations-integration/260628-L9";
 
 vi.mock("../data/sessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/sessions")>();
@@ -29,6 +30,21 @@ function leafDoc(): TaskDocNode {
       { id: "S1", title: "Wire the leaf registry", status: "done", substeps: [] },
       { id: "S2", title: "Add the rail chat", status: "inProgress", substeps: [] },
     ],
+  } as unknown as TaskDocNode;
+}
+
+function secondLeafDoc(): TaskDocNode {
+  return {
+    id: "260628-L9",
+    lifecycleId: "lc-l9",
+    repository: "agents-remember",
+    kind: "subTask",
+    status: "planning",
+    docPath: "/tasks/agents-remember/260628_operations-integration/09_chat-leaf-reassignment-and-live-catalog-sync.json",
+    title: "Chat leaf reassignment",
+    objective: "Move a hosted chat between task leaves.",
+    requirements: ["Keep the terminal session alive."],
+    steps: [{ id: "S1", title: "Move the catalog leaf binding", status: "pending", substeps: [] }],
   } as unknown as TaskDocNode;
 }
 
@@ -253,6 +269,38 @@ describe("RailChat create from anywhere (L5)", () => {
     await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
     await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("f1", expect.any(String)));
     expect(vi.mocked(pasteDraftToSession).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
+  });
+
+  it("offers a move picker for an attached chat and delivers the new leaf context", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/terminal/c1/attach-leaf")) {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        }
+        return Promise.reject(new Error("no backend"));
+      }),
+    );
+    sessionStore.getState().hydrate([
+      { id: "c1", label: "Claude Code 1", kind: "harness", harness: "claude", leafKey: LEAF_KEY, status: "running" },
+    ]);
+
+    const { findByTestId, findAllByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc(), secondLeafDoc()]} />,
+    );
+
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
+    const leaves = await findAllByTestId("rail-attach-leaf-picker-leaf");
+    const next = leaves.find((leaf) => leaf.getAttribute("data-leaf-key") === SECOND_LEAF_KEY);
+    expect(next).not.toBeUndefined();
+    fireEvent.click(next as HTMLElement);
+
+    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(SECOND_LEAF_KEY));
+    await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("c1", expect.any(String)));
+    expect(vi.mocked(pasteDraftToSession).mock.calls[0]?.[1]).toContain(
+      "Task: 260628-L9 -- Chat leaf reassignment",
+    );
   });
 
   it("surfaces a note when the picked leaf is already taken (409) and does not bind", async () => {

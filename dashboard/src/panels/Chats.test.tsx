@@ -6,6 +6,7 @@ import type { TaskDocNode } from "../types/projection";
 import { Chats } from "./Chats";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
+const SECOND_LEAF_KEY = "agents-remember/260628_operations-integration/260628-L9";
 
 // A minimal task-doc whose qualified leaf id (`repo / dir(docPath) basename / id`) equals LEAF_KEY.
 // `kind: "subTask"` marks it as a leaf so the "Attach to leaf" picker lists it.
@@ -16,6 +17,16 @@ function leafDoc(): TaskDocNode {
     kind: "subTask",
     docPath: "/tasks/agents-remember/260628_operations-integration/05_sidebar-chat-attachment.json",
     title: "Sidebar chat attachment",
+  } as unknown as TaskDocNode;
+}
+
+function secondLeafDoc(): TaskDocNode {
+  return {
+    id: "260628-L9",
+    repository: "agents-remember",
+    kind: "subTask",
+    docPath: "/tasks/agents-remember/260628_operations-integration/09_chat-leaf-reassignment-and-live-catalog-sync.json",
+    title: "Chat leaf reassignment",
   } as unknown as TaskDocNode;
 }
 
@@ -340,6 +351,35 @@ describe("Chats session-tab persistence (6e-4)", () => {
     await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
   });
 
+  it("keeps the leaf picker visible for an attached chat and moves it on 200", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/terminal/s1/attach-leaf")) {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+    sessionStore.getState().hydrate([
+      { id: "s1", label: "Chat 1", leafKey: LEAF_KEY, status: "running" },
+    ]);
+
+    const { findByTestId, findAllByTestId } = render(
+      <Chats taskDocuments={[leafDoc(), secondLeafDoc()]} />,
+    );
+
+    expect(await findByTestId("chats-leaf-badge")).not.toBeNull();
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    const leaves = await findAllByTestId("chats-attach-leaf-picker-leaf");
+    const next = leaves.find((leaf) => leaf.getAttribute("data-leaf-key") === SECOND_LEAF_KEY);
+    expect(next).not.toBeUndefined();
+    fireEvent.click(next as HTMLElement);
+
+    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(SECOND_LEAF_KEY));
+  });
+
   it("does not bind and surfaces a note when the picked leaf is already taken (409)", async () => {
     vi.stubGlobal(
       "fetch",
@@ -360,6 +400,55 @@ describe("Chats session-tab persistence (6e-4)", () => {
     const note = await findByTestId("chats-leaf-attach-error");
     expect(note.textContent).toContain("leaf already has a chat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
+  });
+
+  it("rehydrates leaf moves announced by another tab's catalog invalidation", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    let catalogSessions = [
+      {
+        id: "s1",
+        label: "Chat 1",
+        kind: "harness",
+        harness: "claude",
+        leafKey: LEAF_KEY,
+        cwd: "/ws",
+        tmuxName: "ar-s1",
+        createdAt: "2026-07-02T00:00:00Z",
+        lastAttachedAt: "2026-07-02T00:00:00Z",
+        status: "running",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sessions: catalogSessions }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+
+    render(<Chats taskDocuments={[leafDoc(), secondLeafDoc()]} />);
+    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
+
+    catalogSessions = [{ ...catalogSessions[0], leafKey: SECOND_LEAF_KEY }];
+    act(() => {
+      FakeBroadcastChannel.dispatch({
+        type: "terminal-catalog-changed",
+        source: "other-tab",
+        reason: "leaf",
+        sessionId: "s1",
+      });
+    });
+
+    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(SECOND_LEAF_KEY));
   });
 
   it("keeps the launch buttons enabled for free-chat creation with nothing selected", async () => {

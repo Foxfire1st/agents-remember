@@ -94,6 +94,11 @@ def _simple_payloads(config) -> dict[str, dict]:
         "read_ar_files": tools.read_ar_files_payload(
             config, REPO, [{"path": "README.md", "source": "full"}]
         ),
+        "attach_terminal_session_to_leaf": tools.attach_terminal_session_to_leaf_payload(
+            config,
+            session_id="missing-session",
+            leaf_key="repo/master/leaf-1",
+        ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, REPO),
         "drift_check": tools.drift_check_payload(config, REPO),

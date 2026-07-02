@@ -30,7 +30,7 @@ export interface OpenSession {
   status?: TerminalSessionStatus;
 }
 
-type SessionCatalogChangeReason = "create" | "terminate";
+type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
 
 interface SessionCatalogChangeMessage {
   type: "terminal-catalog-changed";
@@ -53,7 +53,7 @@ function isSessionCatalogChangeMessage(data: unknown): data is SessionCatalogCha
   return (
     message.type === "terminal-catalog-changed" &&
     typeof message.source === "string" &&
-    (message.reason === "create" || message.reason === "terminate") &&
+    (message.reason === "create" || message.reason === "terminate" || message.reason === "leaf") &&
     (message.sessionId === undefined || typeof message.sessionId === "string")
   );
 }
@@ -108,6 +108,11 @@ interface SessionState {
    * the server's `409 leaf-taken` is the real arbiter, this just avoids an obvious local double-claim.
    */
   setLeaf: (id: string, leafKey: string | null) => void;
+  /**
+   * Apply a server/catalog-authoritative leaf assignment after a successful backend attach or hydrate.
+   * Same-role local owners of the destination leaf are cleared because the catalog result wins.
+   */
+  applyLeafAssignment: (id: string, leafKey: string | null) => void;
 }
 
 /** A session's leaf-uniqueness role: a plain shell is a TERMINAL, any agent harness is a CHAT. */
@@ -287,6 +292,28 @@ export const sessionStore = createStore<SessionState>((set) => ({
               : clearLeaf(session)
             : session,
         ),
+      };
+    }),
+  applyLeafAssignment: (id, leafKey) =>
+    set((state) => {
+      const target = state.sessions.find((session) => session.id === id);
+      if (!target) return state;
+      const role = sessionRole(target);
+      return {
+        sessions: state.sessions.map((session) => {
+          if (session.id === id) {
+            return leafKey ? { ...session, leafKey } : clearLeaf(session);
+          }
+          if (
+            leafKey &&
+            session.leafKey === leafKey &&
+            isLiveSession(session) &&
+            sessionRole(session) === role
+          ) {
+            return clearLeaf(session);
+          }
+          return session;
+        }),
       };
     }),
 }));

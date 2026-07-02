@@ -89,6 +89,10 @@ from agents_remember.serving.terminal_catalog import (
     role_for_kind,
     terminal_catalog_path,
 )
+from agents_remember.serving.terminal_leaf_assignment import (
+    assign_terminal_session_to_leaf,
+    leaf_conflict_owner,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -348,10 +352,10 @@ def _claim_leaf_or_409(
     """
     if not leaf_key:
         return None
-    owner = catalog.active_for_leaf(leaf_key, role=role)
-    if owner is not None and owner.id != session_id:
+    owner = leaf_conflict_owner(catalog, leaf_key=leaf_key, session_id=session_id, role=role)
+    if owner is not None:
         return JSONResponse(
-            content={"status": "leaf-taken", "leafKey": leaf_key, "session": owner.id},
+            content={"status": "leaf-taken", "leafKey": leaf_key, "session": owner},
             status_code=409,
         )
     return None
@@ -707,16 +711,22 @@ def create_app(
         # L5: claim a leaf for an EXISTING session from the Chats page (enclosure-free, no respawn).
         # 404 if the session is unknown or terminated (a terminated chat cannot hold a leaf); 409 if a
         # different running chat already owns the leaf; else persist the leaf_key and report it.
-        entry = catalog.get(session)
-        if entry is None or entry.status == "terminated":
+        result = assign_terminal_session_to_leaf(
+            catalog,
+            session_id=session,
+            leaf_key=request.leaf_key,
+        )
+        if result.status == "unknown-session":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        # Scope uniqueness to the existing session's role so attaching a terminal to a leaf that
-        # already has an agent chat is allowed (and vice versa).
-        conflict = _claim_leaf_or_409(catalog, request.leaf_key, session, role=entry.role)
-        if conflict is not None:
-            return conflict
-        updated = entry.with_leaf_key(request.leaf_key)
-        catalog.upsert(updated)
+        if result.status == "leaf-taken":
+            return JSONResponse(
+                content={
+                    "session": result.owner_session_id,
+                    "status": "leaf-taken",
+                    "leafKey": request.leaf_key,
+                },
+                status_code=409,
+            )
         return JSONResponse(
             content={"session": session, "status": "attached", "leafKey": request.leaf_key},
             status_code=200,

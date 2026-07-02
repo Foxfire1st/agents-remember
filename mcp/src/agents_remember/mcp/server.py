@@ -11,6 +11,7 @@ from agents_remember.observer import AmbientLifecycle, EventStore, install_ambie
 from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
 from .tools import (
+    attach_terminal_session_to_leaf_payload,
     cgc_callees_payload,
     cgc_callers_payload,
     cgc_complexity_payload,
@@ -125,6 +126,20 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repository and governing route overviews. Native read is the edit precondition once
         building begins."""
         return read_ar_files_payload(config, repo_id, files, refresh=refresh)
+
+    @server.tool()
+    def attach_terminal_session_to_leaf(session_id: str, leaf_key: str) -> dict[str, Any]:
+        """Move an existing hosted terminal/chat session to a durable task leaf.
+
+        Reuses the dashboard terminal catalog's server-authoritative `(leaf, role)` uniqueness
+        rules. Returns status 'attached', 'leaf-taken', or 'unknown-session'; it does not spawn a
+        new session or require a worktree enclosure.
+        """
+        return attach_terminal_session_to_leaf_payload(
+            config,
+            session_id=session_id,
+            leaf_key=leaf_key,
+        )
 
     @server.tool()
     def runtime_install(
