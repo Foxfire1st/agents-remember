@@ -352,7 +352,7 @@ def cgc_dependencies_tool(
         config,
         operation="cgc_dependencies",
         repo_id=repo_id,
-        native_args=["analyze", "dependencies", _required_text(module, "module")],
+        native_args=["analyze", "deps", _required_text(module, "module")],
         dry_run=dry_run,
         timeout=timeout,
         worktree=worktree,

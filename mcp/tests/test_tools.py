@@ -604,7 +604,7 @@ class McpToolTests(unittest.TestCase):
                             "agents_remember.mcp",
                             dry_run=True,
                         ),
-                        ["analyze", "dependencies", "agents_remember.mcp"],
+                        ["analyze", "deps", "agents_remember.mcp"],
                     ),
                     (
                         cgc_complexity_payload(
