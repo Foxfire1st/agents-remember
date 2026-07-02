@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
   return {
     connection,
     fit: vi.fn(),
+    scrollLines: vi.fn(),
     terminalOptions: vi.fn(),
   };
 });
@@ -38,6 +39,9 @@ vi.mock("@xterm/xterm", () => ({
     write() {}
     onData() {
       return { dispose: vi.fn() };
+    }
+    scrollLines(amount: number) {
+      mocks.scrollLines(amount);
     }
     dispose() {}
   },
@@ -68,5 +72,57 @@ describe("Terminal", () => {
     expect(mocks.terminalOptions).toHaveBeenCalledWith(
       expect.objectContaining({ scrollback: 5000 }),
     );
+  });
+
+  it("uses wheel events to scroll the xterm viewport instead of terminal input", () => {
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready: Promise.resolve() },
+    });
+    const parentWheel = vi.fn();
+
+    const { getByTestId } = render(
+      <div onWheel={parentWheel}>
+        <Terminal sessionId="s1" />
+      </div>,
+    );
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -120,
+    });
+
+    getByTestId("terminal-host").dispatchEvent(event);
+
+    expect(mocks.scrollLines).toHaveBeenCalledWith(-3);
+    expect(event.defaultPrevented).toBe(true);
+    expect(parentWheel).not.toHaveBeenCalled();
+    expect(mocks.connection.sendInput).not.toHaveBeenCalled();
+  });
+
+  it("swallows partial pixel wheel movement before it reaches terminal input", () => {
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready: Promise.resolve() },
+    });
+    const parentWheel = vi.fn();
+
+    const { getByTestId } = render(
+      <div onWheel={parentWheel}>
+        <Terminal sessionId="s1" />
+      </div>,
+    );
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 10,
+    });
+
+    getByTestId("terminal-host").dispatchEvent(event);
+
+    expect(mocks.scrollLines).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+    expect(parentWheel).not.toHaveBeenCalled();
+    expect(mocks.connection.sendInput).not.toHaveBeenCalled();
   });
 });

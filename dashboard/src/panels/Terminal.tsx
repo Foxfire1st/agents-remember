@@ -41,8 +41,28 @@ const THEME = {
   white: "#d6e7da",
 };
 
+const WHEEL_PIXELS_PER_LINE = 40;
+const DOM_DELTA_LINE = 1;
+const DOM_DELTA_PAGE = 2;
+
 function cursorShouldBlink(): boolean {
   return typeof document === "undefined" || document.documentElement.dataset.effects !== "off";
+}
+
+function wheelScrollLines(event: WheelEvent, rows: number, pixelRemainder: number): [number, number] {
+  if (event.deltaY === 0) return [0, pixelRemainder];
+  const direction = event.deltaY > 0 ? 1 : -1;
+  const magnitude = Math.abs(event.deltaY);
+
+  if (event.deltaMode === DOM_DELTA_PAGE) {
+    return [direction * Math.max(1, Math.ceil(magnitude) * Math.max(1, rows - 1)), 0];
+  }
+  if (event.deltaMode === DOM_DELTA_LINE) {
+    return [direction * Math.max(1, Math.ceil(magnitude)), 0];
+  }
+  const pixels = pixelRemainder + event.deltaY;
+  const lines = Math.trunc(pixels / WHEEL_PIXELS_PER_LINE);
+  return [lines, pixels - lines * WHEEL_PIXELS_PER_LINE];
 }
 
 export function Terminal({
@@ -75,6 +95,18 @@ export function Terminal({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(node);
+    let wheelPixelRemainder = 0;
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      const [lines, nextPixelRemainder] = wheelScrollLines(event, term.rows, wheelPixelRemainder);
+      wheelPixelRemainder = nextPixelRemainder;
+      if (lines !== 0) term.scrollLines(lines);
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+    // This rail is a transcript surface: wheel input should always scroll xterm's viewport, even
+    // when xterm would otherwise translate it into PTY up/down input because the buffer cannot scroll.
+    node.addEventListener("wheel", handleWheel, { passive: false, capture: true });
 
     const conn = connectTerminal(
       sessionId,
@@ -111,6 +143,7 @@ export function Terminal({
       alive = false;
       cancelAnimationFrame(raf);
       onConnRef.current?.(null);
+      node.removeEventListener("wheel", handleWheel, { capture: true });
       observer.disconnect();
       dataSub.dispose();
       conn.dispose();
