@@ -69,7 +69,9 @@ from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.serving.actions import ActionRequest, evaluate_action
+from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
+from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harnesses import (
     Which,
     detect_harnesses,
@@ -83,7 +85,13 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
     TerminalSessionKind,
+    TerminalSessionRole,
+    role_for_kind,
     terminal_catalog_path,
+)
+from agents_remember.serving.terminal_leaf_assignment import (
+    assign_terminal_session_to_leaf,
+    leaf_conflict_owner,
 )
 
 if TYPE_CHECKING:
@@ -106,13 +114,9 @@ async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]
     """
     seq, snapshot = projector.current()
     if snapshot is not None:
-        yield ServerSentEvent(
-            data=_encode(snapshot), event="snapshot", id=str(seq), retry=2000
-        )
+        yield ServerSentEvent(data=_encode(snapshot), event="snapshot", id=str(seq), retry=2000)
     async for seq, delta in projector.subscribe():
-        yield ServerSentEvent(
-            data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000
-        )
+        yield ServerSentEvent(data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000)
 
 
 _TERMINAL_EXIT_FRAME = json.dumps({"type": "exit"})
@@ -168,9 +172,7 @@ def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
                 host.resize(session, cols=cols, rows=rows)
 
 
-def _apply_terminal_session_input(
-    host: TerminalHost, session: TerminalSession, text: str
-) -> None:
+def _apply_terminal_session_input(host: TerminalHost, session: TerminalSession, text: str) -> None:
     """Apply one client text frame to a concrete PTY client."""
     try:
         message = json.loads(text)
@@ -190,9 +192,7 @@ def _apply_terminal_session_input(
                 host.resize_session(session, cols=cols, rows=rows)
 
 
-async def _terminal_to_socket(
-    websocket: WebSocket, outbound: asyncio.Queue[bytes | None]
-) -> None:
+async def _terminal_to_socket(websocket: WebSocket, outbound: asyncio.Queue[bytes | None]) -> None:
     """Forward queued PTY output frames to the browser until the EOF sentinel (``None``)."""
     while True:
         chunk = await outbound.get()
@@ -272,6 +272,15 @@ class TerminalOpenRequest(BaseModel):
     harness: str | None = None
     label: str | None = None
     lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
+    # The durable leaf-identity key the chat claims at open (qualified leaf id ``repo/master/leaf-id``).
+    # Opaque to the backend; persisted on the catalog entry, uniqueness-checked before the spawn.
+    leaf_key: str | None = Field(default=None, alias="leafKey")
+
+
+class TerminalAttachLeafRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}/attach-leaf``: claim a leaf for an existing session."""
+
+    leaf_key: str = Field(alias="leafKey")
 
 
 class OperatorInboxPostRequest(BaseModel):
@@ -322,6 +331,34 @@ def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: st
 
 def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
     return entry.to_json()
+
+
+def _claim_leaf_or_409(
+    catalog: TerminalCatalog,
+    leaf_key: str | None,
+    session_id: str,
+    *,
+    role: TerminalSessionRole,
+) -> JSONResponse | None:
+    """Server-authoritative uniqueness: at most one RUNNING session per (leaf, role) (the guard).
+
+    Uniqueness is scoped to ``role`` (chat vs. terminal): a leaf may hold one agent chat AND one
+    plain terminal at once, so opening a terminal never 409s against the leaf's chat and vice versa.
+    Returns a ``409 leaf-taken`` response when ``leaf_key`` is already owned by a *different* running
+    session of the SAME role, else ``None`` (free, or already this session's). Called immediately
+    before an upsert in the single-process FastAPI app + atomic JSON store, so the check-then-write is
+    effectively atomic; the client guard in ``data/sessions.ts`` is only advisory. ``leaf_key`` is
+    opaque (a leaf key or a reserved ``master:<...>`` key flow identically).
+    """
+    if not leaf_key:
+        return None
+    owner = leaf_conflict_owner(catalog, leaf_key=leaf_key, session_id=session_id, role=role)
+    if owner is not None:
+        return JSONResponse(
+            content={"status": "leaf-taken", "leafKey": leaf_key, "session": owner},
+            status_code=409,
+        )
+    return None
 
 
 def _refresh_catalog_entries(
@@ -540,7 +577,9 @@ def create_app(
                 created_via="dashboard",
             )
         except ValueError as exc:
-            return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
+            return JSONResponse(
+                content={"status": "bad-address", "detail": str(exc)}, status_code=400
+            )
         return JSONResponse(content=payload, status_code=200)
 
     @app.post("/api/operator-inbox/{entry_id}/dismiss")
@@ -550,9 +589,7 @@ def create_app(
             return JSONResponse(
                 content={"status": "not-found", "entryId": entry_id}, status_code=404
             )
-        return JSONResponse(
-            content={"status": "dismissed", "entryId": entry_id}, status_code=200
-        )
+        return JSONResponse(content={"status": "dismissed", "entryId": entry_id}, status_code=200)
 
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:
@@ -594,8 +631,7 @@ def create_app(
         # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
         return {
             "harnesses": [
-                {"id": h.id, "name": h.name, "detected": h.detected}
-                for h in detect_harnesses()
+                {"id": h.id, "name": h.name, "detected": h.detected} for h in detect_harnesses()
             ]
         }
 
@@ -614,10 +650,16 @@ def create_app(
                 harness=request.harness,
             )
         except ValueError as exc:
-            return JSONResponse(
-                content={"status": "bad-kind", "detail": str(exc)}, status_code=400
-            )
+            return JSONResponse(content={"status": "bad-kind", "detail": str(exc)}, status_code=400)
         kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
+        # Claim the leaf before spawning: a taken leaf is refused 409 so two chats never mingle on
+        # one leaf (contradicting file writes). Scoped to the launch role so a terminal can sit beside
+        # the leaf's agent chat. Enclosure-independent -- no worktree required.
+        conflict = _claim_leaf_or_409(
+            catalog, request.leaf_key, session, role=role_for_kind(kind)
+        )
+        if conflict is not None:
+            return conflict
         opened = host.ensure(
             session,
             cwd=cwd,
@@ -629,7 +671,9 @@ def create_app(
         )
         attached_at = now_iso()
         existing = catalog.get(session)
-        label = request.label or (existing.label if existing else _terminal_label(kind, request.harness, session))
+        label = request.label or (
+            existing.label if existing else _terminal_label(kind, request.harness, session)
+        )
         entry = TerminalCatalogEntry(
             id=opened.sid,
             label=label,
@@ -642,6 +686,9 @@ def create_app(
             created_at=existing.created_at if existing is not None else attached_at,
             last_attached_at=attached_at,
             status="running",
+            # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already
+            # owns (a re-open / reconnect must not silently drop the leaf binding).
+            leaf_key=request.leaf_key or (existing.leaf_key if existing is not None else None),
         )
         catalog.upsert(entry)
         return JSONResponse(
@@ -651,10 +698,37 @@ def create_app(
                 "kind": request.kind,
                 "harness": request.harness,
                 "lifecycleId": request.lifecycle_id,
+                "leafKey": entry.leaf_key,
                 "cwd": str(opened.cwd),
                 "tmuxName": opened.tmux_name,
                 "status": "running",
             },
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/attach-leaf")
+    def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
+        # L5: claim a leaf for an EXISTING session from the Chats page (enclosure-free, no respawn).
+        # 404 if the session is unknown or terminated (a terminated chat cannot hold a leaf); 409 if a
+        # different running chat already owns the leaf; else persist the leaf_key and report it.
+        result = assign_terminal_session_to_leaf(
+            catalog,
+            session_id=session,
+            leaf_key=request.leaf_key,
+        )
+        if result.status == "unknown-session":
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        if result.status == "leaf-taken":
+            return JSONResponse(
+                content={
+                    "session": result.owner_session_id,
+                    "status": "leaf-taken",
+                    "leafKey": request.leaf_key,
+                },
+                status_code=409,
+            )
+        return JSONResponse(
+            content={"session": session, "status": "attached", "leafKey": request.leaf_key},
             status_code=200,
         )
 
@@ -705,11 +779,17 @@ def create_app(
         if len(body) > _MAX_IMAGE_BYTES:
             return JSONResponse(content={"status": "too-large"}, status_code=413)
         if not body or not _looks_like_image(body, ext):
-            return JSONResponse(content={"status": "bad-type"}, status_code=400)  # empty / not an image
+            return JSONResponse(
+                content={"status": "bad-type"}, status_code=400
+            )  # empty / not an image
         dest = cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
+        dest.write_bytes(
+            body
+        )  # flush before the path is injected -- the harness validates existence
         return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
 
+    register_files_routes(app, config)
+    register_changeset_routes(app, config)
     mount_static(app)
     return app

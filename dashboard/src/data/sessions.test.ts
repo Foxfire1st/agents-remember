@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSession,
   deliverToSession,
+  findSessionForLeaf,
   findSessionForLifecycle,
   fromTerminalSessionInfo,
   notifySessionCatalogChanged,
+  pasteDraftToSession,
   registerConnection,
   sendToSession,
   sessionStore,
@@ -178,6 +180,86 @@ describe("sessionStore (6e hardening)", () => {
     expect(sessionStore.getState().sessions).toEqual([{ id: "d", label: "Claude Code 1" }]);
   });
 
+  it("binds a session to a leaf and resolves it via findSessionForLeaf", () => {
+    const leaf = "agents-remember/260628_operations-integration/260628-L5";
+    sessionStore.getState().add("Chat", "agent-1");
+    sessionStore.getState().setLeaf("agent-1", leaf);
+    expect(findSessionForLeaf(leaf)?.id).toBe("agent-1");
+    expect(sessionStore.getState().sessions[0].leafKey).toBe(leaf);
+  });
+
+  it("rejects a leaf bind that another LIVE session already owns (advisory guard)", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().add("Chat", "owner");
+    sessionStore.getState().setLeaf("owner", leaf);
+    sessionStore.getState().add("Chat", "seeker");
+    sessionStore.getState().setLeaf("seeker", leaf); // owner already holds it → no-op
+
+    expect(findSessionForLeaf(leaf)?.id).toBe("owner");
+    expect(sessionStore.getState().sessions.find((s) => s.id === "seeker")?.leafKey).toBeUndefined();
+  });
+
+  it("applies a server-authoritative leaf assignment over a stale local same-role owner", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().add("Chat", "owner");
+    sessionStore.getState().add("Chat", "seeker");
+    sessionStore.getState().setLeaf("owner", leaf);
+
+    sessionStore.getState().applyLeafAssignment("seeker", leaf);
+
+    expect(findSessionForLeaf(leaf)?.id).toBe("seeker");
+    expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.leafKey).toBeUndefined();
+  });
+
+  it("frees a leaf so an exited owner no longer blocks a new bind", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().hydrate([{ id: "dead", label: "Chat 1", leafKey: leaf, status: "exited" }]);
+    expect(findSessionForLeaf(leaf)).toBeUndefined(); // an exited chat does not own the leaf
+    sessionStore.getState().add("Chat", "fresh");
+    sessionStore.getState().setLeaf("fresh", leaf); // not blocked by the dead owner
+    expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
+  });
+
+  it("clears a leaf binding when set to null", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().add("Chat", "agent-1");
+    sessionStore.getState().setLeaf("agent-1", leaf);
+    sessionStore.getState().setLeaf("agent-1", null);
+    expect(findSessionForLeaf(leaf)).toBeUndefined();
+    expect(sessionStore.getState().sessions[0].leafKey).toBeUndefined();
+  });
+
+  it("maps leafKey from a terminal catalog row the same conditional way as lifecycleId", () => {
+    const leaf = "repo/master/leaf-1";
+    expect(
+      fromTerminalSessionInfo({
+        id: "s1",
+        label: "Chat 1",
+        kind: "terminal",
+        leafKey: leaf,
+        cwd: "/ws",
+        tmuxName: "ar-s1",
+        createdAt: "2026-06-26T00:00:00Z",
+        lastAttachedAt: "2026-06-26T00:00:00Z",
+        status: "running",
+      }),
+    ).toEqual({ id: "s1", label: "Chat 1", kind: "terminal", leafKey: leaf, status: "running" });
+
+    // No leafKey on the row → no leafKey on the session (omitted, not undefined-valued).
+    expect(
+      fromTerminalSessionInfo({
+        id: "s2",
+        label: "Chat 2",
+        kind: "terminal",
+        cwd: "/ws",
+        tmuxName: "ar-s2",
+        createdAt: "2026-06-26T00:00:00Z",
+        lastAttachedAt: "2026-06-26T00:00:00Z",
+        status: "running",
+      }),
+    ).not.toHaveProperty("leafKey");
+  });
+
   it("converts terminal catalog rows into store sessions", () => {
     expect(
       fromTerminalSessionInfo({
@@ -241,13 +323,13 @@ describe("session catalog cross-tab sync", () => {
     FakeBroadcastChannel.dispatch({
       type: "terminal-catalog-changed",
       source: "other-tab",
-      reason: "terminate",
-      sessionId: "gone",
+      reason: "leaf",
+      sessionId: "moved",
     });
     notifySessionCatalogChanged("create", "created");
     unsubscribe();
 
-    expect(seen).toEqual(["terminate:gone"]);
+    expect(seen).toEqual(["leaf:moved"]);
     expect(FakeBroadcastChannel.messages).toEqual([
       expect.objectContaining({
         type: "terminal-catalog-changed",
@@ -306,6 +388,45 @@ describe("connection registry + deliverToSession (6f hardening)", () => {
       await vi.advanceTimersByTimeAsync(1800);
       expect(await done).toBe("delivered");
       registerConnection("race-1", null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pastes a draft package without sending Enter and confirms via the draft echo", async () => {
+    vi.useFakeTimers();
+    try {
+      const conn = fakeConn();
+      const raw = "draft\x1abody\x1b[200~tail";
+      registerConnection("draft-1", conn);
+
+      const done = pasteDraftToSession("draft-1", raw);
+      await vi.advanceTimersByTimeAsync(0); // whenReady resolves → the draft paste goes out
+      expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]);
+      conn.outputAt = 1; // the composer echoes the draft (reopened L6: delivery is confirmed, not assumed)
+      await vi.advanceTimersByTimeAsync(300);
+      expect(await done).toBe("delivered");
+
+      expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]); // ONE paste, no Enter
+      registerConnection("draft-1", null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a draft paste 'unconfirmed' when the harness never echoes it (boot discard)", async () => {
+    vi.useFakeTimers();
+    try {
+      const conn = fakeConn();
+      registerConnection("draft-2", conn);
+
+      const done = pasteDraftToSession("draft-2", "pkg");
+      await vi.advanceTimersByTimeAsync(36_000); // past the paste boot deadline with no echo
+      expect(await done).toBe("unconfirmed");
+
+      expect(conn.inputs.length).toBeGreaterThanOrEqual(2); // it retried through the boot window
+      expect(conn.inputs).not.toContain("\r"); // draft-only: never submits on the operator's behalf
+      registerConnection("draft-2", null);
     } finally {
       vi.useRealTimers();
     }

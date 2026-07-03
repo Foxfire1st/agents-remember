@@ -12,6 +12,7 @@ import {
   useSessions,
 } from "../data/sessions";
 import {
+  attachSessionToLeaf,
   bracketedPaste,
   fetchHarnesses,
   fetchTerminalSessionsOrNull,
@@ -19,7 +20,10 @@ import {
   terminateTerminalSession,
   type HarnessInfo,
 } from "../data/terminal";
+import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../data/taskIdentity";
+import type { TaskDocNode } from "../types/projection";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
+import { LeafAttachPicker } from "./LeafAttachPicker";
 import { SessionComposer } from "./SessionComposer";
 import { SessionList } from "./SessionList";
 
@@ -92,13 +96,18 @@ const attachBadge = css({
   paddingInline: "0.45rem",
   paddingBlock: "0.12rem",
 });
+const attachError = css({
+  fontSize: "0.7rem",
+  color: "alarm",
+  paddingInline: "0.2rem",
+});
 const harnessIcon = css({ flexShrink: 0, display: "block" });
 const body = css({ display: "flex", flex: "1", minHeight: "0", gap: "0.5rem" });
 const sidebar = css({
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
-  width: "13rem",
+  width: "16rem",
   minHeight: "0",
   borderRightWidth: "1px",
   borderRightStyle: "solid",
@@ -145,6 +154,7 @@ const statusPanel = css({
 });
 
 const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
+const CATALOG_REFRESH_INTERVAL_MS = 2500;
 
 function readLastActiveSessionId(): string | null {
   try {
@@ -195,7 +205,17 @@ function HarnessIcon({ id }: { id: string }) {
   );
 }
 
-export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string }) {
+export function Chats({
+  selectedLifecycleId,
+  selectedLeafKey,
+  taskDocuments = [],
+  contextMaster,
+}: {
+  selectedLifecycleId?: string;
+  selectedLeafKey?: string;
+  taskDocuments?: TaskDocNode[];
+  contextMaster?: string;
+}) {
   // The session registry lives in the store (shared, testable state); <Chats> is kept mounted across
   // view switches (hidden via CSS in `Cockpit`), so the live terminal + this connection ref persist.
   const sessions = useSessions((state) => state.sessions);
@@ -203,6 +223,12 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
   const activeSession = sessions.find((session) => session.id === activeId);
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  // The attached-leaf name resolver for the session list ("who works on what"): the bound leaf's task-doc
+  // title, falling back to the leaf id.
+  const leafNameFor = (leafKey: string): string =>
+    leafTitleForKey(taskDocuments, leafKey) ?? leafIdFromKey(leafKey);
+  // A transient note for a refused leaf attach (the server's 409 leaf-taken).
+  const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
   // only for detected ones. `[]` (no backend / failure) just leaves ＋ Terminal alone.
@@ -242,6 +268,13 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
   );
 
   useEffect(() => {
+    const interval = window.setInterval(() => {
+      void hydrateTerminalSessionsFromCatalog(false);
+    }, CATALOG_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     writeLastActiveSessionId(activeId);
   }, [activeId]);
 
@@ -266,6 +299,30 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
     if (!activeSession || activeSession.lifecycleId || !selectedLifecycleId) return;
     sessionStore.getState().setLifecycle(activeSession.id, selectedLifecycleId);
   };
+
+  // Attach or move the active session to ANY chosen leaf via the server (the uniqueness arbiter) — NOT
+  // just the leaf you happen to be viewing. On success bind the leaf locally + broadcast the catalog
+  // change; on 409 the leaf already has a same-role running session, so surface a note instead of binding.
+  const attachActiveLeaf = async (leafKey: string) => {
+    if (!activeSession || !leafKey || activeSession.leafKey === leafKey) return;
+    setLeafAttachError(null);
+    const result = await attachSessionToLeaf(activeSession.id, leafKey);
+    if (result === "ok") {
+      sessionStore.getState().applyLeafAssignment(activeSession.id, leafKey);
+      notifySessionCatalogChanged("leaf", activeSession.id);
+    } else if (result === "leaf-taken") {
+      setLeafAttachError("leaf already has a chat");
+    } else {
+      setLeafAttachError("could not attach to leaf");
+    }
+  };
+
+  // The master→…→leaf tree the attach picker drills (nested masters supported). The picker opens
+  // pre-drilled to the in-context master — the explicit `contextMaster`, else the viewed leaf's master
+  // (`selectedLeafKey`'s middle segment) — so the relevant series surfaces first.
+  const leafTree = buildTaskTree(taskDocuments);
+  const pickerContextMaster =
+    contextMaster ?? (selectedLeafKey ? selectedLeafKey.split("/").filter(Boolean)[1] : undefined);
 
   const terminateSession = async (id: string) => {
     if (await terminateTerminalSession(id)) {
@@ -314,6 +371,26 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
         ) : activeSession?.lifecycleId ? (
           <span className={attachBadge}>task {activeSession.lifecycleId}</span>
         ) : null}
+        {activeSession?.leafKey ? (
+          <span className={attachBadge} data-testid="chats-leaf-badge">
+            leaf {leafNameFor(activeSession.leafKey)}
+          </span>
+        ) : null}
+        {activeSession && leafTree.length > 0 ? (
+          <LeafAttachPicker
+            tree={leafTree}
+            contextMaster={pickerContextMaster}
+            onPick={(leafKey) => void attachActiveLeaf(leafKey)}
+            testId="chats-attach-leaf-picker"
+            label={activeSession.leafKey ? "Move leaf" : "Attach to leaf"}
+            align="left"
+          />
+        ) : null}
+        {leafAttachError ? (
+          <span className={attachError} data-testid="chats-leaf-attach-error">
+            {leafAttachError}
+          </span>
+        ) : null}
       </header>
       <div className={body}>
         {sessions.length > 0 && (
@@ -323,6 +400,7 @@ export function Chats({ selectedLifecycleId }: { selectedLifecycleId?: string })
               activeId={activeId}
               onSelect={(id) => sessionStore.getState().setActive(id)}
               onTerminate={(id) => void terminateSession(id)}
+              leafNameFor={leafNameFor}
             />
           </aside>
         )}

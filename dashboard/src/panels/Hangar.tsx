@@ -8,8 +8,19 @@ import { GateResponder, isWorktreeGateKind } from "./GateResponder";
 
 // The hangar (notes 01/06): persistent worktree-backed lifecycles are NEVER auto-reaped — when
 // they rot, this is where the staleness surfaces for the developer (the TTL reaper is fleeting-only).
-// Lists every worktree enclosure with its closeout/integration/cleanup status + the cross-ref
+// Lists every LIVE worktree enclosure with its closeout/integration/cleanup status + the cross-ref
 // lifecycle's staleness, with display-only integrate/cleanup affordances (06 POSTs).
+//
+// A finalized worktree keeps its enclosure CONTRACT on disk (it records the landed state for memory
+// lineage) even after its directory is reaped, so the raw enclosure set only ever grows. The hangar is
+// about worktrees that still physically exist / need action, so it hides the archived ones — a
+// completed/abandoned cleanup means there is no worktree left to integrate, clean up, or rot.
+const ARCHIVED_CLEANUP = new Set(["completed", "abandoned"]);
+
+function isArchived(enclosure: EnclosureNode): boolean {
+  return ARCHIVED_CLEANUP.has(enclosure.cleanup);
+}
+
 function isStale(enclosure: EnclosureNode, lifecycle: LifecycleProjection | undefined): boolean {
   if (enclosure.cleanup === "pending" || enclosure.integrationStatus === "completed") return true;
   return Boolean(lifecycle?.inferred);
@@ -62,12 +73,14 @@ const actions = css({ display: "flex", gap: "0.3rem" });
 export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
   const enclosures = useDashboard((s) => s.enclosures);
   const lifecycles = useDashboard((s) => s.lifecycles);
-  const rows = Object.values(enclosures).sort((a, b) => a.enclosure.localeCompare(b.enclosure));
+  const rows = Object.values(enclosures)
+    .filter((enclosure) => !isArchived(enclosure))
+    .sort((a, b) => a.enclosure.localeCompare(b.enclosure));
 
   return (
     <Panel testid="hangar" title={`Hangar · ${rows.length} worktrees`} className={sizing}>
       {rows.length === 0 ? (
-        <p className="muted">Hangar empty — no persistent worktrees.</p>
+        <p className="muted">Hangar empty — no live persistent worktrees.</p>
       ) : (
         <ul className={list}>
           {rows.map((enclosure) => {

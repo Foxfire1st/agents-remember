@@ -1062,6 +1062,27 @@ class RawEventTests(unittest.TestCase):
         # Only real activity is the start at 10:00 (2h ago); the recent heartbeat is ignored.
         self.assertEqual(prune_expired_lifecycle_event_logs(self.root, now=now), [fleet])
 
+    def test_protected_lifecycle_log_survives_inactivity(self) -> None:
+        # A dormant, enclosure-backed log that belongs to a not-yet-retired master series is exempt:
+        # the dashboard passes its id in `protected_lifecycle_ids`, so a running durable task keeps its
+        # (and its siblings') history regardless of how long since its last lifecycle event.
+        now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
+        kept = self._append(
+            "keepme",
+            self._event_line("k-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True),
+            self._event_line("k-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"),
+            self._event_line("k-3", "tool.completed", "2026-06-14T10:00:00+00:00", tool="x"),
+        )
+        # Protected -> not pruned even though last real activity (10:00) is 2h ago, past the TTL.
+        self.assertEqual(
+            prune_expired_lifecycle_event_logs(self.root, now=now, protected_lifecycle_ids={"keepme"}),
+            [],
+        )
+        self.assertTrue(kept.exists())
+        # Drop the protection and it IS pruned — proving the dormancy precondition held all along.
+        self.assertEqual(prune_expired_lifecycle_event_logs(self.root, now=now), [kept])
+        self.assertFalse(kept.exists())
+
     def test_active_lifecycle_with_recent_activity_not_pruned(self) -> None:
         now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
         alive = self._append(

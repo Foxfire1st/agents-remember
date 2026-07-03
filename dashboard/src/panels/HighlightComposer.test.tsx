@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSession, deliverToSession, sessionStore } from "../data/sessions";
+import { createSession, deliverToSession, pasteDraftToSession, sessionStore } from "../data/sessions";
 import { useSelectionCapture } from "../data/selection";
 import { fetchHarnesses, uploadSessionImage } from "../data/terminal";
 import { HighlightComposer } from "./HighlightComposer";
@@ -9,7 +9,7 @@ import { HighlightComposer } from "./HighlightComposer";
 vi.mock("../data/selection", () => ({ useSelectionCapture: vi.fn() }));
 vi.mock("../data/sessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/sessions")>();
-  return { ...actual, createSession: vi.fn(), deliverToSession: vi.fn() };
+  return { ...actual, createSession: vi.fn(), deliverToSession: vi.fn(), pasteDraftToSession: vi.fn() };
 });
 vi.mock("../data/terminal", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/terminal")>();
@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.mocked(useSelectionCapture).mockReturnValue({ selection: SELECTION, clear });
   vi.mocked(createSession).mockResolvedValue("created-id");
   vi.mocked(deliverToSession).mockResolvedValue("delivered");
+  vi.mocked(pasteDraftToSession).mockResolvedValue("delivered");
   vi.mocked(uploadSessionImage).mockResolvedValue("/cwd/.dashboard-pastes/a.png");
   vi.mocked(fetchHarnesses).mockResolvedValue(HARNESSES);
   // jsdom has no object-URL impl; the composer previews a pasted image with it.
@@ -127,6 +128,55 @@ describe("HighlightComposer (6f-1)", () => {
     await waitFor(() =>
       expect(deliverToSession).toHaveBeenCalledWith("s1", expect.stringContaining("a blocked finding")),
     );
+  });
+
+  it("pill click pastes directly into the viewed leaf chat — a selection alone never pastes", async () => {
+    const leafKey = "repo/master/L8";
+    vi.mocked(useSelectionCapture).mockReturnValue({ selection: { ...SELECTION, leafKey }, clear });
+    sessionStore.getState().hydrate([
+      { id: "leaf-chat", label: "Claude Code 1", kind: "harness", leafKey, status: "running" },
+    ]);
+    const { findByTestId, queryByTestId } = render(
+      <HighlightComposer viewedLeafKey={leafKey} leafChatActive />,
+    );
+
+    const pill = await findByTestId("highlight-add-to-chat"); // the affordance stays visible
+    expect(pasteDraftToSession).not.toHaveBeenCalled(); // no auto-paste on selection
+    fireEvent.click(pill);
+    await waitFor(() =>
+      expect(pasteDraftToSession).toHaveBeenCalledWith("leaf-chat", expect.stringContaining("a blocked finding")),
+    );
+    expect(queryByTestId("highlight-send")).toBeNull(); // no selector/composer stage
+    expect(deliverToSession).not.toHaveBeenCalled(); // draft only, no submit
+    await waitFor(() => expect(clear).toHaveBeenCalled()); // dismissed after the confirmed paste
+  });
+
+  it("opens the generic composer when the direct pill paste is not confirmed", async () => {
+    const leafKey = "repo/master/L8";
+    vi.mocked(pasteDraftToSession).mockResolvedValue("unconfirmed");
+    vi.mocked(useSelectionCapture).mockReturnValue({ selection: { ...SELECTION, leafKey }, clear });
+    sessionStore.getState().hydrate([
+      { id: "leaf-chat", label: "Claude Code 1", kind: "harness", leafKey, status: "running" },
+    ]);
+    const { findByTestId } = render(<HighlightComposer viewedLeafKey={leafKey} leafChatActive />);
+
+    fireEvent.click(await findByTestId("highlight-add-to-chat"));
+    expect(await findByTestId("highlight-send")).not.toBeNull(); // fell back to the visible composer
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic composer fallback when the selected text is outside the viewed leaf", async () => {
+    vi.mocked(useSelectionCapture).mockReturnValue({
+      selection: { ...SELECTION, leafKey: "repo/master/OTHER" },
+      clear,
+    });
+    sessionStore.getState().hydrate([
+      { id: "leaf-chat", label: "Claude Code 1", kind: "harness", leafKey: "repo/master/L8", status: "running" },
+    ]);
+    const { findByTestId } = render(<HighlightComposer viewedLeafKey="repo/master/L8" leafChatActive />);
+
+    expect(await findByTestId("highlight-add-to-chat")).not.toBeNull();
+    expect(pasteDraftToSession).not.toHaveBeenCalled();
   });
 
   it("keeps the composer open with a retry status when delivery is not confirmed", async () => {

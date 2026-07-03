@@ -8,6 +8,7 @@ import {
   fetchTerminalSessionsOrNull,
   openTerminalSession,
   parseTerminalControl,
+  pasteAndConfirm,
   sanitizeForInjection,
   submitAndConfirm,
   terminateTerminalSession,
@@ -375,6 +376,78 @@ describe("submitAndConfirm (6f hardening)", () => {
       expect(result).toBe(false);
       const enters = socket.sent.filter((f) => JSON.parse(f).data === "\r").length;
       expect(enters).toBe(2); // initial Enter + ONE resend, then it stops re-sending into the live pane
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("pasteAndConfirm (reopened L6: draft paste survives harness boot)", () => {
+  const pasteFrames = (socket: FakeSocket): string[] =>
+    socket.sent
+      .map((f) => JSON.parse(f) as { type: string; data: string })
+      .filter((f) => f.type === "stdin" && f.data.startsWith("\x1b[200~"))
+      .map((f) => f.data);
+
+  it("pastes once and resolves true when the composer echoes the draft (no Enter ever)", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = sink();
+      const { conn, socket } = connect(s);
+      socket.pushBinary(new Uint8Array([1])); // boot output; whenReady gates on quiet after it
+      let result: boolean | undefined;
+      void pasteAndConfirm(conn, "Leaf context\nTask: x").then((v) => {
+        result = v;
+      });
+      await vi.advanceTimersByTimeAsync(800); // quiet ≥ 700ms → the paste goes out
+      expect(pasteFrames(socket)).toEqual(["\x1b[200~Leaf context\nTask: x\x1b[201~"]);
+      socket.pushBinary(new Uint8Array([2])); // the composer echoes the draft
+      await vi.advanceTimersByTimeAsync(300); // next poll observes the echo
+      expect(result).toBe(true);
+      expect(pasteFrames(socket)).toHaveLength(1); // confirmed on the first attempt — no duplicate
+      expect(socket.sent.some((f) => (JSON.parse(f) as { data?: string }).data === "\r")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a paste a booting harness discarded and confirms the attempt that echoes", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = sink();
+      const { conn, socket } = connect(s);
+      socket.pushBinary(new Uint8Array([1])); // boot banner, then the harness keeps discarding stdin
+      let result: boolean | undefined;
+      void pasteAndConfirm(conn, "Leaf context").then((v) => {
+        result = v;
+      });
+      await vi.advanceTimersByTimeAsync(800); // attempt 1 pastes…
+      expect(pasteFrames(socket)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(4800); // …no echo (discarded) → retry window elapses → attempt 2
+      expect(pasteFrames(socket)).toHaveLength(2);
+      socket.pushBinary(new Uint8Array([2])); // now the composer is up and echoes attempt 2
+      await vi.advanceTimersByTimeAsync(300);
+      expect(result).toBe(true);
+      expect(pasteFrames(socket)).toHaveLength(2); // no further attempts after confirmation
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up (false) after the boot deadline when no attempt is ever echoed", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = sink();
+      const { conn, socket } = connect(s);
+      socket.pushBinary(new Uint8Array([1]));
+      let result: boolean | undefined;
+      void pasteAndConfirm(conn, "Leaf context").then((v) => {
+        result = v;
+      });
+      await vi.advanceTimersByTimeAsync(36000); // past the 30s boot deadline
+      expect(result).toBe(false); // caller surfaces the unconfirmed-delivery note
+      expect(pasteFrames(socket).length).toBeGreaterThanOrEqual(2); // it kept retrying, bounded
+      expect(socket.sent.some((f) => (JSON.parse(f) as { data?: string }).data === "\r")).toBe(false);
     } finally {
       vi.useRealTimers();
     }

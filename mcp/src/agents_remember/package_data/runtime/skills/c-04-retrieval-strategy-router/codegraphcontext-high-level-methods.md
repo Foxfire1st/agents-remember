@@ -34,7 +34,7 @@ and complexity signals.
 | Where is this symbol? | `cgc_symbol_search` | `find name <name>` |
 | What does this function/method call? | `cgc_callees` | `analyze calls <function>` |
 | Who calls this function/method? | `cgc_callers` | `analyze callers <function>` |
-| Which files import this module string? | `cgc_dependencies` | `analyze dependencies <module>` |
+| Which files import this module string? | `cgc_dependencies` | `analyze deps <module>` |
 | Which functions are most complex? | `cgc_complexity` | `analyze complexity [function]` |
 | Do I need the interactive graph view? | `cgc_visualize` | `visualize` |
 

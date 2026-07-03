@@ -4,6 +4,7 @@ import { createStore } from "zustand/vanilla";
 import {
   bracketedPaste,
   openTerminalSession,
+  pasteAndConfirm,
   sanitizeForInjection,
   submitAndConfirm,
   type TerminalConnection,
@@ -24,10 +25,12 @@ export interface OpenSession {
   kind?: TerminalOpenKind;
   harness?: string;
   lifecycleId?: string;
+  /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat is bound to. */
+  leafKey?: string;
   status?: TerminalSessionStatus;
 }
 
-type SessionCatalogChangeReason = "create" | "terminate";
+type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
 
 interface SessionCatalogChangeMessage {
   type: "terminal-catalog-changed";
@@ -50,7 +53,7 @@ function isSessionCatalogChangeMessage(data: unknown): data is SessionCatalogCha
   return (
     message.type === "terminal-catalog-changed" &&
     typeof message.source === "string" &&
-    (message.reason === "create" || message.reason === "terminate") &&
+    (message.reason === "create" || message.reason === "terminate" || message.reason === "leaf") &&
     (message.sessionId === undefined || typeof message.sessionId === "string")
   );
 }
@@ -99,11 +102,36 @@ interface SessionState {
   setActive: (id: string) => void;
   /** Attach a hosted session to one lifecycle; latest attachment owns that lifecycle route. */
   setLifecycle: (id: string, lifecycleId: string | null) => void;
+  /**
+   * Bind a hosted session to one durable leaf (qualified leaf id), or clear it (`null`). Advisory
+   * uniqueness: a non-null bind is REJECTED (no-op) if another LIVE session already owns that leaf —
+   * the server's `409 leaf-taken` is the real arbiter, this just avoids an obvious local double-claim.
+   */
+  setLeaf: (id: string, leafKey: string | null) => void;
+  /**
+   * Apply a server/catalog-authoritative leaf assignment after a successful backend attach or hydrate.
+   * Same-role local owners of the destination leaf are cleared because the catalog result wins.
+   */
+  applyLeafAssignment: (id: string, leafKey: string | null) => void;
+}
+
+/** A session's leaf-uniqueness role: a plain shell is a TERMINAL, any agent harness is a CHAT. */
+export type SessionRole = "chat" | "terminal";
+
+/** Derive a session's role from its kind (mirrors the backend `role_for_kind`). */
+export function sessionRole(session: Pick<OpenSession, "kind">): SessionRole {
+  return session.kind === "terminal" ? "terminal" : "chat";
 }
 
 function clearLifecycle(session: OpenSession): OpenSession {
   const next = { ...session };
   delete next.lifecycleId;
+  return next;
+}
+
+function clearLeaf(session: OpenSession): OpenSession {
+  const next = { ...session };
+  delete next.leafKey;
   return next;
 }
 
@@ -240,6 +268,54 @@ export const sessionStore = createStore<SessionState>((set) => ({
         return session;
       }),
     })),
+  setLeaf: (id, leafKey) =>
+    set((state) => {
+      if (leafKey) {
+        // Advisory guard, scoped to the binding session's role (chat vs. terminal): a live session of
+        // the SAME role already owning this leaf wins — the new bind is a no-op. A chat and a terminal
+        // can both bind one leaf, so they never block each other. The server's 409 is the real arbiter.
+        const role = sessionRole(state.sessions.find((session) => session.id === id) ?? {});
+        const owner = state.sessions.find(
+          (session) =>
+            session.id !== id &&
+            session.leafKey === leafKey &&
+            isLiveSession(session) &&
+            sessionRole(session) === role,
+        );
+        if (owner) return state;
+      }
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === id
+            ? leafKey
+              ? { ...session, leafKey }
+              : clearLeaf(session)
+            : session,
+        ),
+      };
+    }),
+  applyLeafAssignment: (id, leafKey) =>
+    set((state) => {
+      const target = state.sessions.find((session) => session.id === id);
+      if (!target) return state;
+      const role = sessionRole(target);
+      return {
+        sessions: state.sessions.map((session) => {
+          if (session.id === id) {
+            return leafKey ? { ...session, leafKey } : clearLeaf(session);
+          }
+          if (
+            leafKey &&
+            session.leafKey === leafKey &&
+            isLiveSession(session) &&
+            sessionRole(session) === role
+          ) {
+            return clearLeaf(session);
+          }
+          return session;
+        }),
+      };
+    }),
 }));
 
 export const useSessions = <T>(selector: (state: SessionState) => T): T =>
@@ -251,6 +327,21 @@ export function findSessionForLifecycle(lifecycleId: string): OpenSession | unde
     .sessions.find((session) => session.lifecycleId === lifecycleId && isLiveSession(session));
 }
 
+/**
+ * The single LIVE session bound to `leafKey` (mirrors {@link findSessionForLifecycle}). Pass `role`
+ * to find the leaf's chat vs. its terminal independently — a leaf can hold one of each (L5 fix 2).
+ */
+export function findSessionForLeaf(leafKey: string, role?: SessionRole): OpenSession | undefined {
+  return sessionStore
+    .getState()
+    .sessions.find(
+      (session) =>
+        session.leafKey === leafKey &&
+        isLiveSession(session) &&
+        (role === undefined || sessionRole(session) === role),
+    );
+}
+
 export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession {
   return {
     id: info.id,
@@ -258,6 +349,7 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     kind: info.kind,
     ...(info.harness ? { harness: info.harness } : {}),
     ...(info.lifecycleId ? { lifecycleId: info.lifecycleId } : {}),
+    ...(info.leafKey ? { leafKey: info.leafKey } : {}),
     status: info.status,
   };
 }
@@ -340,6 +432,18 @@ function waitForConnection(id: string): Promise<TerminalConnection | null> {
 export type DeliveryStatus = "delivered" | "unconfirmed";
 
 /**
+ * Paste a context package into a session without submitting it. Used by the leaf-bind handoff where the
+ * operator needs to add their own instruction before pressing Enter. Delivery is confirmed, not assumed:
+ * {@link pasteAndConfirm} retries through the harness boot window (Claude Code discards stdin while
+ * booting) and only reports "delivered" once the composer echoed the draft.
+ */
+export async function pasteDraftToSession(id: string, packageText: string): Promise<DeliveryStatus> {
+  const conn = await waitForConnection(id);
+  if (!conn) return "unconfirmed";
+  return (await pasteAndConfirm(conn, packageText)) ? "delivered" : "unconfirmed";
+}
+
+/**
  * Deliver a context package to a session and confirm it submitted (slice 6f hardening). Waits for the
  * session's terminal to register (bounded — see {@link waitForConnection}) and its harness to settle,
  * injects the package as ONE *sanitized* bracketed paste (control bytes — incl. the `0x1a` suspend byte —
@@ -361,11 +465,12 @@ export async function createSession(
   kind: "terminal" | "harness" = "terminal",
   harness?: string,
   lifecycleId?: string,
+  leafKey?: string,
 ): Promise<string> {
   const id = crypto.randomUUID();
   const label = nextSessionLabel(prefix, sessionStore.getState().sessions);
   // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
-  const persisted = await openTerminalSession(id, kind, "", harness, { label, lifecycleId });
+  const persisted = await openTerminalSession(id, kind, "", harness, { label, lifecycleId, leafKey });
   sessionStore.getState().upsert(
     {
       id,
@@ -373,6 +478,7 @@ export async function createSession(
       kind,
       ...(harness ? { harness } : {}),
       ...(lifecycleId ? { lifecycleId } : {}),
+      ...(leafKey ? { leafKey } : {}),
       status: "running",
     },
     true,

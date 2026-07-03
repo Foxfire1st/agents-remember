@@ -262,6 +262,46 @@ describe("LifecycleList task labels", () => {
     expect(getByText("15. Parallel Leaf Enclosure Workflow").closest("[data-depth='0']")).toBeTruthy();
   });
 
+  it("admits an active leaf doc whose enclosure leafId differs from the doc id only by case (L10)", () => {
+    // The real series shape: enclosure leaf ids are lowercase directory names (260628-l7) while doc
+    // ids are uppercase (260628-L7) and the docPath stem is a numbered slug matching neither.
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({ id: "LC-L7", repoId: "agents-remember", enclosure: "/contracts/l7" }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/l7",
+            lifecycleId: "LC-L7",
+            leafId: "260628-l7",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "260628-L7",
+              lifecycleId: "LC-L7",
+              title: "CGC Dependency Command Repair",
+              docPath: "/tasks/260610_browser-dashboard/07_cgc-dependency-command-repair.json",
+            }),
+          ],
+        },
+      }),
+    );
+
+    const onSelect = vi.fn();
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+
+    // The doc renders as a task-document row (bound through its enclosure), not a bare runtime
+    // lifecycle fallback row: clicking it selects the taskdoc, not the lifecycle id.
+    fireEvent.click(getByText(/CGC Dependency Command Repair/));
+    expect(onSelect).toHaveBeenCalledWith(
+      "taskdoc:/tasks/260610_browser-dashboard/07_cgc-dependency-command-repair.json",
+    );
+  });
+
   it("nests numbered leaf docs whose enclosure leaf id is shorter than the task file stem", () => {
     const onSelect = vi.fn();
     seed(
@@ -318,19 +358,20 @@ describe("LifecycleList task labels", () => {
     );
   });
 
-  it("nests a reopened leaf whose suffixed enclosure leaf id only matches the doc by lifecycle", () => {
+  it("renders a reopened leaf (cleanup=reopened, no lifecycle yet) as its planned doc row", () => {
+    // task_reopen (L11) reuses the EXACT leaf id: the enclosure returns to planning with its
+    // lifecycle binding cleared, and the doc row must render like any other planned leaf — the old
+    // `-rN` suffix admission heuristic is gone because reopened leaf ids never fork anymore.
     const onSelect = vi.fn();
     seed(
       projection({
-        lifecycles: [
-          lifecycle({ id: "LC-29", repoId: "agents-remember", state: "paused", inferred: true }),
-        ],
+        lifecycles: [],
         enclosures: [
           enclosure({
-            enclosure: "/contracts/29-s7",
-            lifecycleId: "LC-29",
-            // Reopen suffix: matches neither the doc stem nor the doc id — only the shared lifecycle.
-            leafId: "29_event-river-retention-and-projection-freshness-s7",
+            enclosure: "/contracts/29",
+            lifecycleId: "",
+            leafId: "29_event-river-retention-and-projection-freshness",
+            cleanup: "reopened",
           }),
         ],
         analytics: {
@@ -343,7 +384,7 @@ describe("LifecycleList task labels", () => {
             }),
             taskDoc({
               id: "29",
-              lifecycleId: "LC-29",
+              lifecycleId: undefined,
               title: "Event-River Retention and Projection Freshness",
               docPath:
                 "/tasks/260610_browser-dashboard/29_event-river-retention-and-projection-freshness.json",
@@ -357,7 +398,7 @@ describe("LifecycleList task labels", () => {
                   number: "29",
                   name: "Event-River Retention and Projection Freshness",
                   file: "29_event-river-retention-and-projection-freshness.md",
-                  status: "Completed",
+                  status: "planning",
                   scope: "",
                   createdAt: "2026-06-27T22:33:00+00:00",
                 },
@@ -368,15 +409,49 @@ describe("LifecycleList task labels", () => {
       }),
     );
 
-    const { getByText, queryByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
     const row = getByText("29. Event-River Retention and Projection Freshness");
-    // Nests under the master instead of rendering as a parent-less standalone phantom, even though
-    // the reopened worktree's leaf id is suffixed and only the shared lifecycle links doc↔enclosure.
     expect(row.closest("[data-depth='1']")).toBeTruthy();
     expect(row.closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
       "taskdoc:/tasks/260610_browser-dashboard/task.json",
     );
-    expect(queryByText("29_event-river-retention-and-projection-freshness-s7")).toBeNull();
+  });
+
+  it("hides an abandoned enclosure from the active operations rows", () => {
+    // worktree_abandon discards the worktrees and records cleanup=abandoned; the enclosure is
+    // history, not active work, so neither a lifecycle row nor a doc row may render for it (L11).
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({ id: "LC-DEAD", repoId: "agents-remember", state: "paused", inferred: true }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/dead-leaf",
+            lifecycleId: "LC-DEAD",
+            leafId: "260628-l10-r1",
+            cleanup: "abandoned",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "260628-L10-R1",
+              lifecycleId: "LC-DEAD",
+              title: "Dead Reopen Attempt",
+              docPath: "/tasks/260628_operations-integration/10r1_dead.json",
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { queryByText, getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    expect(getByText("Tasks · 0")).toBeTruthy();
+    expect(queryByText(/Dead Reopen Attempt/)).toBeNull();
+    expect(queryByText(/260628-l10-r1/)).toBeNull();
   });
 
   it("nests a doc-less orphan lifecycle under its master instead of floating top-level", () => {

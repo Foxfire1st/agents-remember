@@ -129,6 +129,10 @@ def project_workspace(
         for enclosure in enclosures
     ]
     lifecycles = _current_event_backed_lifecycles(enriched, lifecycles)
+    # Abandon is terminal for the anchor too (L11): the single-writer store invariant means
+    # no one may append lifecycle.ended to a log they do not own, so an abandoned worktree's
+    # lifecycle is TERMINALIZED here by the reader — exactly the store's prescribed pattern.
+    lifecycles = _terminalize_abandoned_anchor_lifecycles(enriched, lifecycles)
     # A persistent lifecycle exists as long as its worktree (note 01): every current
     # worktree-backed enclosure with no event-backed lifecycle projects as PAUSED, so dormant
     # worktrees appear as the lifecycles they are -- not as nothing. Fleeting + active promotion
@@ -216,6 +220,34 @@ def _missing_enclosure_is_still_materializing(lifecycle: LifecycleProjection) ->
     )
 
 
+def _terminalize_abandoned_anchor_lifecycles(
+    enclosures: list[EnclosureNode], lifecycles: list[LifecycleProjection]
+) -> list[LifecycleProjection]:
+    """Project ``abandoned`` onto lifecycles whose anchor enclosure was abandoned (L11).
+
+    ``worktree_abandon`` discards the worktrees and records ``cleanup: abandoned`` in the
+    contract, but the lifecycle's event log ends mid-``build`` — the abandoning session may
+    not own that log (a respawned server clears the ambient registry), and the store's
+    single-writer invariant forbids a foreign ``lifecycle.ended`` append. The contract is
+    durable OBSERVED ground truth, so the reader projects the terminal state from it.
+    """
+    abandoned_anchors = {
+        enclosure.enclosure for enclosure in enclosures if enclosure.cleanup == "abandoned"
+    }
+    if not abandoned_anchors:
+        return lifecycles
+    return [
+        lifecycle.model_copy(update={"state": "abandoned"})
+        if (
+            not lifecycle.fleeting
+            and lifecycle.enclosure in abandoned_anchors
+            and lifecycle.state not in TERMINAL_STATES
+        )
+        else lifecycle
+        for lifecycle in lifecycles
+    ]
+
+
 def _persistent_lifecycles(
     enclosures: list[EnclosureNode], event_backed: list[LifecycleProjection]
 ) -> list[LifecycleProjection]:
@@ -235,6 +267,12 @@ def _persistent_lifecycles(
         if enclosure.lifecycleId and enclosure.lifecycleId in known_ids:
             continue
         if enclosure.enclosure in known_enclosures:
+            continue
+        # No worktree, no persistent lifecycle (note 01): an abandoned enclosure's worktrees
+        # were discarded and a reopened one's (L11) were reclaimed by its completed run —
+        # neither has anything to pause. The reopened leaf still appears as its planned task
+        # doc row; a fresh lifecycle arrives with the next worktree_start.
+        if enclosure.cleanup in ("abandoned", "reopened"):
             continue
         synthesized.append(_persistent_from_enclosure(enclosure))
     return synthesized

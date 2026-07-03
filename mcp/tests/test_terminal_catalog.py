@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -14,16 +15,23 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
+    TerminalSessionKind,
     terminal_catalog_path,
 )
 
 
-def _entry(session_id: str, *, created_at: str = "2026-06-26T00:00:00Z") -> TerminalCatalogEntry:
+def _entry(
+    session_id: str,
+    *,
+    created_at: str = "2026-06-26T00:00:00Z",
+    leaf_key: str | None = None,
+    kind: TerminalSessionKind = "terminal",
+) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Terminal {session_id}",
-        kind="terminal",
-        harness=None,
+        kind=kind,
+        harness="claude" if kind == "harness" else None,
         lifecycle_id=None,
         cwd=Path("/workspace"),
         tmux_name=f"ar-{session_id}",
@@ -31,6 +39,7 @@ def _entry(session_id: str, *, created_at: str = "2026-06-26T00:00:00Z") -> Term
         created_at=created_at,
         last_attached_at=created_at,
         status="running",
+        leaf_key=leaf_key,
     )
 
 
@@ -94,6 +103,133 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(updated.status, "terminated")
         self.assertEqual(updated.terminated_at, "2026-06-26T00:03:00Z")
         self.assertEqual(self.catalog.list(), [])
+
+    def test_leaf_key_round_trips_through_json(self) -> None:
+        leaf = "agents-remember/260628_operations-integration/260628-L5"
+        self.catalog.upsert(_entry("a", leaf_key=leaf))
+
+        raw = json.loads(self.catalog.path.read_text(encoding="utf-8"))
+        self.assertEqual(raw["sessions"][0]["leafKey"], leaf)
+
+        entry = self.catalog.get("a")
+        assert entry is not None
+        self.assertEqual(entry.leaf_key, leaf)
+
+    def test_to_json_omits_leaf_key_when_unset(self) -> None:
+        self.catalog.upsert(_entry("a"))
+        self.assertNotIn("leafKey", self.catalog.get("a").to_json())  # type: ignore[union-attr]
+
+    def test_legacy_row_without_leaf_key_reads_as_none(self) -> None:
+        # A v1 row written before L5 has no leafKey; it must read back as None (migration-safe).
+        self.catalog.path.parent.mkdir(parents=True, exist_ok=True)
+        self.catalog.path.write_text(
+            json.dumps(
+                {
+                    "schema": "ar-dashboard-terminal-sessions/v1",
+                    "sessions": [
+                        {
+                            "id": "legacy",
+                            "label": "Terminal legacy",
+                            "kind": "terminal",
+                            "cwd": "/workspace",
+                            "tmuxName": "ar-legacy",
+                            "command": ["bash"],
+                            "createdAt": "2026-06-26T00:00:00Z",
+                            "lastAttachedAt": "2026-06-26T00:00:00Z",
+                            "status": "running",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        entry = self.catalog.get("legacy")
+        assert entry is not None
+        self.assertIsNone(entry.leaf_key)
+
+    def test_active_for_leaf_returns_running_owner(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_entry("a", leaf_key=leaf, kind="harness"))
+        owner = self.catalog.active_for_leaf(leaf)  # defaults to the chat role
+        assert owner is not None
+        self.assertEqual(owner.id, "a")
+        self.assertIsNone(self.catalog.active_for_leaf("repo/master/other"))
+
+    def test_active_for_leaf_is_scoped_by_role(self) -> None:
+        # A chat and a terminal can both own the same leaf; the probe resolves each independently.
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_entry("chat", leaf_key=leaf, kind="harness"))
+        self.catalog.upsert(_entry("term", leaf_key=leaf, kind="terminal"))
+        chat = self.catalog.active_for_leaf(leaf, role="chat")
+        term = self.catalog.active_for_leaf(leaf, role="terminal")
+        assert chat is not None
+        assert term is not None
+        self.assertEqual(chat.id, "chat")
+        self.assertEqual(term.id, "term")
+
+    def test_active_for_leaf_ignores_exited_and_terminated(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_entry("exited", leaf_key=leaf, kind="harness"))
+        self.catalog.mark_exited("exited")
+        # An exited chat frees its leaf.
+        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+
+        self.catalog.upsert(_entry("terminated", leaf_key=leaf, kind="harness"))
+        self.catalog.mark_terminated("terminated", "2026-06-26T00:05:00Z")
+        # A terminated chat frees its leaf too.
+        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+
+    def test_with_leaf_key_copies_binding(self) -> None:
+        entry = _entry("a")
+        bound = entry.with_leaf_key("repo/master/leaf-1")
+        self.assertEqual(bound.leaf_key, "repo/master/leaf-1")
+        self.assertIsNone(bound.with_leaf_key(None).leaf_key)
+        self.assertIsNone(entry.leaf_key)  # the original is untouched (frozen copy)
+
+    def test_read_recovers_from_torn_extra_data_write(self) -> None:
+        # The exact corruption two writers (or one process's two request threads) produced on the old
+        # fixed-temp write: a valid object followed by a partial duplicate ("Extra data"). The reader must
+        # recover the first complete object instead of raising and 500-ing every catalog request.
+        self.catalog.upsert(_entry("a"))
+        good = self.catalog.path.read_text(encoding="utf-8")
+        self.catalog.path.write_text(good + '\nxName": "ar-torn"\n}\n', encoding="utf-8")
+
+        self.assertEqual([entry.id for entry in self.catalog.list()], ["a"])
+
+    def test_read_degrades_to_empty_on_unparseable_file(self) -> None:
+        # Total garbage is treated as "no sessions" (the next write overwrites it clean) — never a 500.
+        self.catalog.path.parent.mkdir(parents=True, exist_ok=True)
+        self.catalog.path.write_text("}{ not json at all", encoding="utf-8")
+        self.assertEqual(self.catalog.list(), [])
+
+    def test_write_leaves_no_fixed_name_temp_sibling(self) -> None:
+        # The old shared `.terminal-sessions.json.tmp` is what concurrent writers tore; a write must not
+        # create that fixed sibling (the per-write temp is unique and removed by os.replace).
+        self.catalog.upsert(_entry("a"))
+        self.assertFalse((self.catalog.path.with_name(f".{self.catalog.path.name}.tmp")).exists())
+        leftover = list(self.catalog.path.parent.glob(f".{self.catalog.path.name}.*.tmp"))
+        self.assertEqual(leftover, [])
+
+    def test_concurrent_upserts_do_not_lose_or_corrupt_rows(self) -> None:
+        # Reproduces the bug class directly: many threads upserting distinct rows at once. With the
+        # read-modify-write serialized under the lock + a unique temp per write, every row survives and the
+        # file stays valid JSON. (Pre-fix: lost updates and a torn, unreadable file.)
+        ids = [f"s{i:03d}" for i in range(40)]
+        barrier = threading.Barrier(len(ids))
+
+        def _add(session_id: str) -> None:
+            barrier.wait()  # maximize overlap on the read-modify-write
+            self.catalog.upsert(_entry(session_id, created_at=f"2026-06-26T00:00:{session_id[-2:]}Z"))
+
+        threads = [threading.Thread(target=_add, args=(session_id,)) for session_id in ids]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        stored = {entry.id for entry in self.catalog.list()}
+        self.assertEqual(stored, set(ids))  # no lost updates
+        json.loads(self.catalog.path.read_text(encoding="utf-8"))  # still valid JSON (no torn write)
 
 
 if __name__ == "__main__":

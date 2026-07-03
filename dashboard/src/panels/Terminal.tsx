@@ -22,6 +22,7 @@ const host = css({
   borderRadius: "3px",
   overflow: "hidden",
   "& .xterm": { height: "100%" },
+  "& .xterm-viewport": { overflowY: "auto !important" },
 });
 
 // A dark VT theme keyed to the cockpit's CRT palette (xterm needs concrete colours, not tokens).
@@ -40,8 +41,45 @@ const THEME = {
   white: "#d6e7da",
 };
 
+const WHEEL_PIXELS_PER_LINE = 40;
+const APPLICATION_SCROLL_LINES_PER_STEP = 3;
+const DOM_DELTA_LINE = 1;
+const DOM_DELTA_PAGE = 2;
+const PAGE_UP_SEQUENCE = "\x1b[5~";
+const PAGE_DOWN_SEQUENCE = "\x1b[6~";
+
 function cursorShouldBlink(): boolean {
   return typeof document === "undefined" || document.documentElement.dataset.effects !== "off";
+}
+
+function wheelScrollLines(event: WheelEvent, rows: number, pixelRemainder: number): [number, number] {
+  if (event.deltaY === 0) return [0, pixelRemainder];
+  const direction = event.deltaY > 0 ? 1 : -1;
+  const magnitude = Math.abs(event.deltaY);
+
+  if (event.deltaMode === DOM_DELTA_PAGE) {
+    return [direction * Math.max(1, Math.ceil(magnitude) * Math.max(1, rows - 1)), 0];
+  }
+  if (event.deltaMode === DOM_DELTA_LINE) {
+    return [direction * Math.max(1, Math.ceil(magnitude)), 0];
+  }
+  const pixels = pixelRemainder + event.deltaY;
+  const lines = Math.trunc(pixels / WHEEL_PIXELS_PER_LINE);
+  return [lines, pixels - lines * WHEEL_PIXELS_PER_LINE];
+}
+
+function applicationScrollInput(lines: number, lineRemainder: number): [string, number] {
+  const nextLineRemainder = lineRemainder + lines;
+  const steps = Math.trunc(nextLineRemainder / APPLICATION_SCROLL_LINES_PER_STEP);
+  if (steps === 0) return ["", nextLineRemainder];
+  return [
+    (steps < 0 ? PAGE_UP_SEQUENCE : PAGE_DOWN_SEQUENCE).repeat(Math.abs(steps)),
+    nextLineRemainder - steps * APPLICATION_SCROLL_LINES_PER_STEP,
+  ];
+}
+
+function hasViewportScrollback(term: XtermTerminal): boolean {
+  return term.buffer.active.type === "normal" && term.buffer.active.baseY > 0;
 }
 
 export function Terminal({
@@ -69,11 +107,11 @@ export function Terminal({
       fontSize: 13,
       theme: THEME,
       convertEol: false,
+      scrollback: 5000,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(node);
-
     const conn = connectTerminal(
       sessionId,
       {
@@ -83,6 +121,37 @@ export function Terminal({
       socketFactory ? { socketFactory } : {},
     );
     onConnRef.current?.(conn);
+
+    let wheelPixelRemainder = 0;
+    let applicationWheelLineRemainder = 0;
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      // App-managed wheel: when the attached application tracks the mouse (tmux with `mouse on`,
+      // mouse-aware TUIs), xterm's native path reports the wheel as mouse events the app scrolls
+      // with — tmux scrolls its pane history for normal-buffer apps and passes the events through
+      // to panes that requested them. Synthesizing PageUp/PageDown here instead would only scroll
+      // TUIs that happen to bind those keys.
+      if (term.modes.mouseTrackingMode !== "none") return;
+      const [lines, nextPixelRemainder] = wheelScrollLines(event, term.rows, wheelPixelRemainder);
+      wheelPixelRemainder = nextPixelRemainder;
+      if (lines !== 0) {
+        if (hasViewportScrollback(term)) {
+          applicationWheelLineRemainder = 0;
+          term.scrollLines(lines);
+        } else {
+          const [input, nextLineRemainder] = applicationScrollInput(lines, applicationWheelLineRemainder);
+          applicationWheelLineRemainder = nextLineRemainder;
+          if (input) conn.sendInput(input);
+        }
+      }
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+    // Wheel precedence: an app that tracks the mouse owns the wheel (xterm reports it as mouse
+    // events); otherwise normal scrollback scrolls xterm's viewport; otherwise (alternate buffer,
+    // no mouse tracking) translate wheel steps to page navigation instead of xterm's default
+    // wheel-to-arrow-history mapping.
+    node.addEventListener("wheel", handleWheel, { passive: false, capture: true });
 
     const dataSub = term.onData((data) => conn.sendInput(data));
     // Fit to the host + keep the PTY winsize in lockstep (the one known Mode B2 risk). A single fit
@@ -109,6 +178,7 @@ export function Terminal({
       alive = false;
       cancelAnimationFrame(raf);
       onConnRef.current?.(null);
+      node.removeEventListener("wheel", handleWheel, { capture: true });
       observer.disconnect();
       dataSub.dispose();
       conn.dispose();

@@ -45,3 +45,5 @@ os.environ.setdefault("GIT_AUTHOR_NAME", "Agents Remember Tests")
 os.environ.setdefault("GIT_AUTHOR_EMAIL", "agents-remember-tests@example.invalid")
 os.environ.setdefault("GIT_COMMITTER_NAME", "Agents Remember Tests")
 os.environ.setdefault("GIT_COMMITTER_EMAIL", "agents-remember-tests@example.invalid")
+
+# Reopen drill marker (L13): first cycle, then reopened and completed a second time under the same leaf id.

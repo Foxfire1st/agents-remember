@@ -49,6 +49,13 @@ describe("readSelection", () => {
     expect(ctx).toEqual({ text: "a finding", rect: { left: 1, top: 2, width: 3, height: 4 } });
   });
 
+  it("carries the task leaf key when the selected text belongs to a task reader", () => {
+    const ctx = readSelection(
+      fakeSelection("leaf text", nodeInside('<article data-task-leaf-key="repo/master/L8"><p>leaf text</p></article>')),
+    );
+    expect(ctx).toMatchObject({ text: "leaf text", leafKey: "repo/master/L8" });
+  });
+
   it("returns null for a collapsed, empty, ignored, or absent selection", () => {
     expect(readSelection(null)).toBeNull();
     expect(readSelection(fakeSelection("x", nodeInside("<p>x</p>"), true))).toBeNull();

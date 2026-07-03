@@ -6,6 +6,8 @@ import { useSelectionCapture } from "../data/selection";
 import {
   createSession,
   deliverToSession,
+  findSessionForLeaf,
+  pasteDraftToSession,
   sessionStore,
   useSessions,
   type DeliveryStatus,
@@ -14,12 +16,16 @@ import { fetchHarnesses, uploadSessionImage, type HarnessInfo } from "../data/te
 
 // Slice 6f — "send a context package by highlighting". Two stages, like a code editor's selection
 // toolbar: (1) selecting cockpit content (on mouse-up) raises a small **"Add to chat"** pill anchored
-// to it; (2) clicking the pill opens the composer box, which stays open until the operator clicks
-// outside it or Sends. The composer lives on a *snapshot* of the selection (`useSelectionCapture`), so
-// clicking into the message box never dismisses it. A selection only ever *raises* the pill; nothing
-// reaches an agent until Send (the no-silent-action invariant). The target control offers the open
-// chats **and** a create option per detected harness (so a new chat is an agent, not a shell into the
-// void). Delivered as a bracketed paste + a trailing Enter over the live B2 `{type:stdin}` channel.
+// to it; (2) clicking the pill acts. With an obvious leaf-chat target (the selection sits inside the
+// viewed leaf's task reader while that leaf's rail chat is active with a bound chat, L8), the click
+// pastes the context straight into that chat's DRAFT — no target selector, no message box, no Enter —
+// and a failed paste opens the composer instead. Without one, the click opens the composer box, which
+// stays open until the operator clicks outside it or Sends. The composer lives on a *snapshot* of the
+// selection (`useSelectionCapture`), so clicking into the message box never dismisses it. A selection
+// only ever *raises* the pill; nothing reaches an agent until the pill/Send click (the no-silent-action
+// invariant). The target control offers the open chats **and** a create option per detected harness (so
+// a new chat is an agent, not a shell into the void). Composer sends deliver as a bracketed paste + a
+// trailing Enter over the live B2 `{type:stdin}` channel.
 const popover = css({ maxWidth: "min(32rem, 94vw)" });
 const dialog = css({
   display: "flex",
@@ -167,11 +173,33 @@ type Target =
   | { key: string; kind: "session"; id: string; label: string }
   | { key: string; kind: "create"; harnessId?: string; prefix: string; label: string };
 
+function buildContextPackage({
+  selectionText,
+  note,
+  imagePath,
+}: {
+  selectionText: string;
+  note?: string;
+  imagePath?: string | null;
+}): string {
+  const parts = note?.trim() ? [note.trim(), ""] : [];
+  parts.push("--- from the dashboard ---", selectionText);
+  // Carry an image by path: Claude Code auto-attaches an on-disk image path it finds in the message.
+  // Follow-up (deferred): if the session cwd contains a space, the path auto-attach may split on it;
+  // paths here are space-free, the robust fix is a space-free pastes root (tracked, non-blocking).
+  if (imagePath) parts.push("", `Screenshot for context: ${imagePath}`);
+  return parts.join("\n");
+}
+
 export function HighlightComposer({
   selectedLifecycleId,
+  viewedLeafKey,
+  leafChatActive = false,
   onSent,
 }: {
   selectedLifecycleId?: string;
+  viewedLeafKey?: string;
+  leafChatActive?: boolean;
   onSent?: () => void;
 }) {
   const { selection, clear } = useSelectionCapture();
@@ -220,6 +248,17 @@ export function HighlightComposer({
     [imagePreviewUrl],
   );
 
+  // The obvious leaf-chat target: the selection sits inside the viewed leaf's task reader while that
+  // leaf's rail chat is active with a bound running chat. Only the pill CLICK acts on it — a selection
+  // never pastes by itself, so the interaction stays visible and intentional.
+  const directLeafChat =
+    selection &&
+    leafChatActive &&
+    viewedLeafKey &&
+    selection.leafKey === viewedLeafKey
+      ? findSessionForLeaf(viewedLeafKey, "chat")
+      : undefined;
+
   if (!selection) return null;
 
   // Targets: every open chat, then a create option per detected harness, then a plain shell.
@@ -248,15 +287,24 @@ export function HighlightComposer({
     setMode("pill");
   };
 
-  const buildPackage = (imagePath?: string | null): string => {
-    const note = message.trim();
-    const parts = note ? [note, ""] : [];
-    parts.push("--- from the dashboard ---", selection.text);
-    // Carry an image by path: Claude Code auto-attaches an on-disk image path it finds in the message.
-    // Follow-up (deferred): if the session cwd contains a space, the path auto-attach may split on it;
-    // paths here are space-free, the robust fix is a space-free pastes root (tracked, non-blocking).
-    if (imagePath) parts.push("", `Screenshot for context: ${imagePath}`);
-    return parts.join("\n");
+  // Direct leaf-chat paste (L8 correction): the "Add to chat" pill click pastes the highlighted context
+  // straight into the adjacent leaf chat's draft — no target selector, no message box, no auto-submit.
+  // A failed paste opens the generic composer instead of dying silently.
+  const directPaste = (targetId: string) => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    setStatus("sending");
+    void pasteDraftToSession(targetId, buildContextPackage({ selectionText: selection.text })).then(
+      (result) => {
+        sendingRef.current = false;
+        setStatus(null);
+        if (result === "delivered") {
+          clear();
+        } else {
+          setMode("composer");
+        }
+      },
+    );
   };
 
   const finish = () => {
@@ -302,7 +350,10 @@ export function HighlightComposer({
         }
         ctx.imagePath = path;
       }
-      const result: DeliveryStatus = await deliverToSession(ctx.id, buildPackage(ctx.imagePath));
+      const result: DeliveryStatus = await deliverToSession(
+        ctx.id,
+        buildContextPackage({ selectionText: selection.text, note: message, imagePath: ctx.imagePath }),
+      );
       if (result === "delivered") finish();
       else setStatus("unconfirmed");
     } finally {
@@ -341,7 +392,12 @@ export function HighlightComposer({
           data-testid="highlight-composer"
         >
           {mode === "pill" ? (
-            <Button className={addButton} onPress={() => setMode("composer")} data-testid="highlight-add-to-chat">
+            <Button
+              className={addButton}
+              isDisabled={status === "sending"}
+              onPress={() => (directLeafChat ? directPaste(directLeafChat.id) : setMode("composer"))}
+              data-testid="highlight-add-to-chat"
+            >
               <ChatIcon />
               Add to chat
             </Button>

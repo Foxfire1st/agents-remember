@@ -1,6 +1,10 @@
 services:
   falkordb:
     restart: unless-stopped
+    # L12 memory cap: the shared graph DB legitimately holds ~830MiB of loaded graphs
+    # today; 2g is headroom, not a target. An OOM kill restarts it (unless-stopped) and
+    # the appendonly persistence under the data volume survives the recycle.
+    mem_limit: 2g
     environment:
       REDIS_ARGS: "--appendonly yes"
       # The falkordb image defaults to "MAX_QUEUED_QUERIES 25", which is far too small once
@@ -23,6 +27,10 @@ services:
   runner:
     profiles: ["run"]
     entrypoint: ["cgc"]
+    # L12 memory cap: batch index/query jobs get more headroom than the long-lived
+    # watchers (a full reindex parses far more at once), but still a hard ceiling so a
+    # runaway job degrades itself instead of the host.
+    mem_limit: 1g
     depends_on:
       falkordb:
         condition: service_healthy

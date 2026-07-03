@@ -291,7 +291,23 @@ def worktree_abandon_tool(
         dry_run=dry_run,
         force=force,
     )
-    return _worktree_result("worktree_abandon", git_worktree_manager.abandon_result(args))
+    result = _worktree_result("worktree_abandon", git_worktree_manager.abandon_result(args))
+    # End the ambient lifecycle when it anchors the abandoned worktree — the owner-written
+    # lifecycle.ended (L11). A lifecycle whose owner is gone (e.g. the server restarted) is
+    # terminalized by the reader instead: the reducer projects `abandoned` from the
+    # contract's cleanup field, honoring the store's single-writer invariant.
+    if not dry_run and result.get("state") == "abandoned":
+        _end_ambient_lifecycle_if_anchored(str(result.get("lifecycle_id") or ""))
+    return result
+
+
+def _end_ambient_lifecycle_if_anchored(lifecycle_id: str) -> None:
+    amb = ambient()
+    if not lifecycle_id or amb is None:
+        return
+    current = amb.current
+    if current is not None and current.id == lifecycle_id:
+        amb.end("abandoned")
 
 
 def lifecycle_finalize_task_tool(

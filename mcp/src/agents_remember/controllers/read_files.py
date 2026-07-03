@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,16 +27,17 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_coordination_context,
     resolve_storage_for_source,
 )
-from agents_remember.kernel.onboarding_doc import meaningful_body
-from agents_remember.kernel.route_index import (
-    INDEX_FILE_NAME,
-    ROUTE_OVERVIEW_NAME,
-    sidecar_status,
+from agents_remember.kernel.route_index import ROUTE_OVERVIEW_NAME
+from agents_remember.kernel.sidecar_pairing import (
+    confine_rel as _confined_rel,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, path_is_relative_to
-from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
-    mirror_onboarding_path,
+from agents_remember.kernel.sidecar_pairing import (
+    route_sidecar_status as _route_sidecar_status,
 )
+from agents_remember.kernel.sidecar_pairing import (
+    sidecar_body as _sidecar_body,
+)
+from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.paths import observer_root
@@ -184,21 +184,6 @@ def _read_one(
     return result, facts, attach
 
 
-def _confined_rel(code_root: Path, requested: str) -> str:
-    """Confine a requested path to ``code_root`` and return its posix-relative form.
-
-    Resolves the real path (following ``..`` and symlinks) before the check, so a
-    traversal or symlink escape is rejected, not just a literal ``..`` token.
-    """
-    candidate = Path(requested)
-    if candidate.is_absolute():
-        raise AuthorityError("file paths must be repo-relative, not absolute")
-    resolved = (code_root / candidate).resolve()
-    if not path_is_relative_to(resolved, code_root):
-        raise AuthorityError(f"path {requested!r} escapes the repository root")
-    return resolved.relative_to(code_root.resolve()).as_posix()
-
-
 def _read_source(source_path: Path, request: _FileRequest) -> tuple[str | None, int]:
     """Read the requested source slice; ``None`` when absent or non-decodable.
 
@@ -254,67 +239,6 @@ def _resolve_onboarding(
     # absent (in-scope, uncovered) and out-of-scope both report missing without
     # probing the filesystem for an unrelated sidecar (pre-resolved decision 4).
     return "missing", None, True
-
-
-def _route_sidecar_status(onboarding_root: Path, rel: str) -> str:
-    """Map the route index's sidecar status, degrading gracefully when absent.
-
-    Walks the governing route-index chain nearest-first; the first index whose
-    scope covers the path decides. When no governing ``overview.index.json``
-    exists, fall back to a direct sidecar-file probe of the mirror path so a
-    repo with sidecars but no built index still resolves (the route index is the
-    authority when present, never a crash when absent).
-    """
-    for index in _governing_indexes(onboarding_root, rel):
-        status = sidecar_status(rel, index)
-        if status in {"present", "absent"}:
-            return status
-        # out-of-scope: try the next (more general) governing index.
-    # No governing index covered the path. Fall back to the mirror probe.
-    return "present" if mirror_onboarding_path(onboarding_root, rel).is_file() else "absent"
-
-
-def _governing_indexes(onboarding_root: Path, rel: str) -> list[dict[str, Any]]:
-    """The route-index chain governing ``rel``, nearest folder first then up to root.
-
-    Small private nearest-route prefix match (the route_index public surface is
-    consumed read-only, never extended): for ``a/b/c.py`` we check
-    ``a/b/overview.index.json``, ``a/overview.index.json``, then the root
-    ``overview.index.json``.
-    """
-    indexes: list[dict[str, Any]] = []
-    parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
-    routes = [parent]
-    while parent:
-        parent = parent.rsplit("/", 1)[0] if "/" in parent else ""
-        routes.append(parent)
-    for route in routes:
-        index = _load_route_index(onboarding_root, route)
-        if index is not None:
-            indexes.append(index)
-    return indexes
-
-
-def _load_route_index(onboarding_root: Path, route: str) -> dict[str, Any] | None:
-    index_rel = INDEX_FILE_NAME if route == "" else f"{route}/{INDEX_FILE_NAME}"
-    index_path = onboarding_root / index_rel
-    if not index_path.is_file():
-        return None
-    try:
-        data = json.loads(index_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _sidecar_body(onboarding_root: Path, rel: str) -> str | None:
-    sidecar_path = mirror_onboarding_path(onboarding_root, rel)
-    if not sidecar_path.is_file():
-        return None
-    try:
-        return meaningful_body(filesystem.read_text(sidecar_path))
-    except (UnicodeDecodeError, OSError):
-        return None
 
 
 # --- auto-attached, session-deduped front-door -----------------------------

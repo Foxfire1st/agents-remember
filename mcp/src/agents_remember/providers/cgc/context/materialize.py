@@ -21,7 +21,16 @@ def ensure_cgc_runtime_layout(layout: CgcRuntimeLayout) -> None:
 
     if not layout.requirements_file.exists():
         layout.requirements_file.write_text("\n".join(CGC_REQUIREMENTS) + "\n", encoding="utf-8")
-    layout.cgcignore_path.write_text(_cgcignore_text(layout), encoding="utf-8")
+    cgcignore_text = _cgcignore_text(layout)
+    layout.cgcignore_path.write_text(cgcignore_text, encoding="utf-8")
+    # The live `cgc watch` resolves its ignore spec through the HOME-scoped GLOBAL context
+    # (ctx.cgcignore_path -> ~/.codegraphcontext/global/.cgcignore) — cgc auto-creates that
+    # file with its own plain defaults, so without this write our enrichment (the repo's
+    # folded .gitignore + per-repo managed exclusions) never reaches the watcher (L12).
+    # Keep both copies identical; this one is the one that is actually read.
+    global_cgcignore = layout.run_root / "home" / ".codegraphcontext" / "global" / ".cgcignore"
+    global_cgcignore.parent.mkdir(parents=True, exist_ok=True)
+    global_cgcignore.write_text(cgcignore_text, encoding="utf-8")
     layout.config_file.write_text("database: falkordb-remote\n", encoding="utf-8")
     layout.env_file.write_text(_cgc_env_text(layout), encoding="utf-8")
 

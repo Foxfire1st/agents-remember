@@ -59,6 +59,11 @@ to type -- and the operator's message is lost (Claude Code self-suspends on this
 ``kind="terminal"`` *shell* session keeps Ctrl-Z, where it is the legitimate keystroke to background a
 foreground program to the prompt (``fg``/``bg`` work there). Scoping is per-session (slice 6f hardening)."""
 
+_SGR_MOUSE_EVENT = re.compile(rb"\x1b\[<\d+(?:;\d+){2}[Mm]")
+"""One SGR-encoded mouse report (``ESC[<b;x;yM`` / ``m``) -- what xterm.js sends when the client has
+mouse tracking (tmux ``mouse on``). A stdin frame made only of these is wheel/click traffic, not typing;
+tmux may have entered copy-mode from it, which captures the keyboard until cancelled."""
+
 
 @dataclass(frozen=True)
 class PtyProcess:
@@ -91,6 +96,12 @@ TmuxKiller = Callable[[str], None]
 
 TmuxCreator = Callable[[str, Path, Sequence[str]], None]
 """Create a detached tmux session for a fixed harness argv."""
+
+TmuxConfigurer = Callable[[str], None]
+"""Apply dashboard session options (mouse mode) to an existing tmux session name."""
+
+TmuxModeCanceller = Callable[[str], None]
+"""Cancel copy-mode on a tmux session name (no-op when the pane is not in a mode)."""
 
 
 def _tmux_has_session(name: str) -> bool:
@@ -138,6 +149,47 @@ def _tmux_create_detached(name: str, cwd: Path, harness: Sequence[str]) -> None:
     )
 
 
+def _tmux_enable_mouse(name: str) -> None:
+    """Enable per-session mouse mode; no-op when tmux or the session is absent (idempotent).
+
+    With ``mouse on`` tmux requests mouse tracking from the attached client, so browser wheel
+    input reaches tmux as mouse reports: tmux scrolls its own pane history (copy-mode) for
+    normal-buffer TUIs (Codex) and passes the events through to panes whose app requested mouse
+    tracking itself (Claude Code). Without it, wheel movement can only be guessed into key
+    presses the inner TUI may not bind. Tradeoff: pane text selection needs Shift+drag while
+    mouse reporting is active.
+    """
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(
+            ["tmux", "set-option", "-t", name, "mouse", "on"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_TERMINATE_TIMEOUT,
+        )
+
+
+def _tmux_cancel_copy_mode(name: str) -> None:
+    """Leave copy-mode on session ``name``; harmless error when no mode is active.
+
+    Wheel scrolling under ``mouse on`` enters tmux copy-mode, which captures the keyboard: typed
+    letters are (mostly unbound) copy-mode keys, so they never reach the pane app until the operator
+    scrolls back to the bottom. tmux has no any-key-cancels binding, so the host cancels explicitly
+    when typing follows mouse traffic -- the view snaps to the live bottom and the keystrokes land in
+    the app's composer.
+    """
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(
+            ["tmux", "send-keys", "-t", name, "-X", "cancel"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_TERMINATE_TIMEOUT,
+        )
+
+
 @dataclass
 class TerminalSession:
     """One live terminal: a tmux-wrapped PTY child plus its lifecycle/worktree correlation."""
@@ -151,6 +203,9 @@ class TerminalSession:
     suspend_unsafe: bool = False
     """True for a bare-pane harness (no shell to ``fg``) -- :meth:`TerminalHost.write` strips Ctrl-Z for
     it; a plain shell session leaves False so its job control keeps working."""
+    mouse_seen: bool = False
+    """Set when this connection's stdin last carried mouse reports (wheel scrolling may have entered
+    tmux copy-mode); the first typed input afterwards cancels copy-mode before it is written."""
 
     @property
     def master_fd(self) -> int:
@@ -263,11 +318,15 @@ class TerminalHost:
         tmux_probe: TmuxProbe | None = None,
         tmux_killer: TmuxKiller | None = None,
         tmux_creator: TmuxCreator | None = None,
+        tmux_configurer: TmuxConfigurer | None = None,
+        tmux_mode_canceller: TmuxModeCanceller | None = None,
     ) -> None:
         self._spawn: Spawner = spawn or _spawn_pty
         self._tmux_probe: TmuxProbe = tmux_probe or _tmux_has_session
         self._tmux_killer: TmuxKiller = tmux_killer or _tmux_kill_session
         self._tmux_creator: TmuxCreator = tmux_creator or _tmux_create_detached
+        self._tmux_configurer: TmuxConfigurer = tmux_configurer or _tmux_enable_mouse
+        self._tmux_mode_canceller: TmuxModeCanceller = tmux_mode_canceller or _tmux_cancel_copy_mode
         self._sessions: dict[str, TerminalSession] = {}
 
     def open(
@@ -318,6 +377,9 @@ class TerminalHost:
         tmux_name = name or _tmux_session_name(sid)
         if not self.has_session(tmux_name):
             self._tmux_creator(tmux_name, root, harness)
+        # Session options are (re-)asserted on every ensure so pre-existing durable sessions
+        # created before an option was introduced pick it up too.
+        self._tmux_configurer(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
@@ -344,7 +406,7 @@ class TerminalHost:
         attached to the same tmux server-side session. The catalog/tmux name remains the durable identity;
         this returned object is a per-connection handle closed with :meth:`close_session`.
         """
-        return self._spawn_session(
+        session = self._spawn_session(
             sid,
             cwd=cwd,
             command=command,
@@ -352,6 +414,9 @@ class TerminalHost:
             name=name,
             suspend_unsafe=suspend_unsafe,
         )
+        # Attach targets an existing durable session, so option assertion cannot race creation here.
+        self._tmux_configurer(session.tmux_name)
+        return session
 
     def get(self, sid: str) -> TerminalSession | None:
         """The live session for ``sid``, or ``None`` if never opened / already closed."""
@@ -383,11 +448,24 @@ class TerminalHost:
         )  # resolve first so an unknown sid still raises KeyError
 
     def write_session(self, session: TerminalSession, data: bytes) -> None:
-        """Write browser keystrokes to one concrete PTY client."""
+        """Write browser keystrokes to one concrete PTY client.
+
+        Mouse-report-only frames (wheel scrolling) arm ``mouse_seen``: tmux may have entered
+        copy-mode, which captures the keyboard. The first non-mouse input afterwards cancels
+        copy-mode before it is written, so typing anywhere in the scrollback snaps the view to the
+        live bottom and reaches the pane app — at most one cancel per scroll-then-type cycle, and a
+        harmless no-op for panes that never entered copy-mode (mouse-aware TUIs).
+        """
         if session.suspend_unsafe:
             data = data.replace(_SUSPEND_BYTE, b"")
-        if data:
-            os.write(session.master_fd, data)
+        if not data:
+            return
+        if _SGR_MOUSE_EVENT.sub(b"", data) == b"":
+            session.mouse_seen = True
+        elif session.mouse_seen:
+            session.mouse_seen = False
+            self._tmux_mode_canceller(session.tmux_name)
+        os.write(session.master_fd, data)
 
     def read_nonblocking(self, sid: str, max_bytes: int = _READ_CHUNK) -> bytes:
         """Drain up to ``max_bytes`` of child output without blocking.

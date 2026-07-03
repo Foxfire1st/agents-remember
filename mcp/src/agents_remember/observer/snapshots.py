@@ -925,8 +925,13 @@ def read_task_documents(
         and enclosure.taskRoot
         and enclosure.lifecycleId in {enclosure.taskId, enclosure.taskName}
     }
+    # Enclosure leaf ids are lowercase directory names (enclosures/260628-l7/) while doc ids are
+    # uppercase (260628-L7), and series leaf docs carry no enclosures[] refs in practice — so this
+    # join is keyed case-insensitively on the doc's own id (the durable, human-stable key), with the
+    # filename stem kept as a legacy alternative. Suffixed reopen enclosures (…-r1) deliberately do
+    # not bind here; the sidebar admits those through its lifecycle-guarded suffix rule.
     lifecycle_by_leaf_doc = {
-        (Path(enclosure.taskRoot).resolve(), enclosure.leafId): enclosure.lifecycleId
+        (Path(enclosure.taskRoot).resolve(), enclosure.leafId.lower()): enclosure.lifecycleId
         for enclosure in enclosures
         if enclosure.lifecycleId and enclosure.taskRoot and enclosure.leafId
     }
@@ -946,7 +951,8 @@ def read_task_documents(
             lifecycle_id = (
                 doc.lifecycleId
                 or _doc_enclosure_lifecycle(doc, lifecycle_by_enclosure)
-                or lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem))
+                or lifecycle_by_leaf_doc.get((path.parent.resolve(), doc.id.lower()))
+                or lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem.lower()))
             )
         nodes.append(_task_doc_node(doc, lifecycle_id, path, lifecycle_by_dir, now))
     return nodes

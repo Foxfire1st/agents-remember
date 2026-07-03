@@ -7,7 +7,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
+from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
+from agents_remember.providers.cgc.context.constants import CGC_REPO_CGCIGNORE_EXTRAS
 from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.context import (
     CGC_NETWORK_NAME,
@@ -197,10 +198,7 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
             "scope": provider.scope,
             "labels": labels,
         },
-        "roots": [
-            {"repoId": repo.repo_id, "path": repo.path.as_posix()}
-            for repo in config.repositories.values()
-        ],
+        "roots": [_cgc_root_settings(repo) for repo in config.repositories.values()],
         "runtimeRoot": provider.runtime_root.as_posix(),
         "instanceRootTemplate": "<runtimeRoot>/<repoId>",
         "requirementsFile": config.coordination_root.joinpath(
@@ -271,3 +269,16 @@ def _cgc_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str
             "logFileTemplate": provider.log_root.joinpath("<repoId>", "watch.log").as_posix(),
         },
     }
+
+
+def _cgc_root_settings(repo: RepositoryScope) -> dict[str, Any]:
+    """One generated CGC root entry; per-repo managed exclusions ride along (L12).
+
+    ``cgcignorePatterns`` feeds ``_cgcignore_patterns_from_settings`` and lands in the
+    materialized .cgcignore under "# Repo-specific managed exclusions".
+    """
+    root: dict[str, Any] = {"repoId": repo.repo_id, "path": repo.path.as_posix()}
+    extras = CGC_REPO_CGCIGNORE_EXTRAS.get(repo.repo_id)
+    if extras:
+        root["cgcignorePatterns"] = list(extras)
+    return root

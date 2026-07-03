@@ -10,11 +10,12 @@ readers (provider current-state + worktree enclosures).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -99,6 +100,7 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
     admitted_worktree_groups,
+    series_retained_lifecycle_ids,
 )
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
@@ -256,6 +258,76 @@ class WorktreeProviderAdmissionTests(unittest.TestCase):
         ]
 
         self.assertEqual(active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"close-ar"})
+
+    def test_active_group_survives_a_pruned_lifecycle_log(self) -> None:
+        # The regression: a running worktree (cleanup pending) whose lifecycle event log was retired for
+        # inactivity must STILL be active — admission keys on the durable enclosure, not the prunable
+        # log. Both the Engine Room set and the provider set recover the live group with NO log present.
+        enclosures = [
+            _enclosure(
+                lifecycleId="LCGONE",
+                worktreeGroup="/coord/worktrees/repo/live-ar",
+                closeoutStatus="not-started",
+                integrationStatus="not-started",
+                cleanup="pending",
+            )
+        ]
+        logs: list[list[Event]] = []  # the log was pruned -> no events project for LCGONE
+        self.assertEqual(active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"live-ar"})
+        self.assertEqual(admitted_worktree_groups(enclosures, logs, now=FRESH), {"live-ar"})
+
+
+class SeriesRetentionTests(unittest.TestCase):
+    """`series_retained_lifecycle_ids`: a master series' events survive until the series is retired."""
+
+    def _leaf(
+        self, lifecycle_id: str, master: str, cleanup: str, *, enclosure: str = "/c.md", repo: str = "r"
+    ) -> EnclosureNode:
+        return _enclosure(
+            lifecycleId=lifecycle_id,
+            taskName=master,
+            repoName=repo,
+            cleanup=cleanup,
+            enclosure=enclosure,
+        )
+
+    def test_live_master_protects_every_leaf_including_archived_siblings(self) -> None:
+        enclosures = [
+            self._leaf("LCA", "260628_x", "pending"),
+            self._leaf("LCB", "260628_x", "completed"),  # archived sibling of a LIVE master
+            self._leaf("LCC", "260628_y", "pending"),  # a different, also-live master
+        ]
+        self.assertEqual(
+            series_retained_lifecycle_ids(enclosures, now=FRESH), {"LCA", "LCB", "LCC"}
+        )
+
+    def test_fully_archived_master_without_readable_timestamp_is_released(self) -> None:
+        enclosures = [
+            self._leaf("LCA", "260628_x", "completed", enclosure="/does-not-exist.md"),
+            self._leaf("LCB", "260628_x", "abandoned", enclosure="/nope.md"),
+        ]
+        self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), set())
+
+    def test_archived_master_is_retained_within_grace_then_released_after(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = Path(tmp) / "series-contract.md"
+            contract.write_text("x", encoding="utf-8")
+            enclosures = [self._leaf("LCA", "260628_z", "completed", enclosure=str(contract))]
+
+            # Finalized one day before now -> inside the one-week grace -> still retained.
+            within = (FRESH - timedelta(days=1)).timestamp()
+            os.utime(contract, (within, within))
+            self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), {"LCA"})
+
+            # Finalized eight days before now -> past the grace -> released for pruning.
+            past = (FRESH - timedelta(days=8)).timestamp()
+            os.utime(contract, (past, past))
+            self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), set())
+
+    def test_enclosure_without_taskname_is_not_series_protected(self) -> None:
+        # A fleeting/standalone enclosure (no master task) keeps the ordinary inactivity TTL.
+        enclosures = [self._leaf("LCA", "", "pending")]
+        self.assertEqual(series_retained_lifecycle_ids(enclosures, now=FRESH), set())
 
 
 class FoldTests(unittest.TestCase):
@@ -650,6 +722,49 @@ class WorkspaceTests(unittest.TestCase):
             now=FRESH,
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
+
+    def test_persistent_synthesis_skips_abandoned_and_reopened_enclosures(self) -> None:
+        # No worktree, no persistent lifecycle (L11): an abandoned enclosure's worktrees were
+        # discarded and a reopened one awaits its next worktree_start — neither may synthesize
+        # a paused zombie into the operations tree.
+        proj = project_workspace(
+            [],
+            enclosures=[
+                _enclosure(enclosure="/a.md", lifecycleId="LC-GONE", cleanup="abandoned"),
+                _enclosure(enclosure="/b.md", lifecycleId="", cleanup="reopened"),
+                _enclosure(enclosure="/c.md", lifecycleId="", cleanup="pending"),
+            ],
+            providers=[],
+            now=FRESH,
+        )
+        self.assertEqual([lc.enclosure for lc in proj.lifecycles], ["/c.md"])
+
+    def test_abandoned_enclosure_terminalizes_its_event_backed_lifecycle(self) -> None:
+        # worktree_abandon records cleanup=abandoned in the contract but may not own the
+        # lifecycle's event log (the ambient dies with a server restart), and the store's
+        # single-writer invariant forbids a foreign lifecycle.ended append — so the READER
+        # projects the terminal state from the contract (L11).
+        log = [
+            _started(lifecycle_id="LC-DEAD", ts=T0),
+            _event(
+                "lifecycle.promoted",
+                lifecycle_id="LC-DEAD",
+                ts="2026-06-13T18:00:05+00:00",
+                trust="observed",
+                actor="system",
+                enclosure="/c.md",
+                repo_id="r",
+                scope="r",
+            ),
+        ]
+        proj = project_workspace(
+            [log],
+            enclosures=[_enclosure(lifecycleId="LC-DEAD", cleanup="abandoned")],
+            providers=[],
+            now=FRESH,
+        )
+        dead = next(lc for lc in proj.lifecycles if lc.id == "LC-DEAD")
+        self.assertEqual(dead.state, "abandoned")
 
     def test_stale_persistent_lifecycle_without_enclosure_is_removed(self) -> None:
         proj = project_workspace(
@@ -2541,6 +2656,42 @@ class TaskDocumentsReaderTests(unittest.TestCase):
 
         self.assertEqual(node.lifecycleId, "LC-LEAF")
         self.assertEqual(node.docPath, (root / f"{leaf_id}.json").as_posix())
+
+    def test_resolves_leaf_doc_lifecycle_from_doc_id_case_insensitively(self) -> None:
+        # The real-world series shape (L10 regression): the enclosure leaf id is the lowercase
+        # enclosures/ directory name ("260628-l7"), the doc slug is a numbered filename that never
+        # matches it, the doc id is uppercase ("260628-L7"), and the doc carries no lifecycleId and
+        # no enclosures[] refs. The doc must still bind to the enclosure's lifecycle.
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        contract = default_contract(
+            task_name="demo",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=self.coord,
+            code_repo_path=self.coord / "repos" / "repo-a",
+            code_source_branch="ar/demo",
+            code_work_branch="ar/demo-leaf",
+            code_base_commit="abc123",
+            worktree_name="cgc-dependency-command-repair",
+            leaf_id="260628-l7",
+            lifecycle_id="LC-LEAF-CASE",
+        )
+        write_contract(contract.contract_path, contract)
+        write_task_doc(
+            root,
+            self._doc(
+                id="260628-L7",
+                slug="07_cgc-dependency-command-repair",
+                kind="subTask",
+                steps=[{"id": "S1", "title": "a", "status": "inProgress"}],
+            ),
+        )
+
+        [node] = read_task_documents(self.coord, enclosures=read_enclosures(self.coord), now=FRESH)
+
+        self.assertEqual(node.lifecycleId, "LC-LEAF-CASE")
+        self.assertEqual(node.id, "260628-L7")
 
     def _master(self) -> TaskDocument:
         return TaskDocument.model_validate(

@@ -4,6 +4,12 @@
     labels:
 @SERVICE_LABELS@
     restart: unless-stopped
+    # L12 memory cap (incident 2026-07-03): a cgc watch process grew to 2.16GiB over two
+    # days of file churn and, beside several uncapped per-worktree stacks, drove the host
+    # into swap exhaustion. Steady-state watchers sit at 20-100MiB, so 512m is generous
+    # headroom AND the recycle threshold: growth past it OOM-restarts the watcher
+    # (unless-stopped) with the graph data safe in falkordb.
+    mem_limit: 512m
     depends_on:
       falkordb:
         condition: service_healthy

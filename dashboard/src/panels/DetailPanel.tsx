@@ -1,20 +1,24 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
+import { type ChangeCounters, leafChangeset, masterChangeset, taskChangeset } from "../data/changeset";
 import { useDashboard } from "../data/store";
 import { parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
 import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
   parseTaskSelection,
+  qualifiedLeafKey,
   taskDocsForLifecycle,
   taskLabel,
+  type TaskSelection,
 } from "../data/taskIdentity";
 import { Markdown } from "../grammar/Markdown";
 import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
 import { TokenGauge } from "../grammar/TokenGauge";
 import type {
+  LifecycleProjection,
   Phase,
   ProviderNode,
   SeriesNode,
@@ -26,6 +30,7 @@ import type {
   TaskSubTaskRefNode,
 } from "../types/projection";
 
+import type { ChangeSetTarget } from "./changeset/ChangeSetViewer";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
 import { GateResponder } from "./GateResponder";
 
@@ -191,6 +196,26 @@ const laneMeta = css({
   color: "muted",
 });
 
+const changeSetBar = css({ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.4rem" });
+const changeSetBtn = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  fontSize: "0.72rem",
+  fontFamily: "mono",
+  color: "cyan",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.15rem",
+  cursor: "pointer",
+  _hover: { borderColor: "cyan", color: "ink" },
+});
+const changeSetCounts = css({ color: "muted" });
+
 const tokensRow = css({ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" });
 const label = css({
   fontSize: "0.72rem",
@@ -294,14 +319,23 @@ const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
 export function DetailPanel({
   selectedId,
   onOpenLifecycle,
+  onOpenChangeSet,
+  onViewLeaf,
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
+  // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view (L4a).
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  // Report the QUALIFIED LEAF ID of the leaf the panel is actually SHOWING — a drilled sub-task or a
+  // directly-opened leaf doc — so the rail chat + "attach to leaf" key by that leaf, not the master
+  // (L5 fix 1). `undefined` while only a master/series overview (or the empty state) is shown.
+  onViewLeaf?: (leafKey: string | undefined) => void;
 }) {
   const jump = onOpenLifecycle ?? (() => {});
   const lifecycles = useDashboard((s) => s.lifecycles);
   const analytics = useDashboard((s) => s.analytics);
   const enclosures = useDashboard((s) => s.enclosures);
+  const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
   const providers = useDashboard((s) => s.providers);
   // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
   const [openSlug, setOpenSlug] = useState<string | null>(null);
@@ -335,6 +369,24 @@ export function DetailPanel({
           (selectedIsRootTask && item.seriesId === selectedEnclosure?.taskName),
       )
     : undefined;
+
+  // The leaf the panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc), mirroring
+  // the render branches below — a master/series overview shows no single leaf. Reported up so the rail
+  // chat + "attach to leaf" key by this leaf, never the master (L5 fix 1).
+  const viewedLeafDoc = displayedLeafDoc({
+    selection,
+    allDocs,
+    selectedTaskDoc,
+    lifecycle,
+    selectedSeries,
+    openSlug,
+  });
+  const viewedLeafKey =
+    viewedLeafDoc && viewedLeafDoc.kind !== "master" ? qualifiedLeafKey(viewedLeafDoc) : undefined;
+  // `onViewLeaf` is a stable setter from CockpitShell; re-report only when the resolved leaf changes.
+  useEffect(() => {
+    onViewLeaf?.(viewedLeafKey);
+  }, [viewedLeafKey, onViewLeaf]);
 
   if (selectedTaskDoc && !lifecycle) {
     const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
@@ -370,17 +422,18 @@ export function DetailPanel({
         <div className={where}>task document · {selectedTaskDoc.repository}</div>
         {selectedTaskDoc.kind === "master" ? (
           openDoc ? (
-            <TaskReader doc={openDoc} />
+            <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
           ) : (
             <MasterOverview
               doc={masterDocWithSeriesTokens(selectedTaskDoc, analytics?.series ?? [])}
               sliceDocs={sliceDocs}
               onOpen={setOpenSlug}
               onJump={jump}
+              onOpenChangeSet={onOpenChangeSet}
             />
           )
         ) : (
-          <TaskReader doc={selectedTaskDoc} />
+          <TaskReader doc={selectedTaskDoc} onOpenChangeSet={onOpenChangeSet} />
         )}
       </Panel>
     );
@@ -389,7 +442,9 @@ export function DetailPanel({
   if (!lifecycle && !selectedSeries) {
     return (
       <Panel testid="detail-panel" title="Detail" className={sizing} fill>
-        <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">
+        {/* Bumped to 0.18 (from the shared 0.14 default) for a touch more presence, matching the
+            File/Diff viewer's siege-tank backdrop. */}
+        <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4" opacity={0.18}>
           Select a task to inspect its phase, gate, and tokens.
         </EmptyStateBackdrop>
       </Panel>
@@ -420,13 +475,14 @@ export function DetailPanel({
       <Panel testid="detail-panel" head={head} className={sizing}>
         <div className={where}>series master · {selectedSeries.repository}</div>
         {openDoc ? (
-          <TaskReader doc={openDoc} />
+          <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
         ) : (
           <MasterOverview
             doc={seriesDoc}
             sliceDocs={seriesSlices}
             onOpen={setOpenSlug}
             onJump={jump}
+            onOpenChangeSet={onOpenChangeSet}
           />
         )}
       </Panel>
@@ -515,23 +571,24 @@ export function DetailPanel({
         ))}
       </ol>
 
-      {activeLifecycle.gate || activeLifecycle.ask ? (
+      {activeLifecycle.gate ? (
         <GateResponder
           lifecycleId={activeLifecycle.id}
           gateNode={activeLifecycle.gate}
           ask={activeLifecycle.ask}
-          testId={activeLifecycle.gate ? "gate-review" : "gate-banner"}
+          testId="gate-review"
         />
       ) : null}
 
       {openDoc ? (
-        <TaskReader doc={openDoc} />
+        <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
       ) : seriesDoc ? (
         <MasterOverview
           doc={seriesDoc}
           sliceDocs={seriesSlices}
           onOpen={setOpenSlug}
           onJump={jump}
+          onOpenChangeSet={onOpenChangeSet}
         />
       ) : master ? (
         <MasterOverview
@@ -539,14 +596,33 @@ export function DetailPanel({
           sliceDocs={slices}
           onOpen={setOpenSlug}
           onJump={jump}
+          onOpenChangeSet={onOpenChangeSet}
         />
       ) : (
-        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} />
+        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} />
       )}
 
       {enclosure ? (
         <div className={spine}>
           <div className={spineHead}>worktree · {groupName || enclosure.repoName}</div>
+          {onOpenChangeSet ? (
+            <div className={changeSetBar}>
+              {activeWorktreeGroups.includes(groupName) ? (
+                <ChangeSetButton
+                  target={{ repo: enclosure.repoName, scope: groupName }}
+                  label="change-set"
+                  onOpen={onOpenChangeSet}
+                />
+              ) : null}
+              {enclosure.taskName ? (
+                <ChangeSetButton
+                  target={{ repo: enclosure.repoName, master: enclosure.taskName }}
+                  label="series"
+                  onOpen={onOpenChangeSet}
+                />
+              ) : null}
+            </div>
+          ) : null}
           <div className={lanes}>
             <SpineLane
               kind="code"
@@ -572,6 +648,112 @@ export function DetailPanel({
   );
 }
 
+// A change-set entry button (L4): fetches its target's counters (enclosure scope, series master, or
+// a leaf view — L4a) and opens the Change-Set Viewer takeover. A failed fetch — e.g. a `working`
+// view whose worktree is gone (404) — hides the counts but keeps the button; clicking still opens
+// the screen, which shows the error. Deps are the stable target ids, so the per-second projection
+// re-render does not re-fetch.
+function ChangeSetButton({
+  target,
+  label,
+  onOpen,
+}: {
+  target: ChangeSetTarget;
+  label: string;
+  onOpen: (target: ChangeSetTarget) => void;
+}) {
+  const [counters, setCounters] = useState<{ code: ChangeCounters; memory: ChangeCounters } | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    setCounters(null);
+    const req = target.leaf
+      ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
+      : target.master
+        ? masterChangeset(target.repo, target.master)
+        : taskChangeset(target.repo, target.scope ?? "");
+    void req.then(
+      (d) => live && setCounters(d.counters),
+      () => live && setCounters(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [target.repo, target.scope, target.master, target.leaf, target.mode]);
+  const total = counters
+    ? `+${counters.code.insertions + counters.memory.insertions} −${counters.code.deletions + counters.memory.deletions}`
+    : null;
+  return (
+    <button
+      type="button"
+      className={changeSetBtn}
+      onClick={() => onOpen(target)}
+      data-testid="open-changeset"
+    >
+      ⇄ {label}
+      {total ? <span className={changeSetCounts}>{total}</span> : null}
+    </button>
+  );
+}
+
+// The task folder name = the `master` key for the change-set API (it matches the series contract dir
+// and the leaf contract's parent/task name). Derived from any sibling doc's path.
+const dirName = (docPath: string): string => pathDir(docPath).split("/").filter(Boolean).pop() ?? "";
+
+// L4a: the change-set bar shown on a task-document READER (master or leaf), with identity taken from
+// the doc node — so it appears with NO active enclosure (closing the L4 gap, where the buttons only
+// lived on the live enclosure spine). A master gets the SERIES net button; a leaf gets COMMITTED
+// (always — its landed delta) plus WORKING (only while its enclosure is live — the uncommitted
+// delta). Liveness is read from the store here, so callers thread only `onOpen`.
+function DocChangeSetBar({
+  kind,
+  repo,
+  master,
+  leaf,
+  onOpen,
+}: {
+  kind: "master" | "leaf";
+  repo: string;
+  master: string;
+  leaf?: string;
+  onOpen?: (target: ChangeSetTarget) => void;
+}) {
+  const enclosures = useDashboard((s) => s.enclosures);
+  const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
+  if (!onOpen || !repo || !master) return null;
+  if (kind === "master") {
+    return (
+      <div className={changeSetBar}>
+        <ChangeSetButton target={{ repo, master }} label="series" onOpen={onOpen} />
+      </div>
+    );
+  }
+  if (!leaf) return null;
+  const live = Object.values(enclosures).some(
+    (e) =>
+      e.repoName === repo &&
+      e.leafId.toLowerCase() === leaf.toLowerCase() &&
+      activeWorktreeGroups.includes(e.worktreeGroup.split("/").filter(Boolean).pop() ?? ""),
+  );
+  return (
+    <div className={changeSetBar}>
+      <ChangeSetButton
+        target={{ repo, master, leaf, mode: "committed" }}
+        label="committed"
+        onOpen={onOpen}
+      />
+      {live ? (
+        <ChangeSetButton
+          target={{ repo, master, leaf, mode: "working" }}
+          label="working"
+          onOpen={onOpen}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 // Drill-in match key (6g): a SubTaskRef.file / a slice's docPath basename, minus extension. A
 // master's index row resolves to the slice doc whose slug equals the ref's file stem.
 const sliceSlug = (doc: TaskDocNode): string => stripExt(doc.docPath.split("/").pop() ?? "");
@@ -584,6 +766,58 @@ const sliceForRef = (
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
 const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
+
+// The leaf doc the panel renders a full reader for — the single source of the viewed-leaf key (L5
+// fix 1). Mirrors the DetailPanel render branches exactly: a drilled sub-task (openSlug), a directly
+// opened leaf doc, or a lone slice; a master/series overview or the empty state yields undefined.
+function displayedLeafDoc({
+  allDocs,
+  selectedTaskDoc,
+  lifecycle,
+  selectedSeries,
+  openSlug,
+}: {
+  selection: TaskSelection | null;
+  allDocs: TaskDocNode[];
+  selectedTaskDoc: TaskDocNode | undefined;
+  lifecycle: LifecycleProjection | undefined;
+  selectedSeries: SeriesNode | undefined;
+  openSlug: string | null;
+}): TaskDocNode | undefined {
+  // Branch 1: a task-doc selection with no live lifecycle.
+  if (selectedTaskDoc && !lifecycle) {
+    if (selectedTaskDoc.kind === "master") {
+      const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
+      return openSlug ? sliceForSlug(sliceDocs, openSlug) : undefined;
+    }
+    return selectedTaskDoc;
+  }
+  // Branch 2: nothing resolved -> empty state.
+  if (!lifecycle && !selectedSeries) return undefined;
+  // Branch 3: a master-less series selection.
+  if (!lifecycle && selectedSeries) {
+    const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
+    return openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
+  }
+  // Branch 4: a live lifecycle.
+  if (!lifecycle) return undefined;
+  const docs =
+    selectedTaskDoc?.lifecycleId === lifecycle.id
+      ? [selectedTaskDoc]
+      : taskDocsForLifecycle(lifecycle, allDocs);
+  const master = docs.find((doc) => doc.kind === "master");
+  const slices = master
+    ? seriesSliceDocs(allDocs, master.docPath)
+    : docs.filter((doc) => doc.kind !== "master");
+  const contentSlices = selectedSeries
+    ? seriesSliceDocs(allDocs, selectedSeries.docPath)
+    : slices;
+  const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
+  if (openDoc) return openDoc;
+  if (selectedSeries || master) return undefined; // a master / series overview shows no single leaf
+  const nonMaster = docs.filter((doc) => doc.kind !== "master");
+  return nonMaster.length === 1 ? nonMaster[0] : undefined;
+}
 const topLevelStepProgress = (doc: TaskDocNode): { done: number; total: number } => ({
   done: doc.steps.filter((step) => step.status === "done").length,
   total: doc.steps.length,
@@ -600,6 +834,7 @@ type MasterDocView = Pick<
   | "decisions"
   | "masterLifecycleId"
   | "docPath"
+  | "repository"
 > & { seriesTokenTotal?: number };
 
 const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
@@ -611,6 +846,7 @@ const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   sections: seriesNode.sections,
   decisions: seriesNode.decisions,
   docPath: seriesNode.docPath,
+  repository: seriesNode.repository,
   seriesTokenTotal: seriesNode.seriesTokenTotal,
 });
 
@@ -627,10 +863,12 @@ function TaskContent({
   docs,
   onOpen,
   onJump,
+  onOpenChangeSet,
 }: {
   docs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this task.</p>;
@@ -638,10 +876,18 @@ function TaskContent({
   const master = docs.find((doc) => doc.kind === "master");
   const sliceDocs = docs.filter((doc) => doc.kind !== "master");
   if (master) {
-    return <MasterOverview doc={master} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />;
+    return (
+      <MasterOverview
+        doc={master}
+        sliceDocs={sliceDocs}
+        onOpen={onOpen}
+        onJump={onJump}
+        onOpenChangeSet={onOpenChangeSet}
+      />
+    );
   }
   if (sliceDocs.length === 1) {
-    return <TaskReader doc={sliceDocs[0]} />;
+    return <TaskReader doc={sliceDocs[0]} onOpenChangeSet={onOpenChangeSet} />;
   }
   return <SliceList sliceDocs={sliceDocs} onOpen={onOpen} />;
 }
@@ -654,11 +900,13 @@ function MasterOverview({
   sliceDocs,
   onOpen,
   onJump,
+  onOpenChangeSet,
 }: {
   doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   return (
     <div className={taskdoc}>
@@ -667,6 +915,12 @@ function MasterOverview({
         <span className={taskdocTitle}>{doc.title}</span>
         <span className={taskdocStatus}>{doc.status}</span>
       </div>
+      <DocChangeSetBar
+        kind="master"
+        repo={doc.repository}
+        master={dirName(doc.docPath)}
+        onOpen={onOpenChangeSet}
+      />
       <MasterTokenSummary total={doc.seriesTokenTotal} />
       {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
@@ -892,16 +1146,30 @@ function SpineLane({
   );
 }
 
-function TaskReader({ doc }: { doc: TaskDocNode }) {
+function TaskReader({
+  doc,
+  onOpenChangeSet,
+}: {
+  doc: TaskDocNode;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+}) {
   const progress = topLevelStepProgress(doc);
+  const leafKey = qualifiedLeafKey(doc);
   return (
-    <div className={taskdoc}>
+    <div className={taskdoc} data-task-leaf-key={leafKey}>
       <div className={taskdocHead}>
         <span className={badge}>{doc.kind}</span>
         <span className={taskdocTitle}>{doc.title}</span>
         <span className={taskdocStatus}>{doc.status}</span>
         <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
       </div>
+      <DocChangeSetBar
+        kind="leaf"
+        repo={doc.repository}
+        master={dirName(doc.docPath)}
+        leaf={doc.id}
+        onOpen={onOpenChangeSet}
+      />
       {doc.steps.length > 0 ? (
         <Section title="Progress">
           <StepList steps={doc.steps} />

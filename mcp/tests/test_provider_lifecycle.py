@@ -103,6 +103,26 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
         self.assertEqual(lifecycle.yaml_port_mapping("127.0.0.1", 5432, 5432), '"127.0.0.1:5432:5432"')
 
 
+class ProviderComposeMemoryCapTests(unittest.TestCase):
+    """L12: every provider service ships an explicit memory cap (watchers 512m by
+    developer directive), so a runaway container OOM-recycles itself under its
+    unless-stopped restart policy instead of exhausting host RAM and swap."""
+
+    def test_cgc_compose_services_are_memory_capped(self) -> None:
+        base = lifecycle.provider_asset_text("compose", "codegraphcontext.compose.yaml")
+        self.assertIn("mem_limit: 2g", base)  # falkordb
+        self.assertIn("mem_limit: 1g", base)  # batch runner
+        watcher = lifecycle.provider_asset_text("compose", "codegraphcontext.watcher.yaml.tmpl")
+        self.assertIn("mem_limit: 512m", watcher)
+        self.assertIn("restart: unless-stopped", watcher)
+
+    def test_grepai_compose_services_are_memory_capped(self) -> None:
+        base = lifecycle.provider_asset_text("compose", "grepai.compose.yaml")
+        self.assertEqual(base.count("mem_limit: 512m"), 2)  # postgres + watcher
+        self.assertIn("mem_limit: 2g", base)  # ollama
+        self.assertEqual(base.count("restart: unless-stopped"), 3)
+
+
 class ProviderLifecycleParserTests(unittest.TestCase):
     def parse_cgc(self, argv: list[str]):
         parser = lifecycle.build_parser()

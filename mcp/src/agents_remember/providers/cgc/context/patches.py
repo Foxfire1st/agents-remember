@@ -36,6 +36,35 @@ def apply_cgc_cgcignore_patch(path: Path) -> bool:
     return True
 
 
+def cgc_timer_pop_patch_applied(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    return CGC_TIMER_POP_PATCH_MARKER in text and "_run_and_forget" in text
+
+
+def apply_cgc_timer_pop_patch(path: Path) -> bool:
+    """Patch the CGC watcher so fired debounce timers leave ``self.timers``.
+
+    Upstream never removes a fired timer's dict entry, so the per-path dict grows
+    with every unique changed source path for the watcher's whole lifetime (L12
+    incident). The identity guard keeps a replacement timer's entry intact when an
+    event re-fires during the pop window. Returns true when the file was changed
+    and false when the patch was already present.
+    """
+
+    text = path.read_text(encoding="utf-8")
+    if cgc_timer_pop_patch_applied(path):
+        return False
+    if CGC_TIMER_POP_ORIGINAL_SNIPPET not in text:
+        raise ContextProviderError(
+            "CGC watcher.py did not match the expected unpatched debounce snippet"
+        )
+    path.write_text(
+        text.replace(CGC_TIMER_POP_ORIGINAL_SNIPPET, CGC_TIMER_POP_PATCHED_SNIPPET),
+        encoding="utf-8",
+    )
+    return True
+
+
 def cgc_delete_patch_applied(path: Path) -> bool:
     text = path.read_text(encoding="utf-8")
     return CGC_DELETE_PATCH_MARKER in text and "prefix_backslash=path_prefix_backslash" in text

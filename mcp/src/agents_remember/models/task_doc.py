@@ -8,9 +8,12 @@ itself (``tasks.TaskDocument``) is the persisted contract and is deliberately
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.worktree import WorktreeCommandResponse
 
 
 class TaskDocMasterSync(BaseModel):
@@ -45,3 +48,9 @@ class TaskDocResponse(ToolResponse):
     diff: str | None = None
     wouldLose: bool = False
     masterSync: TaskDocMasterSync | None = None
+
+
+class TaskReopenResponse(WorktreeCommandResponse):
+    """task_reopen resets a leaf's contract + doc; the payload keeps the contract-state shape."""
+
+    operation: Literal["task_reopen"] = "task_reopen"
