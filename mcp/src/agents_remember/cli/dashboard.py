@@ -15,6 +15,7 @@ from pathlib import Path
 import uvicorn
 
 import agents_remember
+from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.mcp.config import ConfigError, load_config
 from agents_remember.serving.app import create_app
 from agents_remember.serving.sim import SimError, build_sim, parse_sim_speed
@@ -34,7 +35,11 @@ def _dev_app():
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--config", required=True, help="Absolute path to trusted MCP settings JSON."
+        "--config",
+        default=None,
+        help="Path to trusted MCP settings JSON. Omit to discover it from the working "
+        "directory: the nearest .claude/mcp/agents-remember-settings.json, or the "
+        "--config recorded in an .mcp.json agents-remember entry.",
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Bind host (localhost-only by default; do not expose)."
@@ -63,7 +68,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> int:
     try:
-        config = load_config(args.config)
+        config_path = args.config or discover_config()
+    except ConfigDiscoveryError as error:
+        print(f"error: {error}")
+        return 1
+    try:
+        config = load_config(config_path)
     except ConfigError as error:
         print(f"error: {error}")
         return 1
@@ -73,7 +83,7 @@ def run(args: argparse.Namespace) -> int:
             return 1
         # Pass an import-string factory (not the built app object) so uvicorn's reloader can
         # re-import on change; watch only the package source so node_modules/.git don't churn it.
-        os.environ[_DEV_CONFIG_ENV] = str(Path(args.config).resolve())
+        os.environ[_DEV_CONFIG_ENV] = str(Path(config_path).resolve())
         os.environ[_DEV_INTERVAL_ENV] = str(args.interval)
         uvicorn.run(
             "agents_remember.cli.dashboard:_dev_app",
