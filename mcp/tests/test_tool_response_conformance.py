@@ -273,7 +273,7 @@ def _task_doc_payloads(root: Path) -> dict[str, dict]:
                 "id": "DEMO",
                 "slug": "task",
                 "title": "Demo",
-                "kind": "light",
+                "kind": "master",
                 "repo": REPO,
                 "type": "Code",
                 "createdAt": "2026-01-01T00:00",

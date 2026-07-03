@@ -28,6 +28,8 @@ StepStatus = Literal["pending", "inProgress", "blocked", "done"]
 # Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
 # the rendered ``**Status:**`` line is always a valid template value.
 DocStatus = Literal["planning", "inProgress", "Completed"]
+# "light" is retained only so any legacy light document still loads; the task_doc
+# create/replace path refuses to author new ones — every task is master/leaf.
 DocKind = Literal["light", "subTask", "master"]
 
 

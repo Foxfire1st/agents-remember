@@ -5,6 +5,7 @@ system/tools.md
 .env
 *.pyc
 __pycache__/
+node_modules/
 *.egg-info/
 .venv
 .venv/

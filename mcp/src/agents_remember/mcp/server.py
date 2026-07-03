@@ -898,8 +898,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
-        operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'set_subtask' | 'set_section' |
-        'append_decision' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'set_subtask' | 'remove_subtask' |
+        'set_section' | 'append_decision' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
         title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
@@ -907,7 +907,9 @@ def create_server(config: McpRuntimeConfig) -> Any:
         full replacement document in fields and rewrites the existing JSON+markdown after schema
         validation; 'set_step' takes
         step={id, title, status, parent?, note?}; 'set_subtask' (master) takes subtask={number, name,
-        file?, status?, scope?}; 'set_section' (master) takes section={heading, kind?, body?};
+        file?, status?, scope?}; 'remove_subtask' (master) takes subtask={number, keep_file?} and drops that
+        sub-task row AND deletes its leaf doc (json+md) unless keep_file=true; 'set_section' (master) takes
+        section={heading, kind?, body?};
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
         scalar/list updates; 'set_status' takes fields.status. dry_run=true builds + validates and
         returns rendered/diff/wouldLose WITHOUT writing — the preview before adopting a hand .md."""

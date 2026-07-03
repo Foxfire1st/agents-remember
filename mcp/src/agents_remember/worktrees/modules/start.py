@@ -108,6 +108,24 @@ def _memory_base_commit(memory_repo) -> str:
     return head_commit(memory_repo)
 
 
+def _memory_base_for_source(memory_repo, memory_source_branch: str) -> str:
+    """The memory base = the tip of the memory source branch the worktree is created off.
+
+    Mirrors the code-base derivation (``head_commit(repo, source_branch)``) instead of reading the
+    memory repo's current HEAD, which may be checked out on an unrelated branch (e.g. another in-flight
+    task) and would record a divergent base that breaks closeout's "memory source branch moved"
+    preflight. Falls back to the repo HEAD when external memory is off or the source branch is not
+    present yet (it is auto-created off the official tip during memory start).
+    """
+    if memory_repo is None or not memory_source_branch:
+        return _memory_base_commit(memory_repo)
+    if not memory_repo.exists() or not (memory_repo / ".git").exists():
+        return ""
+    if branch_exists(memory_repo, memory_source_branch):
+        return head_commit(memory_repo, memory_source_branch)
+    return _memory_base_commit(memory_repo)
+
+
 def _external_memory_value(memory_mode: str, value: str) -> str:
     return value if memory_mode == "external" else ""
 
@@ -188,7 +206,7 @@ def _parent_series_contract(
             memory_repo_path=memory_repo,
             memory_source_branch=memory_source_branch,
             memory_work_branch=memory_work_branch,
-            memory_base_commit=_memory_base_commit(memory_repo),
+            memory_base_commit=_memory_base_for_source(memory_repo, memory_source_branch),
             parent_task_name=args.parent_task or "",
             task_root=task_root,
         )
@@ -219,7 +237,19 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
     else:
         base_commit = head_commit(repo, source_branch)
     memory_repo = _start_memory_repo(context, memory_mode)
-    memory_base = _memory_base_commit(memory_repo)
+    memory_source_branch = _external_memory_value(memory_mode, source_branch)
+    # Memory base = the tip of the memory source branch this worktree is created off (mirroring the
+    # code base), not the memory repo's current HEAD, which may be on an unrelated branch.
+    if (
+        args.dry_run
+        and parent_series is not None
+        and memory_repo is not None
+        and memory_source_branch
+        and not branch_exists(memory_repo, memory_source_branch)
+    ):
+        memory_base = parent_series.memory_base_commit
+    else:
+        memory_base = _memory_base_for_source(memory_repo, memory_source_branch)
     return default_contract(
         task_name=args.task_name,
         repo_name=context.code_repository_name,
@@ -232,7 +262,7 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
         code_base_commit=base_commit,
         worktree_name=args.worktree_name,
         memory_repo_path=memory_repo,
-        memory_source_branch=_external_memory_value(memory_mode, source_branch),
+        memory_source_branch=memory_source_branch,
         memory_work_branch=_external_memory_value(memory_mode, work_branch),
         memory_base_commit=memory_base,
         lifecycle_id=args.lifecycle_id,
