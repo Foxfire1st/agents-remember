@@ -17,5 +17,9 @@
     "toolSeconds": 30,
     "providerSetupSeconds": 1800
   },
-  "benchmarksEnabled": false
+  "benchmarksEnabled": false,
+  "dashboard": {
+    "autoStart": false,
+    "port": 8765
+  }
 }

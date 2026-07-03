@@ -9,7 +9,12 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import ConfigError, load_config, require_config_path
+from agents_remember.mcp.config import (
+    ConfigError,
+    McpRuntimeConfig,
+    load_config,
+    require_config_path,
+)
 from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
@@ -432,6 +437,45 @@ class McpConfigTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ConfigError, "renamed to providerSetupSeconds"):
                 load_config(path)
+
+
+class DashboardSettingsTests(unittest.TestCase):
+    def _load(self, dashboard: object | None) -> McpRuntimeConfig:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            if dashboard is not None:
+                payload["dashboard"] = dashboard
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+            return load_config(path)
+
+    def test_defaults_stay_off_when_the_key_is_absent(self) -> None:
+        config = self._load(None)
+        self.assertFalse(config.dashboard.auto_start)
+        self.assertEqual(config.dashboard.port, 8765)
+
+    def test_parses_auto_start_and_port(self) -> None:
+        config = self._load({"autoStart": True, "port": 9321})
+        self.assertTrue(config.dashboard.auto_start)
+        self.assertEqual(config.dashboard.port, 9321)
+
+    def test_unknown_dashboard_key_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "unsupported dashboard setting"):
+            self._load({"autostart": True})
+
+    def test_auto_start_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoStart must be a boolean"):
+            self._load({"autoStart": 1})
+
+    def test_port_must_be_a_valid_port_number(self) -> None:
+        for bad in (True, 0, 65536, "8080"):
+            with self.assertRaisesRegex(ConfigError, "dashboard.port"):
+                self._load({"port": bad})
+
+    def test_non_object_dashboard_settings_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "dashboard settings must be an object"):
+            self._load(["autoStart"])
 
 
 if __name__ == "__main__":

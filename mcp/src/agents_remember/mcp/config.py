@@ -24,6 +24,12 @@ DEFAULT_DOCKER_CONTROL_SECONDS = 120
 # documented, reserved cap.
 KNOWN_TIMEOUT_CAPS = frozenset({"providerSetupSeconds", "toolSeconds"})
 
+DEFAULT_DASHBOARD_PORT = 8765
+
+# Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
+# boot, not silently leave the daemon unsupervised.
+KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
+
 
 class ConfigError(AgentsRememberError):
     """Raised when MCP authority settings are missing or unsafe."""
@@ -48,6 +54,14 @@ class ProviderScope:
 
 
 @dataclass(frozen=True)
+class DashboardSettings:
+    """The optional ``dashboard`` settings object (defaults keep it fully off)."""
+
+    auto_start: bool = False
+    port: int = DEFAULT_DASHBOARD_PORT
+
+
+@dataclass(frozen=True)
 class McpRuntimeConfig:
     config_path: Path
     coordination_root: Path
@@ -58,6 +72,7 @@ class McpRuntimeConfig:
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
+    dashboard: DashboardSettings = field(default_factory=DashboardSettings)
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -119,6 +134,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
+    dashboard = parse_dashboard_settings(data.get("dashboard"))
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -130,6 +146,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         providers=providers,
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
+        dashboard=dashboard,
     )
 
 
@@ -284,6 +301,25 @@ def parse_benchmarks_enabled(raw: object) -> bool:
     if not isinstance(raw, bool):
         raise ConfigError("benchmarksEnabled must be a boolean")
     return raw
+
+
+def parse_dashboard_settings(raw: object) -> DashboardSettings:
+    if raw is None:
+        return DashboardSettings()
+    if not isinstance(raw, dict):
+        raise ConfigError("dashboard settings must be an object")
+    unknown = sorted(set(raw) - KNOWN_DASHBOARD_FIELDS)
+    if unknown:
+        allowed = ", ".join(sorted(KNOWN_DASHBOARD_FIELDS))
+        unknown_text = ", ".join(unknown)
+        raise ConfigError(f"unsupported dashboard setting(s): {unknown_text}; allowed: {allowed}")
+    auto_start = raw.get("autoStart", False)
+    if not isinstance(auto_start, bool):
+        raise ConfigError("dashboard.autoStart must be a boolean")
+    port = raw.get("port", DEFAULT_DASHBOARD_PORT)
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise ConfigError("dashboard.port must be an integer in 1..65535")
+    return DashboardSettings(auto_start=auto_start, port=port)
 
 
 def parse_timeout_caps(raw: object) -> dict[str, int]:
