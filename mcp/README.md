@@ -79,6 +79,31 @@ python -m pip install agents-remember-mcp
 agents-remember-mcp --config /absolute/path/to/agents-remember-settings.json
 ```
 
+The package also ships the umbrella CLI `agents-remember`, which carries the
+mission-control `dashboard` subcommand. Install it as a uv tool — latest
+stable, no version pin; pinning (`agents-remember-mcp==X.Y.Z`, also usable
+with `uvx --from`) is the debugging/repro path:
+
+```text
+uv tool install agents-remember-mcp
+agents-remember dashboard
+```
+
+`dashboard` finds its `--config` on its own: it walks up from the current
+directory to the nearest `.claude/mcp/agents-remember-settings.json`, or the
+`--config` recorded in an `.mcp.json` `agents-remember` entry. `--daemon`
+detaches it so it survives the terminal that started it (`--status` /
+`--stop` manage it; state and log live under
+`<coordinationRoot>/logs/dashboard/`), and the
+`"dashboard": {"autoStart": true}` settings key makes every MCP server boot
+ensure the daemon — adopting a healthy one, starting a missing one, and
+restarting on version mismatch.
+
+> **Pre-release note (until 3.0.0 final):** `3.0.0rcN` pre-releases are
+> skipped by default version resolution — install the dashboard-capable CLI
+> with `uv tool install --prerelease allow agents-remember-mcp`, and pin the
+> server registration (`agents-remember-mcp==3.0.0rcN`) instead of `@latest`.
+
 The config path must be **absolute**, the settings file must live **outside the
 `ar-coordination/` runtime folder**, and it should live **under your harness's
 registration folder in an `mcp/` subdirectory** (see

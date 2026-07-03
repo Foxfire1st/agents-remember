@@ -25,11 +25,12 @@
 4. [Live Demo](#live-demo)
 5. [Requirements](#requirements)
 6. [Quickstart](#quickstart)
-7. [Documentation](#documentation)
-8. [Repository Layout](#repository-layout)
-9. [Status](#status)
-10. [Stability](#stability)
-11. [Contributing](#contributing)
+7. [Run The Dashboard](#run-the-dashboard)
+8. [Documentation](#documentation)
+9. [Repository Layout](#repository-layout)
+10. [Status](#status)
+11. [Stability](#stability)
+12. [Contributing](#contributing)
 
 ## Why It Exists
 
@@ -129,6 +130,46 @@ maintenance/manual MCP tool, but the starter packages already provide the
 initial skills and harness files.
 
 After that, normal work runs through the `l-01-session-job-lifecycle` skill. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+
+## Run The Dashboard
+
+The mission-control dashboard ships inside the MCP package. Install the CLI
+once with uv — latest stable, no version pin — then start the cockpit from
+anywhere in your workspace:
+
+```text
+uv tool install agents-remember-mcp
+agents-remember dashboard
+```
+
+`--config` is optional: the CLI walks up from the current directory and uses
+the nearest `.claude/mcp/agents-remember-settings.json`, or the `--config`
+recorded in an `.mcp.json` `agents-remember` entry — the same settings file
+the MCP server boots from.
+
+For a dashboard that survives closing the terminal, use daemon mode:
+
+```text
+agents-remember dashboard --daemon    # detach; state + log under <coordinationRoot>/logs/dashboard/
+agents-remember dashboard --status    # exit 0 when running, 1 when not
+agents-remember dashboard --stop
+```
+
+Or let the MCP server supervise it: set `"dashboard": {"autoStart": true}` in
+the MCP settings JSON and every server boot ensures the daemon — adopting a
+healthy one, starting a missing one, and restarting on version mismatch so an
+upgrade is picked up by the next session
+([Settings Reference](docs/reference/settings-json.md)).
+
+Pinning a version is the debugging/repro path, not the default: `uv tool
+install 'agents-remember-mcp==3.0.0rc2'`, or one-shot without installing,
+`uvx --from 'agents-remember-mcp==3.0.0rc2' agents-remember dashboard`.
+
+> **Pre-release note (until 3.0.0 final):** the dashboard currently ships in
+> `3.0.0rcN` pre-releases, which default version resolution skips. Install with
+> `uv tool install --prerelease allow agents-remember-mcp`, and register the
+> MCP server with an explicit `agents-remember-mcp==3.0.0rcN` pin instead of
+> `@latest`.
 
 ## Documentation
 
