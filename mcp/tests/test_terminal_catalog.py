@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -213,8 +214,6 @@ class TerminalCatalogTests(unittest.TestCase):
         # Reproduces the bug class directly: many threads upserting distinct rows at once. With the
         # read-modify-write serialized under the lock + a unique temp per write, every row survives and the
         # file stays valid JSON. (Pre-fix: lost updates and a torn, unreadable file.)
-        import threading
-
         ids = [f"s{i:03d}" for i in range(40)]
         barrier = threading.Barrier(len(ids))
 

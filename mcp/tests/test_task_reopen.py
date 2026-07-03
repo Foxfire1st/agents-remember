@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 from agents_remember.controllers.worktree_tools import _end_ambient_lifecycle_if_anchored
 from agents_remember.observer.ambient import AmbientLifecycle, install_ambient
@@ -118,7 +119,7 @@ class ReopenGuardTests(unittest.TestCase):
             result = reopen_task(contract.contract_path)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
-            blockers = " ".join(result.payload["blockers"])
+            blockers = " ".join(cast("list[str]", result.payload["blockers"]))
             self.assertIn("closeout", blockers)
             self.assertIn("cleanup", blockers)
 
@@ -128,7 +129,9 @@ class ReopenGuardTests(unittest.TestCase):
             write_contract(contract.contract_path, replace(contract, kind="series"))
             result = reopen_task(contract.contract_path)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("not a leaf enclosure", " ".join(result.payload["blockers"]))
+            self.assertIn(
+                "not a leaf enclosure", " ".join(cast("list[str]", result.payload["blockers"]))
+            )
 
     def test_refuses_when_a_worktree_still_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,7 +139,7 @@ class ReopenGuardTests(unittest.TestCase):
             contract.code_worktree.mkdir(parents=True)
             result = reopen_task(contract.contract_path)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("still exists", " ".join(result.payload["blockers"]))
+            self.assertIn("still exists", " ".join(cast("list[str]", result.payload["blockers"])))
 
 
 class ReopenResetTests(unittest.TestCase):

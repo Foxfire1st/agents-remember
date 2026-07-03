@@ -298,17 +298,18 @@ def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[
     else:
         worktree, repo = contract.code_worktree, contract.code_repo_path
         base, committed = contract.code_base_commit, contract.code_commit
-    live = worktree is not None and worktree.exists()
     if mode == "working":
         # No worktree on this side (e.g. memory disabled) -> nothing to show, like task_changeset's
         # memory degradation. The code-side liveness that makes ``working`` meaningful is enforced once
         # in leaf_changeset, so a missing memory worktree never fails the whole view.
-        if not live:
+        if worktree is None or not worktree.exists():
             return []
         return changed_files_with_counts(worktree, head_commit(worktree, "HEAD"), None)
     if not base:
         return []
-    head = committed or (head_commit(worktree, "HEAD") if live else "")
+    head = committed or (
+        head_commit(worktree, "HEAD") if worktree is not None and worktree.exists() else ""
+    )
     if not head:
         return []
     diff_repo = repo if repo is not None else worktree
@@ -380,16 +381,17 @@ def leaf_file_diff(
     else:
         worktree, repo = contract.code_worktree, contract.code_repo_path
         base, committed = contract.code_base_commit, contract.code_commit
-    live = worktree is not None and worktree.exists()
     if mode == "working":
-        if not live:
+        if worktree is None or not worktree.exists():
             raise FileNotFoundError("no live worktree for the working change-set")
         relp = confine_rel(worktree, rel)
         before = commit_text_or_none(worktree, head_commit(worktree, "HEAD"), relp)
         after_path = worktree / relp
         after = after_path.read_text(errors="replace") if after_path.is_file() else None
     else:
-        head = committed or (head_commit(worktree, "HEAD") if live else "")
+        head = committed or (
+            head_commit(worktree, "HEAD") if worktree is not None and worktree.exists() else ""
+        )
         diff_repo = repo if repo is not None else worktree
         if diff_repo is None or not base or not head:
             raise FileNotFoundError(rel)
@@ -444,7 +446,9 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         repo: str, scope: str = "mainline", master: str = "", leaf: str = "", mode: str = ""
     ) -> Response:
         if leaf:
-            return _leaf_json(lambda: leaf_changeset(config, repo, master, leaf, mode), master, mode)
+            return _leaf_json(
+                lambda: leaf_changeset(config, repo, master, leaf, mode), master, mode
+            )
         return run_scoped(task_changeset, config, repo, scope)
 
     @app.get("/api/changeset/file-diff")

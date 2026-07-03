@@ -17,9 +17,6 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.serving import files, scope
 from agents_remember.serving.changeset import (
@@ -34,6 +31,8 @@ from agents_remember.serving.changeset import (
 from agents_remember.serving.scope import FileScope
 from agents_remember.worktrees.modules.git import changed_files_with_counts
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 def _git(repo: Path, *args: str) -> None:
