@@ -754,6 +754,10 @@ class CliRunTests(unittest.TestCase):
             "reload": False,
             "sim": None,
             "sim_speed": "1",
+            "daemon": False,
+            "status": False,
+            "stop": False,
+            "no_access_log": False,
         }
         base.update(overrides)
         return argparse.Namespace(**base)
@@ -1358,6 +1362,10 @@ class CliSimTests(unittest.TestCase):
             "reload": False,
             "sim": None,
             "sim_speed": "1",
+            "daemon": False,
+            "status": False,
+            "stop": False,
+            "no_access_log": False,
         }
         base.update(overrides)
         return argparse.Namespace(**base)

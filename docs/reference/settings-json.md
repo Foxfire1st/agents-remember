@@ -119,7 +119,11 @@ watch settings internally.
     "toolSeconds": 30,
     "providerSetupSeconds": 1800
   },
-  "benchmarksEnabled": false
+  "benchmarksEnabled": false,
+  "dashboard": {
+    "autoStart": false,
+    "port": 8765
+  }
 }
 ```
 
@@ -188,3 +192,13 @@ dependency install (default 1800). Docker control operations such as
 start, stop, and status use a fixed internal cap and are not configurable.
 Indexing and database seed or clone are never capped because they scale with
 repository size. A value of `0` means unlimited for any cap.
+
+`dashboard` (optional) supervises the mission-control dashboard from the MCP
+server. With `dashboard.autoStart` set to `true` (default `false`), every
+server boot ensures a detached dashboard daemon on `dashboard.port` (default
+`8765`): a healthy same-version daemon is adopted, a missing one is spawned,
+and a version or port mismatch restarts it, so an upgrade is picked up by the
+next session's boot. Daemon state and logs live under
+`<coordinationRoot>/logs/dashboard/`; `agents-remember dashboard --status` /
+`--stop` manage the same daemon from the CLI. Unknown `dashboard` keys are
+rejected.

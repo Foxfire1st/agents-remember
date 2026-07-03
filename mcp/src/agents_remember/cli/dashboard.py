@@ -15,7 +15,9 @@ from pathlib import Path
 import uvicorn
 
 import agents_remember
+from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.mcp.config import ConfigError, load_config
+from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving.app import create_app
 from agents_remember.serving.sim import SimError, build_sim, parse_sim_speed
 
@@ -34,12 +36,21 @@ def _dev_app():
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--config", required=True, help="Absolute path to trusted MCP settings JSON."
+        "--config",
+        default=None,
+        help="Path to trusted MCP settings JSON. Omit to discover it from the working "
+        "directory: the nearest .claude/mcp/agents-remember-settings.json, or the "
+        "--config recorded in an .mcp.json agents-remember entry.",
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Bind host (localhost-only by default; do not expose)."
     )
-    parser.add_argument("--port", type=int, default=8765, help="Bind port (default 8765).")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Bind port (default: the dashboard.port settings key, else 8765).",
+    )
     parser.add_argument(
         "--interval", type=float, default=1.0, help="Projection refresh interval, seconds."
     )
@@ -59,21 +70,53 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="1",
         help="Sim replay speed multiplier (e.g. 1, 10) or 'paused' (default 1).",
     )
+    control = parser.add_mutually_exclusive_group()
+    control.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Detach: ensure a background dashboard daemon (state and log under "
+        "<coordinationRoot>/logs/dashboard/) and return. Adopts a healthy matching daemon; "
+        "restarts one whose version, host, or port differs.",
+    )
+    control.add_argument(
+        "--status",
+        action="store_true",
+        help="Report the dashboard daemon's state and exit (exit 0 running, 1 not).",
+    )
+    control.add_argument(
+        "--stop",
+        action="store_true",
+        help="Stop the dashboard daemon (TERM, bounded wait, KILL fallback) and exit.",
+    )
+    parser.add_argument(
+        "--no-access-log",
+        action="store_true",
+        help="Serve without per-request access logs (the daemon child uses this to keep "
+        "its log file bounded).",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
     try:
-        config = load_config(args.config)
+        config_path = args.config or discover_config()
+    except ConfigDiscoveryError as error:
+        print(f"error: {error}")
+        return 1
+    try:
+        config = load_config(config_path)
     except ConfigError as error:
         print(f"error: {error}")
         return 1
+    port = args.port if args.port is not None else config.dashboard.port
+    if args.daemon or args.status or args.stop:
+        return _run_daemon_command(args, config, port)
     if args.reload:
         if args.sim:
             print("error: --reload is not supported with --sim")
             return 1
         # Pass an import-string factory (not the built app object) so uvicorn's reloader can
         # re-import on change; watch only the package source so node_modules/.git don't churn it.
-        os.environ[_DEV_CONFIG_ENV] = str(Path(args.config).resolve())
+        os.environ[_DEV_CONFIG_ENV] = str(Path(config_path).resolve())
         os.environ[_DEV_INTERVAL_ENV] = str(args.interval)
         uvicorn.run(
             "agents_remember.cli.dashboard:_dev_app",
@@ -81,7 +124,8 @@ def run(args: argparse.Namespace) -> int:
             reload=True,
             reload_dirs=[str(Path(agents_remember.__file__).parent)],
             host=args.host,
-            port=args.port,
+            port=port,
+            access_log=not args.no_access_log,
         )
         return 0
     if args.sim:
@@ -97,5 +141,31 @@ def run(args: argparse.Namespace) -> int:
         )
     else:
         app = create_app(config, interval=args.interval)
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=port, access_log=not args.no_access_log)
     return 0
+
+
+def _run_daemon_command(
+    args: argparse.Namespace, config: serving_daemon.McpRuntimeConfig, port: int
+) -> int:
+    """Dispatch --status/--stop/--daemon against the recorded daemon state."""
+    if args.sim or args.reload:
+        print("error: --daemon/--status/--stop are not supported with --sim or --reload")
+        return 1
+    directory = serving_daemon.daemon_dir(config)
+    if args.status:
+        state, alive = serving_daemon.probe(directory)
+        if alive and state is not None:
+            print(
+                f"dashboard daemon running: pid {state.pid}, http://{state.host}:{state.port}/ "
+                f"(v{state.version}); log: {state.log_path}"
+            )
+            return 0
+        print("dashboard daemon not running")
+        return 1
+    if args.stop:
+        print(f"dashboard daemon: {serving_daemon.stop(directory)}")
+        return 0
+    result = serving_daemon.ensure(config, host=args.host, port=port, interval=args.interval)
+    print(f"dashboard daemon {result.action}: {result.detail}")
+    return 0 if result.action in ("adopted", "started", "restarted") else 1
