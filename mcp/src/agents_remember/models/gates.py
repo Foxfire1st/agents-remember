@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import Field
+
 from agents_remember.controlplane.records import GateKind, GateState
 from agents_remember.models.base import ToolResponse
 
@@ -38,6 +40,8 @@ class GateDecideResponse(ToolResponse):
     state: GateState
     decidedBy: str
     decidedVia: str
+    decidingRole: str | None = None
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class GateWaitResponse(ToolResponse):

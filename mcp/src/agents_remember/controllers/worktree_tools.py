@@ -379,5 +379,6 @@ def _worktree_closeout(
         approval_note=intent_note,
         approved=not dry_run,
         dry_run=dry_run,
+        gate_policy=config.orchestration.gate_policy,
     )
     return _worktree_result(operation, git_worktree_manager.closeout_result(args))

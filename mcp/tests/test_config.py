@@ -478,5 +478,71 @@ class DashboardSettingsTests(unittest.TestCase):
             self._load(["autoStart"])
 
 
+class OrchestrationSettingsTests(unittest.TestCase):
+    def _load(self, orchestration: object | None) -> McpRuntimeConfig:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            if orchestration is not None:
+                payload["orchestration"] = orchestration
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+            return load_config(path)
+
+    def test_defaults_to_all_human_gate_policy(self) -> None:
+        config = self._load(None)
+
+        closeout = config.orchestration.gate_policy.rule_for("closeout-approval")
+        self.assertIsNone(closeout.delegated_role)
+
+    def test_named_manager_leaf_gate_policy(self) -> None:
+        config = self._load(
+            {"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
+        )
+
+        policy = config.orchestration.gate_policy
+        self.assertEqual(policy.rule_for("plan-approval").delegated_role, "manager")
+        self.assertEqual(policy.rule_for("closeout-approval").delegated_role, "manager")
+        self.assertIsNone(policy.rule_for("push-approval").delegated_role)
+
+    def test_custom_delegated_kind_can_require_reviewer_verdict(self) -> None:
+        config = self._load(
+            {
+                "gateDelegation": {
+                    "kinds": {
+                        "closeout-approval": {
+                            "role": "manager",
+                            "requireReviewerVerdict": True,
+                        }
+                    }
+                }
+            }
+        )
+
+        closeout = config.orchestration.gate_policy.rule_for("closeout-approval")
+        self.assertEqual(closeout.delegated_role, "manager")
+        self.assertTrue(closeout.require_reviewer_verdict)
+
+    def test_human_pinned_kind_cannot_be_delegated(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "human-pinned"):
+            self._load(
+                {
+                    "gateDelegation": {
+                        "kinds": {"push-approval": {"role": "manager"}}
+                    }
+                }
+            )
+
+    def test_unsupported_kind_delegation_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "cannot be delegated"):
+            self._load(
+                {
+                    "gateDelegation": {
+                        "kinds": {"agent-question": {"role": "manager"}}
+                    }
+                }
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

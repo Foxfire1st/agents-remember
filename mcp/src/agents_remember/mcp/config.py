@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+    GatePolicyRule,
+    coerce_decision_role,
+    make_gate_policy,
+    named_gate_policy,
+)
+from agents_remember.controlplane.records import GateKind, coerce_gate_kind
 from agents_remember.errors import AgentsRememberError
 from agents_remember.providers.identity import (
     explicit_provider_instance_id,
@@ -29,6 +38,11 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
+KNOWN_ORCHESTRATION_FIELDS = frozenset({"roles", "concurrency", "gateDelegation"})
+KNOWN_GATE_DELEGATION_FIELDS = frozenset(
+    {"policy", "kinds", "requireReviewerVerdictAtSeams"}
+)
+KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
 
 
 class ConfigError(AgentsRememberError):
@@ -62,6 +76,14 @@ class DashboardSettings:
 
 
 @dataclass(frozen=True)
+class OrchestrationSettings:
+    """The optional ``orchestration`` settings object."""
+
+    gate_policy: GatePolicy = DEFAULT_GATE_POLICY
+    require_reviewer_verdict_at_seams: bool = False
+
+
+@dataclass(frozen=True)
 class McpRuntimeConfig:
     config_path: Path
     coordination_root: Path
@@ -73,6 +95,7 @@ class McpRuntimeConfig:
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
+    orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -135,6 +158,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
     dashboard = parse_dashboard_settings(data.get("dashboard"))
+    orchestration = parse_orchestration_settings(data.get("orchestration"))
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -147,6 +171,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
         dashboard=dashboard,
+        orchestration=orchestration,
     )
 
 
@@ -320,6 +345,107 @@ def parse_dashboard_settings(raw: object) -> DashboardSettings:
     if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
         raise ConfigError("dashboard.port must be an integer in 1..65535")
     return DashboardSettings(auto_start=auto_start, port=port)
+
+
+def parse_orchestration_settings(raw: object) -> OrchestrationSettings:
+    if raw is None:
+        return OrchestrationSettings()
+    if not isinstance(raw, dict):
+        raise ConfigError("orchestration settings must be an object")
+    unknown = sorted(set(raw) - KNOWN_ORCHESTRATION_FIELDS)
+    if unknown:
+        allowed = ", ".join(sorted(KNOWN_ORCHESTRATION_FIELDS))
+        unknown_text = ", ".join(unknown)
+        raise ConfigError(
+            f"unsupported orchestration setting(s): {unknown_text}; allowed: {allowed}"
+        )
+    gate_policy, require_verdict_at_seams = parse_gate_delegation(raw.get("gateDelegation"))
+    return OrchestrationSettings(
+        gate_policy=gate_policy,
+        require_reviewer_verdict_at_seams=require_verdict_at_seams,
+    )
+
+
+def parse_gate_delegation(raw: object) -> tuple[GatePolicy, bool]:
+    if raw is None:
+        return DEFAULT_GATE_POLICY, False
+    if not isinstance(raw, dict):
+        raise ConfigError("orchestration.gateDelegation must be an object")
+    unknown = sorted(set(raw) - KNOWN_GATE_DELEGATION_FIELDS)
+    if unknown:
+        allowed = ", ".join(sorted(KNOWN_GATE_DELEGATION_FIELDS))
+        unknown_text = ", ".join(unknown)
+        raise ConfigError(
+            "unsupported orchestration.gateDelegation setting(s): "
+            f"{unknown_text}; allowed: {allowed}"
+        )
+    policy_name = raw.get("policy", "all-human")
+    if not isinstance(policy_name, str) or not policy_name:
+        raise ConfigError("orchestration.gateDelegation.policy must be a non-empty string")
+    try:
+        policy = named_gate_policy(policy_name)
+    except ValueError as error:
+        raise ConfigError(str(error)) from error
+    require_verdict_at_seams = raw.get("requireReviewerVerdictAtSeams", False)
+    if not isinstance(require_verdict_at_seams, bool):
+        raise ConfigError(
+            "orchestration.gateDelegation.requireReviewerVerdictAtSeams must be a boolean"
+        )
+    kinds = raw.get("kinds", {})
+    if not isinstance(kinds, dict):
+        raise ConfigError("orchestration.gateDelegation.kinds must be an object")
+    rules = {rule.kind: rule for rule in policy.rules}
+    for raw_kind, raw_rule in kinds.items():
+        if not isinstance(raw_kind, str) or not raw_kind:
+            raise ConfigError("gate policy kind names must be non-empty strings")
+        try:
+            kind = coerce_gate_kind(raw_kind)
+            rules[kind] = _parse_gate_policy_rule(kind, raw_rule, prior=rules.get(kind))
+        except ValueError as error:
+            raise ConfigError(str(error)) from error
+    try:
+        return make_gate_policy(list(rules.values())), require_verdict_at_seams
+    except ValueError as error:
+        raise ConfigError(str(error)) from error
+
+
+def _parse_gate_policy_rule(
+    kind: GateKind,
+    raw_rule: object,
+    *,
+    prior: GatePolicyRule | None,
+) -> GatePolicyRule:
+    if isinstance(raw_rule, str):
+        return GatePolicyRule(kind=kind, delegated_role=coerce_decision_role(raw_rule))
+    if not isinstance(raw_rule, dict):
+        raise ConfigError(f"orchestration.gateDelegation.kinds.{kind} must be an object")
+    unknown = sorted(set(raw_rule) - KNOWN_GATE_POLICY_KIND_FIELDS)
+    if unknown:
+        allowed = ", ".join(sorted(KNOWN_GATE_POLICY_KIND_FIELDS))
+        unknown_text = ", ".join(unknown)
+        raise ConfigError(
+            f"unsupported gate policy field(s) for {kind}: {unknown_text}; allowed: {allowed}"
+        )
+    role_raw = raw_rule.get("role")
+    delegated_role = prior.delegated_role if prior is not None else None
+    if role_raw is not None:
+        if not isinstance(role_raw, str) or not role_raw:
+            raise ConfigError(f"orchestration.gateDelegation.kinds.{kind}.role must be a string")
+        delegated_role = coerce_decision_role(role_raw)
+    require_verdict = raw_rule.get(
+        "requireReviewerVerdict",
+        prior.require_reviewer_verdict if prior is not None else False,
+    )
+    if not isinstance(require_verdict, bool):
+        raise ConfigError(
+            f"orchestration.gateDelegation.kinds.{kind}.requireReviewerVerdict "
+            "must be a boolean"
+        )
+    return GatePolicyRule(
+        kind=kind,
+        delegated_role=delegated_role,
+        require_reviewer_verdict=require_verdict,
+    )
 
 
 def parse_timeout_caps(raw: object) -> dict[str, int]:

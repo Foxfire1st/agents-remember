@@ -10,9 +10,16 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.controlplane.enforcement import evaluate_closeout_gate
+from agents_remember.controlplane.gate_policy import GatePolicyRule, make_gate_policy
 from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import GateRecord, apply_gate, create_gate, decide_gate
+from agents_remember.controlplane.records import (
+    GateEvidenceRef,
+    GateRecord,
+    apply_gate,
+    create_gate,
+    decide_gate,
+)
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.tools import gates
 from agents_remember.mcp.tools.lifecycle import lifecycle_start_payload
@@ -20,9 +27,22 @@ from agents_remember.observer import AmbientLifecycle, EventStore, install_ambie
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.reducer import project_workspace
 from agents_remember.worktrees.modules import closeout as closeout_mod
+from agents_remember.worktrees.modules.args import WorktreeArgs
 
 T1 = "2026-06-18T10:00:00+00:00"
 T2 = "2026-06-18T10:05:00+00:00"
+MANAGER_CLOSEOUT_POLICY = make_gate_policy(
+    [GatePolicyRule(kind="closeout-approval", delegated_role="manager")]
+)
+MANAGER_CLOSEOUT_WITH_VERDICT_POLICY = make_gate_policy(
+    [
+        GatePolicyRule(
+            kind="closeout-approval",
+            delegated_role="manager",
+            require_reviewer_verdict=True,
+        )
+    ]
+)
 
 
 class GateRecordTests(unittest.TestCase):
@@ -42,6 +62,31 @@ class GateRecordTests(unittest.TestCase):
         self.assertEqual(decided.decidedBy, "developer")
         self.assertEqual(decided.decidedVia, "dashboard")
         self.assertEqual(gate.state, "open")  # original snapshot untouched
+
+    def test_decision_can_attach_reviewer_verdict_evidence(self) -> None:
+        gate = create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="01H", now=T1)
+
+        decided = decide_gate(
+            gate,
+            decision="approve",
+            by="L-manager",
+            via="orchestration",
+            deciding_role="manager",
+            note=None,
+            now=T2,
+            evidence_refs=[
+                GateEvidenceRef(
+                    kind="reviewer-verdict",
+                    ref="notes/reports/verdict.md",
+                    verdict="pass",
+                )
+            ],
+        )
+
+        self.assertEqual(decided.decidedBy, "L-manager")
+        self.assertEqual(decided.decidedVia, "orchestration")
+        self.assertEqual(decided.decidingRole, "manager")
+        self.assertEqual(decided.evidenceRefs[0].ref, "notes/reports/verdict.md")
 
     def test_wire_roundtrip_uses_schema_alias(self) -> None:
         gate = create_gate(kind="agent-question", lifecycle_id="L1", gate_id="01H", now=T1)
@@ -138,6 +183,75 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(decided["state"], "approved")
         self.assertEqual(decided["decidedBy"], "model")
         self.assertEqual(decided["decidedVia"], "cli")
+
+    def test_orchestration_decision_records_lifecycle_identity_and_evidence(self) -> None:
+        gate_id = self._create()
+        config = SimpleNamespace(
+            orchestration=SimpleNamespace(gate_policy=MANAGER_CLOSEOUT_WITH_VERDICT_POLICY)
+        )
+
+        decided = gates.gate_decide_payload(
+            config,  # type: ignore[arg-type]
+            gate_id=gate_id,
+            lifecycle_id="L1",
+            decision="approve",
+            decided_by="L-manager",
+            decided_via="orchestration",
+            deciding_role="manager",
+            evidence_refs=[
+                {
+                    "kind": "reviewer-verdict",
+                    "ref": "notes/reports/verdict.md",
+                    "verdict": "pass",
+                }
+            ],
+        )
+
+        self.assertEqual(decided["decidedBy"], "L-manager")
+        self.assertEqual(decided["decidedVia"], "orchestration")
+        self.assertEqual(decided["decidingRole"], "manager")
+        self.assertEqual(decided["evidenceRefs"][0]["ref"], "notes/reports/verdict.md")
+        stored = self.store.current("L1")[gate_id]
+        self.assertEqual(stored.decidingRole, "manager")
+        self.assertEqual(stored.evidenceRefs[0].kind, "reviewer-verdict")
+
+    def test_orchestration_decision_rejects_owner_self_approval(self) -> None:
+        gate_id = self._create()
+        config = SimpleNamespace(
+            orchestration=SimpleNamespace(gate_policy=MANAGER_CLOSEOUT_POLICY)
+        )
+
+        with self.assertRaisesRegex(ValueError, "owning lifecycle"):
+            gates.gate_decide_payload(
+                config,  # type: ignore[arg-type]
+                gate_id=gate_id,
+                lifecycle_id="L1",
+                decision="approve",
+                decided_by="L1",
+                decided_via="orchestration",
+                deciding_role="manager",
+            )
+
+        self.assertEqual(self.store.current("L1")[gate_id].state, "open")
+
+    def test_orchestration_decision_requires_verdict_when_policy_requires_it(self) -> None:
+        gate_id = self._create()
+        config = SimpleNamespace(
+            orchestration=SimpleNamespace(gate_policy=MANAGER_CLOSEOUT_WITH_VERDICT_POLICY)
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires reviewer verdict evidence"):
+            gates.gate_decide_payload(
+                config,  # type: ignore[arg-type]
+                gate_id=gate_id,
+                lifecycle_id="L1",
+                decision="approve",
+                decided_by="L-manager",
+                decided_via="orchestration",
+                deciding_role="manager",
+            )
+
+        self.assertEqual(self.store.current("L1")[gate_id].state, "open")
 
     def test_create_expires_previous_open_lifecycle_gate(self) -> None:
         first = self._create("agent-question")
@@ -306,6 +420,13 @@ class GateToolTests(unittest.TestCase):
             kind="plan-approval",
             ask={"kind": "decision", "prompt": "Approve?", "options": ["approve"]},
             packet={"summary": "plan"},
+            evidence_refs=[
+                {
+                    "kind": "reviewer-verdict",
+                    "ref": "notes/reports/verdict.md",
+                    "verdict": "pass",
+                }
+            ],
             timeout_seconds=0.0,
             sleep=lambda _s: None,
             monotonic=lambda: 0.0,
@@ -327,6 +448,16 @@ class GateToolTests(unittest.TestCase):
         )
         assert lifecycle.gate is not None
         self.assertEqual((lifecycle.gate.id, lifecycle.gate.kind), (result["gate"]["id"], "plan-approval"))
+        self.assertEqual(
+            lifecycle.gate.evidenceRefs,
+            [
+                {
+                    "kind": "reviewer-verdict",
+                    "ref": "notes/reports/verdict.md",
+                    "verdict": "pass",
+                }
+            ],
+        )
 
     def test_decide_unknown_decision_raises(self) -> None:
         gate_id = self._create("alarm-ack")
@@ -572,9 +703,20 @@ def _gates(*records: GateRecord) -> dict[str, GateRecord]:
 
 
 def _closeout_gate(
-    gate_id: str, state: str, *, by: str = "developer", note: str | None = None, ts: str = T1
+    gate_id: str,
+    state: str,
+    *,
+    by: str = "developer",
+    via: str = "dashboard",
+    deciding_role: str | None = None,
+    note: str | None = None,
+    ts: str = T1,
+    evidence_refs: list[dict[str, str]] | None = None,
+    lifecycle_id: str = "L1",
 ) -> GateRecord:
-    gate = create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id=gate_id, now=ts)
+    gate = create_gate(
+        kind="closeout-approval", lifecycle_id=lifecycle_id, gate_id=gate_id, now=ts
+    )
     if state == "open":
         return gate
     if state == "applied":
@@ -585,7 +727,16 @@ def _closeout_gate(
         "revision-requested": "request-revision",
         "cancelled": "cancel",
     }[state]
-    return decide_gate(gate, decision=decision, by=by, via="dashboard", note=note, now=ts)
+    return decide_gate(
+        gate,
+        decision=decision,
+        by=by,
+        via=via,  # type: ignore[arg-type]
+        deciding_role=deciding_role,
+        note=note,
+        now=ts,
+        evidence_refs=evidence_refs,
+    )
 
 
 class EvaluateCloseoutGateTests(unittest.TestCase):
@@ -611,7 +762,86 @@ class EvaluateCloseoutGateTests(unittest.TestCase):
     def test_model_approved_blocks(self) -> None:
         guard = evaluate_closeout_gate(_gates(_closeout_gate("A", "approved", by="model")))
         self.assertFalse(guard.permitted)
-        self.assertIn("not the developer", guard.reason)
+        self.assertIn("not the developer or a configured orchestration role", guard.reason)
+
+    def test_manager_approved_requires_opt_in_policy(self) -> None:
+        gate = _closeout_gate(
+            "A",
+            "approved",
+            by="L-manager",
+            via="orchestration",
+            deciding_role="manager",
+        )
+
+        guard = evaluate_closeout_gate(_gates(gate))
+
+        self.assertFalse(guard.permitted)
+        self.assertIn("not delegated", guard.reason)
+
+    def test_manager_approved_permits_when_policy_delegates(self) -> None:
+        gate = _closeout_gate(
+            "A",
+            "approved",
+            by="L-manager",
+            via="orchestration",
+            deciding_role="manager",
+        )
+
+        guard = evaluate_closeout_gate(_gates(gate), policy=MANAGER_CLOSEOUT_POLICY)
+
+        self.assertTrue(guard.permitted)
+        self.assertEqual(guard.gate_id, "A")
+
+    def test_manager_owner_self_approval_blocks(self) -> None:
+        gate = _closeout_gate(
+            "A",
+            "approved",
+            by="L1",
+            via="orchestration",
+            deciding_role="manager",
+        )
+
+        guard = evaluate_closeout_gate(_gates(gate), policy=MANAGER_CLOSEOUT_POLICY)
+
+        self.assertFalse(guard.permitted)
+        self.assertIn("owning lifecycle", guard.reason)
+
+    def test_manager_policy_can_require_reviewer_verdict(self) -> None:
+        gate = _closeout_gate(
+            "A",
+            "approved",
+            by="L-manager",
+            via="orchestration",
+            deciding_role="manager",
+        )
+
+        missing = evaluate_closeout_gate(
+            _gates(gate), policy=MANAGER_CLOSEOUT_WITH_VERDICT_POLICY
+        )
+
+        self.assertFalse(missing.permitted)
+        self.assertIn("requires reviewer verdict evidence", missing.reason)
+
+        with_verdict = _closeout_gate(
+            "B",
+            "approved",
+            by="L-manager",
+            via="orchestration",
+            deciding_role="manager",
+            evidence_refs=[
+                {
+                    "kind": "reviewer-verdict",
+                    "ref": "notes/reports/verdict.md",
+                    "verdict": "pass",
+                }
+            ],
+        )
+
+        permitted = evaluate_closeout_gate(
+            _gates(with_verdict), policy=MANAGER_CLOSEOUT_WITH_VERDICT_POLICY
+        )
+
+        self.assertTrue(permitted.permitted)
 
     def test_rejected_blocks_with_note(self) -> None:
         guard = evaluate_closeout_gate(_gates(_closeout_gate("A", "rejected", note="needs work")))
@@ -640,6 +870,9 @@ class CloseoutEnforcementHelperTests(unittest.TestCase):
     def _contract(self, lifecycle_id: str = "L1") -> SimpleNamespace:
         return SimpleNamespace(lifecycle_id=lifecycle_id, coordination_root=self.coord)
 
+    def _args(self, policy=MANAGER_CLOSEOUT_POLICY) -> WorktreeArgs:
+        return WorktreeArgs(gate_policy=policy)
+
     def _seed(self, state: str, *, by: str = "developer") -> str:
         gate = create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="01H", now=T1)
         self.store.append(gate)
@@ -651,21 +884,26 @@ class CloseoutEnforcementHelperTests(unittest.TestCase):
         return gate.id
 
     def test_gateless_lifecycle_returns_none(self) -> None:
-        self.assertIsNone(closeout_mod._enforce_closeout_gate(self._contract(lifecycle_id="")))
+        self.assertIsNone(
+            closeout_mod._enforce_closeout_gate(
+                self._contract(lifecycle_id=""),
+                self._args(),
+            )
+        )
 
     def test_open_gate_blocks_closeout(self) -> None:
         self._seed("open")
         with self.assertRaises(RuntimeError):
-            closeout_mod._enforce_closeout_gate(self._contract())
+            closeout_mod._enforce_closeout_gate(self._contract(), self._args())
 
     def test_model_approved_blocks_closeout(self) -> None:
         self._seed("approved", by="model")
         with self.assertRaises(RuntimeError):
-            closeout_mod._enforce_closeout_gate(self._contract())
+            closeout_mod._enforce_closeout_gate(self._contract(), self._args())
 
     def test_developer_approved_permits_and_marks_applied(self) -> None:
         gate_id = self._seed("approved", by="developer")
-        guard = closeout_mod._enforce_closeout_gate(self._contract())
+        guard = closeout_mod._enforce_closeout_gate(self._contract(), self._args())
         self.assertIsNotNone(guard)
         assert guard is not None
         self.assertTrue(guard.permitted)
@@ -678,7 +916,7 @@ class CloseoutEnforcementHelperTests(unittest.TestCase):
             {"enforced": False, "reason": "gateless lifecycle; chat commit approval governs"},
         )
         self._seed("approved", by="developer")
-        guard = closeout_mod._closeout_gate_guard(self._contract())
+        guard = closeout_mod._closeout_gate_guard(self._contract(), self._args())
         payload = closeout_mod._closeout_gate_payload(guard)
         self.assertTrue(payload["enforced"])
         self.assertTrue(payload["permitted"])

@@ -21,5 +21,15 @@
   "dashboard": {
     "autoStart": false,
     "port": 8765
+  },
+  "orchestration": {
+    "gateDelegation": {
+      "policy": "all-human",
+      "kinds": {
+        "closeout-approval": {
+          "role": "human"
+        }
+      }
+    }
   }
 }

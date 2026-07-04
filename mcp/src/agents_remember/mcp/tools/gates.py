@@ -26,6 +26,10 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from agents_remember.controlplane.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    delegated_decision_failure_reason,
+)
 from agents_remember.controlplane.interaction_retention import (
     GATE_RESPONSE_WAIT_POLL_SECONDS,
     GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
@@ -36,6 +40,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
     DECISION_STATES,
     DecidedVia,
+    GateEvidenceRef,
     GateRecord,
     coerce_gate_kind,
     create_gate,
@@ -87,6 +92,26 @@ def _decision_payload(gate: GateRecord) -> dict[str, Any]:
     }
 
 
+def _resolve_deciding_actor(decided_by: str | None, decided_via: DecidedVia) -> str:
+    if decided_via != "orchestration":
+        if decided_by is None or not decided_by.strip():
+            raise ValueError("gate decision actor must be non-empty")
+        return decided_by
+    if decided_by is not None and decided_by.strip():
+        return decided_by
+    amb = ambient()
+    current = amb.current if amb is not None else None
+    if current is None:
+        raise LifecycleError("orchestration gate decisions require an active deciding lifecycle")
+    return current.id
+
+
+def _evidence_refs(raw: list[dict[str, Any]] | None) -> list[GateEvidenceRef]:
+    if raw is None:
+        return []
+    return [GateEvidenceRef.model_validate(entry) for entry in raw]
+
+
 def _cancelled_wait_payload(operation: str, gate_id: str) -> dict[str, Any]:
     return _tool_payload(
         operation,
@@ -111,6 +136,7 @@ def gate_create_payload(
     repo_id: str | None = None,
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     now = now_iso()
     store = _store(config)
@@ -127,6 +153,7 @@ def gate_create_payload(
         repo_id=repo_id,
         packet=packet,
         required_decision=required_decision,
+        evidence_refs=evidence_refs,
     )
     store.append(gate)
     return _tool_payload(
@@ -152,6 +179,7 @@ def lifecycle_gate_payload(
     repo_id: str | None = None,
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
     timeout_seconds: float | None = None,
     poll_seconds: float = GATE_RESPONSE_WAIT_POLL_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
@@ -203,6 +231,7 @@ def lifecycle_gate_payload(
         repo_id=repo_id,
         packet=packet,
         required_decision=required_decision,
+        evidence_refs=evidence_refs,
     )
     store.append(gate)
     blocked = amb.block(kind=ask_kind, prompt=prompt, options=options)
@@ -256,9 +285,11 @@ def gate_decide_payload(
     gate_id: str,
     lifecycle_id: str | None,
     decision: str,
-    decided_by: str,
+    decided_by: str | None,
     decided_via: DecidedVia,
+    deciding_role: str | None = None,
     note: str | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if decision not in DECISION_STATES:
         raise ValueError(
@@ -268,14 +299,27 @@ def gate_decide_payload(
     gate = store.current(lifecycle_id).get(gate_id)
     if gate is None:
         raise KeyError(f"no gate {gate_id!r} on lifecycle {lifecycle_id!r}")
+    actor = _resolve_deciding_actor(decided_by, decided_via)
+    evidence = _evidence_refs(evidence_refs)
     updated = decide_gate(
         gate,
         decision=decision,
-        by=decided_by,
+        by=actor,
         via=decided_via,
+        deciding_role=deciding_role,
         note=note,
         now=now_iso(),
+        evidence_refs=evidence,
     )
+    if decided_via == "orchestration":
+        policy = (
+            config.orchestration.gate_policy
+            if config is not None
+            else DEFAULT_GATE_POLICY
+        )
+        failure = delegated_decision_failure_reason(updated, policy)
+        if failure is not None:
+            raise ValueError(f"gate decision rejected by delegation policy: {failure}")
     store.append(updated)
     if decision == "cancel":
         store.delete(updated.id, lifecycle_id)
@@ -289,6 +333,10 @@ def gate_decide_payload(
             "state": updated.state,
             "decidedBy": updated.decidedBy,
             "decidedVia": updated.decidedVia,
+            "decidingRole": updated.decidingRole,
+            "evidenceRefs": [
+                ref.model_dump(mode="json", exclude_none=True) for ref in updated.evidenceRefs
+            ],
         },
     )
 
@@ -298,10 +346,12 @@ def gate_decide_for_lifecycle(
     *,
     lifecycle_id: str,
     decision: str,
-    decided_by: str,
+    decided_by: str | None,
     decided_via: DecidedVia,
+    deciding_role: str | None = None,
     expected_gate_id: str | None = None,
     note: str | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Decide the lifecycle's latest still-open gate -- the dashboard's write path.
 
@@ -329,28 +379,16 @@ def gate_decide_for_lifecycle(
         raise KeyError(
             f"gate {expected_gate_id!r} is {state}; current open gate is {gate.id!r}"
         )
-    updated = decide_gate(
-        gate,
+    return gate_decide_payload(
+        config,
+        gate_id=gate.id,
+        lifecycle_id=lifecycle_id,
         decision=decision,
-        by=decided_by,
-        via=decided_via,
+        decided_by=decided_by,
+        decided_via=decided_via,
+        deciding_role=deciding_role,
         note=note,
-        now=now_iso(),
-    )
-    store.append(updated)
-    if decision == "cancel":
-        store.delete(updated.id, lifecycle_id)
-        _inbox_store(config).delete_by_gate(updated.id)
-    return _tool_payload(
-        "gate_decide",
-        {
-            "ok": True,
-            "operation": "gate_decide",
-            "gateId": updated.id,
-            "state": updated.state,
-            "decidedBy": updated.decidedBy,
-            "decidedVia": updated.decidedVia,
-        },
+        evidence_refs=evidence_refs,
     )
 
 

@@ -984,6 +984,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str | None = None,
         packet: dict[str, Any] | None = None,
         required_decision: list[str] | None = None,
+        evidence_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Public lifecycle-gate junction for agents. Creates the durable typed gate,
         blocks the active lifecycle with the developer-facing ask, and waits for the
@@ -1000,6 +1001,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id=repo_id,
             packet=packet,
             required_decision=required_decision,
+            evidence_refs=evidence_refs,
         )
 
     @server.tool()
@@ -1008,21 +1010,25 @@ def create_server(config: McpRuntimeConfig) -> Any:
         decision: str,
         lifecycle_id: str | None = None,
         note: str | None = None,
+        deciding_role: str | None = None,
+        evidence_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Record a decision on an open gate (decision: approve | reject | request-revision
-        | cancel). Append-only -- the decision is a new snapshot, never an overwrite. Over
-        MCP the decision is attributed to the model via the cli; the dashboard records
-        developer/dashboard decisions through its own path. That attribution is what a later
-        enforcement slice checks (a commit gate needs a developer-attributed approval), so an
-        agent recording a model decision here never counts as developer approval."""
+        | cancel). Append-only -- the decision is a new snapshot, never an overwrite. By
+        default the decision is attributed to the model via the cli; with deciding_role it is
+        attributed to the active lifecycle via orchestration and checked against the configured
+        gate policy."""
+        decided_via = "orchestration" if deciding_role is not None else "cli"
         return gate_decide_payload(
             config,
             gate_id=gate_id,
             lifecycle_id=lifecycle_id,
             decision=decision,
-            decided_by="model",
-            decided_via="cli",
+            decided_by=None if deciding_role is not None else "model",
+            decided_via=decided_via,
+            deciding_role=deciding_role,
             note=note,
+            evidence_refs=evidence_refs,
         )
 
     @server.tool()

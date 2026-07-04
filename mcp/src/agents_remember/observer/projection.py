@@ -74,6 +74,7 @@ class GateNode(BaseModel):
     state: str
     decidedBy: str | None = None
     decidedVia: str | None = None
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
     packet: dict[str, Any] = Field(default_factory=dict)
     ts: str

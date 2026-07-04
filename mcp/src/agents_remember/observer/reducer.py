@@ -744,6 +744,9 @@ def _gate_node(gate: GateRecord) -> GateNode:
         state=gate.state,
         decidedBy=gate.decidedBy,
         decidedVia=gate.decidedVia,
+        evidenceRefs=[
+            ref.model_dump(mode="json", exclude_none=True) for ref in gate.evidenceRefs
+        ],
         decisions=sorted(DECISION_STATES) if gate.state == "open" else [],
         packet=gate.packet,
         ts=gate.ts,
