@@ -260,7 +260,7 @@ missing-artifact detection → a rate-limited, logged manager stdin nudge. **Esc
 ladder above through the inbox. The comms substrate (inbox push + artifacts + nudges) is implemented in
 **leaf L3** of this series; this skill describes the protocol it realizes.
 
-## The Super Integration Branch Topology (summary — see the design record + L5)
+## The Super Integration Branch Topology
 
 The git topology is an **accumulative** super integration branch, owned by the orchestrator:
 
@@ -274,17 +274,88 @@ main
         └── … final: super → main PR (remote merge) + memory carry-over to main + push
 ```
 
-Master integration branches base off the **super** branch, so it accumulates. Dependency-ordered
-dispatch: when master B depends on master A, A's manager is dispatched first; B's is dispatched only
-after A is integrated into super. Independent masters may run in parallel off the same super base; the
-`c-11-memory-carryover-from-branch` skill's reconcile absorbs a moved super base. **C-11 is the
-universal integration mechanic at every level** (leaf→master, master→super, super→main). Every
-integration edge carries its C-11 memory carry-over so the ledger maps each accumulated commit.
+The branch stack is strict:
 
-> This is a **summary**. The full topology, the orchestrator worktree flow, the parallel-conflict
-> maneuver (up-front foundation-master extraction vs post-hoc super-branch remediation), and the
-> memory single-siding rule are owned by **leaf L5** and the design record
-> (`260703_agent-orchestration/notes/design-agent-orchestration.md`, §"the git topology" + addenda).
+1. **Super integration branch** - created by the orchestrator from `main`/the spear. It is the
+   accumulative branch for the whole orchestrated series.
+2. **Master integration branches** - created from the current super branch, never directly from
+   `main`. A dependent master starts from a super tip that already contains its dependencies.
+3. **Leaf work branches** - created from their owning master integration branch. Leaf work still uses
+   the normal worktree-backed leaf flow.
+
+**C-11 is the universal integration mechanic at every level**: leaf -> master, master -> super, and
+super -> main. The level changes the owning seat and target branch, not the memory rule. Every
+integration edge carries its `c-11-memory-carryover-from-branch` memory carry-over so the memory ledger
+maps each accumulated code commit. The final super -> main landing follows `system/git-workflow.md`:
+open the PR from super to PR-gated `main`, merge remotely, carry the accumulated memory to main-memory
+so the ledger maps the actual main merge commit, then push the memory result.
+
+### Dependency-Ordered Manager Dispatch
+
+The orchestrator owns the master-level dependency DAG. Dispatch is **master-granular**:
+
+- If master B depends on master A, A's manager starts first. B's manager starts only after A has passed
+  its master-exit review and the orchestrator has integrated A into super with C-11 carry-over.
+- Independent masters may run concurrently from the same super base. When one lands first, the others
+  reconcile against the moved super base before their own handover or integration. The reconcile is the
+  same C-11 carry-over family of mechanics used for parallel leaves, applied at the master branch
+  level.
+- If a returned master is rejected at master/super review, the orchestrator decomposes the feedback into
+  concrete fix leaves and dispatches them through the owning manager or a new master, preserving the
+  same topology.
+
+### Orchestrator Integration Worktree Flow
+
+The orchestrator seat is enclosure-less at rest, but master -> super integration is **not** performed
+from the coordination leaf itself. For each completed master handover, the orchestrator uses an
+orchestrator integration worktree whose source branch is super:
+
+1. Consume the manager's master-handover packet: integration branch ref, change-set summary, check
+   state, master-exit adversarial verdict, carry-over state, and known follow-ups.
+2. Confirm the verdict is acceptable evidence for the seam. A blocking verdict decomposes into fix
+   leaves before integration continues.
+3. In the orchestrator worktree, integrate the master branch into super through the same worktree/C-11
+   pattern used for leaf -> master: code merge/replay, onboarding carry-over, ledger mapping, and
+   memory quality before the memory edge lands.
+4. Record the super tip and memory-ledger mapping for the integrated master. Only then mark downstream
+   masters whose dependencies are now satisfied as ready for dispatch.
+
+This mirrors the leaf -> master flow deliberately: the orchestrator integrates **into** super from a
+worktree sourced at super, just as a manager integrates leaves into a master branch sourced at that
+master.
+
+### Conflict Resolution
+
+There are exactly two conflict-resolution modes:
+
+- **Up-front foundation-master extraction (preferred).** If streamlining finds overlapping work before
+  dispatch, move not-yet-started leaves into a shared foundation master and implement that master first.
+  The losing and receiving masters both get decision-log entries explaining what moved and why.
+- **Post-hoc super-worktree remediation.** If duplicate code or duplicate memory is only visible after
+  integration branches return, the orchestrator resolves it on the super integration worktree: dedupe
+  code there, keep memory single-sided on the strand that should own the final onboarding truth, and
+  map the resulting ledger edge once.
+
+Leaf moves are real moves for not-yet-started leaves, not tombstones. They always carry decision-log
+entries on both affected masters so a manager or respawned worker can reconstruct the portfolio change
+from durable state.
+
+### Sequenced Prerequisites And Follow-Ups
+
+The topology doctrine depends on two lifecycle gaps that are sequenced but **not implemented by this
+skill text**:
+
+- **Master finalize/archive** - the gh-route master landing needs a safe retire/archive flow that stamps
+  the root series contract from the PR merge plus C-11 carry-over without attempting to remove the main
+  checkout. This is tracked as `260703_task-doc-tooling-repair/08_retire-master-series.md`, migrated
+  from the archived `260630_master-series-lifecycle-gaps` master.
+- **Parallel master reconciliation** - a master integration branch that is behind a sibling land needs a
+  first-class master-level reconcile flow for code, memory, ledger, and live leaves. This is tracked as
+  `260703_task-doc-tooling-repair/09_parallel-master-reconciliation.md`, also migrated from
+  `260630_master-series-lifecycle-gaps`.
+
+Until those follow-ups land, the orchestrator runs the retire/archive and parallel-master reconcile
+steps manually with the existing C-09/C-11 primitives and records the manual edge in durable notes.
 
 ## settings.json Orchestration Block (schema documentation — parsing is deferred)
 

@@ -70,9 +70,8 @@ For each **ready** master (its dependencies integrated into super):
   (below) to plan deltas that escalate up from managers.
 - **Master handover** — receive the manager's master-handover packet (integration branch ref ·
   change-set summary · **master-exit adversarial verdict** · carry-over state).
-- **Integrate master → super** — in an **orchestrator worktree** with super as source, via the
-  `c-11-memory-carryover-from-branch` skill: merge/carry-over, memory single-siding, ledger maps every
-  commit. Loop until the DAG is drained.
+- **Integrate master → super** — run the integration-duty procedure below in an **orchestrator
+  worktree** with super as source. Loop until the DAG is drained.
 
 ### 5 — Super-exit seam & developer handover
 
@@ -89,6 +88,39 @@ At handover, **propose changes for future tasks**, grounded in the accumulated b
 automated self-modification**; the developer decides at review. Expected report surfaces, in order: the
 orchestrator's own report templates, then code quality, memory curation, token usage, performance.
 `lifecycle_end` records the terminal state; the durable notes/reports remain the record.
+
+## Integration Duty — Master To Super
+
+The orchestrator owns every master -> super edge. Treat it like the leaf -> master flow at a higher
+branch level: the source branch is super, the incoming branch is the completed master integration
+branch, and C-11 carries memory across the edge.
+
+1. **Consume the handover packet.** Read the manager's `templates/master-handover-packet.md` artifact
+   and verify it names the integration branch ref, change-set summary, checks, master-exit adversarial
+   verdict, memory carry-over state, unresolved risks, and next dependencies.
+2. **Check the verdict.** A passing or explicitly accepted verdict is seam evidence and may proceed. A
+   blocking verdict decomposes into fix leaves; dispatch those before integrating the master.
+3. **Open the orchestrator integration worktree.** The worktree is sourced from the current super
+   branch, not from `main` and not from the manager's master branch. Merge/replay the master branch into
+   super using the same C-09/C-11 family of mechanics the manager uses for leaf -> master.
+4. **Carry memory and map the ledger.** Run C-11 carry-over for this edge, keep memory single-sided when
+   resolving duplicate-memory conflicts, run the required memory quality checks, and record the ledger
+   mapping from each accumulated master commit to the resulting super memory line.
+5. **Advance readiness.** Record the new super code tip and memory tip in durable notes. Then mark the
+   next masters whose dependencies are satisfied as ready; dependent managers start only after their
+   dependencies are integrated into super.
+
+The final super -> main edge is the same invariant with a PR-gated landing tail: open the super -> main
+PR, merge remotely, run the memory carry-over to main-memory so the ledger maps the actual merge
+commit, then push per `system/git-workflow.md`.
+
+### Manual Backlog Until 260630 Follow-Ups Land
+
+Two master-level lifecycle primitives remain sequenced backlog, not behavior this job file implements:
+`260703_task-doc-tooling-repair/08_retire-master-series.md` for gh-route master finalize/archive, and
+`260703_task-doc-tooling-repair/09_parallel-master-reconciliation.md` for first-class parallel-master
+reconcile. Until they land, the orchestrator performs those edges manually with existing C-09/C-11
+primitives and records the manual steps in durable notes before moving to the next ready master.
 
 ## The Spirit Test — This Seat Only
 
