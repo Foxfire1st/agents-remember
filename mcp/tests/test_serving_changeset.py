@@ -69,6 +69,14 @@ def _by_path(files: list[dict]) -> dict[str, dict]:
     return {f["path"]: f for f in files}
 
 
+def _sum_counts(files: list[dict]) -> dict[str, int]:
+    return {
+        "files": len(files),
+        "insertions": sum(int(f["insertions"] or 0) for f in files),
+        "deletions": sum(int(f["deletions"] or 0) for f in files),
+    }
+
+
 class ChangedCountsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -247,19 +255,35 @@ class MasterChangesetTests(unittest.TestCase):
             transcript_root=self.tmp / "logs",
             repositories={"R": RepositoryScope(repo_id="R", path=self.tmp / "ws" / "R")},
         )
-        # The series code repo: a base, then two commits past it -- the NET is base -> tip,
-        # NOT a sum of the per-commit (leaf) diffs.
+        # The series code repo: main stays at the base while the in-flight series commits live
+        # on the work branch. The NET is base -> work tip, not source-branch tip or a sum of
+        # per-leaf diffs.
         self.code = self.tmp / "series-code"
         _init_repo(self.code)
         (self.code / "shared.py").write_text("base\n", encoding="utf-8")
         (self.code / "gone.py").write_text("x\n", encoding="utf-8")
         self.base = _commit_all(self.code, "series base")
+        _git(self.code, "checkout", "-q", "-b", "work")
         (self.code / "shared.py").write_text("base\nl1\n", encoding="utf-8")  # +1
         (self.code / "added.py").write_text("a\n", encoding="utf-8")
         _commit_all(self.code, "c1")
         (self.code / "shared.py").write_text("base\nl1\nl2\n", encoding="utf-8")  # +1 (net +2)
         (self.code / "gone.py").unlink()
-        _commit_all(self.code, "c2")
+        self.code_work_tip = _commit_all(self.code, "c2")
+        _git(self.code, "checkout", "-q", "main")
+
+        self.mem = self.tmp / "series-memory"
+        _init_repo(self.mem)
+        mem_ob = self.mem / "onboarding" / "pkg"
+        mem_ob.mkdir(parents=True)
+        (mem_ob / "mod.py.md").write_text("# sidecar\nbase\n", encoding="utf-8")
+        self.mem_base = _commit_all(self.mem, "memory base")
+        _git(self.mem, "checkout", "-q", "-b", "work")
+        (mem_ob / "mod.py.md").write_text("# sidecar\nbase\nwork\n", encoding="utf-8")
+        (mem_ob / "new.py.md").write_text("# new\n", encoding="utf-8")
+        self.mem_work_tip = _commit_all(self.mem, "memory work")
+        _git(self.mem, "checkout", "-q", "main")
+
         # The master (series) root contract at tasks/<repo>/<master>/series-contract.md.
         self.master_contract = self.coord / "tasks" / "R" / "t" / "series-contract.md"
         write_contract(
@@ -269,7 +293,7 @@ class MasterChangesetTests(unittest.TestCase):
                 task_name="t",
                 repo_name="R",
                 workflow_kind="light-task",
-                memory_mode="disabled",
+                memory_mode="external",
                 coordination_root=self.coord,
                 task_root=self.coord / "tasks" / "R" / "t",
                 contract_path=self.master_contract,
@@ -280,6 +304,12 @@ class MasterChangesetTests(unittest.TestCase):
                 code_work_branch="work",
                 code_base_commit=self.base,
                 code_worktree=self.code,
+                memory_repo_path=self.mem,
+                memory_source_branch="main",
+                memory_work_branch="work",
+                memory_base_commit=self.mem_base,
+                memory_worktree=self.mem,
+                ledger_path=self.mem / "memory.md",
                 kind="series",
             ),
         )
@@ -302,6 +332,14 @@ class MasterChangesetTests(unittest.TestCase):
 
     def test_master_net_diff_not_sum(self) -> None:
         body = master_changeset(self.config, "R", "t")
+        self.assertEqual(
+            body["counters"]["code"],
+            _sum_counts(changed_files_with_counts(self.code, self.base, self.code_work_tip)),
+        )
+        self.assertEqual(
+            body["counters"]["memory"],
+            _sum_counts(changed_files_with_counts(self.mem, self.mem_base, self.mem_work_tip)),
+        )
         code = _by_path(body["code"])
         # shared.py is +2 across the whole base..tip range (one coherent diff), added.py is an
         # add, gone.py a delete -- and net entries carry no per-leaf leafCount.
@@ -311,13 +349,37 @@ class MasterChangesetTests(unittest.TestCase):
         self.assertEqual(code["gone.py"]["status"], "D")
         self.assertEqual(body["counters"]["code"]["files"], 3)
         self.assertEqual(body["counters"]["code"]["insertions"], 3)  # shared +2, added +1
+        self.assertIn("onboarding/pkg/mod.py.md", _by_path(body["memory"]))
 
     def test_master_file_diff_base_to_tip(self) -> None:
+        self.assertEqual((self.code / "shared.py").read_text(encoding="utf-8"), "base\n")
         body = master_file_diff(self.config, "R", "t", "code", "shared.py")
         self.assertEqual(body["before"]["content"], "base\n")  # at the master base
-        self.assertEqual(body["after"]["content"], "base\nl1\nl2\n")  # at the series tip
+        self.assertEqual(body["after"]["content"], "base\nl1\nl2\n")  # at the work tip
         self.assertEqual(body["kind"], "code")
         self.assertEqual(body["scope"], "t")
+        memory = master_file_diff(self.config, "R", "t", "memory", "onboarding/pkg/mod.py.md")
+        self.assertEqual(memory["before"]["content"], "# sidecar\nbase\n")
+        self.assertEqual(memory["after"]["content"], "# sidecar\nbase\nwork\n")
+        self.assertEqual(memory["kind"], "memory")
+
+    def test_master_falls_back_to_source_tip_when_work_branch_absent(self) -> None:
+        _git(self.code, "merge", "--ff-only", "work")
+        _git(self.code, "branch", "-D", "work")
+        _git(self.mem, "merge", "--ff-only", "work")
+        _git(self.mem, "branch", "-D", "work")
+
+        body = master_changeset(self.config, "R", "t")
+        self.assertEqual(
+            body["counters"]["code"],
+            _sum_counts(changed_files_with_counts(self.code, self.base, self.code_work_tip)),
+        )
+        self.assertEqual(
+            body["counters"]["memory"],
+            _sum_counts(changed_files_with_counts(self.mem, self.mem_base, self.mem_work_tip)),
+        )
+        diff = master_file_diff(self.config, "R", "t", "code", "shared.py")
+        self.assertEqual(diff["after"]["content"], "base\nl1\nl2\n")
 
     def test_master_keeps_per_leaf_breakdown(self) -> None:
         body = master_changeset(self.config, "R", "t")

@@ -35,6 +35,7 @@ from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_st
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.scope import FileScope, language_for, run_scoped
 from agents_remember.worktrees.modules.git import (
+    branch_exists,
     changed_files_with_counts,
     commit_text_or_none,
     head_commit,
@@ -150,12 +151,28 @@ def _load_master_contract(
         return None
 
 
-def _net_changed(repo_path: Path | None, base: str, source_branch: str) -> list[dict[str, Any]]:
-    """Net change-set ``base -> the live source-branch tip`` (``[]`` when unresolvable)."""
-    if repo_path is None or not base or not source_branch:
+def _series_tip(repo_path: Path | None, source_branch: str, work_branch: str) -> str | None:
+    """Resolve the master series tip: live work branch first, landed source branch otherwise."""
+    if repo_path is None or not source_branch:
+        return None
+    try:
+        if work_branch and branch_exists(repo_path, work_branch):
+            return head_commit(repo_path, work_branch)
+        return head_commit(repo_path, source_branch)
+    except (RuntimeError, OSError):
+        return None
+
+
+def _net_changed(
+    repo_path: Path | None, base: str, source_branch: str, work_branch: str
+) -> list[dict[str, Any]]:
+    """Net change-set ``base -> resolved series tip`` (``[]`` when unresolvable)."""
+    if repo_path is None or not base:
+        return []
+    tip = _series_tip(repo_path, source_branch, work_branch)
+    if tip is None:
         return []
     try:
-        tip = head_commit(repo_path, source_branch)
         return changed_files_with_counts(repo_path, base, tip)
     except (RuntimeError, OSError):
         return []
@@ -201,10 +218,16 @@ def master_changeset(config: McpRuntimeConfig, repo_id: str, master: str) -> dic
     onboarding_root: Path | None = None
     if contract is not None:
         code = _net_changed(
-            contract.code_repo_path, contract.code_base_commit, contract.code_source_branch
+            contract.code_repo_path,
+            contract.code_base_commit,
+            contract.code_source_branch,
+            contract.code_work_branch,
         )
         memory = _net_changed(
-            contract.memory_repo_path, contract.memory_base_commit, contract.memory_source_branch
+            contract.memory_repo_path,
+            contract.memory_base_commit,
+            contract.memory_source_branch,
+            contract.memory_work_branch,
         )
         if contract.memory_repo_path is not None:
             candidate = contract.memory_repo_path / "onboarding"
@@ -233,17 +256,20 @@ def master_file_diff(
         raise FileNotFoundError(f"no series contract for {master!r}")
     if kind == "memory":
         repo_path = contract.memory_repo_path
-        base, branch = contract.memory_base_commit, contract.memory_source_branch
+        base = contract.memory_base_commit
+        source_branch = contract.memory_source_branch
+        work_branch = contract.memory_work_branch
     else:
         repo_path = contract.code_repo_path
-        base, branch = contract.code_base_commit, contract.code_source_branch
-    if repo_path is None or not base or not branch:
+        base = contract.code_base_commit
+        source_branch = contract.code_source_branch
+        work_branch = contract.code_work_branch
+    if repo_path is None or not base or not source_branch:
         raise FileNotFoundError(rel)
     relp = confine_rel(repo_path, rel)
-    try:
-        tip = head_commit(repo_path, branch)
-    except (RuntimeError, OSError) as err:
-        raise FileNotFoundError(str(branch)) from err
+    tip = _series_tip(repo_path, source_branch, work_branch)
+    if tip is None:
+        raise FileNotFoundError(source_branch)
     before = commit_text_or_none(repo_path, base, relp)
     after = commit_text_or_none(repo_path, tip, relp)
     return {
