@@ -27,6 +27,7 @@ package skill folder. The pre-push hook runs
 | Skill | Purpose |
 | --- | --- |
 | `l-01-session-job-lifecycle` | The session job lifecycle the coordinator routes every session into (orient → ground → frame → decide → build → close); owns the read-only exit and the build-mode decision. |
+| `l-02-agent-orchestration` | The developer-invoked agent-orchestration frame: the consistent runtime that houses the orchestration-family jobs (designer · orchestrator · manager · worker · adversarial reviewer). Owns the thin contact points (context → job selection → execution → wrap-up), the coordination-leaf convention, the escalation ladder, the two review seams, the gate-delegation doctrine, and the super integration branch topology. Entered only on developer request; never self-spawning. |
 | `w-02-light-task-workflow` | Durable one-page task plan with approval gate and live checklist; escalates to a master + light sub-task series for larger work. |
 
 ## Core Skills
