@@ -164,7 +164,8 @@ per-leaf. Leaf-level review is the manager's own duty, not an adversarial seam.
 
 1. **Master-exit** — before a manager hands its completed master integration branch to the
    orchestrator.
-2. **Super-exit** — before the orchestrator hands the super integration branch to the developer.
+2. **Super-exit** — before the orchestrator hands the accumulated super integration branch to the
+   developer.
 
 Each seam spawns an `adversarial-reviewer` job over three lenses (completion vs task docs · code
 quality per `system/tools.md` · onboarding-vs-code = paired `read_ar_files` + `memory_quality_check` +
@@ -172,6 +173,27 @@ drift). The verdict is a **templated artifact** (`templates/verdict.md`) that at
 gate as **judge evidence** — it is **evidence, never a decision**. A **blocking verdict must decompose
 into fix leaves** (concrete, leaf-shaped findings the owning manager/orchestrator can dispatch), never
 prose-only complaints.
+
+**Master-exit procedure.** The owning manager spawns an `adversarial-reviewer` session with
+`spawn_agent_session` using the reviewer job file, passing the master integration branch ref, the
+master/leaf task docs, worker turn reports, decision logs, changed paths, resolved `system/tools.md`
+check evidence, and memory/carry-over evidence as the review context. The reviewer writes the
+master-exit variant of `templates/verdict.md` under the series `notes/reports/` directory. The manager
+then includes that artifact on the master handover gate as judge evidence:
+`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/<master-id>-master-exit-verdict.md","verdict":"pass|pass-with-notes|block"}]`.
+A policy may require that evidence before a delegated orchestration decision is valid. A blocking
+verdict returns to the manager as fix leaves under the master; the manager dispatches those leaves
+before attempting handover again.
+
+**Super-exit procedure.** The orchestrator spawns an `adversarial-reviewer` session with
+`spawn_agent_session` using the reviewer job file, passing the super integration branch ref, the whole
+portfolio task-doc set, master handover packets, prior master-exit verdicts, orchestrator decision logs,
+changed paths, resolved `system/tools.md` check evidence, and final carry-over/ledger evidence as the
+review context. The reviewer writes the super-exit variant of `templates/verdict.md` under the series
+`notes/reports/` directory. The orchestrator attaches that artifact to the developer handover gate as
+the same `reviewer-verdict` evidence ref shape. A blocking verdict returns to the orchestrator as fix
+leaves, which the orchestrator routes to an owning manager, a new master, or the super worktree before
+attempting developer handover again.
 
 ### The Gate-Delegation Doctrine (enforcement is L4)
 

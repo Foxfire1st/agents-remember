@@ -11,8 +11,10 @@
 
 **Short-lived, spawned at exactly two seams** (developer decision 2026-07-03):
 
-1. **Master-exit** — before a **manager** hands its master integration branch to the **orchestrator**.
-2. **Super-exit** — before the **orchestrator** hands the super integration branch to the **developer**.
+1. **Master-exit** — before a **manager** hands its completed master integration branch to the
+   **orchestrator**.
+2. **Super-exit** — before the **orchestrator** hands the accumulated super integration branch to the
+   **developer**.
 
 Leaf-level review is the manager's own duty — **not** an adversarial seam. The reviewer reviews an
 **accumulated change set**, not a single leaf.
@@ -32,7 +34,9 @@ Leaf-level review is the manager's own duty — **not** an adversarial seam. The
 
 ## The Three Review Lenses
 
-Fan out sub-agents (each writing a durable report) across three lenses:
+Fan out sub-agents (each writing a durable report) across three lenses. The posture is always
+**refute-or-confirm**: try to disprove the change set, keep only findings that survive that attempt,
+and make every finding traceable to a durable evidence file.
 
 1. **Completion vs task docs** — every requirement/step addressed; deltas justified in decision logs.
    (`templates/impact-analysis.md` for the surface swept.)
@@ -42,13 +46,59 @@ Fan out sub-agents (each writing a durable report) across three lenses:
    overviews current. This is the paired `read_ar_files` + `memory_quality_check` + `drift_check`
    check. (`templates/onboarding-coherency.md`.)
 
+## Seam-Specific Rubrics
+
+### MASTER-EXIT — Manager Before Orchestrator Handover
+
+The manager spawns this reviewer before handing the completed master integration branch to the
+orchestrator. Review the **accumulated master change set**, not a final leaf in isolation.
+
+- **Scope packet:** master integration branch diff, master `task_doc`, leaf task docs, worker turn
+  reports, decision logs, the draft master-handover packet, resolved `system/tools.md`, changed source
+  paths, changed sidecars, governing route overviews, and the master branch's memory/carry-over state.
+- **Completion vs task docs:** every master requirement, leaf, substep, and accepted blank-fill is
+  accounted for; skipped or reshaped work has a decision-log trail; no unfinished leaf work is hidden
+  inside the handover packet.
+- **Code quality per tools.md:** the master branch has current quality evidence for the resolved suite
+  (lint, typecheck, tests, complexity where applicable), and the reviewer checks regressions **vs the
+  past** through route indexes, CGC, GrepAI, and changed behavior surfaces.
+- **Onboarding-vs-code:** changed source files have same-pass sidecar updates or explicit no-impact
+  history, route overviews are current for the master side of the change, `drift_check` and
+  `memory_quality_check` evidence is recorded, and any memory/carry-over gap is named.
+- **Blocking rule:** a block returns to the owning **manager** as decomposable fix leaves under that
+  master. Each fix leaf names scope, target files/docs, evidence, and done-when. A master-exit block
+  without fix leaves is invalid.
+
+### SUPER-EXIT — Orchestrator Before Developer Handover
+
+The orchestrator spawns this reviewer before handing the accumulated super integration branch to the
+developer. Review **wholesale branch behavior**: the whole portfolio as integrated on super.
+
+- **Scope packet:** super integration branch diff against the spear/base, portfolio task docs, master
+  task docs, master-handover packets, prior master-exit verdicts, orchestrator decision logs, resolved
+  `system/tools.md`, changed source paths, changed sidecars, governing route overviews, and final
+  carry-over/ledger evidence.
+- **Completion vs portfolio intent:** the integrated super branch satisfies the accepted portfolio
+  objective and dependency order; master-level deltas are justified; cross-master conflicts, duplicate
+  implementations, or deferred follow-ups are surfaced rather than hidden in the final handover.
+- **Code quality per tools.md:** the full super branch has current quality evidence for the resolved
+  suite, and the reviewer checks branch-wide behavior regressions **vs the past** and across integrated
+  masters, not just per-master local quality.
+- **Onboarding-vs-code:** the accumulated memory layer matches the super branch: changed sidecars are
+  current, route overviews describe the resulting behavior, C-11 carry-over/ledger mapping is coherent,
+  and `drift_check` plus `memory_quality_check` evidence is recorded.
+- **Blocking rule:** a block returns to the **orchestrator** as decomposable fix leaves. The
+  orchestrator may route a fix through an owning manager, a new master, or the super worktree, but the
+  verdict itself must name leaf-shaped work with evidence and done-when. A super-exit block without fix
+  leaves is invalid.
+
 ## Duties
 
 1. **Scope** the review to the seam (diff · task docs · rubric).
 2. **Run the three lenses**, fanning out sub-agents that write durable reports; adopt the
    refute-or-confirm posture — a finding that cannot survive an attempt to refute it is not a finding.
 3. **Write the verdict artifact** (`templates/verdict.md`, the matching seam variant): findings ranked,
-   an explicit **pass / block** recommendation, durable under the series notes.
+   an explicit **pass / block** recommendation, durable under the series `notes/reports/` directory.
 4. **Attach the verdict as judge evidence** on the handover gate — the decider decides; the reviewer
    does not.
 5. **Decompose a blocking verdict into fix leaves** — concrete, **leaf-shaped** findings the owning
