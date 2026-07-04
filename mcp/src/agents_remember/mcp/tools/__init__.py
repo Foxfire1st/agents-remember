@@ -66,7 +66,7 @@ from .providers import (
 )
 from .read_files import read_ar_files_payload
 from .task_doc import task_doc_payload, task_reopen_payload
-from .terminal import attach_terminal_session_to_leaf_payload
+from .terminal import attach_terminal_session_to_leaf_payload, spawn_agent_session_payload
 from .worktree import (
     worktree_abandon_payload,
     worktree_attach_payload,
@@ -132,6 +132,7 @@ __all__ = [
     "runtime_install_payload",
     "server_info_payload",
     "skills_install_payload",
+    "spawn_agent_session_payload",
     "switch_lifecycle_payload",
     "task_doc_payload",
     "task_reopen_payload",

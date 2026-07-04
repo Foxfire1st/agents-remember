@@ -72,27 +72,18 @@ from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
-from agents_remember.serving.harnesses import (
-    Which,
-    detect_harnesses,
-    find_harness,
-    is_detected,
-)
+from agents_remember.serving.harnesses import detect_harnesses
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
-    TerminalSessionKind,
-    TerminalSessionRole,
-    role_for_kind,
     terminal_catalog_path,
 )
-from agents_remember.serving.terminal_leaf_assignment import (
-    assign_terminal_session_to_leaf,
-    leaf_conflict_owner,
-)
+from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
+from agents_remember.serving.terminal_opener import open_terminal_session
+from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -283,6 +274,18 @@ class TerminalAttachLeafRequest(BaseModel):
     leaf_key: str = Field(alias="leafKey")
 
 
+class TerminalPasteRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}/paste``: deliver a context packet to a hosted session.
+
+    The server-side mirror of the frontend ``pasteAndConfirm`` / ``submitAndConfirm`` (L2): paste the
+    text as one echo-confirmed bracketed paste, and only submit it (send ``Enter``) when ``submit`` is
+    true -- a draft stays a draft otherwise.
+    """
+
+    text: str
+    submit: bool = False
+
+
 class OperatorInboxPostRequest(BaseModel):
     """Body of ``POST /api/operator-inbox`` for non-hosted chat replies."""
 
@@ -293,72 +296,8 @@ class OperatorInboxPostRequest(BaseModel):
     response: str
 
 
-def resolve_terminal_launch(
-    kind: str,
-    *,
-    workspace_root: Path,
-    shell: str,
-    harness: str | None = None,
-    which: Which | None = None,
-) -> tuple[Path, list[str]]:
-    """Resolve a launch ``kind`` to ``(cwd, argv)`` -- the server owns the command.
-
-    ``terminal`` spawns ``shell`` at the workspace root (the dashboard-owned scratch terminal,
-    slice 6e-2a). ``harness`` spawns the registered TUI harness ``harness`` (its id) at the same
-    root (slice 6e-2b), rejecting an absent id, an unknown id, or one whose CLI is not installed
-    (``which`` defaults to :func:`shutil.which`). Every other kind raises ``ValueError`` -- the
-    opener endpoint turns that into a 400.
-    """
-    if kind == "terminal":
-        return workspace_root, [shell]
-    if kind == "harness":
-        if harness is None:
-            raise ValueError("harness kind requires a harness id")
-        found = find_harness(harness)
-        if found is None:
-            raise ValueError(f"unknown harness: {harness!r}")
-        if not is_detected(found, which=which):
-            raise ValueError(f"harness not installed: {harness!r}")
-        return workspace_root, list(found.argv)
-    raise ValueError(f"unknown terminal kind: {kind!r}")
-
-
-def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: str) -> str:
-    if kind == "terminal":
-        return "Terminal"
-    return harness or fallback
-
-
 def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
     return entry.to_json()
-
-
-def _claim_leaf_or_409(
-    catalog: TerminalCatalog,
-    leaf_key: str | None,
-    session_id: str,
-    *,
-    role: TerminalSessionRole,
-) -> JSONResponse | None:
-    """Server-authoritative uniqueness: at most one RUNNING session per (leaf, role) (the guard).
-
-    Uniqueness is scoped to ``role`` (chat vs. terminal): a leaf may hold one agent chat AND one
-    plain terminal at once, so opening a terminal never 409s against the leaf's chat and vice versa.
-    Returns a ``409 leaf-taken`` response when ``leaf_key`` is already owned by a *different* running
-    session of the SAME role, else ``None`` (free, or already this session's). Called immediately
-    before an upsert in the single-process FastAPI app + atomic JSON store, so the check-then-write is
-    effectively atomic; the client guard in ``data/sessions.ts`` is only advisory. ``leaf_key`` is
-    opaque (a leaf key or a reserved ``master:<...>`` key flow identically).
-    """
-    if not leaf_key:
-        return None
-    owner = leaf_conflict_owner(catalog, leaf_key=leaf_key, session_id=session_id, role=role)
-    if owner is not None:
-        return JSONResponse(
-            content={"status": "leaf-taken", "leafKey": leaf_key, "session": owner},
-            status_code=409,
-        )
-    return None
 
 
 def _refresh_catalog_entries(
@@ -413,6 +352,7 @@ def create_app(
     refresh_provider_state: bool | None = None,
     terminal_host: TerminalHost | None = None,
     terminal_catalog: TerminalCatalog | None = None,
+    terminal_paster: TerminalPaster | None = None,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
@@ -431,6 +371,7 @@ def create_app(
     )
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    paster = terminal_paster if terminal_paster is not None else TerminalPaster()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -638,69 +579,49 @@ def create_app(
     @app.post("/api/terminal/{session}")
     def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
         # Mode B2 opener (slice 6e-2a; harness kinds 6e-2b): the dashboard *spawns + owns* a
-        # session, then the WebSocket above attaches to it. The command is server-resolved from the
-        # kind/harness id (never wire-supplied) and spawned as the dashboard's OS user/env at the
-        # workspace root.
+        # session, then the WebSocket above attaches to it. L2 moves the leaf-claim + ensure + upsert
+        # composition into the shared `open_terminal_session` so this route and the agent-facing
+        # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
         shell = os.environ.get("SHELL") or DEFAULT_SHELL
-        try:
-            cwd, command = resolve_terminal_launch(
-                request.kind,
-                workspace_root=config.workspace_root,
-                shell=shell,
-                harness=request.harness,
-            )
-        except ValueError as exc:
-            return JSONResponse(content={"status": "bad-kind", "detail": str(exc)}, status_code=400)
-        kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
-        # Claim the leaf before spawning: a taken leaf is refused 409 so two chats never mingle on
-        # one leaf (contradicting file writes). Scoped to the launch role so a terminal can sit beside
-        # the leaf's agent chat. Enclosure-independent -- no worktree required.
-        conflict = _claim_leaf_or_409(
-            catalog, request.leaf_key, session, role=role_for_kind(kind)
-        )
-        if conflict is not None:
-            return conflict
-        opened = host.ensure(
-            session,
-            cwd=cwd,
-            command=command,
-            lifecycle_id=request.lifecycle_id,
-            # A harness is a bare pane with no shell to `fg`; the host strips Ctrl-Z for it. A plain
-            # shell keeps Ctrl-Z so its job control works (slice 6f hardening).
-            suspend_unsafe=request.kind == "harness",
-        )
-        attached_at = now_iso()
-        existing = catalog.get(session)
-        label = request.label or (
-            existing.label if existing else _terminal_label(kind, request.harness, session)
-        )
-        entry = TerminalCatalogEntry(
-            id=opened.sid,
-            label=label,
-            kind=kind,
+        result = open_terminal_session(
+            catalog=catalog,
+            host=host,
+            session_id=session,
+            kind=request.kind,
+            workspace_root=config.workspace_root,
+            shell=shell,
             harness=request.harness,
+            label=request.label,
             lifecycle_id=request.lifecycle_id,
-            cwd=opened.cwd,
-            tmux_name=opened.tmux_name,
-            command=tuple(command),
-            created_at=existing.created_at if existing is not None else attached_at,
-            last_attached_at=attached_at,
-            status="running",
-            # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already
-            # owns (a re-open / reconnect must not silently drop the leaf binding).
-            leaf_key=request.leaf_key or (existing.leaf_key if existing is not None else None),
+            leaf_key=request.leaf_key,
         )
-        catalog.upsert(entry)
+        if result.status == "bad-kind":
+            return JSONResponse(
+                content={"status": "bad-kind", "detail": result.detail}, status_code=400
+            )
+        if result.status == "leaf-taken":
+            # Server-authoritative uniqueness (per leaf, role): refuse so two chats never mingle on
+            # one leaf. The client guard in data/sessions.ts is only advisory.
+            return JSONResponse(
+                content={
+                    "status": "leaf-taken",
+                    "leafKey": request.leaf_key,
+                    "session": result.owner_session_id,
+                },
+                status_code=409,
+            )
+        entry = result.entry
+        assert entry is not None  # opened => an upserted row
         return JSONResponse(
             content={
-                "session": opened.sid,
+                "session": entry.id,
                 "label": entry.label,
                 "kind": request.kind,
                 "harness": request.harness,
                 "lifecycleId": request.lifecycle_id,
                 "leafKey": entry.leaf_key,
-                "cwd": str(opened.cwd),
-                "tmuxName": opened.tmux_name,
+                "cwd": str(entry.cwd),
+                "tmuxName": entry.tmux_name,
                 "status": "running",
             },
             status_code=200,
@@ -729,6 +650,29 @@ def create_app(
             )
         return JSONResponse(
             content={"session": session, "status": "attached", "leafKey": request.leaf_key},
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/paste")
+    def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
+        # L2 paste seam: deliver a context packet to a hosted session server-side (the mirror of the
+        # frontend WebSocket pasteAndConfirm/submitAndConfirm), so a packet can be pushed to a durable
+        # tmux session that has no attached browser client. 404 if the session is unknown/terminated or
+        # its tmux session is gone; otherwise echo-confirm the paste (and submit when asked) and report
+        # delivered/submitted. Same localhost posture as the rest of serving/.
+        entry = catalog.get(session)
+        if entry is None or entry.status != "running" or not host.has_session(entry.tmux_name):
+            if entry is not None and entry.status == "running":
+                catalog.mark_exited(session)
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        outcome = paster.paste(entry.tmux_name, request.text, submit=request.submit)
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "delivered" if outcome.delivered else "unconfirmed",
+                "delivered": outcome.delivered,
+                "submitted": outcome.submitted,
+            },
             status_code=200,
         )
 

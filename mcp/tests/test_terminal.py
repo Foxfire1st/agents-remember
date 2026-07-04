@@ -26,7 +26,7 @@ import tempfile
 import termios
 import time
 import unittest
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -158,6 +158,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.existing_tmux: set[str] = set()
         self.killed_tmux: list[str] = []
         self.created_tmux: list[tuple[str, Path, tuple[str, ...]]] = []
+        self.created_env: list[dict[str, str]] = []
         self.configured_tmux: list[str] = []
         self.host = TerminalHost(
             spawn=self.spawner,
@@ -171,8 +172,11 @@ class TerminalHostRegistryTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.host.shutdown()
 
-    def _create_tmux(self, name: str, cwd: Path, command: Sequence[str]) -> None:
+    def _create_tmux(
+        self, name: str, cwd: Path, command: Sequence[str], env: Mapping[str, str]
+    ) -> None:
         self.created_tmux.append((name, cwd, tuple(command)))
+        self.created_env.append(dict(env))
         self.existing_tmux.add(name)
 
     def test_open_builds_tmux_command_and_registers(self) -> None:

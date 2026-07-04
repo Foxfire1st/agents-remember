@@ -99,6 +99,12 @@ def _simple_payloads(config) -> dict[str, dict]:
             session_id="missing-session",
             leaf_key="repo/master/leaf-1",
         ),
+        # Representative refusal payload: an unknown harness id short-circuits before any tmux spawn,
+        # so the conformance fixture never touches a real terminal host.
+        "spawn_agent_session": tools.spawn_agent_session_payload(
+            config,
+            harness="definitely-not-a-real-harness",
+        ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, REPO),
         "drift_check": tools.drift_check_payload(config, REPO),

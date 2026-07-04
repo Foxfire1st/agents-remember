@@ -45,6 +45,13 @@ class TerminalCatalogEntry:
     # ``lifecycleId`` / ``terminatedAt``) so legacy rows with no ``leafKey`` read back as ``None``
     # -- no schema bump, migration-safe. A chat claims a leaf at open/attach, enclosure-independent.
     leaf_key: str | None = None
+    # Spawned-by provenance (L2 agent dispatch): the spawning session id + lifecycle id when this row
+    # was created by the ``spawn_agent_session`` tool (an orchestrator spawning a manager, a manager
+    # spawning a worker). Same migration-safe pattern as ``leaf_key`` -- written only when set, so a
+    # hand-opened or dashboard-opened row reads both back as ``None``. The dashboard reads these to
+    # render the orchestration tree (spawner -> spawned edges) once that surface lands.
+    spawned_by_session: str | None = None
+    spawned_by_lifecycle: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -68,6 +75,14 @@ class TerminalCatalogEntry:
                 str(data["terminatedAt"]) if data.get("terminatedAt") is not None else None
             ),
             leaf_key=str(data["leafKey"]) if data.get("leafKey") is not None else None,
+            spawned_by_session=(
+                str(data["spawnedBySession"]) if data.get("spawnedBySession") is not None else None
+            ),
+            spawned_by_lifecycle=(
+                str(data["spawnedByLifecycle"])
+                if data.get("spawnedByLifecycle") is not None
+                else None
+            ),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -90,42 +105,29 @@ class TerminalCatalogEntry:
             data["terminatedAt"] = self.terminated_at
         if self.leaf_key is not None:
             data["leafKey"] = self.leaf_key
+        if self.spawned_by_session is not None:
+            data["spawnedBySession"] = self.spawned_by_session
+        if self.spawned_by_lifecycle is not None:
+            data["spawnedByLifecycle"] = self.spawned_by_lifecycle
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
-        return TerminalCatalogEntry(
-            id=self.id,
-            label=self.label,
-            kind=self.kind,
-            harness=self.harness,
-            lifecycle_id=self.lifecycle_id,
-            cwd=self.cwd,
-            tmux_name=self.tmux_name,
-            command=self.command,
-            created_at=self.created_at,
+        # ``replace`` preserves every other field (incl. leaf_key + spawned-by provenance) so a new
+        # column never silently drops on a re-attach.
+        return replace(
+            self,
             last_attached_at=attached_at,
             status="running",
             terminated_at=None,
-            leaf_key=self.leaf_key,
         )
 
     def with_status(
         self, status: TerminalSessionStatus, *, at: str | None = None
     ) -> TerminalCatalogEntry:
-        return TerminalCatalogEntry(
-            id=self.id,
-            label=self.label,
-            kind=self.kind,
-            harness=self.harness,
-            lifecycle_id=self.lifecycle_id,
-            cwd=self.cwd,
-            tmux_name=self.tmux_name,
-            command=self.command,
-            created_at=self.created_at,
-            last_attached_at=self.last_attached_at,
+        return replace(
+            self,
             status=status,
             terminated_at=at if status == "terminated" else self.terminated_at,
-            leaf_key=self.leaf_key,
         )
 
     def with_leaf_key(self, leaf_key: str | None) -> TerminalCatalogEntry:

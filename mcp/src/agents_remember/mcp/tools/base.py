@@ -17,6 +17,7 @@ PUBLIC_TOOLS = (
     "context_packet",
     "read_ar_files",
     "attach_terminal_session_to_leaf",
+    "spawn_agent_session",
     "runtime_install",
     "resolve_context",
     "drift_check",

@@ -32,7 +32,7 @@ import re
 import struct
 import subprocess
 import termios
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -94,8 +94,8 @@ TmuxProbe = Callable[[str], bool]
 TmuxKiller = Callable[[str], None]
 """Kill a tmux session name if it still exists."""
 
-TmuxCreator = Callable[[str, Path, Sequence[str]], None]
-"""Create a detached tmux session for a fixed harness argv."""
+TmuxCreator = Callable[[str, Path, Sequence[str], Mapping[str, str]], None]
+"""Create a detached tmux session for a fixed harness argv, seeding ``env`` at spawn (L2)."""
 
 TmuxConfigurer = Callable[[str], None]
 """Apply dashboard session options (mouse mode) to an existing tmux session name."""
@@ -137,10 +137,27 @@ def _tmux_kill_session(name: str) -> None:
         )
 
 
-def _tmux_create_detached(name: str, cwd: Path, harness: Sequence[str]) -> None:
-    """Create tmux session ``name`` without attaching a local PTY client."""
+def _env_flags(env: Mapping[str, str]) -> list[str]:
+    """Flatten ``env`` into tmux ``-e KEY=VALUE`` new-session flags (L2 knob injection).
+
+    Empty for an empty mapping so the argv is byte-identical to the legacy no-env spawn. tmux seeds
+    each pair into the new session's environment (and thus the child harness process); the pairs stay
+    argv items on a fixed ``Sequence[str]`` spawn, so there is no shell-injection surface. This is the
+    minimal env-passthrough seam the terminal host lacked -- the same injection point the planned T3
+    analytics env wiring and the role-knob (model/effort) resolution layer target.
+    """
+    return [flag for key, value in env.items() for flag in ("-e", f"{key}={value}")]
+
+
+def _tmux_create_detached(
+    name: str, cwd: Path, harness: Sequence[str], env: Mapping[str, str] | None = None
+) -> None:
+    """Create tmux session ``name`` without attaching a local PTY client, seeding ``env`` at spawn."""
     subprocess.run(
-        ["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "--", *harness],
+        [
+            "tmux", "new-session", "-d", "-s", name, "-c", str(cwd),
+            *_env_flags(env or {}), "--", *harness,
+        ],
         check=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -241,14 +258,20 @@ def _tmux_session_name(sid: str) -> str:
     return f"{_TMUX_NAME_PREFIX}-{safe or 'session'}"
 
 
-def _build_tmux_command(name: str, cwd: Path, harness: Sequence[str]) -> list[str]:
-    """The persistent-session argv: ``tmux new-session -A -s <name> -c <cwd> -- <harness>``.
+def _build_tmux_command(
+    name: str, cwd: Path, harness: Sequence[str], env: Mapping[str, str] | None = None
+) -> list[str]:
+    """The persistent-session argv: ``tmux new-session -A -s <name> -c <cwd> [-e K=V …] -- <harness>``.
 
     Pure -- no I/O -- so the command construction is unit-testable on its own. ``-A`` attaches
-    to an existing session of that name (persistence) or creates it; ``--`` ends tmux's option
-    parsing so the fixed harness argv is never reinterpreted as tmux flags.
+    to an existing session of that name (persistence) or creates it; the optional ``-e KEY=VALUE``
+    flags seed spawn env (L2 knob injection); ``--`` ends tmux's option parsing so the fixed harness
+    argv is never reinterpreted as tmux flags.
     """
-    return ["tmux", "new-session", "-A", "-s", name, "-c", str(cwd), "--", *harness]
+    return [
+        "tmux", "new-session", "-A", "-s", name, "-c", str(cwd),
+        *_env_flags(env or {}), "--", *harness,
+    ]
 
 
 def _spawn_pty(argv: Sequence[str], cwd: Path) -> PtyProcess:
@@ -338,12 +361,14 @@ class TerminalHost:
         lifecycle_id: str | None = None,
         name: str | None = None,
         suspend_unsafe: bool = False,
+        env: Mapping[str, str] | None = None,
     ) -> TerminalSession:
         """Open (or re-attach) the session ``sid`` running ``command`` in ``cwd``.
 
         Idempotent: a live session for ``sid`` is returned as-is (tmux ``-A`` would re-attach the
         same session anyway); a dead one is reaped and replaced. ``lifecycle_id`` correlates the
-        session to a lifecycle/worktree for the registry views.
+        session to a lifecycle/worktree for the registry views. ``env`` seeds spawn env at creation
+        (L2 knob injection); it is inert on a re-attach (the durable session keeps its original env).
         """
         existing = self._sessions.get(sid)
         if existing is not None and existing.is_alive:
@@ -357,6 +382,7 @@ class TerminalHost:
             lifecycle_id=lifecycle_id,
             name=name,
             suspend_unsafe=suspend_unsafe,
+            env=env,
         )
         self._sessions[sid] = session
         return session
@@ -370,13 +396,19 @@ class TerminalHost:
         lifecycle_id: str | None = None,
         name: str | None = None,
         suspend_unsafe: bool = False,
+        env: Mapping[str, str] | None = None,
     ) -> TerminalSessionBinding:
-        """Ensure the durable tmux session exists without attaching a PTY client."""
+        """Ensure the durable tmux session exists without attaching a PTY client.
+
+        ``env`` seeds spawn env (``tmux new-session -e KEY=VALUE``) when the session is created here;
+        it is inert once the session already exists (durable sessions keep their creation env). This
+        is the detached path the agent-facing spawn tool composes over, so knob injection lands here.
+        """
         root = Path(cwd)
         harness = tuple(command)
         tmux_name = name or _tmux_session_name(sid)
         if not self.has_session(tmux_name):
-            self._tmux_creator(tmux_name, root, harness)
+            self._tmux_creator(tmux_name, root, harness, env or {})
         # Session options are (re-)asserted on every ensure so pre-existing durable sessions
         # created before an option was introduced pick it up too.
         self._tmux_configurer(tmux_name)
@@ -540,11 +572,12 @@ class TerminalHost:
         lifecycle_id: str | None,
         name: str | None,
         suspend_unsafe: bool,
+        env: Mapping[str, str] | None = None,
     ) -> TerminalSession:
         root = Path(cwd)
         harness = tuple(command)
         tmux_name = name or _tmux_session_name(sid)
-        process = self._spawn(_build_tmux_command(tmux_name, root, harness), root)
+        process = self._spawn(_build_tmux_command(tmux_name, root, harness, env), root)
         return TerminalSession(
             sid=sid,
             tmux_name=tmux_name,

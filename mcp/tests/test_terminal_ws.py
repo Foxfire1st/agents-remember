@@ -18,7 +18,7 @@ import socket
 import sys
 import tempfile
 import unittest
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -35,7 +35,6 @@ from agents_remember.serving.app import (
     _TERMINAL_EXIT_FRAME,
     _apply_terminal_input,
     create_app,
-    resolve_terminal_launch,
 )
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import (
@@ -43,6 +42,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionStatus,
 )
+from agents_remember.serving.terminal_opener import resolve_terminal_launch
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -165,6 +165,7 @@ class _FakeTerminalHost:
         lifecycle_id: str | None = None,
         name: str | None = None,
         suspend_unsafe: bool = False,
+        env: Mapping[str, str] | None = None,
     ) -> _FakeSession:
         self.opened.append(
             {
@@ -174,6 +175,7 @@ class _FakeTerminalHost:
                 "lifecycle_id": lifecycle_id,
                 "name": name,
                 "suspend_unsafe": suspend_unsafe,
+                "env": dict(env or {}),
             }
         )
         self.registry_session = self._new_client(
@@ -197,6 +199,7 @@ class _FakeTerminalHost:
         lifecycle_id: str | None = None,
         name: str | None = None,
         suspend_unsafe: bool = False,
+        env: Mapping[str, str] | None = None,
     ) -> TerminalSessionBinding:
         tmux_name = name or f"ar-{sid}"
         self.ensured.append(
@@ -207,6 +210,7 @@ class _FakeTerminalHost:
                 "lifecycle_id": lifecycle_id,
                 "name": name,
                 "suspend_unsafe": suspend_unsafe,
+                "env": dict(env or {}),
             }
         )
         self.probe_names.add(tmux_name)

@@ -53,6 +53,7 @@ from .tools import (
     runtime_install_payload,
     server_info_payload,
     skills_install_payload,
+    spawn_agent_session_payload,
     switch_lifecycle_payload,
     task_doc_payload,
     task_reopen_payload,
@@ -141,6 +142,48 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             session_id=session_id,
             leaf_key=leaf_key,
+        )
+
+    @server.tool()
+    def spawn_agent_session(
+        harness: str,
+        leaf_key: str | None = None,
+        context: str | None = None,
+        submit: bool = False,
+        label: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        env: dict[str, str] | None = None,
+        spawned_by_session: str | None = None,
+        spawned_by_lifecycle: str | None = None,
+        kind: str = "harness",
+    ) -> dict[str, Any]:
+        """Spawn a role-configured, leaf-attached, context-primed hosted agent session.
+
+        Composes the EXISTING session primitives so an orchestrator can spawn a manager and a manager
+        a worker without dashboard clicks: create a hosted session via the serving opener, attach it
+        to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
+        overridden), seed the role knobs (`model`/`effort`/`env` injected as spawn env — the terminal
+        host's `tmux new-session -e KEY=VALUE` seam), and deliver `context` as an echo-confirmed
+        bracketed paste. `submit=true` presses Enter so a worker auto-starts; leave it false for a
+        draft. `harness` is validated against the fetch-harnesses detection set. Each spawned session
+        is its own harness process (the ambient-lifecycle singleton is untouched). Spawned-by
+        provenance (`spawned_by_session` + the active/`spawned_by_lifecycle` lifecycle) is recorded on
+        the catalog row so the dashboard can render the orchestration tree. Status 'spawned' on
+        success; 'harness-unknown'/'harness-not-detected'/'bad-kind' are pre-spawn refusals."""
+        return spawn_agent_session_payload(
+            config,
+            harness=harness,
+            leaf_key=leaf_key,
+            context=context,
+            submit=submit,
+            label=label,
+            model=model,
+            effort=effort,
+            env=env,
+            spawned_by_session=spawned_by_session,
+            spawned_by_lifecycle=spawned_by_lifecycle,
+            kind=kind,
         )
 
     @server.tool()
