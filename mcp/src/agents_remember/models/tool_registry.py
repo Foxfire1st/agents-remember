@@ -62,6 +62,7 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxPollResponse,
     OperatorInboxPostResponse,
 )
+from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.providers import (
     CGCCalleesResponse,
     CGCCallersResponse,
@@ -164,6 +165,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "operator_inbox_post": OperatorInboxPostResponse,
     "operator_inbox_poll": OperatorInboxPollResponse,
     "operator_inbox_consume": OperatorInboxConsumeResponse,
+    "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
 }
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {

@@ -276,7 +276,14 @@ class AgentPickupNode(BaseModel):
     entryId: str
     lifecycleId: str | None = None
     agentId: str | None = None
+    senderAgentId: str | None = None
+    senderRole: str | None = None
+    recipientRole: str | None = None
     gateId: str | None = None
+    messageKind: str = "message"
+    artifactPath: str | None = None
+    deliveryState: str = "queued"
+    deliveredToSession: str | None = None
     state: str
     ageSeconds: float | None = None
     ttlSeconds: float

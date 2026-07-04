@@ -66,6 +66,7 @@ PUBLIC_TOOLS = (
     "operator_inbox_post",
     "operator_inbox_poll",
     "operator_inbox_consume",
+    "orchestration_nudge_manager",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 

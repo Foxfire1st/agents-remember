@@ -48,6 +48,14 @@ class _FakePane:
         return self.content
 
 
+class _BootingPane(_FakePane):
+    """A pane that repaints boot output while discarding pasted stdin."""
+
+    def paste_buffer(self, tmux_name: str, buffer_name: str) -> None:
+        self.pasted.append((tmux_name, buffer_name, self.buffers.get(buffer_name)))
+        self.content += "\nloading MCP servers"
+
+
 class _Clock:
     """A monotonic stand-in that advances a fixed step per call so timeouts are hit deterministically."""
 
@@ -112,6 +120,16 @@ class PasteTests(unittest.TestCase):
         # A discarded paste is retried across the boot window (more than one attempt).
         self.assertGreaterEqual(len(pane.pasted), 2)
         # Never submit an unconfirmed paste.
+        self.assertEqual(pane.keys, [])
+
+    def test_boot_output_advance_without_paste_echo_does_not_confirm_delivery(self) -> None:
+        pane = _BootingPane(echo=False)
+        result = _paster(pane).paste(
+            "ar-worker", "discarded", submit=True, echo_timeout=1, boot_deadline=8
+        )
+        self.assertFalse(result.delivered)
+        self.assertFalse(result.submitted)
+        self.assertGreaterEqual(len(pane.pasted), 2)
         self.assertEqual(pane.keys, [])
 
     def test_submit_unconfirmed_when_enter_produces_no_output(self) -> None:

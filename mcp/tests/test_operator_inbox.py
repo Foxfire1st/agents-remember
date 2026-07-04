@@ -14,6 +14,10 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
+from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_paste import PasteResult
 
 T1 = "2026-06-23T10:00:00+00:00"
 T2 = "2026-06-23T10:05:00+00:00"
@@ -31,8 +35,18 @@ class OperatorInboxRecordTests(unittest.TestCase):
             response="Yes, proceed.",
             created_by="developer",
             created_via="dashboard",
+            sender_agent_id="manager-1",
+            sender_role="manager",
+            recipient_role="worker",
+            message_kind="turn-report",
+            artifact_path="notes/reports/L3-worker-report.md",
         )
         self.assertEqual(entry.state, "pending")
+        self.assertEqual(entry.senderAgentId, "manager-1")
+        self.assertEqual(entry.senderRole, "manager")
+        self.assertEqual(entry.recipientRole, "worker")
+        self.assertEqual(entry.messageKind, "turn-report")
+        self.assertEqual(entry.artifactPath, "notes/reports/L3-worker-report.md")
         consumed = consume_operator_inbox_entry(
             entry,
             now=T2,
@@ -102,6 +116,20 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.store.append(self._entry("A", lifecycle_id="L1", agent_id="agent-a"))
         self.store.append(self._entry("B", lifecycle_id="L2", agent_id="agent-a"))
         self.store.append(self._entry("C", lifecycle_id="L1", agent_id="agent-b"))
+        self.store.append(
+            create_operator_inbox_entry(
+                entry_id="D",
+                now=T1,
+                lifecycle_id=None,
+                agent_id=None,
+                recipient_role="manager",
+                ask="Nudge",
+                response="Check worker.",
+                created_by="system",
+                created_via="cli",
+                message_kind="nudge",
+            )
+        )
 
         self.assertEqual(
             [entry.id for entry in self.store.list_pending(lifecycle_id="L1", agent_id=None)],
@@ -114,6 +142,17 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertEqual(
             [entry.id for entry in self.store.list_pending(lifecycle_id="L1", agent_id="agent-a")],
             ["A"],
+        )
+        self.assertEqual(
+            [
+                entry.id
+                for entry in self.store.list_pending(
+                    lifecycle_id=None,
+                    agent_id=None,
+                    recipient_role="manager",
+                )
+            ],
+            ["D"],
         )
 
     def test_consume_marks_entry_and_is_idempotent(self) -> None:
@@ -155,6 +194,20 @@ class OperatorInboxStoreTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.consume("nope", now=T2, consumed_by="model", consumed_via="cli")
 
+    def test_record_delivery_appends_status_snapshot(self) -> None:
+        self.store.append(self._entry("A"))
+        delivered = self.store.record_delivery(
+            "A",
+            now=T2,
+            delivery_state="delivered",
+            delivered_to_session="agent-a",
+            delivery_detail="echo-confirmed",
+        )
+        self.assertEqual(delivered.deliveryState, "delivered")
+        self.assertEqual(delivered.deliveredAt, T2)
+        self.assertEqual(delivered.deliveredToSession, "agent-a")
+        self.assertEqual(len(self.store.read()), 2)
+
     def test_poll_requires_mailbox_address(self) -> None:
         with self.assertRaises(ValueError):
             self.store.list_pending(lifecycle_id=None, agent_id=None)
@@ -179,13 +232,22 @@ class OperatorInboxToolTests(unittest.TestCase):
             response="Yes, proceed.",
             created_by="developer",
             created_via="dashboard",
+            sender_agent_id="manager-1",
+            sender_role="manager",
+            recipient_role="worker",
+            message_kind="message",
+            deliver_to_hosted=False,
         )
         self.assertEqual(posted["state"], "pending")
+        self.assertEqual(posted["senderAgentId"], "manager-1")
+        self.assertEqual(posted["recipientRole"], "worker")
+        self.assertEqual(posted["deliveryState"], "queued")
 
         polled = inbox_tools.operator_inbox_poll_payload(
             None,  # type: ignore[arg-type]
             lifecycle_id=None,
             agent_id="agent-a",
+            recipient_role=None,
         )
         self.assertEqual(polled["entryCount"], 1)
         self.assertEqual(polled["entries"][0]["ask"], "Continue?")
@@ -206,4 +268,64 @@ class OperatorInboxToolTests(unittest.TestCase):
                 None,  # type: ignore[arg-type]
                 lifecycle_id=None,
                 agent_id=None,
+                recipient_role=None,
             )
+
+
+class OperatorInboxDeliveryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        self.store = OperatorInboxStore(root)
+        self.catalog = TerminalCatalog(root / "terminal-sessions.json")
+        self.catalog.upsert(
+            TerminalCatalogEntry(
+                id="agent-a",
+                label="Worker",
+                kind="harness",
+                harness="claude",
+                lifecycle_id="L1",
+                cwd=root,
+                tmux_name="ar-agent-a",
+                command=("claude",),
+                created_at=T1,
+                last_attached_at=T1,
+                status="running",
+            )
+        )
+        self.host = TerminalHost(tmux_probe=lambda _name: True)
+
+    def test_deliver_inbox_entry_pushes_to_hosted_session(self) -> None:
+        entry = create_operator_inbox_entry(
+            entry_id="A",
+            now=T1,
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            sender_role="manager",
+            recipient_role="worker",
+            ask="Please continue.",
+            response="Review the report.",
+            created_by="manager-1",
+            created_via="cli",
+        )
+        self.store.append(entry)
+        calls: list[tuple[str, str, bool]] = []
+
+        class _Paster:
+            def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
+                calls.append((tmux_name, text, submit))
+                return PasteResult(delivered=True, submitted=True)
+
+        delivered = deliver_inbox_entry(
+            store=self.store,
+            catalog=self.catalog,
+            host=self.host,
+            paster=_Paster(),  # type: ignore[arg-type]
+            entry=entry,
+        )
+        self.assertEqual(delivered.deliveryState, "delivered")
+        self.assertEqual(delivered.deliveredToSession, "agent-a")
+        self.assertEqual(calls[0][0], "ar-agent-a")
+        self.assertTrue(calls[0][2])
+        self.assertIn("[Agents Remember inbox:message]", calls[0][1])

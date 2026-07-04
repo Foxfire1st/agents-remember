@@ -380,6 +380,19 @@ def _operator_inbox_payloads(config) -> dict[str, dict]:
     }
 
 
+def _orchestration_payloads(config) -> dict[str, dict]:
+    return {
+        "orchestration_nudge_manager": tools.orchestration_nudge_manager_payload(
+            config,
+            reason="missing-turn-report",
+            subject="worker 260703-L3",
+            manager_agent_id="manager-a",
+            subject_agent_id="worker-a",
+            artifact_path="notes/reports/260703-L3-worker-report.md",
+        )
+    }
+
+
 def _allowed_keys(model) -> set[str]:
     """Serialized keys the model is allowed to emit (field names plus aliases)."""
     allowed: set[str] = set()
@@ -399,8 +412,8 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(7)]
-        base, worktree, carryover, lifecycle, task_doc_root, gate_root, inbox_root = (
+        cls._temp_dirs = [tempfile.mkdtemp() for _ in range(8)]
+        base, worktree, carryover, lifecycle, task_doc_root, gate_root, inbox_root, orch_root = (
             Path(d) for d in cls._temp_dirs
         )
         cls.payloads = {}
@@ -411,6 +424,7 @@ class ToolResponseConformanceTests(unittest.TestCase):
         cls.payloads.update(_task_doc_payloads(task_doc_root))
         cls.payloads.update(_gate_payloads(_base_fixture(gate_root)))
         cls.payloads.update(_operator_inbox_payloads(_base_fixture(inbox_root)))
+        cls.payloads.update(_orchestration_payloads(_base_fixture(orch_root)))
 
     @classmethod
     def tearDownClass(cls) -> None:

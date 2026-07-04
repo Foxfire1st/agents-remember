@@ -11,6 +11,8 @@ transcript**. A missing turn report is nudged by the manager.
 2. State facts, not a narrative: what changed, what broke, what is proven green, what remains.
 3. The **Respawn State** section must let a fresh successor continue **without reading any transcript**.
 4. Keep it durable and in the series notes; reference it from the leaf `task_doc`.
+5. Default path: `notes/reports/<leaf-id>-worker-report.md`. The control-plane helper exposes this
+   convention so manager nudges and respawn onboarding can point at the same artifact.
 
 ## Shape
 
@@ -26,6 +28,7 @@ transcript**. A missing turn report is nudged by the manager.
 | status       | in-progress | leaf-complete | blocked    |
 | checks       | green | failing:<which> | not-yet-run    |
 | written      | <YYYY-MM-DDTHH:MM>                       |
+| inbox        | <operator_inbox entry id or none>        |
 
 ## What Was Done
 - <concrete change> (files: `<path>`, …)

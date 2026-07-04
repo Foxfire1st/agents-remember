@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxState
+from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxDeliveryState,
+    InboxMessageKind,
+    OperatorInboxState,
+)
 from agents_remember.models.base import ToolResponse
 
 
@@ -15,7 +20,16 @@ class OperatorInboxPostResponse(ToolResponse):
     state: OperatorInboxState
     lifecycleId: str | None = None
     agentId: str | None = None
+    senderAgentId: str | None = None
+    senderRole: AgentRole | None = None
+    recipientRole: AgentRole | None = None
     gateId: str | None = None
+    messageKind: InboxMessageKind
+    artifactPath: str | None = None
+    deliveryState: InboxDeliveryState
+    deliveredAt: str | None = None
+    deliveredToSession: str | None = None
+    deliveryDetail: str | None = None
 
 
 class OperatorInboxPollResponse(ToolResponse):
@@ -23,6 +37,7 @@ class OperatorInboxPollResponse(ToolResponse):
 
     lifecycleId: str | None = None
     agentId: str | None = None
+    recipientRole: AgentRole | None = None
     entryCount: int
     entries: list[dict[str, Any]]
 

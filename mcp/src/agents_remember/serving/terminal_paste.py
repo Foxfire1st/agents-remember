@@ -10,9 +10,9 @@ frontend semantics server-side over tmux primitives:
 
 * **paste** -- ``set-buffer`` + ``paste-buffer -p`` (tmux does the ``ESC[200~ … ESC[201~`` bracketing
   itself), the robust way to inject a multi-line blob into a pane with no escape-byte fiddling.
-* **echo confirmation** -- ``capture-pane`` before/after: the composer echoing the draft (or a
-  ``[Pasted text #N]`` chip) advances the visible pane, so a changed capture is the "delivered" signal.
-  A boot-discarded paste leaves the pane unchanged and is re-pasted through the boot window.
+* **echo confirmation** -- ``capture-pane`` before/after: delivery is confirmed only when the pasted
+  draft text or a new ``[Pasted text #N]`` chip appears. A booting harness may repaint the pane while
+  still discarding stdin, so a generic capture change is not enough.
 * **submit** -- ``send-keys Enter`` then one more ``capture-pane`` advance check (workers auto-start;
   a human draft-only flow leaves ``submit=False`` so the draft stays editable, unsubmitted).
 
@@ -40,18 +40,21 @@ _TMUX_TIMEOUT = 5.0
 # suspend byte, and DEL (0x7f). tmux's ``paste-buffer -p`` re-adds the bracketing around the clean text.
 _PASTE_MARKER = re.compile(r"\x1b\[20[01]~")
 _CONTROL_NOISE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_PASTED_TEXT_CHIP = re.compile(r"\[Pasted text(?: #[0-9]+)?\]")
 
 # Delivery/submit confirmation cadence. Modest by default so a deliberate spawn dispatch does not block
 # unbounded; overridable per call. A just-spawned harness (Claude Code loading MCP) discards stdin while
 # booting, so the paste is retried across the boot window until the composer echoes it.
-_ECHO_TIMEOUT = 8.0
+_ECHO_TIMEOUT = 4.0
 """Seconds to watch for the composer's echo after one paste before re-pasting."""
-_BOOT_DEADLINE = 20.0
+_BOOT_DEADLINE = 30.0
 """Total seconds to keep re-pasting across a harness boot before reporting unconfirmed delivery."""
 _SUBMIT_TIMEOUT = 8.0
 """Seconds to watch for output past the post-paste baseline after ``Enter`` before reporting unsubmitted."""
 _POLL_INTERVAL = 0.4
 """Delay between ``capture-pane`` confirmation polls."""
+_RETRY_DELAY = 0.5
+"""Breather between paste attempts across the boot deadline."""
 
 
 def sanitize_for_injection(text: str) -> str:
@@ -208,11 +211,37 @@ class TerminalPaster:
             baseline = self._capture_pane(tmux_name)
             self._set_buffer(buffer_name, sanitized)
             self._paste_buffer(tmux_name, buffer_name)
-            if self._await_advance(
-                tmux_name, baseline, timeout=echo_timeout, poll_interval=poll_interval
+            if self._await_echo(
+                tmux_name,
+                baseline,
+                sanitized,
+                timeout=echo_timeout,
+                poll_interval=poll_interval,
             ):
                 return True
+            with contextlib.suppress(OSError):
+                self._sleep(_RETRY_DELAY)
         return False
+
+    def _await_echo(
+        self,
+        tmux_name: str,
+        baseline: str,
+        sanitized: str,
+        *,
+        timeout: float,
+        poll_interval: float,
+    ) -> bool:
+        """Poll until the pane contains this paste's visible draft or pasted-text chip."""
+        started = self._monotonic()
+        while True:
+            current = self._capture_pane(tmux_name)
+            if _echo_observed(baseline, current, sanitized):
+                return True
+            if self._monotonic() - started >= timeout:
+                return False
+            with contextlib.suppress(OSError):
+                self._sleep(poll_interval)
 
     def _await_advance(
         self, tmux_name: str, baseline: str, *, timeout: float, poll_interval: float
@@ -226,3 +255,20 @@ class TerminalPaster:
                 return False
             with contextlib.suppress(OSError):
                 self._sleep(poll_interval)
+
+
+def _echo_observed(baseline: str, current: str, sanitized: str) -> bool:
+    """True when ``current`` shows evidence of the paste itself, not just new boot output."""
+    if current == baseline:
+        return False
+    if len(_PASTED_TEXT_CHIP.findall(current)) > len(_PASTED_TEXT_CHIP.findall(baseline)):
+        return True
+    fragment = _echo_fragment(sanitized)
+    return bool(fragment and current.count(fragment) > baseline.count(fragment))
+
+
+def _echo_fragment(sanitized: str) -> str:
+    lines = [line.strip() for line in sanitized.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[0][:120]

@@ -278,7 +278,14 @@ export interface AgentPickupNode {
   entryId: string;
   lifecycleId?: string;
   agentId?: string;
+  senderAgentId?: string;
+  senderRole?: string;
+  recipientRole?: string;
   gateId?: string;
+  messageKind: string;
+  artifactPath?: string;
+  deliveryState: "queued" | "no-hosted-session" | "delivered" | "unconfirmed" | string;
+  deliveredToSession?: string;
   state: "waiting-for-agent" | "check-chat" | string;
   ageSeconds?: number;
   ttlSeconds: number;

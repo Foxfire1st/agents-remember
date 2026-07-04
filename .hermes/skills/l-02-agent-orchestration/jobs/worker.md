@@ -52,15 +52,19 @@ blanks a competent implementer would fill; run the checks; refresh onboarding in
 
 ## Artifact Obligations
 
-- **A MANDATORY turn report** (`templates/turn-report.md`) at **every** hand-off: what was done · issues
-  hit · what was solved · what is left · the respawn-onboarding state for a successor. **A missing report
-  gets nudged by the manager.** This is the worker's single most important obligation — it is how the
-  work survives the session's death and how a respawned successor onboards from state.
+- **A MANDATORY turn report** (`templates/turn-report.md`) at **every** hand-off, written to
+  `notes/reports/<leaf-id>-worker-report.md`: what was done · issues hit · what was solved · what is
+  left · the respawn-onboarding state for a successor. **A missing report gets nudged by the manager**
+  through the `orchestration_nudge_manager` helper. This is the worker's single most important
+  obligation — it is how the work survives the session's death and how a respawned successor onboards
+  from state.
 
 ## Comms Protocol
 
 - **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — receive the dispatch/context packet; post
-  the turn report; raise escalations.
+  the turn report; raise escalations. Agent-to-agent rows carry sender/recipient role metadata and a
+  `messageKind` (`turn-report`, `nudge`, `escalation`, …), while the same durable row stays visible on
+  the dashboard.
 - **Stdin push** — the manager delivers nudges/messages into this hosted session; the worker's replies
   are inbox rows or the turn-report artifact — **never an untracked side channel**.
 - **Escalation** — **up to the manager, never straight to the developer.** A stumped worker, and any

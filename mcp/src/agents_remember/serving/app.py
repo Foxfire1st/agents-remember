@@ -62,6 +62,7 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
+from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
@@ -291,7 +292,13 @@ class OperatorInboxPostRequest(BaseModel):
 
     lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
     agent_id: str | None = Field(default=None, alias="agentId")
+    sender_agent_id: str | None = Field(default=None, alias="senderAgentId")
+    sender_role: AgentRole | None = Field(default=None, alias="senderRole")
+    recipient_role: AgentRole | None = Field(default=None, alias="recipientRole")
     gate_id: str | None = Field(default=None, alias="gateId")
+    message_kind: InboxMessageKind = Field(default="message", alias="messageKind")
+    artifact_path: str | None = Field(default=None, alias="artifactPath")
+    deliver_to_hosted: bool = Field(default=True, alias="deliverToHosted")
     ask: str
     response: str
 
@@ -512,6 +519,15 @@ def create_app(
                 lifecycle_id=request.lifecycle_id,
                 agent_id=request.agent_id,
                 gate_id=request.gate_id,
+                sender_agent_id=request.sender_agent_id,
+                sender_role=request.sender_role,
+                recipient_role=request.recipient_role,
+                message_kind=request.message_kind,
+                artifact_path=request.artifact_path,
+                deliver_to_hosted=request.deliver_to_hosted,
+                terminal_catalog=catalog,
+                terminal_host=host,
+                terminal_paster=paster,
                 ask=request.ask,
                 response=request.response,
                 created_by="developer",

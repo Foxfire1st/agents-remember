@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxMessageKind,
     OperatorInboxEntry,
     OperatorInboxVia,
     create_operator_inbox_entry,
@@ -14,6 +16,10 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
+from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_paste import TerminalPaster
 
 from .base import _tool_payload
 
@@ -39,6 +45,15 @@ def operator_inbox_post_payload(
     created_by: str,
     created_via: OperatorInboxVia,
     gate_id: str | None = None,
+    sender_agent_id: str | None = None,
+    sender_role: AgentRole | None = None,
+    recipient_role: AgentRole | None = None,
+    message_kind: InboxMessageKind = "message",
+    artifact_path: str | None = None,
+    deliver_to_hosted: bool = True,
+    terminal_catalog: TerminalCatalog | None = None,
+    terminal_host: TerminalHost | None = None,
+    terminal_paster: TerminalPaster | None = None,
 ) -> dict[str, Any]:
     entry = create_operator_inbox_entry(
         entry_id=new_ulid(),
@@ -50,10 +65,24 @@ def operator_inbox_post_payload(
         response=response,
         created_by=created_by,
         created_via=created_via,
+        sender_agent_id=sender_agent_id,
+        sender_role=sender_role,
+        recipient_role=recipient_role,
+        message_kind=message_kind,
+        artifact_path=artifact_path,
     )
     store = _store(config)
     store.append(entry)
     store.compact(now=datetime.now(UTC))
+    if deliver_to_hosted:
+        entry = deliver_inbox_entry(
+            store=store,
+            catalog=terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root)),
+            host=terminal_host or TerminalHost(),
+            paster=terminal_paster or TerminalPaster(),
+            entry=entry,
+            submit=True,
+        )
     return _tool_payload(
         "operator_inbox_post",
         {
@@ -63,7 +92,16 @@ def operator_inbox_post_payload(
             "state": entry.state,
             "lifecycleId": entry.lifecycleId,
             "agentId": entry.agentId,
+            "senderAgentId": entry.senderAgentId,
+            "senderRole": entry.senderRole,
+            "recipientRole": entry.recipientRole,
             "gateId": entry.gateId,
+            "messageKind": entry.messageKind,
+            "artifactPath": entry.artifactPath,
+            "deliveryState": entry.deliveryState,
+            "deliveredAt": entry.deliveredAt,
+            "deliveredToSession": entry.deliveredToSession,
+            "deliveryDetail": entry.deliveryDetail,
         },
     )
 
@@ -73,8 +111,13 @@ def operator_inbox_poll_payload(
     *,
     lifecycle_id: str | None,
     agent_id: str | None,
+    recipient_role: AgentRole | None = None,
 ) -> dict[str, Any]:
-    entries = _store(config).list_pending(lifecycle_id=lifecycle_id, agent_id=agent_id)
+    entries = _store(config).list_pending(
+        lifecycle_id=lifecycle_id,
+        agent_id=agent_id,
+        recipient_role=recipient_role,
+    )
     return _tool_payload(
         "operator_inbox_poll",
         {
@@ -82,6 +125,7 @@ def operator_inbox_poll_payload(
             "operation": "operator_inbox_poll",
             "lifecycleId": lifecycle_id,
             "agentId": agent_id,
+            "recipientRole": recipient_role,
             "entryCount": len(entries),
             "entries": [_entry_payload(entry) for entry in entries],
         },

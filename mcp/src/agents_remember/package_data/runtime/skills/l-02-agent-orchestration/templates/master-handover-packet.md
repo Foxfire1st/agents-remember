@@ -10,6 +10,8 @@ orchestrator integrates a completed master into the super branch from.
 2. Name the integration branch precisely; the orchestrator bases its C-11 integration on it.
 3. The carry-over state must let the orchestrator's `c-11-memory-carryover-from-branch` integration run
    without re-deriving what landed.
+4. Post the packet as an `operator_inbox_post` row with `messageKind="master-handover"` and push
+   delivery enabled so the durable inbox row and stdin notification agree.
 
 ## Shape
 
