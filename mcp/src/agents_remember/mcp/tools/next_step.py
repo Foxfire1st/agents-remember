@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 # leaf-26 Lifecycle Flow tab RUNDOWN, with the developer-chosen plan-approval
 # hand-off appended (S5: ride the first gate tool).
 FRONT_HALF_RUNDOWN: list[str] = [
-    "reframe — restate the request as agreed work, then present it for the developer's agreement.",
+    "reframe — restate the request as agreed work, then present it for the developer's agreement (the orchestrator lifecycle: l-01-agent-lifecycles roles/orchestrator.md).",
     "research — read_ar_files · grepai · cgc (they fire unpredictably, so this half is prose-guided, "
     "not per-tool).",
     "job selection — bug / feature → build ; triage / research → research-only exit.",

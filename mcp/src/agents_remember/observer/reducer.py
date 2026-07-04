@@ -281,7 +281,7 @@ def _persistent_lifecycles(
 def _persistent_from_enclosure(enclosure: EnclosureNode) -> LifecycleProjection:
     """Seed a paused persistent lifecycle from a worktree contract (no event log).
 
-    The l-01 phase is unknown without events, so it is inferred from the contract's git progress:
+    The lifecycle phase is unknown without events, so it is inferred from the contract's git progress:
     a completed closeout/integration reads ``close``, otherwise ``build`` (worktrees live in build).
     """
     closed = "completed" in {enclosure.closeoutStatus, enclosure.integrationStatus}

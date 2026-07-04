@@ -66,8 +66,8 @@ class EscalationPacket(BaseModel):
 
 
 def template_path(runtime_root: Path, name: str) -> Path:
-    """Return one L2 template path under the runtime skill tree."""
-    return runtime_root / "skills" / "l-02-agent-orchestration" / "templates" / name
+    """Return one orchestration template path under the runtime skill tree."""
+    return runtime_root / "skills" / "l-01-agent-lifecycles" / "templates" / name
 
 
 def turn_report_artifact(task_root: Path, leaf_id: str, title: str, runtime_root: Path) -> TurnReportArtifact:

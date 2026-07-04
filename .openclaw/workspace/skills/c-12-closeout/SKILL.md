@@ -40,7 +40,7 @@ records the developer's explicit commit approval. Agents must not treat
 implementation approval, a previous "looks good", or their own judgment as
 commit approval.
 
-The relay follows the `l-01-session-job-lifecycle` skill hand-off protocol: run the
+The relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
 preview/dry-run first, then call
 `lifecycle_turn_end_notification(summary={…the preview facts + the commit ask…})` as the **last tool
 call**, then deliver the preview facts and proposed messages as plain

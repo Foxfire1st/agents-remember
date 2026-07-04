@@ -46,7 +46,7 @@ class ArtifactHelperTests(unittest.TestCase):
         self.assertEqual(artifact.path, "/tasks/series/notes/reports/260703-L3-worker-report.md")
         self.assertEqual(
             artifact.templatePath,
-            "/runtime/skills/l-02-agent-orchestration/templates/turn-report.md",
+            "/runtime/skills/l-01-agent-lifecycles/templates/turn-report.md",
         )
 
     def test_escalation_moves_one_rung_only(self) -> None:
