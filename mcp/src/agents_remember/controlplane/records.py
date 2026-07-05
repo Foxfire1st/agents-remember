@@ -31,6 +31,10 @@ GateKind = Literal[
     "closeout-approval",
     "push-approval",
     "integration-approval",
+    # `master-handover-approval` is the master-exit seam gate: the manager raises it with the
+    # reviewer verdict attached as evidence; the orchestrator decides it on the happy path
+    # (delegable, never human-pinned) — human review concentrates at the super gate.
+    "master-handover-approval",
     "cleanup-approval",
     "agent-question",
     "provider-retry",

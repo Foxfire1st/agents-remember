@@ -523,6 +523,23 @@ class OrchestrationSettingsTests(unittest.TestCase):
         self.assertEqual(closeout.delegated_role, "manager")
         self.assertTrue(closeout.require_reviewer_verdict)
 
+    def test_at_seams_flag_binds_delegated_seam_rules_through_parse(self) -> None:
+        config = self._load(
+            {
+                "gateDelegation": {
+                    "policy": "manager-decides-leaf-gates",
+                    "requireReviewerVerdictAtSeams": True,
+                }
+            }
+        )
+
+        policy = config.orchestration.gate_policy
+        handover = policy.rule_for("master-handover-approval")
+        self.assertEqual(handover.delegated_role, "orchestrator")
+        self.assertTrue(handover.require_reviewer_verdict)
+        self.assertFalse(policy.rule_for("plan-approval").require_reviewer_verdict)
+        self.assertTrue(config.orchestration.require_reviewer_verdict_at_seams)
+
     def test_human_pinned_kind_cannot_be_delegated(self) -> None:
         with self.assertRaisesRegex(ConfigError, "human-pinned"):
             self._load(

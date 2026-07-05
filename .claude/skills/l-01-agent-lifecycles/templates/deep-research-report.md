@@ -68,7 +68,7 @@ work, use the full shape.
 
 - Research-only exit:
 - Spawn build?
-- Suggested build mode if spawned:
+- Suggested artifact shape if spawned (minimal `w-02` task vs master + series):
 - Plan-gate status:
 ```
 

@@ -1,6 +1,6 @@
 # Verdict Template (adversarial reviewer)
 
-The artifact an **adversarial reviewer** writes at a seam (`roles/adversarial-reviewer.md`). It lands
+The artifact an **adversarial reviewer** writes at a seam (`roles/reviewer.md`). It lands
 under the series `notes/reports/` directory and attaches to the handover gate as **judge evidence**.
 There are two variants: **master-exit** (before a manager hands over to the orchestrator) and
 **super-exit** (before the orchestrator hands over to the developer).
@@ -30,7 +30,7 @@ There are two variants: **master-exit** (before a manager hands over to the orch
 | reviewer        | <this reviewer's agent/lifecycle id>               |
 | task docs       | <master task_doc + leaf task docs>                 |
 | recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
-| decider         | <orchestrator | developer> (per L4 policy)         |
+| decider         | orchestrator (delegated `master-handover-approval`; serious issues escalate → developer) |
 | artifact path   | notes/reports/<master-id>-master-exit-verdict.md   |
 | gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass | pass-with-notes | block> |
 | written         | <YYYY-MM-DDTHH:MM>                                  |
@@ -76,7 +76,7 @@ reviewer does not.
 | reviewer        | <this reviewer's agent/lifecycle id>               |
 | task docs       | <portfolio task docs + master task docs>           |
 | recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
-| decider         | developer (or delegated role per L4 policy)        |
+| decider         | developer (human review concentrates at the super gate) |
 | artifact path   | notes/reports/<series-id>-super-exit-verdict.md    |
 | gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass | pass-with-notes | block> |
 | written         | <YYYY-MM-DDTHH:MM>                                  |

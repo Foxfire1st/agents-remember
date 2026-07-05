@@ -24,8 +24,12 @@ HUMAN_PINNED_GATE_KINDS: frozenset[GateKind] = frozenset(
     {"integration-approval", "push-approval", "cleanup-approval"}
 )
 DELEGABLE_GATE_KINDS: frozenset[GateKind] = frozenset(
-    {"plan-approval", "closeout-approval"}
+    {"plan-approval", "closeout-approval", "master-handover-approval"}
 )
+# The seam kinds `requireReviewerVerdictAtSeams` binds: delegated decisions on these kinds
+# demand reviewer-verdict evidence. (The super-exit seam stays human via the pinned
+# integration/push kinds, where the human sees the attached verdict directly.)
+SEAM_GATE_KINDS: frozenset[GateKind] = frozenset({"master-handover-approval"})
 
 
 @dataclass(frozen=True)
@@ -108,16 +112,41 @@ def named_gate_policy(name: str) -> GatePolicy:
     if name == "all-human":
         return DEFAULT_GATE_POLICY
     if name == "manager-decides-leaf-gates":
+        # Leaf gates -> the manager; the master-exit handover -> the orchestrator (developer
+        # ruling 2026-07-05: happy path through the orchestrator, human review at the super gate).
         return make_gate_policy(
             [
                 GatePolicyRule(kind="plan-approval", delegated_role="manager"),
                 GatePolicyRule(kind="closeout-approval", delegated_role="manager"),
+                GatePolicyRule(kind="master-handover-approval", delegated_role="orchestrator"),
             ]
         )
     raise ValueError(
         "unknown gate delegation policy "
         f"{name!r}; expected one of ['all-human', 'manager-decides-leaf-gates']"
     )
+
+
+def apply_seam_verdict_requirement(policy: GatePolicy) -> GatePolicy:
+    """Bind reviewer-verdict evidence to every DELEGATED seam-kind rule.
+
+    The `requireReviewerVerdictAtSeams` switch: seam kinds without a delegated role stay
+    human-decided (the human sees the attached verdict on the gate), so only delegated seam
+    rules gain the hard requirement.
+    """
+    rules = []
+    for rule in policy.rules:
+        if rule.kind in SEAM_GATE_KINDS and rule.delegated_role is not None:
+            rules.append(
+                GatePolicyRule(
+                    kind=rule.kind,
+                    delegated_role=rule.delegated_role,
+                    require_reviewer_verdict=True,
+                )
+            )
+        else:
+            rules.append(rule)
+    return GatePolicy(tuple(rules))
 
 
 def has_reviewer_verdict_evidence(gate: GateRecord) -> bool:

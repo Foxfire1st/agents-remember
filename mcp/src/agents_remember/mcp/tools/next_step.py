@@ -58,9 +58,10 @@ FRONT_HALF_RUNDOWN: list[str] = [
     "reframe — restate the request as agreed work, then present it for the developer's agreement (the orchestrator lifecycle: l-01-agent-lifecycles roles/orchestrator.md).",
     "research — read_ar_files · grepai · cgc (they fire unpredictably, so this half is prose-guided, "
     "not per-tool).",
-    "job selection — bug / feature → build ; triage / research → research-only exit.",
-    "task file exists? (build/fix) — yes → worktree_start ; "
-    "no → task_doc first (persist the proposal + approval), then worktree_start.",
+    "route the event (the lens tunes it): no task doc → design one ; approved doc + code change "
+    "→ build ; no code change → research-only exit ; triage may route, spawn, or escalate.",
+    "task file exists? — no → task_doc first (persist the proposal + approval); worktree_start "
+    "only AFTER the plan gate: task doc → branch → worktree, in that order.",
     "when the plan is ready, present it and notify via lifecycle_turn_end_notification, then "
     "stop — your next AR tool call resumes automatically; from worktree_start on, every tool "
     "response carries the next step.",

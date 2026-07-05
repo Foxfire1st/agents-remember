@@ -1,7 +1,7 @@
 # Conversation-Handover-Packet Template
 
-**One schema, three uses** (design record, the COMMS model): **role takeover** (profile-fit — the frame
-spawns the correct profile and hands over), **worker respawn** (a fresh worker continues a leaf), and
+**One schema, three uses** (design record, the COMMS model): **role takeover** (profile-fit — the orchestrator's
+profile check, `roles/orchestrator.md` Orchestrated Mode, spawns the correct profile and hands over), **worker respawn** (a fresh worker continues a leaf), and
 any **master-complete handover** that needs the receiver to onboard from **state, not the transcript**.
 The receiver always onboards from this packet, never from a prior conversation.
 

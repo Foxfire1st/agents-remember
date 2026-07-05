@@ -27,8 +27,8 @@ invariant the bug violates. Defaults to a build; the fix lands through `decide -
 
 Lead by pinning down intent, scope, and the non-goals — what this feature is explicitly *not*. Use the
 design doctrine in `tasks/AGENTS.md` to pressure-test the shape, and Intent retrieval to find the
-contracts the feature must respect. Defaults to a build; size decides chat vs durable `w-02-light-task-workflow` task at
-`decide`.
+contracts the feature must respect. Defaults to a build; size decides the minimal `w-02-light-task-workflow` artifact vs a master +
+sub-task series at `decide`.
 
 ## triage
 

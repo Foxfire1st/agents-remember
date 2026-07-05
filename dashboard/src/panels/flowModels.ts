@@ -1,8 +1,10 @@
-// The flow-model registry for the FlowTab canvas (orchestration L0): each model is one drawable
-// lifecycle/interaction design, rendered by FlowTab's segment renderer and switched by its nav.
-// Models are STATIC design artifacts (no store reads) — the canvas is where a lifecycle is drawn,
-// reviewed with the developer, and only then built. `current` edges/pieces are wired today; `proposed`
-// is the orchestration series (mirrors the original task-26 mint/amber legend).
+// The flow-model registry for the FlowTab canvas: each model is one drawable lifecycle design,
+// rendered by FlowTab's segment renderer and switched by its nav. Models are STATIC design
+// artifacts (no store reads) — the canvas is where a lifecycle is drawn, reviewed with the
+// developer, and kept in step with the doctrine (visuals ride every doctrine change). The drawn
+// truth is the unified l-01-agent-lifecycles skill: ROUTER + per-role lifecycles; the retired
+// FRAME and BUILD-JOB models died with the l-01/l-02 convergence. `current` = wired today;
+// `proposed` = doctrine not yet exercised end-to-end.
 
 export type Status = "current" | "proposed";
 
@@ -49,48 +51,52 @@ export interface FlowModel {
   segments: FlowSegment[];
 }
 
-// --- build job (task 26 — the original model, preserved verbatim) -----------------------------
+// --- the router (the unified skill's spine) ------------------------------------------------------
 
-const BUILD_JOB: FlowModel = {
-  id: "build-job",
-  label: "Build job",
-  title: "build job — the hint chain",
+const ROUTER: FlowModel = {
+  id: "router",
+  label: "Router",
+  title: "router — one skill, one lifecycle per agent type",
   takeaway:
-    "The turn-end notification is not a tool the agent calls — it auto-fires when a gate tool " +
-    "(dry-run / preview / task_doc-create) is called, so the agent can't forget it (amber left-bar " +
-    "nodes below). The front half is non-linear (research fires unpredictably; task-file-exists? " +
-    "isn't a tool), so lifecycle_start emits a one-time prose rundown instead of per-tool hints. " +
-    "From worktree_start on it's linear; mint edges already chain (guidance.lifecycle_guidance), " +
-    "amber is this series. Historically this drawing is the \"Eierlegende Wollmilchsau\": one " +
-    "implicit role doing a bit of everything minus orchestration, the developer wearing the " +
-    "orchestrator + manager hats throughout — see the FRAME model for the decomposition.",
+    "l-01-agent-lifecycles routes every session by EXACTLY three conditions: AR_SPAWN_ROLE set → " +
+    "run that role's lifecycle; else a role brief as first message → that role (the brief IS the " +
+    "session start); else the session is developer-facing → the ORCHESTRATOR. Edge cases are " +
+    "decided: an unresolvable role value falls through to the brief; a brief that never arrives " +
+    "means announce-and-wait, never improvise. The invariant ladder binds every path: approved " +
+    "task doc → branch (intent) → worktree only where something is built — and chat is never a " +
+    "build route.",
   segments: [
-    { kind: "start", label: "▸ developer request — stated in chat", next: "context_packet", nextStatus: "proposed" },
-    { kind: "node", phase: "1 · trust-checkpoint", tool: "context_packet", detail: "providers · drift · freshness", next: "lifecycle_start", nextStatus: "proposed" },
-    { kind: "node", phase: "1 · trust-checkpoint", tool: "lifecycle_start", detail: "promote the lifecycle — and emit the front-half rundown ↓", next: "(prose rundown)", nextStatus: "proposed" },
+    { kind: "start", label: "▸ a session boots — which lifecycle am I?", next: "condition 1", nextStatus: "current" },
     {
       kind: "rundown",
-      title: "front half · prose rundown from lifecycle_start (not per-tool hints)",
+      title: "the three conditions — in order, no fourth entry",
       lines: [
-        { line: "reframe — restate the request as agreed work" },
-        { line: "research — read_ar_files · grepai · cgc   (fire unpredictably → not hint anchors)" },
-        { line: "job selection — bug / feature → build   ·   triage / research → research-only exit" },
-        { line: "⟁ task file exists? (build/fix)     yes → worktree_start     no ↓", junction: true },
-        { line: "task_doc — persist the chat task proposal as a durable file (+ approval), then ↓" },
+        { line: "1 · AR_SPAWN_ROLE set → run roles/<value>.md   (designer = the same hat in another chair)" },
+        { line: "⟁ unresolvable value → fall through to condition 2 · no brief arrives → announce on the inbox and WAIT", junction: true },
+        { line: "2 · first message is a role brief (templates/*-brief.md shape, or `ROLE BRIEF — <role>`) → that role" },
+        { line: "3 · otherwise: developer-facing session → roles/orchestrator.md (solo = the jobs with hats collapsed)" },
       ],
     },
-    { kind: "divider", label: "↓ from here the lifecycle is linear — each gate tool auto-fires its notification ↓" },
-    { kind: "node", phase: "3 · decide", tool: "worktree_start --dry-run", detail: "verify the worktree-intent dry-run (self-fix first)", rides: "worktree-intent", next: "worktree_start (apply)", nextStatus: "proposed" },
-    { kind: "node", phase: "3→4 · build", tool: "worktree_start (apply)", detail: "open the worktree — lifecycle promotes to persistent", next: "implement + run checks", nextStatus: "proposed" },
-    { kind: "node", phase: "4 · build", tool: "implement + run checks", detail: "edit · tests · quality wrapper", next: "worktree_closeout_preview", nextStatus: "proposed" },
-    { kind: "node", phase: "4 · build", tool: "worktree_closeout_preview", detail: "verify the closeout preview (self-fix first)", rides: "commit / closeout-approval", next: "worktree_closeout_apply", nextStatus: "proposed" },
-    { kind: "node", phase: "4 · build", tool: "worktree_closeout_apply", detail: "commit code · memory · ledger", next: "worktree_integrate --dry-run", nextStatus: "current" },
-    { kind: "node", phase: "4 · build", tool: "worktree_integrate --dry-run", detail: "verify the integration dry-run", rides: "integration-approval", next: "worktree_integrate (apply)", nextStatus: "proposed" },
-    { kind: "node", phase: "4 · build", tool: "worktree_integrate (apply)", detail: "land into the source branch", next: "memory_carryover_apply", nextStatus: "current" },
-    { kind: "node", phase: "5 · close", tool: "memory_carryover_apply", detail: "carry parked memory home", next: "lifecycle_finalize_task --dry-run", nextStatus: "current" },
-    { kind: "node", phase: "5 · close", tool: "lifecycle_finalize_task --dry-run", detail: "verify the landed-edge + cleanup plan", rides: "cleanup / finalization", next: "lifecycle_finalize_task (apply)", nextStatus: "proposed" },
-    { kind: "node", phase: "5 · close", tool: "lifecycle_finalize_task (apply)", detail: "prove the edge · reclaim worktrees", next: "lifecycle_end", nextStatus: "current" },
-    { kind: "node", phase: "5 · close", tool: "lifecycle_end", detail: "terminal" },
+    { kind: "divider", label: "— the event loop (orchestrator): route each event into a job —" },
+    {
+      kind: "rundown",
+      title: "jobs — Design · Portfolio · Orchestrate (+ research-only exit)",
+      lines: [
+        { line: "no task doc for the ask → JOB D — pull the designer hat (no git surface)" },
+        { line: "docs exist, coherence/order in question → JOB P — bulwark · reshape · the planner master (no git surface)" },
+        { line: "approved series ready to implement → JOB O — super-branch INTENT (a branch, not a worktree) → dispatch" },
+        { line: "no code change → research-only exit — chat is the right medium" },
+      ],
+    },
+    {
+      kind: "rundown",
+      title: "the invariant ladder — every path, every role",
+      lines: [
+        { line: "task doc (approved) → branch (intent) → worktree (only where something is built)" },
+        { line: "⟁ chat is never a build route — small code work takes the minimal w-02 artifact", junction: true },
+        { line: "hat-collapse: flat run → the orchestrator wears the manager hat · session scale → hands-on build" },
+      ],
+    },
   ],
 };
 
@@ -99,16 +105,18 @@ const BUILD_JOB: FlowModel = {
 const ORCHESTRATOR: FlowModel = {
   id: "orchestrator",
   label: "Orchestrator",
-  title: "orchestrator — portfolio → super integration branch",
+  title: "orchestrator — the event loop, drawn on its biggest run (Job O)",
   takeaway:
-    "Developer-requested, never self-spawning. The opening move is the PORTFOLIO PHASE: streamline " +
-    "the requested masters (coherence before sequencing) using the memory substrate — route indexes, " +
-    "onboarding, grepai, cgc — with sub-agents writing durable reports. Only a master-granular " +
-    "dependency DAG proceeds to dispatch: masters base off the SUPER branch, so every integration " +
-    "accumulates. The developer reviews wholesale at the super seam, and the orchestrator closes with " +
-    "grounded self-improvement proposals — proposals, never automated self-modification.",
+    "The developer-facing lifecycle is an EVENT LOOP over durable portfolio state: every session " +
+    "(resumption is the common case) opens with the trust checkpoint + PORTFOLIO ORIENTATION, then " +
+    "routes the event — Design (the hat), Portfolio, Orchestrate, or a research-only exit. Below is " +
+    "the biggest shape, an orchestrated run: streamline → portfolio gate → super-branch INTENT (a " +
+    "branch, not a worktree) → dependency-ordered dispatch → decide each master-handover gate → " +
+    "integrate per-edge in a transient worktree → super-exit review → developer handover. Human " +
+    "review concentrates at the SUPER gate; the orchestrator closes with grounded self-improvement " +
+    "proposals — never automated self-modification.",
   segments: [
-    { kind: "start", label: "▸ developer request — \"orchestrate these masters\" (orchestration skill)", next: "profile-fit check", nextStatus: "proposed" },
+    { kind: "start", label: "▸ event: \"orchestrate these masters\" — after trust checkpoint + portfolio orientation", next: "profile-fit check", nextStatus: "proposed" },
     {
       kind: "rundown",
       title: "seat · profile — before any analysis",
@@ -130,11 +138,11 @@ const ORCHESTRATOR: FlowModel = {
       ],
     },
     { kind: "node", phase: "portfolio · gate", tool: "portfolio plan gate", detail: "developer approves the reshaped portfolio + DAG + dispatch order — one wholesale review", rides: "plan-approval", ridesNote: "⊘ the streamlining output is a PROPOSAL — no silent rewrites of dev-accepted tasks", next: "create super integration branch", nextStatus: "proposed" },
-    { kind: "node", phase: "topology", tool: "super integration branch", detail: "based off main · orchestrator-owned · masters will base off IT (accumulative change set)", next: "dispatch loop", nextStatus: "proposed" },
+    { kind: "node", phase: "topology", tool: "super-branch INTENT", detail: "creates a BRANCH off main, nothing more — masters base off IT; the orchestrator worktree exists only per integration edge", next: "dispatch loop", nextStatus: "proposed" },
     { kind: "divider", label: "↺ dependency-ordered dispatch loop — send out the next READY master's manager ↺" },
-    { kind: "node", phase: "dispatch", tool: "spawn_agent_session (manager)", detail: "job file + master context packet · seat leaf + chat · knobs from settings/job (harness · model · effort)", next: "monitor", nextStatus: "proposed" },
-    { kind: "node", phase: "monitor", tool: "monitor + steer", detail: "turn-report artifacts · nudges · escalation intake · spirit test on plan deltas (within spirit → act + log; against → raise)", next: "master handover", nextStatus: "proposed" },
-    { kind: "node", phase: "handover", tool: "master handover packet", detail: "integration branch ref · change-set summary · MASTER-EXIT adversarial verdict · carry-over state", rides: "master-exit seam", ridesNote: "⊘ adversarial review seam 1 of 2 — before the manager hands over to the orchestrator", next: "integrate master → super", nextStatus: "proposed" },
+    { kind: "node", phase: "dispatch", tool: "spawn_agent_session (manager)", detail: "manager-brief.md · AR_SPAWN_ROLE=manager · qualified leaf key · base = the CURRENT super tip", next: "monitor", nextStatus: "proposed" },
+    { kind: "node", phase: "monitor", tool: "monitor + steer", detail: "turn reports · nudges · escalations · spirit test on deltas · a wrong deliverable REOPENS its leaf (task_reopen) — never a redo sibling", next: "master handover", nextStatus: "proposed" },
+    { kind: "node", phase: "handover", tool: "decide master-handover-approval", detail: "the manager RAISED it with the verdict attached — the ORCHESTRATOR decides (own ambient identity; owner-never-self-approves holds; the policy may require the verdict)", rides: "master-handover-approval", ridesNote: "⊘ seam 1 of 2 — happy path through the orchestrator; a handover it cannot honestly decide escalates to the developer", next: "integrate master → super", nextStatus: "proposed" },
     { kind: "node", phase: "integrate", tool: "integrate master → super (C-11)", detail: "orchestrator WORKTREE with super as source · merge/carry-over · memory single-siding · ledger maps every commit", next: "↺ next ready master — until the DAG is drained", nextStatus: "proposed" },
     { kind: "divider", label: "↓ DAG drained — the super branch holds the accumulated change set ↓" },
     { kind: "node", phase: "seam 2", tool: "super-exit adversarial review", detail: "wholesale verdict on the super branch: completion vs tasks · quality · onboarding-vs-code", rides: "super-exit seam", ridesNote: "⊘ adversarial review seam 2 of 2 — before the orchestrator hands over to the developer", next: "developer handover", nextStatus: "proposed" },
@@ -152,14 +160,15 @@ const MANAGER: FlowModel = {
   label: "Manager",
   title: "manager — one master, leaf loop → master-exit handover",
   takeaway:
-    "Spawned by the orchestrator with the master's context packet. Owns exactly one master series: " +
-    "dispatches a fresh worker per leaf, reviews turn-report artifacts, decides DELEGATED leaf gates " +
-    "(attributed — the owning agent never self-approves), and integrates leaves into the master " +
-    "integration branch via C-11. It exits through the master-exit adversarial seam and hands the " +
-    "completed integration branch to the orchestrator. Escalation ladders up — a stumped manager " +
-    "raises to the orchestrator, never straight to the developer.",
+    "Spawned by the orchestrator with a manager brief (its entire session start). Owns exactly one " +
+    "master: dispatches a fresh worker per leaf, reviews turn reports, decides DELEGATED leaf gates " +
+    "(plan · closeout — the owning agent never self-approves), owns the leaf lifecycle end-to-end " +
+    "(worktree_start → closeout → integrate → finalize), and REOPENS a leaf whose deliverable came " +
+    "out wrong. At master exit it spawns the reviewer, then RAISES master-handover-approval with " +
+    "the verdict attached — the ORCHESTRATOR decides it. In a flat run the orchestrator wears this " +
+    "hat. Escalation: to the orchestrator, never straight to the developer.",
   segments: [
-    { kind: "start", label: "▸ spawned by the orchestrator — job file + master context packet (auto-submitted)", next: "seat", nextStatus: "proposed" },
+    { kind: "start", label: "▸ spawned by the orchestrator — manager-brief.md pasted + submitted (the brief is the session start)", next: "seat", nextStatus: "proposed" },
     {
       kind: "rundown",
       title: "seat · intake",
@@ -171,14 +180,14 @@ const MANAGER: FlowModel = {
       ],
     },
     { kind: "divider", label: "↺ leaf dispatch loop — next leaf ↺" },
-    { kind: "node", phase: "dispatch", tool: "spawn_agent_session (worker)", detail: "fresh session on the leaf · context packet pasted + submitted · worker attaches the leaf worktree", next: "monitor worker", nextStatus: "proposed" },
+    { kind: "node", phase: "dispatch", tool: "spawn_agent_session (worker)", detail: "fresh session · worker-brief.md pasted + submitted · AR_SPAWN_ROLE=worker · the worker edits inside the worktrees the brief names", next: "monitor worker", nextStatus: "proposed" },
     { kind: "node", phase: "monitor", tool: "monitor worker", detail: "turn-report artifacts expected at every hand-off · inactivity or missing artifact → rate-limited stdin nudge · escalation intake via inbox", next: "review artifact", nextStatus: "proposed" },
-    { kind: "node", phase: "review", tool: "review artifact vs task_doc", detail: "completion vs requirements/steps · checks green · onboarding refreshed in the same pass", next: "delegated gates", nextStatus: "proposed" },
-    { kind: "node", phase: "gate", tool: "delegated leaf gates (plan · closeout)", detail: "decidedBy: manager lifecycle · decidedVia: orchestration · appended, dashboard-visible", rides: "delegated gate", ridesNote: "⊘ policy-configured delegation (L4) — the OWNING agent never self-approves; a distinct configured role may", next: "integrate leaf → master", nextStatus: "proposed" },
-    { kind: "node", phase: "integrate", tool: "integrate leaf → master branch (C-11)", detail: "ff-only / replay per c-09 · ↺ next leaf until the master's leaves are done", next: "master-exit review", nextStatus: "current" },
+    { kind: "node", phase: "review", tool: "review artifact vs task_doc", detail: "completion vs requirements/steps · checks green · onboarding same-pass · ⟁ wrong deliverable? → task_reopen the SAME leaf, reshape — never a redo sibling", next: "delegated gates", nextStatus: "proposed" },
+    { kind: "node", phase: "gate", tool: "delegated leaf gates (plan · closeout)", detail: "decidedBy: manager lifecycle · decidedVia: orchestration · appended, dashboard-visible", rides: "delegated gate", ridesNote: "⊘ policy-configured delegation — the OWNING agent never self-approves; a distinct configured role may", next: "integrate leaf → master", nextStatus: "proposed" },
+    { kind: "node", phase: "integrate", tool: "integrate leaf → master branch (C-11)", detail: "ff-only / replay per c-09 · a durable gate here is integration-approval — HUMAN-pinned · ↺ next leaf until done", next: "master-exit review", nextStatus: "current" },
     { kind: "divider", label: "↓ all leaves landed on the master integration branch ↓" },
-    { kind: "node", phase: "seam 1", tool: "master-exit adversarial review", detail: "spawn reviewer · verdict artifact: completion vs task docs · tools.md quality · onboarding-vs-code · ⟁ blocked? → fix leaves ↺", rides: "master-exit seam", next: "handover to orchestrator", nextStatus: "proposed" },
-    { kind: "node", phase: "handover", tool: "handover packet → orchestrator", detail: "inbox post (durable) + stdin push · integration branch ref · change-set summary · verdict ref · carry-over state", next: "seat stays reachable", nextStatus: "proposed" },
+    { kind: "node", phase: "seam 1", tool: "master-exit adversarial review", detail: "spawn reviewer (AR_SPAWN_ROLE=reviewer) · verdict: completion · quality · onboarding-vs-code · ⟁ blocked? → fix leaves ↺", rides: "master-exit seam", next: "handover to orchestrator", nextStatus: "proposed" },
+    { kind: "node", phase: "handover", tool: "RAISE master-handover-approval + packet", detail: "gate raised with the verdict attached (evidenceRefs) · packet via inbox + push · the ORCHESTRATOR decides the gate", rides: "master-handover-approval", ridesNote: "⊘ delegable, never human-pinned — human review concentrates at the super gate", next: "seat stays reachable", nextStatus: "proposed" },
     { kind: "node", phase: "close", tool: "seat remains", detail: "chat + coordination leaf stay reachable until the series retires" },
   ],
 };
@@ -188,31 +197,29 @@ const MANAGER: FlowModel = {
 const WORKER: FlowModel = {
   id: "worker",
   label: "Worker",
-  title: "worker — one leaf, fresh session, mandatory turn report",
+  title: "worker — one leaf, one session, one report",
   takeaway:
-    "Short-lived by design: one worker per leaf, fresh context, onboarded from the context packet and " +
-    "the task_doc — never from a transcript. It runs the normal l-01 build spine inside the leaf " +
-    "worktree (the spine is unchanged; the job lens specializes it). Its closeout gate is decided by " +
-    "the MANAGER (delegated, attributed). Every hand-off leaves a turn-report artifact — a missing " +
-    "report gets nudged. A stumped worker escalates to its manager via the inbox; never to the " +
-    "developer directly.",
+    "Self-contained and short-lived: the brief IS the session start (it replaces the front half the " +
+    "spawner already ran). The worker orients with paired reads, builds exactly the leaf plan with " +
+    "same-pass onboarding, gets the checks green, and ends at the MANDATORY turn report. It owns no " +
+    "lifecycle machinery — closeout, integration, finalization, and gates belong to the owning " +
+    "seat — and it never git-commits. A plan delta beyond blank-filling escalates one rung to the " +
+    "owning seat; the spirit test lives with the orchestrator, not here.",
   segments: [
-    { kind: "start", label: "▸ spawned on a leaf — context packet pasted + submitted (auto-start)", next: "worktree_attach", nextStatus: "proposed" },
-    { kind: "node", phase: "attach", tool: "worktree_attach", detail: "leaf enclosure → resumes the leaf's persistent lifecycle · own harness + MCP process (ambient singleton)", next: "l-01 build spine", nextStatus: "current" },
+    { kind: "start", label: "▸ spawned on a leaf — worker-brief.md pasted + submitted (the brief is the session start)", next: "orient", nextStatus: "current" },
     {
       kind: "rundown",
-      title: "l-01 build — the normal spine, unchanged (job lens: worker)",
+      title: "the worker loop — roles/worker.md, self-contained",
       lines: [
-        { line: "implement per the leaf plan · onboarding refreshed in the SAME pass (c-05)" },
-        { line: "checks green before every incremental commit (tools.md · lint · typecheck · tests)" },
-        { line: "⟁ stumped for good? → escalate to the MANAGER (inbox, push-delivered) — never straight to the dev", junction: true },
+        { line: "intake — the brief + leaf task_doc + predecessor report; never a transcript" },
+        { line: "orient — paired reads of the files you will touch (read_ar_files = official baseline; native reads in the worktree)" },
+        { line: "build — exactly the leaf plan · same-pass c-05 onboarding · local build_route_indexes · NEVER git commit" },
+        { line: "checks green — the brief-prescribed focused suite + full wrapper" },
+        { line: "⟁ blocked, or a plan delta beyond blank-filling? → escalate ONE rung to the owning seat — never the developer", junction: true },
       ],
     },
-    { kind: "node", phase: "closeout", tool: "worktree_closeout_preview", detail: "dry-run first, self-fix, then hand off", rides: "delegated closeout", ridesNote: "⊘ decided by the MANAGER (delegated, attributed) — not the developer; human review waits at the master/super seams", next: "worktree_closeout_apply", nextStatus: "proposed" },
-    { kind: "node", phase: "closeout", tool: "worktree_closeout_apply", detail: "commit code · memory · ledger", next: "integrate leaf → master", nextStatus: "current" },
-    { kind: "node", phase: "integrate", tool: "worktree_integrate", detail: "land into the master integration branch (the recorded source branch)", next: "turn report", nextStatus: "current" },
-    { kind: "node", phase: "handover", tool: "turn-report artifact", detail: "MANDATORY templated report: what/issues/solved/left · missing → nudge · the respawn-onboarding state for a successor", next: "session ends", nextStatus: "proposed" },
-    { kind: "node", phase: "close", tool: "session ends", detail: "short-lived by design — continuity lives in task_doc + report, not the transcript" },
+    { kind: "node", phase: "handover", tool: "turn-report artifact", detail: "MANDATORY templated report — what/issues/solved/left · evidence tally · respawn state · written even when blocked", next: "session ends", nextStatus: "current" },
+    { kind: "node", phase: "close", tool: "session ends", detail: "terminal state = checks green + report; the owning seat runs closeout → integrate → finalize" },
   ],
 };
 
@@ -272,17 +279,17 @@ const COMMS: FlowModel = {
 const DESIGNER: FlowModel = {
   id: "designer",
   label: "Designer",
-  title: "designer — co-think a master task with the developer",
+  title: "designer — the hat the orchestrator pulls",
   takeaway:
-    "Task design becomes its own registered job. Before orchestration there was one implicit " +
-    "do-it-all role; now the DESIGNER owns the front of the pipeline: helping the developer think a " +
-    "master through — the tasks/AGENTS.md doctrine (meta-questioning, reframe before execution, " +
+    "Task design is its own job, worn as a HAT: it cannot sit in a coordination leaf because the " +
+    "task is what it exists to create — the orchestrator runs roles/designer.md inline, at the " +
+    "front of the pipeline AND mid-flight, helping the developer think a master through — the tasks/AGENTS.md doctrine (meta-questioning, reframe before execution, " +
     "evidence-first) given a distinct, optimized shape. It shares the orchestrator's bird's-eye " +
     "toolkit (route indexes · onboarding · grepai · cgc · blast radius) but is SCOPED to one master — " +
     "collisions with other or FUTURE masters can slip. That residual risk is owned downstream: at " +
     "portfolio streamlining the ORCHESTRATOR doubles as the designer's adversarial reviewer.",
   segments: [
-    { kind: "start", label: "▸ developer intent — \"help me think this task through\" (designer job)", next: "co-design loop", nextStatus: "proposed" },
+    { kind: "start", label: "▸ developer intent, no task doc yet — the orchestrator pulls the designer hat (Job D)", next: "co-design loop", nextStatus: "current" },
     {
       kind: "rundown",
       title: "co-design loop · the tasks/AGENTS.md doctrine, as a job",
@@ -300,37 +307,6 @@ const DESIGNER: FlowModel = {
   ],
 };
 
-// --- the frame (contact points — the consistent runtime every job plugs into) --------------------
-
-const FRAME: FlowModel = {
-  id: "frame",
-  label: "Frame",
-  title: "the frame — context → job → wrap-up (the consistent runtime)",
-  takeaway:
-    "Decomposing the Wollmilchsau narrows the LIFECYCLE proper down to thin CONTACT POINTS every job " +
-    "shares: context intake → job selection + execution → wrap-up. The frame is the consistent " +
-    "container that houses the different jobs — deliberately thin compared to its payloads, but it " +
-    "is what makes them one runtime: same trust checkpoint, same observability, same gates and " +
-    "escalation seams, same durable-artifact obligations, same close. A job's meat lives in its own " +
-    "drawing; the frame only guarantees the sockets it plugs into.",
-  segments: [
-    { kind: "start", label: "▸ any request — every session enters through the same frame", next: "context", nextStatus: "current" },
-    { kind: "node", phase: "frame · context", tool: "trust checkpoint", detail: "context_packet — providers · drift · freshness · lifecycle_start (observable from the first call)", next: "job selection", nextStatus: "current" },
-    {
-      kind: "rundown",
-      title: "frame · job selection — the container picks its payload",
-      lines: [
-        { line: "profile-fit — the job registry names the wanted harness/model/effort; wrong profile → takeover spawn" },
-        { line: "lenses today: research · triage · bug · feature   ·   jobs this series: designer · orchestrator · manager · worker · reviewer" },
-        { line: "⟁ from here the JOB's own flow takes over — see its drawing; the frame stays thin", junction: true },
-      ],
-    },
-    { kind: "node", phase: "frame · execution", tool: "housed job runs", detail: "the frame guarantees only the contact points: observability (task_doc · events) · gates · escalation ladder · durable artifacts", next: "wrap-up", nextStatus: "proposed" },
-    { kind: "node", phase: "frame · wrap-up", tool: "lifecycle wrap-up", detail: "turn-report / notes durable · land per the job's path (closeout · integration · handover) · lifecycle_end", next: "(next session — same frame, any payload)", nextStatus: "current" },
-    { kind: "divider", label: "one thin frame · many payloads — a consistent runtime is what makes jobs composable" },
-  ],
-};
-
 // --- adversarial reviewer (the two seams) ---------------------------------------------------------
 
 const REVIEWER: FlowModel = {
@@ -343,10 +319,11 @@ const REVIEWER: FlowModel = {
     "It reviews the accumulated change set through three lenses — completion vs task docs, code " +
     "quality per tools.md, and onboarding-vs-code — fanning out sub-agents that write durable " +
     "reports. Its verdict is a templated artifact that attaches to the handover gate as JUDGE " +
-    "evidence; the gate's decider (manager / orchestrator / developer per policy) decides. A " +
-    "blocking verdict must decompose into fix leaves — findings, never prose complaints.",
+    "evidence; the decider decides — the ORCHESTRATOR at master-exit (master-handover-approval), " +
+    "the DEVELOPER at super-exit. A blocking verdict must decompose into fix leaves — findings, " +
+    "never prose complaints.",
   segments: [
-    { kind: "start", label: "▸ spawned at a seam — master-exit or super-exit (reviewer job + change-set context)", next: "intake", nextStatus: "proposed" },
+    { kind: "start", label: "▸ spawned at a seam (AR_SPAWN_ROLE=reviewer) — master-exit or super-exit + change-set context", next: "intake", nextStatus: "proposed" },
     { kind: "node", phase: "intake", tool: "scope the review", detail: "integration branch diff · the master's/portfolio's task docs · the seam's rubric", next: "three-lens review", nextStatus: "proposed" },
     {
       kind: "rundown",
@@ -359,10 +336,10 @@ const REVIEWER: FlowModel = {
       ],
     },
     { kind: "node", phase: "verdict", tool: "verdict artifact", detail: "templated · findings ranked · explicit pass/block recommendation · durable under the series notes", next: "attach as judge evidence", nextStatus: "proposed" },
-    { kind: "node", phase: "seam", tool: "attach to the handover gate", detail: "JUDGE evidence on the gate record — the decider (per L4 policy) decides; the reviewer never does", rides: "judge evidence", ridesNote: "⊘ verdicts are evidence, not decisions — a policy may REQUIRE a verdict before a delegated decision is valid", next: "pass or block", nextStatus: "proposed" },
+    { kind: "node", phase: "seam", tool: "attach to the handover gate", detail: "JUDGE evidence on the gate record — the decider (per the gate delegation policy) decides; the reviewer never does", rides: "judge evidence", ridesNote: "⊘ verdicts are evidence, not decisions — requireReviewerVerdictAtSeams binds delegated seam decisions to the verdict", next: "pass or block", nextStatus: "proposed" },
     { kind: "node", phase: "outcome", tool: "⟁ block? → decomposable fix leaves", detail: "a blocking verdict names concrete, leaf-shaped findings the owning manager/orchestrator can dispatch — never prose-only", next: "session ends", nextStatus: "proposed" },
     { kind: "node", phase: "close", tool: "session ends", detail: "short-lived by design — the verdict artifact and sub-agent reports remain the record" },
   ],
 };
 
-export const FLOW_MODELS: FlowModel[] = [BUILD_JOB, FRAME, DESIGNER, ORCHESTRATOR, MANAGER, WORKER, REVIEWER, COMMS];
+export const FLOW_MODELS: FlowModel[] = [ROUTER, DESIGNER, ORCHESTRATOR, MANAGER, WORKER, REVIEWER, COMMS];

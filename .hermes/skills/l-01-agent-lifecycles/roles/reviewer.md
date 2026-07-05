@@ -18,8 +18,11 @@ Leaf-level review is the manager's own duty — **not** an adversarial seam. The
 **accumulated change set**, not a single leaf.
 
 > **Verdicts are evidence, not decisions.** The reviewer never decides a gate. Its verdict attaches to
-> the handover gate as **judge evidence**; the gate's decider (manager / orchestrator / developer per
-> the L4 policy) decides. A policy may **require** a verdict before a delegated decision is valid.
+> the handover gate as **judge evidence**; the gate's decider decides — the **orchestrator** at
+> master-exit (delegated `master-handover-approval`), the **developer** at super-exit — per the
+> gate delegation policy (settings `orchestration.gateDelegation`, `controlplane/gate_policy.py`).
+> The policy binds delegated seam decisions to verdict evidence when
+> `requireReviewerVerdictAtSeams` is set.
 
 ## Lens
 
@@ -129,4 +132,4 @@ developer. Review **wholesale branch behavior**: the whole portfolio as integrat
 | effort  | high             | the last line of defense before a handover; do not economize |
 | tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates |
 
-Settings.json `orchestration.roles.adversarial-reviewer` overrides these (job base < variant < settings).
+Settings.json `orchestration.roles.adversarial-reviewer` overrides these (role-file defaults < settings).

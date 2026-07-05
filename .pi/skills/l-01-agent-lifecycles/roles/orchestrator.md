@@ -147,8 +147,10 @@ time. (Interim: until a branch-without-worktree primitive lands, the manual git 
 acceptable and recorded in durable notes.)
 
 **Dispatch loop**, dependency-ordered — for each ready master (dependencies integrated into
-super): `spawn_agent_session(manager)` with a brief compiled from the role file
-(`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key `<repository>/<master>/<docId>`);
+super): `spawn_agent_session(manager)` with a brief compiled from
+`../templates/manager-brief.md` (`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key
+`<repository>/<master>/<docId>`; the brief carries the load-bearing base fact: master branches
+off the **current super**, never off main);
 monitor turn-report artifacts, nudges, escalation intake; apply the **spirit test** to escalated
 deltas. In a **flat run, wear the manager hat yourself** (see The Hat-Collapse Rule).
 
@@ -160,7 +162,11 @@ task order, and splits the change-set.
 
 **Master exit:** consume the manager's handover packet
 (`../templates/master-handover-packet.md`); check the master-exit verdict (evidence, never a
-decision); a blocking verdict decomposes into fix leaves dispatched before integration.
+decision); then **decide the manager's `master-handover-approval` gate** — your own ambient
+identity is the attributed decider (you never handle ids; owner-never-self-approves holds because
+the raiser was the manager), and the policy may require the attached reviewer verdict
+(`requireReviewerVerdictAtSeams`). A blocking verdict decomposes into fix leaves dispatched before
+integration; a handover you cannot honestly decide escalates to the developer.
 
 **Integration duty (master → super) — the worktree moment.** Per completed master:
 
@@ -204,11 +210,12 @@ parallel-master reconcile (T9), the series-branch-without-worktree primitive, an
 move/renumber — run manually with existing primitives, each manual edge recorded in durable notes.
 
 **Super exit & landing tail:** when the DAG drains, spawn the super-exit adversarial reviewer
-(`roles/adversarial-reviewer.md`) over the whole super branch; attach its verdict as judge
+(`roles/reviewer.md`, spawned with `env={"AR_SPAWN_ROLE": "reviewer"}`) over the whole super
+branch; attach its verdict as judge
 evidence (`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"…"}]`);
 the developer reviews **whole-branch behavior**; rejections decompose into fix leaves. On
 approval: PR + memory carry-over + push (developer-gated), then finalization
-(`lifecycle_finalize_task` per edge — statuses AND steps), then the **self-improvement close**:
+(`lifecycle_finalize_task` per edge — statuses via the tool, steps checked by hand), then the **self-improvement close**:
 proposals for future runs grounded in the run's own ledger ("did x/y/z; hit a/b/c; a and b solved
 on the spot; c needs this change") — proposals only, never automated self-modification.
 `lifecycle_end` records the terminal state.
@@ -218,13 +225,15 @@ on the spot; c needs this change") — proposals only, never automated self-modi
 Solo work is **not a fourth route** — it is the same three jobs collapsed:
 
 - **Design** still happens (however briefly): the task doc exists before anything else.
+- **Delegated gates collapse back to the developer when one chair owns both sides** — a gate you
+  raised from this session's lifecycle cannot be decided by it (owner-never-self-approves).
 - **Portfolio** is trivially skipped for a one-item run.
 - **Orchestrate** runs with hats collapsed: in a **flat series** the orchestrator wears the
   **manager hat** (`roles/manager.md` duties — dispatch, review, delegated gates, leaf closeout →
   integrate → finalize — same duties, same artifacts, one chair). At **session scale** it builds
   **hands-on** instead of spawning (when spawn economics don't pay): the build discipline is the
   worker's (edit + same-pass `c-05` onboarding + `system/tools.md` checks green + freshness watch
-  / early `worktree_sync`), the closeout tail is the owner's (Phase — see `c-12-closeout`), and
+  / early `worktree_sync`), the closeout tail is the owner's (see `c-12-closeout`), and
   the ladder holds identically: task doc → intent → worktree → build → close.
 - Fan-out sub-agents may read/search and **write durable reports**; **every AR state mutation
   stays in this seat's main loop** (see Sub-Agent Fan-Out below).
@@ -285,4 +294,4 @@ task, fill small blanks, escalate real deltas).
 | effort  | high              | the bird's-eye seat; not the place to economize |
 | tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · worktree/C-11 |
 
-Settings.json `orchestration.roles.orchestrator` overrides these (role base < variant < settings).
+Settings.json `orchestration.roles.orchestrator` overrides these (role-file defaults < settings).

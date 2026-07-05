@@ -115,4 +115,4 @@ itself is in question" default.
 | effort  | medium         | scales with leaf difficulty via settings |
 | tools   | build surface  | native edit · read-only AR retrieval · prescribed checks · inbox |
 
-Settings.json `orchestration.roles.worker` overrides these (role base < variant < settings).
+Settings.json `orchestration.roles.worker` overrides these (role-file defaults < settings).

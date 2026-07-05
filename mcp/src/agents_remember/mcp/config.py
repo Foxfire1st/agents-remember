@@ -11,6 +11,7 @@ from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
     GatePolicyRule,
+    apply_seam_verdict_requirement,
     coerce_decision_role,
     make_gate_policy,
     named_gate_policy,
@@ -404,9 +405,12 @@ def parse_gate_delegation(raw: object) -> tuple[GatePolicy, bool]:
         except ValueError as error:
             raise ConfigError(str(error)) from error
     try:
-        return make_gate_policy(list(rules.values())), require_verdict_at_seams
+        policy = make_gate_policy(list(rules.values()))
     except ValueError as error:
         raise ConfigError(str(error)) from error
+    if require_verdict_at_seams:
+        policy = apply_seam_verdict_requirement(policy)
+    return policy, require_verdict_at_seams
 
 
 def _parse_gate_policy_rule(

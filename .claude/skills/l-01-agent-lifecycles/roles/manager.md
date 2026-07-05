@@ -17,7 +17,8 @@ master to the orchestrator through the master-exit adversarial seam.
 
 The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → (the worker
 builds) → closeout preview/apply (deciding the delegated gates per the gate policy) →
-`worktree_integrate` → finalize, task-doc statuses **and steps** included. The worker's terminal
+`worktree_integrate` → finalize — task-doc statuses via the finalizer, **steps checked by this
+seat by hand** (the tool does not reconcile checkboxes). The worker's terminal
 state is checks-green + turn report; everything after that is this seat's.
 
 **Flat-run note:** in a flat series (no managers spawned) the **orchestrator wears this hat** —
@@ -73,19 +74,30 @@ developer can walk in any time. Read the master + leaf docs; order the leaves.
   manager. (Enforced as-built by the gate policy: `orchestration.gateDelegation` in settings,
   `controlplane/gate_policy.py` — human-pinned kinds stay human, decisions attributed.)
 - **Integrate leaf → master branch** via the `c-11-memory-carryover-from-branch` skill (ff-only / replay
-  per the `c-09-git-worktree-manager` skill). Loop until the master's leaves are done.
+  per the `c-09-git-worktree-manager` skill). Know the human-pinned gate kinds by name:
+  `integration-approval`, `push-approval`, `cleanup-approval` — none is ever delegable. When a
+  durable `integration-approval` gate is raised on this step it awaits the **developer** (dashboard
+  or your attached chat); under the series' standing approval the notify-and-stop hand-off governs.
+  Loop until the master's leaves are done.
 
 ### 3 — Master-exit seam
 
 When all leaves have landed on the master integration branch, spawn the **adversarial reviewer**
-(master-exit) via `spawn_agent_session` with the reviewer role file, passing the master branch ref,
+(master-exit) via `spawn_agent_session` with `env={"AR_SPAWN_ROLE": "reviewer"}` and the reviewer
+role file (`roles/reviewer.md`), passing the master branch ref,
 master/leaf task docs, worker turn reports, decision logs, changed paths, resolved
 `system/tools.md` evidence, and carry-over state. The verdict lands at
 `notes/reports/<master-id>-master-exit-verdict.md` and attaches to the handover gate as
 `evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"pass|pass-with-notes|block"}]`
 — a verdict over completion vs task docs · `system/tools.md` quality · onboarding-vs-code. **Blocked? → the verdict decomposes into fix leaves** the manager dispatches (loop
-back to the leaf loop). Verdicts are **evidence, not decisions** — the manager decides the handover gate
-with the verdict as judge evidence.
+back to the leaf loop). Verdicts are **evidence, not decisions**. The manager **raises** the
+handover gate — kind `master-handover-approval` (delegable, never human-pinned) — **with the
+verdict attached** as `evidenceRefs`; **the orchestrator decides it** on the happy path (human
+review concentrates at the super gate). Identity mechanics, as-built: the gate pins to your
+ambient lifecycle when you raise it; the deciding orchestrator's own ambient identity becomes
+`decidedBy` automatically — you never handle ids, and owner-never-self-approves holds by
+construction. A handover carrying serious issues the orchestrator cannot answer on its own
+escalates up the ladder (orchestrator → developer).
 
 ### 4 — Handover to the orchestrator
 
@@ -117,4 +129,4 @@ coordination leaf) **stays reachable** until the series retires.
 | effort  | medium         | one master's scope, not the portfolio                            |
 | tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |
 
-Settings.json `orchestration.roles.manager` overrides these (job base < variant < settings).
+Settings.json `orchestration.roles.manager` overrides these (role-file defaults < settings).

@@ -85,4 +85,4 @@ planned-vs-past). The designer's duty is to *declare* the limit, not to close it
 | effort  | high               | design leverage justifies the thinking budget                        |
 | tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` |
 
-Settings.json `orchestration.roles.designer` overrides these (job base < variant < settings).
+Settings.json `orchestration.roles.designer` overrides these (role-file defaults < settings).

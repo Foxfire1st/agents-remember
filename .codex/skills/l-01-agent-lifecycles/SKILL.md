@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> role brief -> otherwise orchestrator), carries the minimal lifecycle frame (the six lifecycle_* signals every session shares), and houses the self-contained per-role lifecycles (orchestrator, designer, manager, worker, adversarial reviewer) plus the report-template library. A developer-facing session IS the orchestrator; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
+description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> role brief -> otherwise orchestrator), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (orchestrator, designer, manager, worker, adversarial reviewer) plus the report-template library. A developer-facing session IS the orchestrator; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
 ---
 
 # l-01-agent-lifecycles — The Agent Lifecycles
@@ -15,17 +15,26 @@ lifecycle, and no role reads another role's file.
 1. **`AR_SPAWN_ROLE` is set** (spawn env, injected by `spawn_agent_session`) → run
    `roles/<value>.md`. Nothing else in this file's "developer session" material applies to you.
    (`designer` here means the same design hat in a separate chair — see `roles/designer.md`.)
-2. **Else: the first user message is a role brief** — a `templates/worker-brief.md`-shaped dispatch
-   or an explicit role-brief header from an orchestrating agent → run that role's lifecycle. The
-   brief is your session start; a workspace session-start notice is not addressed to you.
+2. **Else: the first user message is a role brief** — a `templates/*-brief.md`-shaped dispatch or
+   a first line of the form `ROLE BRIEF — <role>` from an orchestrating agent → run that role's
+   lifecycle. The brief is your session start; a workspace session-start notice is not addressed
+   to you.
 3. **Else** (a developer opened this session) → you are the **orchestrator**: run
    `roles/orchestrator.md`. Solo work is the degenerate portfolio — the same three jobs with hats
    collapsed (the orchestrator wears the manager hat in flat runs and builds hands-on at session
    scale); the task doc still comes first.
 
-There is no fourth entry. Orchestrated fan-out (spawning managers/workers at scale) begins only on
-an explicit developer request (e.g. *"orchestrate these masters"*) — no agent promotes itself into
-a spawning seat, and the developer talks to **one orchestrator** as the single point of contact.
+There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
+value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
+session **whose brief never arrives** announces itself on the inbox and waits — it never
+improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a takeover chair (the profile
+check in `roles/orchestrator.md`) — the developer still talks to **one** orchestrator. Orchestrated
+fan-out (spawning managers/workers at scale) begins only on an explicit developer request (e.g.
+*"orchestrate these masters"*) — no agent promotes itself into a spawning seat.
+
+One exception to the no-cross-reading rule below: **a seat that WEARS a hat runs that hat's file
+as its own** — the orchestrator always for `roles/designer.md`, and in flat runs for
+`roles/manager.md` (the hat-collapse rule).
 
 ## The Role Registry
 
@@ -35,7 +44,7 @@ a spawning seat, and the developer talks to **one orchestrator** as the single p
 | **designer** | a HAT the orchestrator pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
-| **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) | `roles/adversarial-reviewer.md` |
+| **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit); spawn value `reviewer` | `roles/reviewer.md` |
 
 The **lenses** (bug · feature · triage · research — `lenses.md`) are how the scoping seats
 (orchestrator, designer) read a piece of work; a dispatched role never picks a lens — its brief
@@ -43,7 +52,9 @@ already carries the flavor.
 
 ## The Minimal Frame (the only machinery every session shares)
 
-Every session in a managed repo may be a **lifecycle**: the `lifecycle_*` signals record where it
+Every session in a managed repo may be a **lifecycle**: six signals — `lifecycle_start` ·
+`lifecycle_phase` · `lifecycle_turn_end_notification` · `worktree_attach` · `switch_lifecycle` ·
+`lifecycle_end` (plus the automatic `worktree_start` promotion) — record where it
 is and what it waits on, so work is observable and resumable across chat deaths. The model **never
 handles a lifecycle id** — identity is server-side, anchored in the worktree contract.
 
@@ -87,7 +98,7 @@ doctrine any coding agent can apply, and harness PREFERENCE is deployment config
 ## settings.json Orchestration Block
 
 Machine/user overrides layer over the role-file defaults, in the **MCP authority settings file**
-(`docs/reference/settings-json.md`). Precedence: role-file defaults < variant < settings.
+(`docs/reference/settings-json.md`). Precedence: role-file defaults < settings.
 
 ```jsonc
 {
@@ -107,7 +118,10 @@ Machine/user overrides layer over the role-file defaults, in the **MCP authority
 
 **As-built:** `orchestration.gateDelegation` is parsed and **enforced** (`controlplane/gate_policy.py`
 — all-human default, opt-in delegation, human-pinned kinds `integration-approval` / `push-approval` /
-`cleanup-approval`, owner never self-approves). `orchestration.roles` / `concurrency` are documented
+`cleanup-approval`, owner never self-approves). `requireReviewerVerdictAtSeams` **binds delegated
+seam decisions** (`master-handover-approval`) to attached reviewer-verdict evidence; the named
+policy `manager-decides-leaf-gates` routes leaf gates to the manager and the master-exit handover
+to the **orchestrator** (human review concentrates at the super gate). `orchestration.roles` / `concurrency` are documented
 schema whose parsing/injection is tracked backlog (task-doc-tooling series) — the terminal host
 currently receives knobs per dispatch from the spawning seat.
 

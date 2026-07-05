@@ -10,7 +10,14 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.controlplane.enforcement import evaluate_closeout_gate
-from agents_remember.controlplane.gate_policy import GatePolicyRule, make_gate_policy
+from agents_remember.controlplane.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicyRule,
+    apply_seam_verdict_requirement,
+    approval_failure_reason,
+    make_gate_policy,
+    named_gate_policy,
+)
 from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
@@ -921,3 +928,86 @@ class CloseoutEnforcementHelperTests(unittest.TestCase):
         self.assertTrue(payload["enforced"])
         self.assertTrue(payload["permitted"])
         self.assertEqual(payload["gateId"], "01H")
+
+
+def _handover_gate(
+    state: str = "approved",
+    *,
+    by: str = "lc-orchestrator",
+    deciding_role: str | None = "orchestrator",
+    lifecycle_id: str = "lc-manager",
+    evidence_refs: list[dict[str, str]] | None = None,
+) -> GateRecord:
+    gate = create_gate(
+        kind="master-handover-approval", lifecycle_id=lifecycle_id, gate_id="G-HANDOVER", now=T1
+    )
+    if state == "open":
+        return gate
+    return decide_gate(
+        gate,
+        decision="approve",
+        by=by,
+        via="orchestration",
+        deciding_role=deciding_role,
+        note=None,
+        now=T1,
+        evidence_refs=evidence_refs,
+    )
+
+
+class MasterHandoverSeamTests(unittest.TestCase):
+    """The master-exit seam gate kind (developer ruling 2026-07-05)."""
+
+    def test_master_handover_is_delegable_to_orchestrator(self) -> None:
+        policy = make_gate_policy(
+            [GatePolicyRule(kind="master-handover-approval", delegated_role="orchestrator")]
+        )
+        self.assertEqual(
+            policy.rule_for("master-handover-approval").delegated_role, "orchestrator"
+        )
+
+    def test_named_policy_routes_handover_to_orchestrator(self) -> None:
+        policy = named_gate_policy("manager-decides-leaf-gates")
+        self.assertEqual(
+            policy.rule_for("master-handover-approval").delegated_role, "orchestrator"
+        )
+        self.assertEqual(policy.rule_for("plan-approval").delegated_role, "manager")
+
+    def test_human_pinned_kinds_stay_pinned(self) -> None:
+        with self.assertRaises(ValueError):
+            make_gate_policy(
+                [GatePolicyRule(kind="integration-approval", delegated_role="orchestrator")]
+            )
+
+    def test_seam_requirement_binds_delegated_seam_rules_only(self) -> None:
+        policy = apply_seam_verdict_requirement(named_gate_policy("manager-decides-leaf-gates"))
+        self.assertTrue(policy.rule_for("master-handover-approval").require_reviewer_verdict)
+        self.assertFalse(policy.rule_for("plan-approval").require_reviewer_verdict)
+        bound = apply_seam_verdict_requirement(DEFAULT_GATE_POLICY)
+        self.assertFalse(bound.rule_for("master-handover-approval").require_reviewer_verdict)
+
+    def test_delegated_handover_requires_verdict_evidence(self) -> None:
+        policy = apply_seam_verdict_requirement(named_gate_policy("manager-decides-leaf-gates"))
+        without = _handover_gate()
+        reason = approval_failure_reason(without, policy)
+        self.assertIsNotNone(reason)
+        assert reason is not None
+        self.assertIn("reviewer verdict", reason)
+        with_evidence = _handover_gate(
+            evidence_refs=[
+                {
+                    "kind": "reviewer-verdict",
+                    "ref": "notes/reports/master-exit-verdict.md",
+                    "verdict": "pass",
+                }
+            ]
+        )
+        self.assertIsNone(approval_failure_reason(with_evidence, policy))
+
+    def test_owner_still_never_self_approves_handover(self) -> None:
+        policy = named_gate_policy("manager-decides-leaf-gates")
+        gate = _handover_gate(by="lc-manager")
+        reason = approval_failure_reason(gate, policy)
+        self.assertIsNotNone(reason)
+        assert reason is not None
+        self.assertIn("owning lifecycle", reason)
