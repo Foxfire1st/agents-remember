@@ -277,6 +277,14 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["status"], "bad-path")
 
+    def test_null_byte_path_is_400_bad_path(self) -> None:
+        with self._client(with_memory=True) as client:
+            response = client.get(
+                "/api/files/read", params={"repo": "R", "path": "pkg/mod\x00.py"}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "bad-path")
+
     def test_absent_file_is_404_not_found(self) -> None:
         with self._client(with_memory=True) as client:
             response = client.get("/api/files/read", params={"repo": "R", "path": "pkg/ghost.py"})

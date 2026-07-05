@@ -33,6 +33,7 @@ import type {
 import type { ChangeSetTarget } from "./changeset/ChangeSetViewer";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
 import { GateResponder } from "./GateResponder";
+import { TaskNotes } from "./TaskNotes";
 
 // The l-01 phase vocabulary, in order (mcp/.../lifecycle_state.py). The stepper marks phases before
 // the current as done — mc2's Request→Close mini-map.
@@ -944,6 +945,9 @@ function MasterOverview({
           onJump={onJump}
         />
       ))}
+      {/* L9: the series' coordination notes (design records, friction ledger, reports/) —
+          browsable from the master overview too, not only from a drilled leaf reader. */}
+      <TaskNotes repo={doc.repository} master={dirName(doc.docPath)} references={[]} />
     </div>
   );
 }
@@ -1217,11 +1221,13 @@ function TaskReader({
           {section.body ? <Markdown>{section.body}</Markdown> : null}
         </Section>
       ))}
-      {doc.references.length > 0 ? (
-        <Section title="References">
-          <Bullets items={doc.references} />
-        </Section>
-      ) : null}
+      {/* L9: References moved into TaskNotes so a reference naming an existing notes/ file
+          renders as an openable link into the series-notes view (plain text otherwise). */}
+      <TaskNotes
+        repo={doc.repository}
+        master={dirName(doc.docPath)}
+        references={doc.references}
+      />
     </div>
   );
 }

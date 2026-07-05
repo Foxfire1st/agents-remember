@@ -179,7 +179,9 @@ def run_scoped(
         return JSONResponse({"status": "unknown-scope", "scope": scope_id}, status_code=404)
     try:
         return JSONResponse(op(scope), status_code=200)
-    except AuthorityError as err:
+    except (AuthorityError, ValueError) as err:
+        # ValueError: Path.resolve() rejects malformed input (e.g. an embedded null
+        # byte) before confinement even runs — same wire answer as a confinement breach.
         return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
     except FileNotFoundError as err:
         return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)

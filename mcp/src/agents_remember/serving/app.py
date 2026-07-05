@@ -74,6 +74,7 @@ from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harnesses import detect_harnesses
+from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
@@ -751,5 +752,6 @@ def create_app(
 
     register_files_routes(app, config)
     register_changeset_routes(app, config)
+    register_notes_routes(app, config)
     mount_static(app)
     return app
