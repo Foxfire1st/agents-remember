@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 
-from agents_remember.controlplane.enforcement import evaluate_gate
+from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
+from agents_remember.controlplane.gate_policy import GatePolicy
+from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
@@ -34,9 +37,40 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
+HANDOVER_GATE_KIND = "master-handover-approval"
+
 
 def integration_branch(contract: WorktreeContract) -> str:
     return f"{contract.memory_work_branch}-integration"
+
+
+def handover_gate_guard(
+    gates: Mapping[str, GateRecord],
+    *,
+    task_name: str,
+    parent_task_name: str,
+    policy: GatePolicy,
+) -> GateGuard:
+    """The master-exit seam verdict for one integrating contract. Pure.
+
+    The handover gate carries the MASTER identity: the manager raises it with
+    ``enclosure=<master task name>`` on its own (worktree-less) lifecycle, while
+    the master -> super integration runs on the orchestrator's integration
+    worktree -- a different lifecycle -- so the fold must be cross-lifecycle
+    (:meth:`GateStore.all_current`) and the address is the contract's master or
+    series name, never ``contract.lifecycle_id``. Only gates whose ``enclosure``
+    matches the contract's ``task_name`` or ``parent_task_name`` govern; the
+    latest matching snapshot decides via :func:`evaluate_gate` (open or
+    policy-invalid blocks). Gateless stays additive: with no matching gate the
+    existing approval channel governs.
+    """
+    addresses = {name for name in (task_name, parent_task_name) if name}
+    matching = {
+        gate_id: gate
+        for gate_id, gate in gates.items()
+        if gate.kind == HANDOVER_GATE_KIND and gate.enclosure in addresses
+    }
+    return evaluate_gate(matching, kind=HANDOVER_GATE_KIND, policy=policy)
 
 
 def blocked_integration_payload(
@@ -401,12 +435,16 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
     validate_integrate_contract(contract)
     if not args.dry_run:
         # The master-exit seam consumer (mirror of the closeout gate): when a
-        # master-handover-approval gate exists on this contract's lifecycle, only a
-        # policy-valid approval lets the integration proceed. Gateless stays additive.
+        # master-handover-approval gate is addressed to this contract's master or
+        # series (its `enclosure`), only a policy-valid approval lets the
+        # integration proceed. The fold is cross-lifecycle because the raiser
+        # (the manager) and the integrator anchor different lifecycles.
+        # Gateless stays additive.
         gate_store = GateStore(observer_logs_root(contract.coordination_root))
-        guard = evaluate_gate(
-            gate_store.current(contract.lifecycle_id),
-            kind="master-handover-approval",
+        guard = handover_gate_guard(
+            gate_store.all_current(),
+            task_name=contract.task_name,
+            parent_task_name=contract.parent_task_name,
             policy=args.gate_policy,
         )
         if not guard.permitted:

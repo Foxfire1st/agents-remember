@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from agents_remember.controllers import worktree_tools
 from agents_remember.controlplane.enforcement import evaluate_closeout_gate, evaluate_gate
 from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
@@ -34,6 +35,7 @@ from agents_remember.observer import AmbientLifecycle, EventStore, install_ambie
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.reducer import project_workspace
 from agents_remember.worktrees.modules import closeout as closeout_mod
+from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 
 T1 = "2026-06-18T10:00:00+00:00"
@@ -620,6 +622,28 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(listed["gates"][0]["id"], gate_id)
         self.assertEqual(listed["gates"][0]["schema"], "ar-gate-record/v1")
 
+    def test_list_without_id_defaults_to_ambient_lifecycle(self) -> None:
+        # AR3-3: a raiser polls its own gate without ever handling a lifecycle id.
+        gate_id = self._create()
+        with mock.patch.object(
+            gates,
+            "ambient",
+            return_value=SimpleNamespace(current=SimpleNamespace(id="L1")),
+        ):
+            listed = gates.gate_list_payload(None, lifecycle_id=None)  # type: ignore[arg-type]
+        self.assertEqual(listed["lifecycleId"], "L1")
+        self.assertEqual([gate["id"] for gate in listed["gates"]], [gate_id])
+
+    def test_list_without_id_or_ambient_falls_back_to_workspace(self) -> None:
+        self.store.append(
+            create_gate(kind="agent-question", lifecycle_id=None, gate_id="01W", now=T1)
+        )
+        self._create()  # a lifecycle-scoped gate that must NOT appear
+        with mock.patch.object(gates, "ambient", return_value=None):
+            listed = gates.gate_list_payload(None, lifecycle_id=None)  # type: ignore[arg-type]
+        self.assertIsNone(listed.get("lifecycleId"))  # workspace scope (None is stripped)
+        self.assertEqual([gate["id"] for gate in listed["gates"]], ["01W"])
+
     def test_decide_for_lifecycle_decides_newest_open(self) -> None:
         self.store.append(
             create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="A", now=T1)
@@ -1013,6 +1037,137 @@ class MasterHandoverSeamTests(unittest.TestCase):
         self.assertIn("owning lifecycle", reason)
 
 
+HANDOVER_SEAM_POLICY = apply_seam_verdict_requirement(
+    named_gate_policy("manager-decides-leaf-gates")
+)
+
+
+class HandoverEnforcementHelperTests(unittest.TestCase):
+    """AR3-1: the integrate-side seam consumer — cross-lifecycle fold, master-addressed.
+
+    The handover gate lives on the MANAGER's lifecycle while the integrating
+    contract anchors the orchestrator's, so the guard folds every gate log
+    (``GateStore.all_current``) and matches by the gate's ``enclosure`` against
+    the contract's master/series name — never ``contract.lifecycle_id``.
+    """
+
+    MASTER = "260703-agent-orchestration-m1"
+    SERIES = "260703-agent-orchestration"
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.coord = Path(tmp.name)
+        self.store = GateStore(observer_logs_root(self.coord))
+
+    def _guard(self, policy=HANDOVER_SEAM_POLICY):
+        return integrate_mod.handover_gate_guard(
+            self.store.all_current(),
+            task_name=self.MASTER,
+            parent_task_name=self.SERIES,
+            policy=policy,
+        )
+
+    def _seed(
+        self,
+        *,
+        enclosure: str | None,
+        gate_id: str = "G-HANDOVER",
+        lifecycle_id: str = "L-MANAGER",
+    ) -> GateRecord:
+        gate = create_gate(
+            kind="master-handover-approval",
+            lifecycle_id=lifecycle_id,
+            gate_id=gate_id,
+            now=T1,
+            enclosure=enclosure,
+        )
+        self.store.append(gate)
+        return gate
+
+    def _approve(self, gate: GateRecord, *, with_verdict: bool = True) -> None:
+        evidence = (
+            [
+                {
+                    "kind": "reviewer-verdict",
+                    "ref": "notes/reports/master-exit-verdict.md",
+                    "verdict": "pass",
+                }
+            ]
+            if with_verdict
+            else None
+        )
+        self.store.append(
+            decide_gate(
+                gate,
+                decision="approve",
+                by="L-ORCH",
+                via="orchestration",
+                deciding_role="orchestrator",
+                note=None,
+                now=T2,
+                evidence_refs=evidence,
+            )
+        )
+
+    def test_open_gate_on_foreign_lifecycle_blocks(self) -> None:
+        gate = self._seed(enclosure=self.MASTER)
+        guard = self._guard()
+        self.assertFalse(guard.permitted)
+        self.assertEqual(guard.gate_id, gate.id)
+
+    def test_policy_valid_approval_permits(self) -> None:
+        gate = self._seed(enclosure=self.MASTER)
+        self._approve(gate)
+        guard = self._guard()
+        self.assertTrue(guard.permitted)
+        self.assertEqual(guard.gate_id, gate.id)
+
+    def test_configured_policy_governs_not_the_default(self) -> None:
+        # The exact regression AR3-1(a) named: the channel's policy-valid delegated
+        # approval must NOT be re-judged under the all-human dataclass default.
+        gate = self._seed(enclosure=self.MASTER)
+        self._approve(gate)
+        default_guard = self._guard(policy=DEFAULT_GATE_POLICY)
+        self.assertFalse(default_guard.permitted)
+        self.assertIn("not delegated", default_guard.reason)
+        self.assertTrue(self._guard(policy=HANDOVER_SEAM_POLICY).permitted)
+
+    def test_gateless_permits(self) -> None:
+        guard = self._guard()
+        self.assertTrue(guard.permitted)
+        self.assertIn("existing approval channel governs", guard.reason)
+
+    def test_gate_addressed_to_another_master_does_not_govern(self) -> None:
+        self._seed(enclosure="some-other-master")
+        self._seed(enclosure=None, gate_id="G-UNADDRESSED")
+        self.assertTrue(self._guard().permitted)
+
+    def test_parent_task_name_addresses_the_series(self) -> None:
+        self._seed(enclosure=self.SERIES)
+        self.assertFalse(self._guard().permitted)
+
+    def test_worktree_integrate_tool_passes_configured_policy(self) -> None:
+        # The controller/args layer (mirror of the closeout path): the CONFIGURED
+        # policy reaches integrate_result's guard, not the dataclass default.
+        config = SimpleNamespace(
+            coordination_root=self.coord,
+            orchestration=SimpleNamespace(gate_policy=HANDOVER_SEAM_POLICY),
+        )
+        with mock.patch.object(
+            worktree_tools.git_worktree_manager,
+            "integrate_result",
+            return_value=SimpleNamespace(payload={"state": "integrated"}, returncode=0),
+        ) as integrate_result:
+            worktree_tools.worktree_integrate_tool(
+                config,  # type: ignore[arg-type]
+                contract_path=str(self.coord / "enclosures" / "contract.md"),
+            )
+        (args,), _kwargs = integrate_result.call_args
+        self.assertIs(args.gate_policy, HANDOVER_SEAM_POLICY)
+        self.assertIsNot(args.gate_policy, DEFAULT_GATE_POLICY)
+
+
 class SeamChannelTests(unittest.TestCase):
     """Cycle-5 seam channel: non-blocking raise + cross-lifecycle decide (AR2-1/AR2-2)."""
 
@@ -1062,12 +1217,38 @@ class SeamChannelTests(unittest.TestCase):
         self.assertEqual(stored.kind, "master-handover-approval")
 
     def test_wait_false_refused_for_undelegated_kind(self) -> None:
+        # A seam kind under an all-human policy (the default nothing forces a run to
+        # change): the raise must refuse loudly and mutate NOTHING (AR3-2) — no orphan
+        # open gate, and the previously open sibling is not expired as a side effect.
+        sibling = create_gate(
+            kind="agent-question", lifecycle_id="L-MANAGER", gate_id="G-SIBLING", now=T1
+        )
+        self.store.append(sibling)
+        all_human = SimpleNamespace(
+            orchestration=SimpleNamespace(gate_policy=DEFAULT_GATE_POLICY)
+        )
         with self._ambient("L-MANAGER"), self.assertRaisesRegex(ValueError, "not delegated"):
             gates.lifecycle_gate_payload(
-                self.config,  # type: ignore[arg-type]
-                kind="agent-question",
+                all_human,  # type: ignore[arg-type]
+                kind="master-handover-approval",
                 wait=False,
             )
+        current = self.store.current("L-MANAGER")
+        self.assertEqual(set(current), {"G-SIBLING"})  # no orphan handover gate
+        self.assertEqual(current["G-SIBLING"].state, "open")  # sibling not expired
+
+    def test_wait_false_refused_for_delegated_non_seam_kind(self) -> None:
+        # AR3-5: wait=false is reserved for SEAM kinds — plan-approval is delegated
+        # under the named policy but must still block (it has no enforcement consumer).
+        with self._ambient("L-MANAGER"), self.assertRaisesRegex(
+            ValueError, "reserved for delegated seam kinds"
+        ):
+            gates.lifecycle_gate_payload(
+                self.config,  # type: ignore[arg-type]
+                kind="plan-approval",
+                wait=False,
+            )
+        self.assertEqual(self.store.current("L-MANAGER"), {})
 
     def test_cross_lifecycle_decide_by_packet_carried_gate_id(self) -> None:
         gate_id = self._raise_handover()

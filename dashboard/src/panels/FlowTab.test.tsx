@@ -68,7 +68,9 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     // Master-granular DAG + the branch-not-worktree intent + the delegated handover decision.
     expect(getByText(/reshape master boundaries — NEVER interleave dispatch/)).not.toBeNull();
     expect(getByText(/creates a BRANCH off main, nothing more/)).not.toBeNull();
-    expect(getByText(/the ORCHESTRATOR decides \(own ambient identity/)).not.toBeNull();
+    expect(
+      getByText(/the ORCHESTRATOR decides by the packet-carried gateId \(own ambient identity/),
+    ).not.toBeNull();
     // The escalation ladder lives on the comms drawing; the spirit test is ORCHESTRATOR-ONLY.
     fireEvent.click(getByTestId("flow-nav-comms"));
     expect(getByText(/escalation · worker → manager → orchestrator → developer/)).not.toBeNull();
@@ -77,6 +79,10 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     fireEvent.click(getByTestId("flow-nav-manager"));
     expect(getByText(/managers don't reshape plans \(no bird's-eye\)/)).not.toBeNull();
     expect(getByText(/task_reopen the SAME leaf, reshape — never a redo sibling/)).not.toBeNull();
+    // The ruled seam channel: non-blocking raise, the gateId rides the packet.
+    expect(
+      getByText(/the returned gateId rides the packet via inbox \+ push · the ORCHESTRATOR decides the gate by that id/),
+    ).not.toBeNull();
   });
 
   it("draws the worker as brief-started with no lifecycle machinery", () => {

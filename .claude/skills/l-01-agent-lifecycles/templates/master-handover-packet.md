@@ -21,7 +21,7 @@ orchestrator integrates a completed master into the super branch from.
 | Field              | Value                                        |
 | ------------------ | -------------------------------------------- |
 | master             | <master id / task_doc path>                  |
-| manager            | <this manager's agent/lifecycle id>          |
+| manager seat       | <master's coordination leaf / chat ref>      |
 | integration branch | <branch ref the leaves landed on>            |
 | handover gateId    | <gate id returned by the wait=false raise>   |
 | base               | <super branch @ commit the master based off> |

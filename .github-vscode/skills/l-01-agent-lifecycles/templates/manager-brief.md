@@ -18,6 +18,7 @@ master's leaf loop to the master-exit seam, then hand over.
 
 ## The master
 - Task doc: `<master task.json/md path>` (read it + every leaf doc first).
+- Planner master: <path or n/a (flat run)>
 - Leaves, in order: <L0 …, with status and any dependency notes>.
 - Trust facts (compiled by the orchestrator — do not re-run the checkpoint): providers <state /
   stack key or NONE>, drift <count>, freshness <state>.
@@ -36,9 +37,11 @@ master's leaf loop to the master-exit seam, then hand over.
 - When all leaves have landed on your branch: spawn the master-exit reviewer
   (`env={"AR_SPAWN_ROLE": "reviewer"}`, `roles/reviewer.md`) with the scope packet your role file
   enumerates; then RAISE the gate without blocking —
-  `lifecycle_gate(kind="master-handover-approval", evidence_refs=[<verdict>], wait=false)` —
+  `lifecycle_gate(kind="master-handover-approval", enclosure="<master task name>",
+  evidence_refs=[<verdict>], wait=false)` — the `enclosure` MUST carry the master's identity —
   and post the master-handover packet **carrying the returned gateId**: the ORCHESTRATOR decides
-  the gate by that id.
+  the gate by that id. Under an all-human policy the raise blocks and the developer decides — do
+  not pass wait=false.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:
   `integration-approval`, `push-approval`, `cleanup-approval`.
 

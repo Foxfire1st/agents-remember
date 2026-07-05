@@ -258,6 +258,10 @@ def worktree_integrate_tool(
         approved=not dry_run,
         ledger_commit_message=ledger_commit_message,
         dry_run=dry_run,
+        # The configured policy MUST reach the seam guard (mirror of the closeout
+        # path below): the dataclass default is all-human, which would refuse the
+        # exact delegated approval the master-handover channel produces.
+        gate_policy=config.orchestration.gate_policy,
     )
     return _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
 

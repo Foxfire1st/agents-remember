@@ -992,10 +992,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         developer decision or gate-specific response in one operation. kind is the dashboard junction
         (plan-approval, worktree-intent, closeout-approval, etc.); ask.kind is the
         answer shape (decision, question, conflict). Do not add a separate wait call
-        as live gate choreography. wait=false raises without blocking — allowed only for
-        kinds the active policy delegates (seam gates): the call returns the gateId, the
-        raiser carries it in the handover packet, and the delegated decider resolves it
-        by id via gate_decide(deciding_role=...)."""
+        as live gate choreography. wait=false raises without blocking — reserved for
+        delegated seam kinds (master-handover-approval under a delegating policy; any
+        other kind blocks): the call returns the gateId, the raiser carries it in the
+        handover packet, and the delegated decider resolves it by id via
+        gate_decide(deciding_role=...)."""
         return lifecycle_gate_payload(
             config,
             kind=kind,
@@ -1038,8 +1039,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def gate_list(lifecycle_id: str | None = None) -> dict[str, Any]:
-        """List the current (folded) gates for a lifecycle, or the workspace gates when no
-        lifecycle id is given. Read-only."""
+        """List the current (folded) gates for a lifecycle. With no lifecycle id it
+        defaults to the ACTIVE (ambient) lifecycle — poll your own raised gate without
+        handling lifecycle ids — and lists the workspace gates only when no lifecycle
+        is active. Read-only."""
         return gate_list_payload(config, lifecycle_id=lifecycle_id)
 
     @server.tool()

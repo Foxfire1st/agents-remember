@@ -26,12 +26,6 @@ exception):
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the developer — and **say it back**.
-**Profile check (takeover).** Before heavy work in any job: if this session's harness/model/
-effort is wrong for the run (resolved: role file < settings), spawn the right chair —
-`spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator` + a conversation-handover packet
-(`../templates/conversation-handover-packet.md`) — and hand over; the developer still talks to
-ONE orchestrator at a time.
-
 3. **Route the event** by what exists and what is asked:
 
 | Condition | Job |
@@ -40,6 +34,12 @@ ONE orchestrator at a time.
 | Designed masters exist; coherence/conflicts/order in question, or "orchestrate these" | **P — Portfolio** |
 | An approved task/series is ready for implementation | **O — Orchestrate** |
 | The ask changes no code (a question, an investigation) | **research-only exit** — deliver the answer; chat is the right medium; no worktree, no task artifact |
+
+**Profile check (takeover).** Before heavy work in any job: if this session's harness/model/
+effort is wrong for the run (resolved: role file < settings), spawn the right chair —
+`spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator` + a conversation-handover packet
+(`../templates/conversation-handover-packet.md`) — and hand over; the developer still talks to
+ONE orchestrator at a time.
 
 Several jobs can be active across a day; the loop routes per event. The frame's phase axis stays
 the observable `lifecycle_phase` vocabulary (`reframe-research` ≈ D, `decide` ≈ P, `build`/`close`
@@ -174,8 +174,9 @@ deciding_role="orchestrator")`. The server resolves the gate across lifecycles b
 handle a LIFECYCLE id; gate ids are the sanctioned hand-off), your ambient identity becomes the
 attributed decider (owner-never-self-approves holds because the raiser was the manager), and the
 policy may require the attached reviewer verdict (`requireReviewerVerdictAtSeams`). Integration
-enforces it: `worktree_integrate` refuses while a handover gate exists undecided or
-policy-invalid. A blocking verdict decomposes into fix leaves dispatched before integration; a
+enforces it: `worktree_integrate` refuses while a `master-handover-approval` gate addressed to
+this master (its `enclosure`) is undecided or policy-invalid. A blocking verdict decomposes into
+fix leaves dispatched before integration; a
 handover you cannot honestly decide escalates to the developer.
 
 **Integration duty (master → super) — the worktree moment.** Per completed master:
@@ -251,11 +252,14 @@ Solo work is **not a fourth route** — it is the same three jobs collapsed:
 ## Sub-Agent Fan-Out (capability doctrine — any harness that has it)
 
 Not a vendor feature: whatever the harness calls its sub-agents, the doctrine is the same — and a
-harness without the ability has two fallbacks: run the analyses sequentially in the main loop, or
-**spawn the seat through agents-remember itself** (`spawn_agent_session` as a chat, no leaf
-attachment required) — the framework's own spawn is the harness-independent fan-out, which is why
-spawn-first seats like the strategist work from ANY harness. Like a database management system,
-the framework encodes the behavior reliably regardless of the engine underneath.
+harness without the ability has two fallbacks: **analyses stay sequential in the main loop**, or
+**spawn a ROLE seat through agents-remember itself** (`spawn_agent_session` with that role's
+`AR_SPAWN_ROLE`, as a chat — no leaf attachment required). The framework spawn is for ROLE seats,
+never for anonymous analyses: an env-less spawned chat has no role and no brief, so the router
+would misroute it as an orchestrator. The framework's own spawn is the harness-independent
+fan-out, which is why spawn-first seats (like the planned strategist seat — leaf L12) work from
+ANY harness. Like a database management system, the framework encodes the behavior reliably
+regardless of the engine underneath.
 
 - Dispatch each fan-out analysis (route-coherence scan, conflict/regression scan, per-design
   adversarial pass) as a sub-agent whose task is to **write a templated durable report**

@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
+    SEAM_GATE_KINDS,
     delegated_decision_failure_reason,
 )
 from agents_remember.controlplane.interaction_retention import (
@@ -218,13 +219,35 @@ def lifecycle_gate_payload(
     options = cast(list[str] | None, options_raw)
     structured_ask = build_ask(ask_kind, prompt, options)
 
+    gate_kind = coerce_gate_kind(kind)
+    if not wait:
+        # Raise-and-continue: reserved for SEAM kinds the active policy delegates. A
+        # human-decided kind must keep the blocking/notify contract, and a delegated
+        # non-seam kind (e.g. plan-approval) keeps it too — only the seam gate (the
+        # master-handover-approval the manager raises for the orchestrator) returns
+        # immediately so the raiser can post its packet; the gate id is the hand-off.
+        # Validate-then-mutate: refuse BEFORE the expire-sweep and append below, so a
+        # refused raise persists no orphan open gate and expires no sibling.
+        policy = (
+            config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
+        )
+        if gate_kind not in SEAM_GATE_KINDS:
+            raise ValueError(
+                f"lifecycle_gate wait=false is reserved for delegated seam kinds; "
+                f"{gate_kind} blocks"
+            )
+        if policy.rule_for(gate_kind).delegated_role is None:
+            raise ValueError(
+                f"lifecycle_gate wait=false requires a kind the active policy delegates; "
+                f"{gate_kind} is not delegated"
+            )
     now = now_iso()
     store = _store(config)
     for open_gate in store.current(current.id).values():
         if open_gate.state == "open":
             store.append(expire_gate(open_gate, now=now))
     gate = create_gate(
-        kind=coerce_gate_kind(kind),
+        kind=gate_kind,
         lifecycle_id=current.id,
         gate_id=new_ulid(),
         now=now,
@@ -236,18 +259,6 @@ def lifecycle_gate_payload(
     )
     store.append(gate)
     if not wait:
-        # Raise-and-continue: only for kinds the active policy delegates. A human-decided
-        # kind must keep the blocking/notify contract; a delegated seam gate (e.g. the
-        # master-handover-approval the manager raises for the orchestrator) returns
-        # immediately so the raiser can post its packet — the gate id is the hand-off.
-        policy = (
-            config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
-        )
-        if policy.rule_for(gate.kind).delegated_role is None:
-            raise ValueError(
-                f"lifecycle_gate wait=false requires a kind the active policy delegates; "
-                f"{gate.kind} is not delegated"
-            )
         return _tool_payload(
             "lifecycle_gate",
             {
@@ -568,6 +579,15 @@ def gate_list_payload(
     *,
     lifecycle_id: str | None,
 ) -> dict[str, Any]:
+    if lifecycle_id is None:
+        # Ambient-defaulting (matching the other lifecycle-scoped tools): with no
+        # explicit id, list the ACTIVE lifecycle's gates — so a raiser can poll its
+        # own gate without ever handling a lifecycle id (they stay server-side).
+        # The workspace log is the fallback only when no lifecycle is active.
+        amb = ambient()
+        current = amb.current if amb is not None else None
+        if current is not None:
+            lifecycle_id = current.id
     gates = _store(config).current(lifecycle_id)
     return _tool_payload(
         "gate_list",

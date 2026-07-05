@@ -97,9 +97,12 @@ master/leaf task docs, worker turn reports, decision logs, changed paths, resolv
 — a verdict over completion vs task docs · `system/tools.md` quality · onboarding-vs-code. **Blocked? → the verdict decomposes into fix leaves** the manager dispatches (loop
 back to the leaf loop). Verdicts are **evidence, not decisions**. The seam channel, exactly:
 **raise without blocking** — `lifecycle_gate(kind="master-handover-approval",
-evidence_refs=[<the verdict ref>], wait=false)` (raise-and-continue is allowed precisely because
-the kind is delegated; the call returns the **gateId**); then **carry that gateId in the handover
-packet** (§4) — the packet is the orchestrator's trigger AND its address for the gate. Identity
+enclosure="<master task name>", evidence_refs=[<the verdict ref>], wait=false)` (raise-and-continue
+is allowed precisely because the kind is a delegated seam kind; the `enclosure` MUST carry the
+master's identity — it is the address integration enforcement matches the gate by; the call
+returns the **gateId**); then **carry that gateId in the handover
+packet** (§4) — the packet is the orchestrator's trigger AND its address for the gate. Under an
+all-human policy the raise blocks and the developer decides — do not pass wait=false. Identity
 truth, as-built: the gate pins to your ambient lifecycle when you raise it; the deciding
 orchestrator resolves the gate **by the packet-carried gate id** (gate ids are model-visible —
 only LIFECYCLE ids stay server-side) and its own ambient identity becomes `decidedBy`;

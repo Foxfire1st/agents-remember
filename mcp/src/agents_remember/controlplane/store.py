@@ -80,6 +80,22 @@ class GateStore:
             latest[record.id] = record
         return latest
 
+    def all_current(self) -> dict[str, GateRecord]:
+        """Fold every gate log (workspace + all lifecycles), last-wins per gate id.
+
+        The cross-lifecycle enforcement fold: a seam gate lives on its raiser's
+        lifecycle while the consuming contract anchors a different one (e.g. the
+        manager-raised ``master-handover-approval`` consumed by the orchestrator's
+        integration), so identity-addressed consumers need the whole workspace
+        view. A gate's snapshots all live in one log (``append`` routes by
+        ``record.lifecycleId``) and gate ids are ULIDs, so cross-log collisions do
+        not occur in practice; within one log the fold stays last-wins.
+        """
+        latest: dict[str, GateRecord] = {}
+        for lifecycle_id in self.lifecycle_ids():
+            latest.update(self.current(lifecycle_id))
+        return latest
+
     def delete(self, gate_id: str, lifecycle_id: str | None) -> bool:
         """Physically remove one gate id from its log."""
         records = self.read(lifecycle_id)
