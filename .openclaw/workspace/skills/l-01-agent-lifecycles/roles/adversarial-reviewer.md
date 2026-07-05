@@ -1,8 +1,7 @@
 # Lifecycle — Adversarial Reviewer
 
 > Short-lived and self-contained: review the accumulated change set at one seam, refute-or-confirm,
-> write the verdict, end. Your **brief is your session start**. No harness overlay ships yet; author
-> `roles/adversarial-reviewer.<harness>.md` when one is needed.
+> write the verdict, end. Your **brief is your session start**.
 >
 > Drawn as the **REVIEWER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 
@@ -125,7 +124,7 @@ developer. Review **wholesale branch behavior**: the whole portfolio as integrat
 
 | Knob    | Default          | Notes                                                        |
 | ------- | ---------------- | ------------------------------------------------------------ |
-| harness | claude-code      | portable default; add a variant when a harness needs one     |
+| harness | claude-code      | default preference only — settings picks the actual harness |
 | model   | high-reasoning   | adversarial review wants a strong, skeptical model           |
 | effort  | high             | the last line of defense before a handover; do not economize |
 | tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates |

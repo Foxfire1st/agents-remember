@@ -4,7 +4,6 @@
 > request-to-close pipeline. Each turn routes the incoming event — a developer message, a worker
 > report, a verdict, the orchestrator's own finding — into one of **three jobs** (Design ·
 > Portfolio · Orchestrate) under one roof, with solo work as the same jobs run with hats collapsed.
-> Harness overlay: `roles/orchestrator.claude-code.md`.
 
 ## What This Seat Is
 
@@ -228,7 +227,23 @@ Solo work is **not a fourth route** — it is the same three jobs collapsed:
   / early `worktree_sync`), the closeout tail is the owner's (Phase — see `c-12-closeout`), and
   the ladder holds identically: task doc → intent → worktree → build → close.
 - Fan-out sub-agents may read/search and **write durable reports**; **every AR state mutation
-  stays in this seat's main loop** (see the harness overlay).
+  stays in this seat's main loop** (see Sub-Agent Fan-Out below).
+
+## Sub-Agent Fan-Out (capability doctrine — any harness that has it)
+
+Not a vendor feature: whatever the harness calls its sub-agents, the doctrine is the same — and a
+harness without the ability runs the same analyses sequentially in the main loop.
+
+- Dispatch each fan-out analysis (route-coherence scan, conflict/regression scan, per-design
+  adversarial pass) as a sub-agent whose task is to **write a templated durable report**
+  (`../templates/impact-analysis.md`, `../templates/onboarding-coherency.md`) and return a compact
+  summary. The report is the artifact of record; a sub-agent that is the sole holder of a finding
+  is a bug.
+- **AR state mutations stay in this seat's main loop** — a sub-agent never calls `task_doc`,
+  gates, `spawn_agent_session`, or closeout.
+- Fan-out is capped by settings.json `orchestration.concurrency.maxSubAgents`.
+- Prefer continuing an existing sub-agent for a follow-up on the same analysis, so its durable
+  report accretes rather than fragmenting across files.
 
 ## The Spirit Test — This Seat Only
 
@@ -265,7 +280,7 @@ task, fill small blanks, escalate real deltas).
 
 | Knob    | Default           | Notes |
 | ------- | ----------------- | ----- |
-| harness | claude-code       | portable default; `roles/orchestrator.claude-code.md` carries specifics |
+| harness | claude-code       | default preference only — settings picks the actual harness |
 | model   | highest-reasoning | portfolio blast-radius judgment wants the strongest model |
 | effort  | high              | the bird's-eye seat; not the place to economize |
 | tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · worktree/C-11 |

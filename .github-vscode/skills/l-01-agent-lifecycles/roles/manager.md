@@ -3,8 +3,7 @@
 > One master, one seat, self-contained. The manager lifecycle drives exactly one master series:
 > spawn a fresh worker per leaf, review turn reports, decide the delegated leaf gates, close out and
 > integrate each leaf, hand the completed master to the orchestrator through the master-exit seam.
-> Your **brief is your session start**. No harness overlay ships yet; author
-> `roles/manager.<harness>.md` when one is needed.
+> Your **brief is your session start**.
 >
 > Drawn as the **MANAGER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 
@@ -113,7 +112,7 @@ coordination leaf) **stays reachable** until the series retires.
 
 | Knob    | Default        | Notes                                                            |
 | ------- | -------------- | ---------------------------------------------------------------- |
-| harness | claude-code    | portable default; add `roles/manager.<harness>.md` when needed    |
+| harness | claude-code    | default preference only — settings picks the actual harness       |
 | model   | mid-reasoning  | leaf review + coordination; strong but below the orchestrator    |
 | effort  | medium         | one master's scope, not the portfolio                            |
 | tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |

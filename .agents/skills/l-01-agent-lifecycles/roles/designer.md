@@ -4,8 +4,7 @@
 > pipeline or mid-flight. **A hat, not a seat**: it cannot sit in a coordination leaf because the
 > task is what it exists to create — no leaf, no worktree, no branch, no spawn required. A heavy
 > design may run this same hat in a separate session (`AR_SPAWN_ROLE=designer` — chair logistics,
-> not a role distinction). A `roles/designer.<harness>.md` overlay may add harness knobs; none
-> ships yet.
+> not a role distinction).
 >
 > Drawn as the **DESIGNER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 

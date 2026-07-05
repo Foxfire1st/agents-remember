@@ -2,7 +2,7 @@
 
 > One leaf, one session, one report. The worker lifecycle is **self-contained**: everything this
 > seat does is on this page, and your **brief is your session start** — a workspace session-start
-> notice is not addressed to you. Harness overlay: `roles/worker.claude-code.md`.
+> notice is not addressed to you.
 
 ## What This Seat Is
 
@@ -81,6 +81,15 @@ Everything else — `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_*
 `route_index_refresh` — is the owning seat's machinery, not yours. A worker that never touches
 lifecycle machinery never instantiates a lifecycle; that is the designed shape, not a gap.
 
+## Fan-Out (capability doctrine — any harness that has it)
+
+When the harness offers sub-agents, use them for **read/search only**, scoped to the leaf (locate
+call sites, sweep onboarding): each writes durable notes and returns a compact summary. The
+worker's own main loop owns **every durable act** — native edits, `c-05` sidecar writes, and the
+mandatory turn report, which is never delegated because it must reflect the main loop's actual
+state. No sub-agent touches AR tools; a harness without fan-out simply does these reads
+sequentially.
+
 ## Default Behavior
 
 **Fulfill the task, fill small blanks.** No creative-liberty prompting in either direction. The
@@ -101,7 +110,7 @@ itself is in question" default.
 
 | Knob    | Default        | Notes |
 | ------- | -------------- | ----- |
-| harness | codex          | portable default; `roles/worker.claude-code.md` carries Claude Code specifics |
+| harness | codex          | default preference only — settings picks the actual harness |
 | model   | mid-reasoning  | competent implementer on a scoped leaf |
 | effort  | medium         | scales with leaf difficulty via settings |
 | tools   | build surface  | native edit · read-only AR retrieval · prescribed checks · inbox |

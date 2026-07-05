@@ -31,10 +31,10 @@ a spawning seat, and the developer talks to **one orchestrator** as the single p
 
 | Role | Seat | Lifecycle file |
 | --- | --- | --- |
-| **orchestrator** | the developer-facing session; first coordination leaf of an orchestrated series | `roles/orchestrator.md` (+ `roles/orchestrator.claude-code.md` overlay) |
+| **orchestrator** | the developer-facing session; first coordination leaf of an orchestrated series | `roles/orchestrator.md` |
 | **designer** | a HAT the orchestrator pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
-| **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` (+ `roles/worker.claude-code.md` overlay) |
+| **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
 | **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) | `roles/adversarial-reviewer.md` |
 
 The **lenses** (bug · feature · triage · research — `lenses.md`) are how the scoping seats
@@ -74,19 +74,15 @@ at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifec
 - **Decision-needing questions land in the task doc's `openQuestions`** — the rendered decision
   surface; `notes/` carries the analysis behind them.
 
-## Knob Block & Per-Harness Variants
+## Knob Block & Capability Doctrine (no per-harness files)
 
 Role files are **model-interpreted markdown, never an executor**. Each carries a portable **knob
 block** (harness / model / effort / tools) — the defaults the terminal host injects at spawn.
-Resolution when a session on harness `H` runs role `R`:
-
-```
-roles/<R>.md  (portable base: role + duties + portable knobs)
-   └─ overlaid by roles/<R>.<H>.md   when present   (harness-specific knobs + idioms)
-        └─ overlaid by settings.json orchestration block   (machine/user override)
-```
-
-A variant carries only what is harness-specific; it never restates the role's duties.
+Resolution: **role-file defaults < settings.json orchestration block.** There are deliberately
+**no per-harness role files** (developer decision 2026-07-05): harness-specific ABILITIES —
+sub-agent fan-out and the like — are covered inside the portable files as capability-conditional
+doctrine any coding agent can apply, and harness PREFERENCE is deployment configuration
+(settings), not doctrine. Hard-coding a vendor would fork the doctrine per harness.
 
 ## settings.json Orchestration Block
 
@@ -118,7 +114,7 @@ currently receives knobs per dispatch from the spawning seat.
 ## Companion Files
 
 - `lenses.md` — the four job lenses for the scoping seats.
-- `roles/…` — the five role lifecycles + harness overlays (the registry above).
+- `roles/…` — the five self-contained role lifecycles (the registry above).
 - `templates/…` — turn-report · worker-brief · master-handover-packet ·
   conversation-handover-packet · verdict · impact-analysis · onboarding-coherency ·
   deep-research-report. Spawning seats compile briefs FROM these; sub-agents fan out and fill them,
