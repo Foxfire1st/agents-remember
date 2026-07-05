@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agents_remember.controlplane.enforcement import evaluate_closeout_gate
+from agents_remember.controlplane.enforcement import evaluate_closeout_gate, evaluate_gate
 from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicyRule,
@@ -1011,3 +1011,147 @@ class MasterHandoverSeamTests(unittest.TestCase):
         self.assertIsNotNone(reason)
         assert reason is not None
         self.assertIn("owning lifecycle", reason)
+
+
+class SeamChannelTests(unittest.TestCase):
+    """Cycle-5 seam channel: non-blocking raise + cross-lifecycle decide (AR2-1/AR2-2)."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.store = GateStore(self.root)
+        self.inbox = OperatorInboxStore(self.root)
+        for name, value in (("_store", self.store), ("_inbox_store", self.inbox)):
+            patcher = mock.patch.object(gates, name, return_value=value)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+        self.config = SimpleNamespace(
+            orchestration=SimpleNamespace(
+                gate_policy=apply_seam_verdict_requirement(
+                    named_gate_policy("manager-decides-leaf-gates")
+                )
+            )
+        )
+
+    def _ambient(self, lifecycle_id: str):
+        return mock.patch.object(
+            gates,
+            "require_ambient",
+            return_value=SimpleNamespace(
+                current=SimpleNamespace(id=lifecycle_id, state="running"),
+                block=lambda **_: SimpleNamespace(id=lifecycle_id),
+            ),
+        )
+
+    def _raise_handover(self, lifecycle_id: str = "L-MANAGER") -> str:
+        with self._ambient(lifecycle_id):
+            payload = gates.lifecycle_gate_payload(
+                self.config,  # type: ignore[arg-type]
+                kind="master-handover-approval",
+                wait=False,
+            )
+        self.assertEqual(payload["wait"]["state"], "raised")
+        self.assertFalse(payload["wait"]["waited"])
+        return payload["gate"]["id"]
+
+    def test_wait_false_raises_without_blocking(self) -> None:
+        gate_id = self._raise_handover()
+        stored = self.store.current("L-MANAGER")[gate_id]
+        self.assertEqual(stored.state, "open")
+        self.assertEqual(stored.kind, "master-handover-approval")
+
+    def test_wait_false_refused_for_undelegated_kind(self) -> None:
+        with self._ambient("L-MANAGER"), self.assertRaisesRegex(ValueError, "not delegated"):
+            gates.lifecycle_gate_payload(
+                self.config,  # type: ignore[arg-type]
+                kind="agent-question",
+                wait=False,
+            )
+
+    def test_cross_lifecycle_decide_by_packet_carried_gate_id(self) -> None:
+        gate_id = self._raise_handover()
+        with mock.patch.object(
+            gates,
+            "ambient",
+            return_value=SimpleNamespace(
+                current=SimpleNamespace(id="L-ORCH", state="running")
+            ),
+        ):
+            decided = gates.gate_decide_payload(
+                self.config,  # type: ignore[arg-type]
+                gate_id=gate_id,
+                lifecycle_id=None,
+                decision="approve",
+                decided_by=None,
+                decided_via="orchestration",
+                deciding_role="orchestrator",
+                evidence_refs=[
+                    {
+                        "kind": "reviewer-verdict",
+                        "ref": "notes/reports/master-exit-verdict.md",
+                        "verdict": "pass",
+                    }
+                ],
+            )
+        self.assertEqual(decided["state"], "approved")
+        self.assertEqual(decided["decidedBy"], "L-ORCH")
+        self.assertEqual(decided["decidingRole"], "orchestrator")
+
+    def test_cross_lifecycle_decide_requires_verdict_when_seam_bound(self) -> None:
+        gate_id = self._raise_handover()
+        with mock.patch.object(
+            gates,
+            "ambient",
+            return_value=SimpleNamespace(
+                current=SimpleNamespace(id="L-ORCH", state="running")
+            ),
+        ), self.assertRaisesRegex(ValueError, "reviewer verdict"):
+            gates.gate_decide_payload(
+                self.config,  # type: ignore[arg-type]
+                gate_id=gate_id,
+                lifecycle_id=None,
+                decision="approve",
+                decided_by=None,
+                decided_via="orchestration",
+                deciding_role="orchestrator",
+            )
+
+    def test_cli_decide_refused_on_delegated_kind(self) -> None:
+        gate_id = self._raise_handover()
+        with self.assertRaisesRegex(ValueError, "delegated by the active gate policy"):
+            gates.gate_decide_payload(
+                self.config,  # type: ignore[arg-type]
+                gate_id=gate_id,
+                lifecycle_id=None,
+                decision="approve",
+                decided_by="model",
+                decided_via="cli",
+            )
+
+    def test_cancel_still_allowed_for_the_raiser(self) -> None:
+        gate_id = self._raise_handover()
+        cancelled = gates.gate_decide_payload(
+            self.config,  # type: ignore[arg-type]
+            gate_id=gate_id,
+            lifecycle_id=None,
+            decision="cancel",
+            decided_by="model",
+            decided_via="cli",
+        )
+        self.assertEqual(cancelled["state"], "cancelled")
+        self.assertNotIn(gate_id, self.store.current("L-MANAGER"))
+
+    def test_evaluate_gate_enforces_the_handover_kind(self) -> None:
+        gate_id = self._raise_handover()
+        open_guard = evaluate_gate(
+            self.store.current("L-MANAGER"),
+            kind="master-handover-approval",
+            policy=self.config.orchestration.gate_policy,
+        )
+        self.assertFalse(open_guard.permitted)
+        self.assertEqual(open_guard.gate_id, gate_id)
+        gateless_guard = evaluate_gate(
+            {}, kind="master-handover-approval", policy=self.config.orchestration.gate_policy
+        )
+        self.assertTrue(gateless_guard.permitted)

@@ -83,6 +83,6 @@ planned-vs-past). The designer's duty is to *declare* the limit, not to close it
 | harness | (the wearer's)     | the hat runs inside the orchestrator session, or a spawned design chair |
 | model   | high-reasoning     | reframe + blast-radius reasoning wants a strong model                 |
 | effort  | high               | design leverage justifies the thinking budget                        |
-| tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` |
+| tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · inbox |
 
 Settings.json `orchestration.roles.designer` overrides these (role-file defaults < settings).

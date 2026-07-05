@@ -54,6 +54,25 @@ class GateStore:
             if line.strip()
         ]
 
+    def find(self, gate_id: str) -> GateRecord | None:
+        """Resolve one gate id across the workspace log and every lifecycle log.
+
+        The seam-decide path: a deciding seat holds only the gate id (packet-carried);
+        lifecycle ids stay server-side. Last-wins fold per log, first hit returned
+        (gate ids are ULIDs — collisions across logs do not occur in practice).
+        """
+        hit = self.current(None).get(gate_id)
+        if hit is not None:
+            return hit
+        lifecycles_dir = self._root / "lifecycles"
+        if not lifecycles_dir.is_dir():
+            return None
+        for log in sorted(lifecycles_dir.glob("*/gates.jsonl")):
+            hit = self.current(log.parent.name).get(gate_id)
+            if hit is not None:
+                return hit
+        return None
+
     def current(self, lifecycle_id: str | None) -> dict[str, GateRecord]:
         """Fold the log by gate id, last-wins -- the live gate set."""
         latest: dict[str, GateRecord] = {}

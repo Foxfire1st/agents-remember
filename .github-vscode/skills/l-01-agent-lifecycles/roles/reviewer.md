@@ -75,7 +75,7 @@ orchestrator. Review the **accumulated master change set**, not a final leaf in 
 The orchestrator spawns this reviewer before handing the accumulated super integration branch to the
 developer. Review **wholesale branch behavior**: the whole portfolio as integrated on super.
 
-- **Scope packet:** super integration branch diff against the spear/base, portfolio task docs, master
+- **Scope packet:** super integration branch diff against its base (main), portfolio task docs, master
   task docs, master-handover packets, prior master-exit verdicts, orchestrator decision logs, resolved
   `system/tools.md`, changed source paths, changed sidecars, governing route overviews, and final
   carry-over/ledger evidence.
@@ -130,6 +130,6 @@ developer. Review **wholesale branch behavior**: the whole portfolio as integrat
 | harness | claude-code      | default preference only — settings picks the actual harness |
 | model   | high-reasoning   | adversarial review wants a strong, skeptical model           |
 | effort  | high             | the last line of defense before a handover; do not economize |
-| tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates |
+| tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates · inbox |
 
-Settings.json `orchestration.roles.adversarial-reviewer` overrides these (role-file defaults < settings).
+Settings.json `orchestration.roles.reviewer` overrides these (role-file defaults < settings).

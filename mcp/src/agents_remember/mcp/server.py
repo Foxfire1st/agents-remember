@@ -985,13 +985,17 @@ def create_server(config: McpRuntimeConfig) -> Any:
         packet: dict[str, Any] | None = None,
         required_decision: list[str] | None = None,
         evidence_refs: list[dict[str, Any]] | None = None,
+        wait: bool = True,
     ) -> dict[str, Any]:
         """Public lifecycle-gate junction for agents. Creates the durable typed gate,
         blocks the active lifecycle with the developer-facing ask, and waits for the
         developer decision or gate-specific response in one operation. kind is the dashboard junction
         (plan-approval, worktree-intent, closeout-approval, etc.); ask.kind is the
         answer shape (decision, question, conflict). Do not add a separate wait call
-        as live gate choreography."""
+        as live gate choreography. wait=false raises without blocking — allowed only for
+        kinds the active policy delegates (seam gates): the call returns the gateId, the
+        raiser carries it in the handover packet, and the delegated decider resolves it
+        by id via gate_decide(deciding_role=...)."""
         return lifecycle_gate_payload(
             config,
             kind=kind,
@@ -1002,6 +1006,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             packet=packet,
             required_decision=required_decision,
             evidence_refs=evidence_refs,
+            wait=wait,
         )
 
     @server.tool()

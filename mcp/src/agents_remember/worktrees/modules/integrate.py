@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from agents_remember.controlplane.enforcement import evaluate_gate
+from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     load_ledger,
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_exists,
@@ -396,6 +399,26 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if contract.integration_status == "completed":
         return WorktreeCommandResult(0, {"state": "already-integrated", **status_payload(contract)})
     validate_integrate_contract(contract)
+    if not args.dry_run:
+        # The master-exit seam consumer (mirror of the closeout gate): when a
+        # master-handover-approval gate exists on this contract's lifecycle, only a
+        # policy-valid approval lets the integration proceed. Gateless stays additive.
+        gate_store = GateStore(observer_logs_root(contract.coordination_root))
+        guard = evaluate_gate(
+            gate_store.current(contract.lifecycle_id),
+            kind="master-handover-approval",
+            policy=args.gate_policy,
+        )
+        if not guard.permitted:
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": "handover-gate-blocked",
+                    "gateId": guard.gate_id,
+                    "reason": guard.reason,
+                    **status_payload(contract),
+                },
+            )
 
     current_code_source, current_memory_source, code_replay_required, memory_replay_required = (
         _integration_replay_requirements(contract)

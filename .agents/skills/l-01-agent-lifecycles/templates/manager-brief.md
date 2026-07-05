@@ -35,8 +35,10 @@ master's leaf loop to the master-exit seam, then hand over.
 ## The exit
 - When all leaves have landed on your branch: spawn the master-exit reviewer
   (`env={"AR_SPAWN_ROLE": "reviewer"}`, `roles/reviewer.md`) with the scope packet your role file
-  enumerates; then RAISE the `master-handover-approval` gate with the verdict attached and post
-  the master-handover packet — the ORCHESTRATOR decides the gate.
+  enumerates; then RAISE the gate without blocking —
+  `lifecycle_gate(kind="master-handover-approval", evidence_refs=[<verdict>], wait=false)` —
+  and post the master-handover packet **carrying the returned gateId**: the ORCHESTRATOR decides
+  the gate by that id.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:
   `integration-approval`, `push-approval`, `cleanup-approval`.
 

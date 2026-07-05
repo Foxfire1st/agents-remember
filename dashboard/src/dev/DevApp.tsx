@@ -32,7 +32,7 @@ export default function DevApp() {
           <a href="/dev/reference">/dev/reference</a> — mc2 design endpoint, read-only
         </li>
         <li>
-          <a href="/dev/flows">/dev/flows</a> — lifecycle flow canvas (build job · frame · designer · orchestrator · manager · worker · reviewer · comms)
+          <a href="/dev/flows">/dev/flows</a> — lifecycle flow canvas (router · designer · orchestrator · manager · worker · reviewer · comms)
         </li>
       </ul>
     </div>

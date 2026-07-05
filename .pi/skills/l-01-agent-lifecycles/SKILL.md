@@ -27,12 +27,12 @@ lifecycle, and no role reads another role's file.
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
 value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
 session **whose brief never arrives** announces itself on the inbox and waits — it never
-improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a takeover chair (the profile
-check in `roles/orchestrator.md`) — the developer still talks to **one** orchestrator. Orchestrated
+improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a takeover chair (the Profile
+check (takeover) in `roles/orchestrator.md`, The Event Loop) — the developer still talks to **one** orchestrator. Orchestrated
 fan-out (spawning managers/workers at scale) begins only on an explicit developer request (e.g.
 *"orchestrate these masters"*) — no agent promotes itself into a spawning seat.
 
-One exception to the no-cross-reading rule below: **a seat that WEARS a hat runs that hat's file
+One exception to the no-cross-reading rule above: **a seat that WEARS a hat runs that hat's file
 as its own** — the orchestrator always for `roles/designer.md`, and in flat runs for
 `roles/manager.md` (the hat-collapse rule).
 
@@ -93,7 +93,10 @@ Resolution: **role-file defaults < settings.json orchestration block.** There ar
 **no per-harness role files** (developer decision 2026-07-05): harness-specific ABILITIES —
 sub-agent fan-out and the like — are covered inside the portable files as capability-conditional
 doctrine any coding agent can apply, and harness PREFERENCE is deployment configuration
-(settings), not doctrine. Hard-coding a vendor would fork the doctrine per harness.
+(settings), not doctrine. Hard-coding a vendor would fork the doctrine per harness. For spawning
+seats, `spawn_agent_session` is itself the harness-independent fan-out: a harness with no
+sub-agent facility still dispatches seats through the framework (a chat, no leaf attachment
+required) — the DBMS principle: one behavior, any engine.
 
 ## settings.json Orchestration Block
 

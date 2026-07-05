@@ -26,6 +26,12 @@ exception):
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the developer — and **say it back**.
+**Profile check (takeover).** Before heavy work in any job: if this session's harness/model/
+effort is wrong for the run (resolved: role file < settings), spawn the right chair —
+`spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator` + a conversation-handover packet
+(`../templates/conversation-handover-packet.md`) — and hand over; the developer still talks to
+ONE orchestrator at a time.
+
 3. **Route the event** by what exists and what is asked:
 
 | Condition | Job |
@@ -162,11 +168,15 @@ task order, and splits the change-set.
 
 **Master exit:** consume the manager's handover packet
 (`../templates/master-handover-packet.md`); check the master-exit verdict (evidence, never a
-decision); then **decide the manager's `master-handover-approval` gate** — your own ambient
-identity is the attributed decider (you never handle ids; owner-never-self-approves holds because
-the raiser was the manager), and the policy may require the attached reviewer verdict
-(`requireReviewerVerdictAtSeams`). A blocking verdict decomposes into fix leaves dispatched before
-integration; a handover you cannot honestly decide escalates to the developer.
+decision); then **decide the manager's gate by its packet-carried id** — the exact call:
+`gate_decide(gate_id=<handover gateId from the packet>, decision="approve",
+deciding_role="orchestrator")`. The server resolves the gate across lifecycles by id (you never
+handle a LIFECYCLE id; gate ids are the sanctioned hand-off), your ambient identity becomes the
+attributed decider (owner-never-self-approves holds because the raiser was the manager), and the
+policy may require the attached reviewer verdict (`requireReviewerVerdictAtSeams`). Integration
+enforces it: `worktree_integrate` refuses while a handover gate exists undecided or
+policy-invalid. A blocking verdict decomposes into fix leaves dispatched before integration; a
+handover you cannot honestly decide escalates to the developer.
 
 **Integration duty (master → super) — the worktree moment.** Per completed master:
 
@@ -241,7 +251,11 @@ Solo work is **not a fourth route** — it is the same three jobs collapsed:
 ## Sub-Agent Fan-Out (capability doctrine — any harness that has it)
 
 Not a vendor feature: whatever the harness calls its sub-agents, the doctrine is the same — and a
-harness without the ability runs the same analyses sequentially in the main loop.
+harness without the ability has two fallbacks: run the analyses sequentially in the main loop, or
+**spawn the seat through agents-remember itself** (`spawn_agent_session` as a chat, no leaf
+attachment required) — the framework's own spawn is the harness-independent fan-out, which is why
+spawn-first seats like the strategist work from ANY harness. Like a database management system,
+the framework encodes the behavior reliably regardless of the engine underneath.
 
 - Dispatch each fan-out analysis (route-coherence scan, conflict/regression scan, per-design
   adversarial pass) as a sub-agent whose task is to **write a templated durable report**

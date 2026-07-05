@@ -70,7 +70,7 @@ FRONT_HALF_RUNDOWN: list[str] = [
 # Front-half generic pointer back to the rundown (every non-``decide`` call).
 _FRONT_HALF_SUMMARY = (
     "Front half (non-linear): follow the lifecycle_start rundown — reframe → research → "
-    "job-selection → task-file-exists? → task_doc. When the plan is ready, notify via "
+    "event-routing → task-file-exists? → task_doc. When the plan is ready, notify via "
     "lifecycle_turn_end_notification and stop; the linear per-tool chain begins at worktree_start."
 )
 

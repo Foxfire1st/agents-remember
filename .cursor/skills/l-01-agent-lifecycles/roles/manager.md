@@ -73,12 +73,17 @@ developer can walk in any time. Read the master + leaf docs; order the leaves.
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
   manager. (Enforced as-built by the gate policy: `orchestration.gateDelegation` in settings,
   `controlplane/gate_policy.py` — human-pinned kinds stay human, decisions attributed.)
+  Your own hand-off idiom, this seat only: durable gates + inbox posts — you never call the
+  developer-facing notification; your counterparty is the orchestrator.
 - **Integrate leaf → master branch** via the `c-11-memory-carryover-from-branch` skill (ff-only / replay
   per the `c-09-git-worktree-manager` skill). Know the human-pinned gate kinds by name:
   `integration-approval`, `push-approval`, `cleanup-approval` — none is ever delegable. When a
-  durable `integration-approval` gate is raised on this step it awaits the **developer** (dashboard
-  or your attached chat); under the series' standing approval the notify-and-stop hand-off governs.
-  Loop until the master's leaves are done.
+  durable `integration-approval` gate is raised on this step it awaits the **developer** (via the
+  dashboard GateResponder or your attached chat — you do not relay; if the wait blocks the loop,
+  escalate to the orchestrator). Absent a durable gate, the **series' standing approval** governs:
+  the developer's portfolio-gate approval of this series, recorded in the planner master's
+  decision log, covers dependency-ordered leaf integrations. Loop until the master's leaves are
+  done.
 
 ### 3 — Master-exit seam
 
@@ -90,20 +95,24 @@ master/leaf task docs, worker turn reports, decision logs, changed paths, resolv
 `notes/reports/<master-id>-master-exit-verdict.md` and attaches to the handover gate as
 `evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"pass|pass-with-notes|block"}]`
 — a verdict over completion vs task docs · `system/tools.md` quality · onboarding-vs-code. **Blocked? → the verdict decomposes into fix leaves** the manager dispatches (loop
-back to the leaf loop). Verdicts are **evidence, not decisions**. The manager **raises** the
-handover gate — kind `master-handover-approval` (delegable, never human-pinned) — **with the
-verdict attached** as `evidenceRefs`; **the orchestrator decides it** on the happy path (human
-review concentrates at the super gate). Identity mechanics, as-built: the gate pins to your
-ambient lifecycle when you raise it; the deciding orchestrator's own ambient identity becomes
-`decidedBy` automatically — you never handle ids, and owner-never-self-approves holds by
-construction. A handover carrying serious issues the orchestrator cannot answer on its own
-escalates up the ladder (orchestrator → developer).
+back to the leaf loop). Verdicts are **evidence, not decisions**. The seam channel, exactly:
+**raise without blocking** — `lifecycle_gate(kind="master-handover-approval",
+evidence_refs=[<the verdict ref>], wait=false)` (raise-and-continue is allowed precisely because
+the kind is delegated; the call returns the **gateId**); then **carry that gateId in the handover
+packet** (§4) — the packet is the orchestrator's trigger AND its address for the gate. Identity
+truth, as-built: the gate pins to your ambient lifecycle when you raise it; the deciding
+orchestrator resolves the gate **by the packet-carried gate id** (gate ids are model-visible —
+only LIFECYCLE ids stay server-side) and its own ambient identity becomes `decidedBy`;
+owner-never-self-approves holds by construction. A handover carrying serious issues the
+orchestrator cannot answer on its own escalates up the ladder (orchestrator → developer).
 
 ### 4 — Handover to the orchestrator
 
 Post the **master-handover packet** (`../templates/master-handover-packet.md`) — inbox (durable) + stdin
-push — integration branch ref · change-set summary · verdict ref · carry-over state. The seat (chat +
-coordination leaf) **stays reachable** until the series retires.
+push — integration branch ref · change-set summary · verdict ref · **handover gateId** ·
+carry-over state. The seat (chat + coordination leaf) **stays reachable** until the series
+retires; your raised gate stays open until the orchestrator decides it (poll `gate_list` on your
+own lifecycle if you need its state).
 
 ## Artifact Obligations
 

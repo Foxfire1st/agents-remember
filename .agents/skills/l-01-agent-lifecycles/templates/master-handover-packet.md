@@ -23,6 +23,7 @@ orchestrator integrates a completed master into the super branch from.
 | master             | <master id / task_doc path>                  |
 | manager            | <this manager's agent/lifecycle id>          |
 | integration branch | <branch ref the leaves landed on>            |
+| handover gateId    | <gate id returned by the wait=false raise>   |
 | base               | <super branch @ commit the master based off> |
 | verdict            | <master-exit verdict artifact ref>           |
 | verdict outcome    | pass | pass-with-notes                        |

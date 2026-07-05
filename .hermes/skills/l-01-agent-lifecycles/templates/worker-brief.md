@@ -12,6 +12,8 @@ Spawn with `env={"AR_SPAWN_ROLE": "worker"}` and the **qualified** leaf key
 ---
 
 ```md
+ROLE BRIEF — worker
+
 # WORKER BRIEF — <leaf-id> · <leaf title>
 
 You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is

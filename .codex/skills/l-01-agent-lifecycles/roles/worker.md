@@ -88,7 +88,7 @@ call sites, sweep onboarding): each writes durable notes and returns a compact s
 worker's own main loop owns **every durable act** — native edits, `c-05` sidecar writes, and the
 mandatory turn report, which is never delegated because it must reflect the main loop's actual
 state. No sub-agent touches AR tools; a harness without fan-out simply does these reads
-sequentially.
+sequentially (workers do not spawn AR sessions — that is the spawning seats' channel).
 
 ## Default Behavior
 

@@ -217,9 +217,14 @@ rejected.
 gate delegation. If omitted, the policy is `all-human`: every gate requires the
 existing human/developer decision path. The built-in
 `manager-decides-leaf-gates` policy adds the manager role for leaf
-`plan-approval` and `closeout-approval` gates while leaving human decisions
-valid. `kinds` may override individual delegable gate kinds with
+`plan-approval` and `closeout-approval` gates and routes the master-exit
+`master-handover-approval` gate to the orchestrator, while leaving human
+decisions valid. `kinds` may override individual delegable gate kinds with
 `role: "human" | "manager" | "orchestrator"` and
 `requireReviewerVerdict: true`; verdict requirements only apply to delegated
-decisions. `integration-approval`, `push-approval`, and `cleanup-approval` are
+decisions. `requireReviewerVerdictAtSeams: true` additionally binds every
+delegated seam-kind rule (`master-handover-approval`) to attached
+reviewer-verdict evidence. The delegable kinds are `plan-approval`,
+`closeout-approval`, and `master-handover-approval`;
+`integration-approval`, `push-approval`, and `cleanup-approval` are
 human-pinned and cannot be delegated.
