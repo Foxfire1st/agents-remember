@@ -37,6 +37,7 @@ from agents_remember.observer.reducer import project_workspace
 from agents_remember.worktrees.modules import closeout as closeout_mod
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 T1 = "2026-06-18T10:00:00+00:00"
 T2 = "2026-06-18T10:05:00+00:00"
@@ -1167,6 +1168,148 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
         self.assertIs(args.gate_policy, HANDOVER_SEAM_POLICY)
         self.assertIsNot(args.gate_policy, DEFAULT_GATE_POLICY)
 
+    # --- AR4-1(b): the unmatched-open-gate spelling-check warning (pure helper) ---
+
+    def _warning(self):
+        return integrate_mod.unmatched_handover_gate_warning(
+            self.store.all_current(),
+            task_name=self.MASTER,
+            parent_task_name=self.SERIES,
+        )
+
+    def test_unmatched_open_gate_yields_spelling_warning(self) -> None:
+        # A mis-spelled enclosure is exactly this shape: an open handover gate the
+        # guard cannot match. Integration proceeds gateless, but loudly.
+        self._seed(enclosure="some-other-master")
+        warning = self._warning()
+        self.assertIsNotNone(warning)
+        assert warning is not None
+        self.assertEqual(
+            warning["unmatched_open_gates"],
+            [{"gateId": "G-HANDOVER", "enclosure": "some-other-master"}],
+        )
+        self.assertIn("verify the enclosure spelling", str(warning["note"]))
+
+    def test_no_handover_gates_yields_no_warning(self) -> None:
+        self.assertIsNone(self._warning())
+
+    def test_matching_gate_suppresses_the_warning(self) -> None:
+        # The address worked — another master's in-flight open gate is legitimate.
+        self._seed(enclosure=self.MASTER)
+        self._seed(enclosure="some-other-master", gate_id="G-FOREIGN")
+        self.assertIsNone(self._warning())
+
+    def test_decided_foreign_gate_does_not_warn(self) -> None:
+        gate = self._seed(enclosure="some-other-master")
+        self._approve(gate)
+        self.assertIsNone(self._warning())
+
+
+class IntegrateDryRunGuardTests(unittest.TestCase):
+    """AR4-2: the integrate dry-run evaluates the seam guard and persists nothing.
+
+    ``integrate_result`` is driven with the git-touching steps mocked out (the
+    live-git end-to-end drive is the disclosed AR4-6 debt); the REAL parts here
+    are the ``GateStore`` fold over a temp coordination root, the guard/warning
+    evaluation, and the dry-run payload assembly.
+    """
+
+    MASTER = "260703-agent-orchestration-m1"
+    SERIES = "260703-agent-orchestration"
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.coord = Path(tmp.name)
+        self.store = GateStore(observer_logs_root(self.coord))
+        task_root = self.coord / "tasks" / "agents-remember" / self.MASTER
+        self.contract = WorktreeContract(
+            task_id="260703-AGENT-ORCHESTRATION-M1",
+            task_name=self.MASTER,
+            repo_name="agents-remember",
+            workflow_kind="light-task",
+            memory_mode="internal",
+            coordination_root=self.coord,
+            task_root=task_root,
+            contract_path=task_root / "enclosures" / "m1" / "series-contract.md",
+            task_artifact=task_root / "task.md",
+            worktree_group=self.coord / "worktrees" / "agents-remember" / "m1-ar",
+            code_repo_path=self.coord / "repo",
+            code_source_branch="main",
+            code_work_branch="ar/m1",
+            code_base_commit="c0",
+            code_worktree=self.coord / "worktrees" / "agents-remember" / "m1-ar" / "m1",
+            leaf_id="m1",
+            parent_task_name=self.SERIES,
+        )
+
+    def _seed_gate(self, *, enclosure: str, gate_id: str = "G-HANDOVER") -> GateRecord:
+        gate = create_gate(
+            kind="master-handover-approval",
+            lifecycle_id="L-MANAGER",
+            gate_id=gate_id,
+            now=T1,
+            enclosure=enclosure,
+        )
+        self.store.append(gate)
+        return gate
+
+    def _dry_run(self) -> dict[str, object]:
+        args = WorktreeArgs(
+            contract_path=self.contract.contract_path,
+            strategy="ff-only",
+            dry_run=True,
+            gate_policy=HANDOVER_SEAM_POLICY,
+        )
+        with (
+            mock.patch.object(integrate_mod, "load_contract", return_value=self.contract),
+            mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(
+                integrate_mod,
+                "_integration_replay_requirements",
+                return_value=("c1", "", False, False),
+            ),
+            mock.patch.object(integrate_mod, "write_contract") as write_contract,
+        ):
+            result = integrate_mod.integrate_result(args)
+        write_contract.assert_not_called()  # the dry run persists no contract mutation
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.payload["state"], "would-integrate")
+        return result.payload
+
+    def test_dry_run_reports_open_gate_would_block(self) -> None:
+        gate = self._seed_gate(enclosure=self.MASTER)
+        payload = self._dry_run()
+        handover = payload["handover_gate"]
+        assert isinstance(handover, dict)
+        self.assertFalse(handover["permitted"])
+        self.assertEqual(handover["gateId"], gate.id)
+        self.assertIn("open", str(handover["reason"]))
+        self.assertIn("handover-gate-blocked", str(payload["summary"]))
+        self.assertNotIn("handover_gate_warning", payload)
+
+    def test_dry_run_gateless_reports_permitted(self) -> None:
+        payload = self._dry_run()
+        handover = payload["handover_gate"]
+        assert isinstance(handover, dict)
+        self.assertTrue(handover["permitted"])
+        self.assertIsNone(handover["gateId"])
+        self.assertIn("can proceed", str(payload["summary"]))
+        self.assertNotIn("handover_gate_warning", payload)
+
+    def test_dry_run_carries_unmatched_open_gate_warning(self) -> None:
+        self._seed_gate(enclosure="some-other-master", gate_id="G-FOREIGN")
+        payload = self._dry_run()
+        handover = payload["handover_gate"]
+        assert isinstance(handover, dict)
+        self.assertTrue(handover["permitted"])  # gateless stays additive
+        warning = payload["handover_gate_warning"]
+        assert isinstance(warning, dict)
+        self.assertEqual(
+            warning["unmatched_open_gates"],
+            [{"gateId": "G-FOREIGN", "enclosure": "some-other-master"}],
+        )
+
 
 class SeamChannelTests(unittest.TestCase):
     """Cycle-5 seam channel: non-blocking raise + cross-lifecycle decide (AR2-1/AR2-2)."""
@@ -1199,11 +1342,14 @@ class SeamChannelTests(unittest.TestCase):
             ),
         )
 
+    MASTER = "260703-agent-orchestration-m1"
+
     def _raise_handover(self, lifecycle_id: str = "L-MANAGER") -> str:
         with self._ambient(lifecycle_id):
             payload = gates.lifecycle_gate_payload(
                 self.config,  # type: ignore[arg-type]
                 kind="master-handover-approval",
+                enclosure=self.MASTER,
                 wait=False,
             )
         self.assertEqual(payload["wait"]["state"], "raised")
@@ -1215,6 +1361,7 @@ class SeamChannelTests(unittest.TestCase):
         stored = self.store.current("L-MANAGER")[gate_id]
         self.assertEqual(stored.state, "open")
         self.assertEqual(stored.kind, "master-handover-approval")
+        self.assertEqual(stored.enclosure, self.MASTER)  # the guard's address rides the gate
 
     def test_wait_false_refused_for_undelegated_kind(self) -> None:
         # A seam kind under an all-human policy (the default nothing forces a run to
@@ -1233,6 +1380,31 @@ class SeamChannelTests(unittest.TestCase):
                 kind="master-handover-approval",
                 wait=False,
             )
+        current = self.store.current("L-MANAGER")
+        self.assertEqual(set(current), {"G-SIBLING"})  # no orphan handover gate
+        self.assertEqual(current["G-SIBLING"].state, "open")  # sibling not expired
+
+    def test_wait_false_refused_without_enclosure(self) -> None:
+        # AR4-1: the enclosure IS the integrate guard's address — an addressless
+        # (or blank) wait=false raise could only ever fail open at the enforcement
+        # rung, so it refuses BEFORE any store mutation: no orphan open gate, and
+        # the pre-seeded open sibling is not expired as a side effect.
+        sibling = create_gate(
+            kind="agent-question", lifecycle_id="L-MANAGER", gate_id="G-SIBLING", now=T1
+        )
+        self.store.append(sibling)
+        for enclosure in (None, "", "   "):
+            with (
+                self.subTest(enclosure=enclosure),
+                self._ambient("L-MANAGER"),
+                self.assertRaisesRegex(ValueError, "requires\\s+enclosure=<master task name>"),
+            ):
+                gates.lifecycle_gate_payload(
+                    self.config,  # type: ignore[arg-type]
+                    kind="master-handover-approval",
+                    enclosure=enclosure,
+                    wait=False,
+                )
         current = self.store.current("L-MANAGER")
         self.assertEqual(set(current), {"G-SIBLING"})  # no orphan handover gate
         self.assertEqual(current["G-SIBLING"].state, "open")  # sibling not expired

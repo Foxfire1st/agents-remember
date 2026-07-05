@@ -79,7 +79,10 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     fireEvent.click(getByTestId("flow-nav-manager"));
     expect(getByText(/managers don't reshape plans \(no bird's-eye\)/)).not.toBeNull();
     expect(getByText(/task_reopen the SAME leaf, reshape — never a redo sibling/)).not.toBeNull();
-    // The ruled seam channel: non-blocking raise, the gateId rides the packet.
+    // The ruled seam channel: non-blocking raise addressed by enclosure, the gateId rides the packet.
+    expect(
+      getByText(/enclosure="<master task name>" — the exact address integration enforcement matches the gate by/),
+    ).not.toBeNull();
     expect(
       getByText(/the returned gateId rides the packet via inbox \+ push · the ORCHESTRATOR decides the gate by that id/),
     ).not.toBeNull();

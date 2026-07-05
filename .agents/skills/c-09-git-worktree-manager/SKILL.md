@@ -200,7 +200,7 @@ moved since task start.
 
 Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
 
-On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun.
+On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun. When no gate addresses the integrating master but open `master-handover-approval` gates exist elsewhere, integrate still proceeds and its result carries a `handover_gate_warning` naming them — treat it as a spelling check on the raised gate's `enclosure`.
 
 Run `worktree_integrate(..., dry_run=true)` first, then **hand off**: call
 `lifecycle_turn_end_notification(summary={…the integration plan…})` as the **last tool call**, then

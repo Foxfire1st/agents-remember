@@ -226,6 +226,9 @@ def lifecycle_gate_payload(
         # non-seam kind (e.g. plan-approval) keeps it too — only the seam gate (the
         # master-handover-approval the manager raises for the orchestrator) returns
         # immediately so the raiser can post its packet; the gate id is the hand-off.
+        # The raise also requires the enforcement address: `enclosure` is the master
+        # task name the integrate guard matches the gate by, so an addressless
+        # wait=false gate could only ever fail open at the enforcement rung.
         # Validate-then-mutate: refuse BEFORE the expire-sweep and append below, so a
         # refused raise persists no orphan open gate and expires no sibling.
         policy = (
@@ -240,6 +243,11 @@ def lifecycle_gate_payload(
             raise ValueError(
                 f"lifecycle_gate wait=false requires a kind the active policy delegates; "
                 f"{gate_kind} is not delegated"
+            )
+        if enclosure is None or not enclosure.strip():
+            raise ValueError(
+                f"a {gate_kind} raise-and-continue requires "
+                "enclosure=<master task name> — the integration guard's address"
             )
     now = now_iso()
     store = _store(config)

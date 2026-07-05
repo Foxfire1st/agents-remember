@@ -994,9 +994,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         answer shape (decision, question, conflict). Do not add a separate wait call
         as live gate choreography. wait=false raises without blocking — reserved for
         delegated seam kinds (master-handover-approval under a delegating policy; any
-        other kind blocks): the call returns the gateId, the raiser carries it in the
-        handover packet, and the delegated decider resolves it by id via
-        gate_decide(deciding_role=...)."""
+        other kind blocks) and it requires enclosure=<master task name>, the address
+        integration enforcement matches the gate by: the call returns the gateId, the
+        raiser carries it in the handover packet, and the delegated decider resolves
+        it by id via gate_decide(deciding_role=...)."""
         return lifecycle_gate_payload(
             config,
             kind=kind,

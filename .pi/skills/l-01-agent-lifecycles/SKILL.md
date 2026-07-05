@@ -132,7 +132,8 @@ currently receives knobs per dispatch from the spawning seat.
 
 - `lenses.md` — the four job lenses for the scoping seats.
 - `roles/…` — the five self-contained role lifecycles (the registry above).
-- `templates/…` — turn-report · worker-brief · master-handover-packet ·
+- `templates/…` — turn-report · worker-brief · manager-brief (`ROLE BRIEF — manager`; the
+  orchestrator compiles a manager's session start from it) · master-handover-packet ·
   conversation-handover-packet · verdict · impact-analysis · onboarding-coherency ·
   deep-research-report. Spawning seats compile briefs FROM these; sub-agents fan out and fill them,
   so analysis survives compaction.

@@ -99,7 +99,9 @@ back to the leaf loop). Verdicts are **evidence, not decisions**. The seam chann
 **raise without blocking** — `lifecycle_gate(kind="master-handover-approval",
 enclosure="<master task name>", evidence_refs=[<the verdict ref>], wait=false)` (raise-and-continue
 is allowed precisely because the kind is a delegated seam kind; the `enclosure` MUST carry the
-master's identity — it is the address integration enforcement matches the gate by; the call
+master's identity — it is the address integration enforcement matches the gate by, and the match
+is exact-string: pass the EXACT master task name as the contracts carry it (`worktree_start`'s
+`task_name`) — the raise refuses without an enclosure; the call
 returns the **gateId**); then **carry that gateId in the handover
 packet** (§4) — the packet is the orchestrator's trigger AND its address for the gate. Under an
 all-human policy the raise blocks and the developer decides — do not pass wait=false. Identity

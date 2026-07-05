@@ -38,7 +38,8 @@ master's leaf loop to the master-exit seam, then hand over.
   (`env={"AR_SPAWN_ROLE": "reviewer"}`, `roles/reviewer.md`) with the scope packet your role file
   enumerates; then RAISE the gate without blocking —
   `lifecycle_gate(kind="master-handover-approval", enclosure="<master task name>",
-  evidence_refs=[<verdict>], wait=false)` — the `enclosure` MUST carry the master's identity —
+  evidence_refs=[<verdict>], wait=false)` — the `enclosure` MUST carry the master's identity:
+  the EXACT master task name as the contracts carry it (the raise refuses without one) —
   and post the master-handover packet **carrying the returned gateId**: the ORCHESTRATOR decides
   the gate by that id. Under an all-human policy the raise blocks and the developer decides — do
   not pass wait=false.
