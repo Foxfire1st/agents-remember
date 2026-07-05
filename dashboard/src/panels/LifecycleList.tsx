@@ -10,7 +10,7 @@ import {
 } from "react-aria-components";
 
 import { css, cva } from "../../styled-system/css";
-import { fmtWait, type Pivot } from "../data/selectors";
+import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import {
   pathDir,
@@ -305,11 +305,19 @@ interface OperationGroup {
 
 function operationRows(input: OperationRowsInput): OperationRow[] {
   const representedLifecycleIds = new Set<string>();
+  // The identity rule (L11): one task entry per enclosureId. A doc row that resolved through an
+  // enclosure CLAIMS that leaf; a lifecycle bound to the same enclosure annotates the claimed row
+  // (via the lifecycleForEnclosure fallback below) instead of rendering a second entry.
+  const representedEnclosureIds = new Set<string>();
   const docPaths = new Set(input.docs.map((doc) => doc.docPath));
   const docsByLifecycle = groupDocs(input.docs);
   const pickupsByLifecycle = groupPickups(input.agentPickups);
   const enclosureList = Object.values(input.enclosures);
-  const activeEnclosureList = enclosureList.filter(isActiveEnclosure);
+  // The visibility rule (L11): a leaf is active while its worktree physically exists — the
+  // projection's stat'ed truth, never a cleanup-state proxy. Completed/abandoned worktrees are
+  // gone (hidden, as before), and a reopened contract (cleanup=reopened) has none until
+  // worktree_start recreates them, so it stays hidden like any other planned leaf.
+  const activeEnclosureList = enclosureList.filter(hasLiveWorktree);
   const activeEnclosures = Object.fromEntries(
     activeEnclosureList.map((item) => [item.enclosure, item]),
   );
@@ -319,8 +327,13 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   for (const doc of input.docs) {
     const enclosure = enclosureForDoc(doc, activeEnclosureList);
     if (!isRootTaskDoc(doc) && !enclosure) continue;
-    const lifecycle = runtimeForDoc(doc, input.lifecycleById, enclosureList);
+    const lifecycle =
+      runtimeForDoc(doc, input.lifecycleById, enclosureList) ??
+      (enclosure
+        ? lifecycleForEnclosure(enclosure, input.lifecycles, input.lifecycleById)
+        : undefined);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
+    if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
     rows.push(docRow(doc, lifecycle, input.series, docPaths, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
   }
 
@@ -339,7 +352,10 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       activeEnclosures,
       activeEnclosuresByLifecycle,
     );
-    if (!enclosure) continue;
+    // No live-worktree enclosure -> no task entry; an already-claimed enclosureId -> the doc row
+    // above IS this leaf's single entry (the lifecycle already annotates it).
+    if (!enclosure || representedEnclosureIds.has(enclosure.enclosureId)) continue;
+    representedEnclosureIds.add(enclosure.enclosureId);
     rows.push(
       lifecycleRow(
         lifecycle,
@@ -635,11 +651,29 @@ function enclosureForDoc(
   });
 }
 
-function isActiveEnclosure(enclosure: Pick<EnclosureNode, "cleanup">): boolean {
-  // "completed" is a retired leaf, "abandoned" a discarded one — neither is active work.
-  // A "reopened" enclosure (L11) IS active: the leaf is back in planning awaiting its
-  // worktree_start, and its doc row must render like any other planned leaf.
-  return enclosure.cleanup !== "completed" && enclosure.cleanup !== "abandoned";
+// The lifecycle bound to an enclosure, following the cross-ref in either direction: the
+// contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
+// (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
+// unset or stale: the bound lifecycle's ask/gate/staleness enrich the leaf's single row instead
+// of rendering a duplicate lifecycle card for the same enclosureId (L11).
+function lifecycleForEnclosure(
+  enclosure: EnclosureNode,
+  lifecycles: LifecycleProjection[],
+  lifecycleById: Record<string, LifecycleProjection>,
+): LifecycleProjection | undefined {
+  if (enclosure.lifecycleId && lifecycleById[enclosure.lifecycleId]) {
+    return lifecycleById[enclosure.lifecycleId];
+  }
+  // Anchor fallback: several lifecycles may anchor one enclosure with no contract
+  // lifecycleId — the most recently active one annotates the row (ISO timestamps
+  // compare lexicographically), never whichever happened to project first.
+  return lifecycles
+    .filter((lifecycle) => lifecycle.enclosure === enclosure.enclosure)
+    .reduce<LifecycleProjection | undefined>(
+      (latest, lifecycle) =>
+        !latest || lifecycle.lastEventTs > latest.lastEventTs ? lifecycle : latest,
+      undefined,
+    );
 }
 
 function topLevelStepProgress(doc: TaskDocNode): { done: number; total: number } {

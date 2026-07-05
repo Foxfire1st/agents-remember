@@ -71,6 +71,8 @@ function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure
     closeoutStatus: "not-started",
     integrationStatus: "not-started",
     cleanup: "pending",
+    codeWorktreeExists: true,
+    memoryWorktreeExists: true,
     actions: [],
     ...over,
   } satisfies EnclosureNode;

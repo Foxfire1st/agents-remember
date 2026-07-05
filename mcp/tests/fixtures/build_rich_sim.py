@@ -145,6 +145,20 @@ def contract_path(root: Path, repo: str, task: str, *, leaf_id: str | None = Non
     return root / "tasks" / repo / task / "enclosures" / leaf / "series-contract.md"
 
 
+def materialize_worktrees(root: Path, repo: str, task: str, *, leaf_id: str | None = None) -> None:
+    """Create the worktree dirs a live leaf contract records.
+
+    L11 renders a leaf on the tasks surface ONLY while its worktree physically
+    exists (stat'ed at snapshot time), so a fixture leaf that should be visible
+    must ship the directories its contract points at — recording the paths
+    without creating them replays as an empty Hangar (L11R-1).
+    """
+    leaf = leaf_id or task
+    group = f"{leaf}-ar"
+    (root / "worktrees" / repo / group / leaf).mkdir(parents=True, exist_ok=True)
+    (root / "worktrees" / repo / group / f"memory-{leaf}").mkdir(parents=True, exist_ok=True)
+
+
 def event(
     kind: str, lc: str, *, trust: str = "observed", actor: str = "system", **data: object
 ) -> dict:
@@ -382,6 +396,8 @@ def main(out: Path) -> None:
             write_text(
                 contract_path(out, repo, task), contract_md(out, repo, task, lifecycle_id=lc, **st)
             )
+            if st["cleanup"] == "pending":
+                materialize_worktrees(out, repo, task)
             if give_doc:
                 write_json(
                     out / "tasks" / repo / task / f"{task}.json",
@@ -395,6 +411,7 @@ def main(out: Path) -> None:
         "260610_browser-dashboard",
         "L-series-dashboard",
     )
+    (out / "repos" / series_repo).mkdir(parents=True, exist_ok=True)
     write_text(
         out / "tasks" / series_repo / series_task / "series-contract.md",
         contract_md(
@@ -447,6 +464,7 @@ def main(out: Path) -> None:
             contract_path(out, repo, f"active-{lc}"),
             contract_md(out, repo, f"active-{lc}", lifecycle_id=lc, cleanup="pending"),
         )
+        materialize_worktrees(out, repo, f"active-{lc}")
         write_json(
             out / "tasks" / repo / f"active-{lc}" / f"active-{lc}.json",
             light_doc(repo, f"active-{lc}", lc, status="inProgress", done=2, total=5),

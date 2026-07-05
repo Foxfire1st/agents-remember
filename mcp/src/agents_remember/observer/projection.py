@@ -127,6 +127,13 @@ class EnclosureNode(BaseModel):
 
     ``lifecycleId`` cross-references the lifecycle this enclosure anchors (it is
     ``""`` for a legacy contract written before the lifecycle field existed).
+
+    ``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence
+    TRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree
+    tools report existence (``contract.code_worktree.exists()`` in
+    ``worktree_status``). The tasks surface filters visibility on these, never on a
+    cleanup-state proxy — ``cleanup: reopened`` means contract-reset-awaiting-restart
+    (worktrees gone until the next ``worktree_start``), not live work.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -144,6 +151,8 @@ class EnclosureNode(BaseModel):
     closeoutStatus: str
     integrationStatus: str
     cleanup: str
+    codeWorktreeExists: bool = False
+    memoryWorktreeExists: bool = False
     actions: list[ActionAvailability] = Field(default_factory=list)
 
 

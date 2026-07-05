@@ -109,6 +109,9 @@ function enclosure(
     closeoutStatus: "pending",
     integrationStatus: "not-started",
     cleanup: "pending",
+    // Live by default: the tasks surface renders a leaf only while a worktree exists (L11).
+    codeWorktreeExists: true,
+    memoryWorktreeExists: true,
     actions: [],
     ...over,
   };

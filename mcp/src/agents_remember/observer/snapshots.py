@@ -426,6 +426,13 @@ def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
         closeoutStatus=contract.closeout_status,
         integrationStatus=contract.integration_status,
         cleanup=contract.cleanup,
+        # Worktree-existence truth (L11), stat'ed here at snapshot time exactly as
+        # worktree_status reports it: the tasks surface renders a leaf ONLY while a
+        # worktree physically exists, so this must never be inferred from cleanup state.
+        codeWorktreeExists=contract.code_worktree.exists(),
+        memoryWorktreeExists=(
+            contract.memory_worktree.exists() if contract.memory_worktree else False
+        ),
     )
 
 

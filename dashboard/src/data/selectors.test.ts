@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DashboardState } from "./store";
 import type { AttentionItem, LifecycleProjection, Phase } from "../types/projection";
-import { buildTree, fmtWait, selectQueue } from "./selectors";
+import { buildTree, fmtWait, hasLiveWorktree, selectQueue } from "./selectors";
 
 const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): LifecycleProjection => {
   const base: LifecycleProjection = {
@@ -46,6 +46,16 @@ describe("buildTree", () => {
   it("BY REPO buckets a lifecycle with no repoId under (unassigned)", () => {
     const tree = buildTree([lifecycle("LC1")], "repo");
     expect(tree[0].key).toBe("(unassigned)");
+  });
+});
+
+describe("hasLiveWorktree", () => {
+  it("is the stat'ed existence truth (L11): either physical worktree admits, neither hides", () => {
+    // Never a cleanup-state proxy — the flags alone decide tasks-surface visibility.
+    expect(hasLiveWorktree({ codeWorktreeExists: true, memoryWorktreeExists: true })).toBe(true);
+    expect(hasLiveWorktree({ codeWorktreeExists: true, memoryWorktreeExists: false })).toBe(true);
+    expect(hasLiveWorktree({ codeWorktreeExists: false, memoryWorktreeExists: true })).toBe(true);
+    expect(hasLiveWorktree({ codeWorktreeExists: false, memoryWorktreeExists: false })).toBe(false);
   });
 });
 

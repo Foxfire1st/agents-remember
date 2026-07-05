@@ -70,6 +70,11 @@ export interface EnclosureNode {
   closeoutStatus: string;
   integrationStatus: string;
   cleanup: string;
+  // Worktree-existence truth (L11): stat'ed server-side at snapshot time (never inferred from
+  // cleanup state). The tasks surface renders a leaf ONLY while a worktree physically exists —
+  // cleanup=reopened means contract-reset-awaiting-restart, not live work.
+  codeWorktreeExists: boolean;
+  memoryWorktreeExists: boolean;
   actions: ActionAvailability[];
 }
 

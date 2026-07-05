@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1353,6 +1354,78 @@ class SnapshotReaderTests(unittest.TestCase):
 
     def test_read_enclosures_absent_is_empty(self) -> None:
         self.assertEqual(read_enclosures((self.tmp / "nope").resolve()), [])
+
+    def _existence_contract(self, coord: Path):  # -> WorktreeContract
+        contract = default_contract(
+            task_name="Observe Lifecycle",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=coord,
+            code_repo_path=coord / "repo-a",
+            code_source_branch="main",
+            code_work_branch="ar/observe",
+            code_base_commit="0" * 40,
+            worktree_name="observe",
+            memory_repo_path=coord / "repo-a-memory",
+            memory_source_branch="main",
+            memory_work_branch="ar/observe-memory",
+            memory_base_commit="1" * 40,
+            lifecycle_id="LC-1",
+        )
+        contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+        write_contract(contract.contract_path, contract)
+        return contract
+
+    def test_read_enclosures_stat_worktree_existence(self) -> None:
+        """L11: codeWorktreeExists/memoryWorktreeExists are stat'ed truth at snapshot time.
+
+        Matches how the worktree tools report existence (``status_payload``'s
+        ``code_worktree.exists()``): the flags flip as the directories appear on disk,
+        with no contract rewrite involved.
+        """
+        coord = (self.tmp / "coord").resolve()
+        contract = self._existence_contract(coord)
+
+        [before] = read_enclosures(coord)
+        self.assertEqual((before.codeWorktreeExists, before.memoryWorktreeExists), (False, False))
+
+        contract.code_worktree.mkdir(parents=True)
+        [code_only] = read_enclosures(coord)
+        self.assertEqual(
+            (code_only.codeWorktreeExists, code_only.memoryWorktreeExists), (True, False)
+        )
+
+        assert contract.memory_worktree is not None
+        contract.memory_worktree.mkdir(parents=True)
+        [both] = read_enclosures(coord)
+        self.assertEqual((both.codeWorktreeExists, both.memoryWorktreeExists), (True, True))
+
+    def test_read_enclosures_reopened_is_reset_awaiting_restart_not_archived(self) -> None:
+        """L11: ``cleanup=reopened`` means contract-reset-awaiting-restart, not live work.
+
+        The reopened contract must still project (it is NOT archived like
+        completed/abandoned — the leaf is coming back), but with existence False so the
+        tasks surface hides it until ``worktree_start`` physically recreates the
+        worktrees — at which point the same contract reads visible again.
+        """
+        coord = (self.tmp / "coord").resolve()
+        contract = self._existence_contract(coord)
+        write_contract(
+            contract.contract_path, replace(contract, cleanup="reopened", lifecycle_id="")
+        )
+
+        [reopened] = read_enclosures(coord)
+        self.assertEqual(reopened.cleanup, "reopened")
+        self.assertEqual(
+            (reopened.codeWorktreeExists, reopened.memoryWorktreeExists), (False, False)
+        )
+
+        # worktree_start recreates the directories: existence truth flips back with no
+        # further contract interpretation needed.
+        contract.code_worktree.mkdir(parents=True)
+        [restarted] = read_enclosures(coord)
+        self.assertTrue(restarted.codeWorktreeExists)
 
     def test_project_and_write_end_to_end(self) -> None:
         config = self._config()
