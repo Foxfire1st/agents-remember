@@ -14,12 +14,14 @@ lifecycle, and no role reads another role's file.
 
 1. **`AR_SPAWN_ROLE` is set** (spawn env, injected by `spawn_agent_session`) → run
    `roles/<value>.md`. Nothing else in this file's "developer session" material applies to you.
+   (`designer` here means the same design hat in a separate chair — see `roles/designer.md`.)
 2. **Else: the first user message is a role brief** — a `templates/worker-brief.md`-shaped dispatch
    or an explicit role-brief header from an orchestrating agent → run that role's lifecycle. The
    brief is your session start; a workspace session-start notice is not addressed to you.
 3. **Else** (a developer opened this session) → you are the **orchestrator**: run
-   `roles/orchestrator.md`. Solo work is the degenerate portfolio — the same lifecycle whose build
-   phase is simply executed hands-on.
+   `roles/orchestrator.md`. Solo work is the degenerate portfolio — the same three jobs with hats
+   collapsed (the orchestrator wears the manager hat in flat runs and builds hands-on at session
+   scale); the task doc still comes first.
 
 There is no fourth entry. Orchestrated fan-out (spawning managers/workers at scale) begins only on
 an explicit developer request (e.g. *"orchestrate these masters"*) — no agent promotes itself into
@@ -30,7 +32,7 @@ a spawning seat, and the developer talks to **one orchestrator** as the single p
 | Role | Seat | Lifecycle file |
 | --- | --- | --- |
 | **orchestrator** | the developer-facing session; first coordination leaf of an orchestrated series | `roles/orchestrator.md` (+ `roles/orchestrator.claude-code.md` overlay) |
-| **designer** | co-thinks one master with the developer (front of the pipeline) | `roles/designer.md` |
+| **designer** | a HAT the orchestrator pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` (+ `roles/worker.claude-code.md` overlay) |
 | **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) | `roles/adversarial-reviewer.md` |

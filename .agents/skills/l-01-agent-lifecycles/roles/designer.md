@@ -1,18 +1,22 @@
-# Lifecycle — Designer
+# Lifecycle — Designer (the hat)
 
-> Self-contained co-thinking lifecycle: help the developer think one master through, author its
-> task docs, declare the master-scoped limit, hand into the portfolio. A
-> `roles/designer.<harness>.md` overlay may add harness-specific knobs; none ships yet.
+> The design lifecycle the **orchestrator pulls inline** whenever design is needed — front of the
+> pipeline or mid-flight. **A hat, not a seat**: it cannot sit in a coordination leaf because the
+> task is what it exists to create — no leaf, no worktree, no branch, no spawn required. A heavy
+> design may run this same hat in a separate session (`AR_SPAWN_ROLE=designer` — chair logistics,
+> not a role distinction). A `roles/designer.<harness>.md` overlay may add harness knobs; none
+> ships yet.
 >
 > Drawn as the **DESIGNER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 
-## What This Seat Is
+## What This Hat Is
 
 Task design is **its own job** (developer decision 2026-07-04). Before orchestration one implicit
-do-it-all role did design, features, and fixes; the roles now diversify, and the designer owns the
-**front of the pipeline** — helping the developer think a master through. It is the `tasks/AGENTS.md`
-collaboration doctrine (meta-questioning, reframe-before-execution, evidence-first) given a distinct,
-optimized shape as a job.
+do-it-all role did design, features, and fixes; the roles now diversify, and design routes
+**through the orchestrator, which wears this hat** — at the front of the pipeline AND mid-flight
+(most leaves of a live series are designed mid-flight). It is the `tasks/AGENTS.md` collaboration
+doctrine (meta-questioning, reframe-before-execution, evidence-first) given a distinct, optimized
+shape as a job. Nothing here assumes a master exists yet — producing one is the point.
 
 The designer shares the orchestrator's **bird's-eye toolkit** — route indexes, onboarding, the
 `grepai_search` MCP tool, the code-graph (`cgc_*`) MCP tools, blast-radius analysis — but is **scoped
@@ -70,14 +74,14 @@ planned-vs-past). The designer's duty is to *declare* the limit, not to close it
 - **Handover:** the finished design **joins the portfolio**. At streamlining the orchestrator
   adversarially reviews it; hand the task_doc + the designer-limits note over via the inbox
   (`operator_inbox_post`) and, for a hosted orchestrator, stdin push.
-- **Escalation:** the designer sits at the front of the pipeline, so its "escalation" is simply the
-  handover into the portfolio phase — there is no deeper seat to escalate to.
+- **Escalation:** the hat's "escalation" is simply the handover into the portfolio job — the
+  orchestrator that wears it is already the last resolver before the developer.
 
 ## Knobs
 
 | Knob    | Default            | Notes                                                                 |
 | ------- | ------------------ | --------------------------------------------------------------------- |
-| harness | (developer's)      | co-thinking runs in the developer's own session; portable base        |
+| harness | (the wearer's)     | the hat runs inside the orchestrator session, or a spawned design chair |
 | model   | high-reasoning     | reframe + blast-radius reasoning wants a strong model                 |
 | effort  | high               | design leverage justifies the thinking budget                        |
 | tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` |

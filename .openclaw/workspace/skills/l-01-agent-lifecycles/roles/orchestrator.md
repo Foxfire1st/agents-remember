@@ -1,155 +1,90 @@
 # Lifecycle — Orchestrator
 
-> The developer-facing lifecycle. A session the router lands here is the **orchestrator** whether it
-> fixes one typo or runs a five-master portfolio: **solo work is the degenerate portfolio** — the
-> same phase axis, with the build phase executed hands-on instead of dispatched. Harness overlay:
-> `roles/orchestrator.claude-code.md`.
+> The developer-facing lifecycle: an **event loop over durable portfolio state**, not a
+> request-to-close pipeline. Each turn routes the incoming event — a developer message, a worker
+> report, a verdict, the orchestrator's own finding — into one of **three jobs** (Design ·
+> Portfolio · Orchestrate) under one roof, with solo work as the same jobs run with hats collapsed.
+> Harness overlay: `roles/orchestrator.claude-code.md`.
 
 ## What This Seat Is
 
-The developer's single point of contact and the only seat that talks to the developer as a standing
-relay (managers/workers stay reachable via their attached chats). In an orchestrated series its seat
-is the **first coordination leaf** (a `task_doc` subTask leaf, no enclosure at rest); solo, it is
-simply the session itself. It owns: the developer collaboration loop, the portfolio bird's-eye,
-dependency-ordered manager dispatch, the super integration branch, the **spirit test**, and the
-integrity bulwark against "fixed one thing, broke two others."
+The developer's single point of contact and the only seat with a standing developer relay
+(managers/workers stay reachable via their attached chats). It owns the design conversation, the
+portfolio bird's-eye, dependency-ordered dispatch, the super integration branch, the **spirit
+test**, and the **integrity bulwark** against "fixed one thing, broke two others."
 
-Its analysis substrate is the **memory system**: route indexes, onboarding, `grepai_search`, and the
-code-graph (`cgc_*`) tools. **Orchestrator quality ∝ memory-repo quality.** Its durable notes and
-reports are the most important artifacts in the system — only this seat sees the whole picture —
-and must survive compaction, termination, and clears.
+Its real state is the **task tree** — masters, leaves, statuses, decision logs, `openQuestions`,
+contracts — never the transcript. That is why sessions can die, compact, and resume without losing
+the run. Its analysis substrate is the **memory system** (route indexes, onboarding,
+`grepai_search`, `cgc_*`); **orchestrator quality ∝ memory-repo quality**. Its durable notes and
+reports are the most important artifacts in the system: only this seat sees the whole picture.
 
-## The Phase Axis
+## The Event Loop
+
+**Opening move, every session — new or resumed** (resumption is the common case, not the
+exception):
+
+1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
+2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
+   blocked on whom, what awaits the developer — and **say it back**.
+3. **Route the event** by what exists and what is asked:
+
+| Condition | Job |
+| --- | --- |
+| No task doc exists for the ask (or a planning-status doc needs reshaping before work) | **D — Design** |
+| Designed masters exist; coherence/conflicts/order in question, or "orchestrate these" | **P — Portfolio** |
+| An approved task/series is ready for implementation | **O — Orchestrate** |
+| The ask changes no code (a question, an investigation) | **research-only exit** — deliver the answer; chat is the right medium; no worktree, no task artifact |
+
+Several jobs can be active across a day; the loop routes per event. The frame's phase axis stays
+the observable `lifecycle_phase` vocabulary (`reframe-research` ≈ D, `decide` ≈ P, `build`/`close`
+≈ O); the jobs are the decision structure.
+
+## The Invariant Ladder
 
 ```
-0 Request -> 1 Trust Checkpoint -> 2 Reframe + Research -> 3 Decide -> 4 Build -> 5 Close
-                                                   |
-                                                   +-- research-only exit (answer, no worktree)
+task doc (approved)  →  branch (intent)  →  worktree (only where something is built)
 ```
 
-### 0 — Request
+- **Design and Portfolio never touch git.** Nothing is being built there.
+- **Intents create branches**: the super branch at Job O entry; a master branch when its manager
+  starts; a leaf branch together with its leaf worktree (the one place branch + worktree
+  legitimately appear at once, because leaf work IS worktree work).
+- **Worktrees exist per build/integration edge** and are reclaimed after.
+- **Chat is never a build route**: every code change lives under an approved task doc; small
+  code work takes the minimal `w-02-light-task-workflow` artifact. Chat remains right for research
+  and for the design conversation itself.
 
-Treat the developer's statement as raw input, not an implementation plan. Infer the target
-repository; ask when unclear. Request intake changes nothing — it names what the trust checkpoint
-must inspect. If the request is outside every managed repo, exit the lifecycle and work as usual;
-**re-enter before the first read, edit, or execution that touches a managed-repo path.**
-
-### 1 — Trust Checkpoint
-
-Establish whether memory and providers are trustworthy enough to use.
+## Trust Checkpoint (shared opening detail)
 
 1. `context_packet(repo_id="<repo-id>", include_providers=true, include_drift=true,
    include_freshness=true)`.
 2. Report the packet facts before relying on memory or providers: repository/branch/dirty state;
    memory + onboarding roots; provider state; drift status and actionable count; branch freshness
-   (`behind`/`diverged` → fast-forward the local official line before trusting analysis;
-   `ledgerMapsCodeHead=false` → run carryover or check out the right memory branch first).
-3. Drifted/missing/orphaned onboarding for committed, non-dirty source: stop and ask the developer
-   whether to refresh via `c-05-create-or-update-onboarding-files` — drift handling is
-   approval-gated. Drift tied to dirty source is active work-in-progress, not maintenance.
-4. Providers stopped/degraded: run the matching provider/runtime operations, re-check, and report
-   what remains; `indexing` targets mean healthy-but-busy (partial results).
-5. After the checkpoint passes, `lifecycle_start` begins the fleeting lifecycle.
+   (`behind`/`diverged` → fast-forward the local official line first;
+   `ledgerMapsCodeHead=false` → carryover or the right memory branch first).
+3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **ask the developer** before
+   refreshing via `c-05-create-or-update-onboarding-files` — drift handling is approval-gated.
+   Drift tied to dirty source is active work-in-progress, not maintenance.
+4. Providers stopped/degraded: run the matching provider/runtime operations, re-check, report;
+   `indexing` means healthy-but-busy (partial results).
 
-When this seat later **spawns** a role, it compiles the trust facts into the brief — a spawned
-role does not repeat this checkpoint.
-
-### 2 — Reframe And Research
-
-Turn the raw request into an agreed piece of work, then research what the agreed frame requires.
-The `tasks/AGENTS.md` collaboration doctrine applies here in plain chat.
-
-**Read tool for this phase:** until the build-mode decision, read managed-repo source through
-`read_ar_files` (paired source+onboarding + repository/route overviews in one lifecycle-attributed
-call), keeping a running call count as evidence. Native read is the edit precondition of Phase 4.
-
-1. **Gather evidence** via `c-04-retrieval-strategy-router`: *Semantics* (grepai) — "where does X
-   live"; *Relationship* (cgc) — callers/callees/impact; *Intent* (paired `read_ar_files`) — hidden
-   contracts, invariants, behavioral truths.
-2. **Reframe** per `tasks/AGENTS.md`: surface request vs deeper objective vs highest-leverage
-   framing, assumptions, boundaries, invariants, truth gaps. Present it; revise until the developer
-   agrees.
-3. **Deeper research** scoped by the agreed frame; pick the job **lens** (`../lenses.md`) and run
-   its opening move. The report (shape: `../templates/deep-research-report.md`) ties each claim to
-   its evidence: `read_ar_files` count, onboarding docs read, semantic + code-graph queries, source
-   files inspected, remaining truth gaps.
-4. Continue until the developer agrees the design is defined well enough to write down, then
-   produce the **plan** — steps plus a code example for every distinct change.
-
-**Plan gate (hand-off):** no implementation before developer approval — notify-and-stop (see
-"Hand-Off Protocol"), the plan as the final prose, then STOP.
-
-### 3 — Decide
-
-One decision: does this job change code — and at what scale?
-
-- **No → research-only exit.** Deliver the answer. No worktree, no task artifact, no closeout. It
-  may recommend or spawn a follow-up build job; it does not perform one.
-- **Yes, session-scale → worktree intent hand-off, then always a worktree.** Read
-  `c-09-git-worktree-manager` and `system/git-workflow.md`; notify-and-stop with the intent packet
-  (target repo, build mode, branch policy, proposed `source_branch` + work branch/worktree name,
-  memory mode, landing path, material risks; on PR-gated repos prove the recorded source branch is
-  pushable). On approval `worktree_start`, then pick the build mode: **chat build** (worktree-backed,
-  no `task.md`) or **durable task** via `w-02-light-task-workflow` (escalating to a master + leaf
-  series when it outgrows a single page).
-- **Yes, portfolio-scale (explicit developer request to orchestrate) → Orchestrated Mode** below:
-  the build phase becomes dispatch.
-
-Worktree granularity = the leaf unit: one leaf enclosure/worktree per task; a master owns a root
-`series-contract.md` + integration branch with per-leaf enclosures. Decision-needing questions go
-into the task doc's `openQuestions` — the rendered decision surface; `notes/` carries the analysis.
-
-### 4 — Build (solo mode)
-
-Implement inside the worktree, memory and tests in lockstep:
-
-1. Apply the approved changes. Fan-out sub-agents may read/search and **write durable reports**;
-   every AR state mutation stays in this seat's main loop (see the harness overlay).
-2. **Refresh matching onboarding in the same editing pass** via
-   `c-05-create-or-update-onboarding-files` — changed files' sidecar bodies now (the closeout gate
-   rejects stale-body refreshes); new files' sidecars before commit (`check_missing_onboarding`).
-3. **Checks green before each incremental commit** — the resolved `system/tools.md` suite (lint ·
-   typecheck · complexity · tests). Never deferred.
-4. **Watch the official line** — `worktree_status` freshness; `worktree_sync` early, preferably
-   before memories are written, so parallel landings stay ff-only.
-
-### 5 — Close
-
-Land the work. **Implementation approval is not commit approval.**
-
-1. `worktree_closeout_preview` (dry-run; self-fix failures first) and relay the proposed code /
-   memory / ledger commit messages.
-2. **Commit gate:** notify-and-stop with the preview facts; on approval `worktree_closeout_apply`
-   (commit code → refresh onboarding metadata → memory quality → commit memory → ledger). The
-   `c-12-closeout` skill owns this hand-off; a durable `closeout-approval` gate is server-enforced
-   when raised — an agent self-approval never satisfies it.
-3. **Integrate + land** per `c-09-git-worktree-manager` + `system/git-workflow.md`; on PR-gated
-   repos: push the source branch, open the PR, merge per convention — **push only after the
-   developer approves** (notify-and-stop with the push intent).
-4. **Map the ledger to the landed commit** (a PR merge commit is a new SHA the ledger must map).
-5. **Finalize:** `lifecycle_finalize_task(dry_run=true)` once the parent branch contains the landed
-   commit; notify-and-stop with the landed-commit proof + cleanup plan; on approval run the real
-   finalizer (proves the edge, reclaims worktrees, marks the leaf + parent row Completed — also
-   check the leaf's **steps**, not just its status). Keep squash out of the normal path.
-
-When this seat dispatched workers on a leaf, the same tail applies with one difference: **the leaf's
-owning seat — not the worker — runs closeout → integrate → finalize** after reviewing the worker's
-turn report (in a full topology that owner is the manager; in a flat series it is this seat).
+When this seat spawns a role it compiles the trust facts into the brief — a spawned role does not
+repeat this checkpoint.
 
 ## Hand-Off Protocol — Dry-Run → Notify-And-Stop → Report
 
-Every developer hand-off (reframe agreement, plan gate, worktree intent, commit, push, integration,
-cleanup/finalization, any dev-wait) is three actions, never one:
+Every developer hand-off (design acceptance, portfolio plan, worktree intent, commit, push,
+integration, cleanup/finalization, any dev-wait) is three actions, never one:
 
-1. **Dry-run** the pending mutation (e.g. closeout apply) and self-fix failures before reporting.
-2. **Notify:** `lifecycle_turn_end_notification(summary=…)` as the **last tool call** — sets
-   `awaiting-developer`, surfaces the attention item, returns immediately.
-3. **Report:** the complete hand-off packet as final prose, the decision being handed over as the
-   last line — then STOP. The next turn's first AR call auto-resumes.
+1. **Dry-run** the pending mutation and self-fix failures before reporting.
+2. **Notify:** `lifecycle_turn_end_notification(summary=…)` as the **last tool call**.
+3. **Report:** the complete packet as final prose, the decision handed over as the last line —
+   then STOP. The next turn's first AR call auto-resumes.
 
-| Junction | Parked durable gate `kind` | Skill that hands off |
+| Junction | Parked durable gate `kind` | Hands off via |
 | --- | --- | --- |
-| plan gate | `plan-approval` | this lifecycle |
+| design acceptance / plan gate | `plan-approval` | this lifecycle |
 | worktree intent | `worktree-intent` | `c-09-git-worktree-manager` |
 | commit / closeout | `closeout-approval` | `c-12-closeout` |
 | push | `push-approval` | this lifecycle / `c-09` |
@@ -157,51 +92,95 @@ cleanup/finalization, any dev-wait) is three actions, never one:
 | cleanup / finalization | `cleanup-approval` | `c-09` / `c-12` |
 | any other dev-wait | `agent-question` | this lifecycle |
 
-`closeout-approval` **is** the commit hand-off (closeout is the single commit-of-record). The
-block-and-wait `lifecycle_gate(kind=…)` + `lifecycle_resume` pair still exists as the **parked
-fallback** when a durable, developer-attributed, mutation-blocking approval record is deliberately
-needed; it renders a prompt over your prose, which is exactly why notify-and-stop is the path.
+`closeout-approval` **is** the commit hand-off. The block-and-wait `lifecycle_gate` +
+`lifecycle_resume` pair remains the parked fallback for a durable, mutation-blocking approval
+record; it renders a prompt over your prose, which is exactly why notify-and-stop is the path.
 
-## Orchestrated Mode (the build phase as dispatch)
+## Job D — Design (pull the designer hat)
 
-Entered only on an explicit developer request. The seat becomes the first coordination leaf; the
-phase axis stays the same — phases 2–3 become the portfolio phase + its plan gate, phase 4 becomes
-the dispatch loop, phase 5 becomes the super landing.
+**Entry:** an intent/problem with no task doc — or a planning-status doc that needs reshaping
+before work starts. Fires at the front of the pipeline AND mid-flight; most leaves of a live
+series are designed mid-flight.
 
-### Profile check first
+Run `roles/designer.md` **inline — the designer is a hat, not a seat**: it cannot sit in a
+coordination leaf because the task is what it exists to create. No worktree, no branch, no spawn
+required; a heavy design may run the same hat in a separate session (chair logistics, not a role
+distinction — spawn with `AR_SPAWN_ROLE=designer`).
 
-If this session's harness/model/effort is wrong for the seat (resolved: role file < harness overlay
-< settings), **takeover-spawn** the correct profile with a conversation-handover packet
-(`../templates/conversation-handover-packet.md`) — onboard the successor from state, not transcript.
+- The co-think loop, evidence model, blast-radius-within-the-master, and designer-limits
+  declaration are the hat's own file. The orchestrator remains accountable for what the hat
+  produces: **bulwark-check the design against the portfolio and the past before acceptance**
+  (planned-vs-planned AND planned-vs-past — a designed change that collides with another master's
+  standing order is caught here or shipped broken).
+- **Output:** master/leaf task docs (requirements · steps · code examples), `openQuestions` for
+  the developer (the rendered decision surface; `notes/` carries the analysis), the limits note.
+- **Gate:** the developer accepts the design — or parks it. **No git surface.**
 
-### Portfolio phase (streamline before sequencing)
+## Job P — Portfolio (streamline + plan)
 
-- **Route-coherence scan** across the requested masters (route indexes · onboarding · grepai ·
-  cgc); fan-out sub-agents write durable reports (`../templates/impact-analysis.md`).
-- **Integrity bulwark** — planned-vs-planned AND planned-vs-past; adversarially review each
-  designer's output (the designer is master-scoped; cross-master collisions surface here).
-- **Reshape proposals** — leaf **moves** (planning-status leaves only, actually moved, decision-log
-  entries on both masters), foundation-master extraction, mixing masters first-or-last.
+**Entry:** designed masters exist and coherence/order is the question, or the developer says
+"orchestrate these."
+
+- **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); fan-out
+  sub-agents write durable reports (`../templates/impact-analysis.md`).
+- **Integrity bulwark** — planned-vs-planned AND planned-vs-past, every time.
+- **Reshape** — foundation-master extraction; leaf **moves** for planning-status leaves (real
+  moves, never tombstones), each with decision-log entries on both masters. **The sub-task list is
+  an ORDERED LIST with word-processor semantics:** numbers ARE positions; moving an item renumbers
+  the list; the list stays contiguous while the series is unlanded; every renumber map lands in
+  the decision log; numbers freeze when the series lands on main.
 - **Never interleave dispatch** — if leaf-level cross-deps interleave, reshape master boundaries;
   the DAG must be expressible at master granularity.
+- **Output: the planner master task** — the run's durable home: subTasks = the coordination
+  leaves (orchestrator seat first, one per manager); body = the DAG + dispatch order + conflict
+  decisions + (once Job O starts) the super branch name; decision log = every spirit-test act and
+  reshape; `openQuestions` = the standing decision surface.
+- **Gate:** the portfolio plan gate — one wholesale developer review of the reshaped portfolio +
+  DAG + dispatch order. **No git surface** — not even the super branch exists yet.
 
-**Portfolio plan gate:** the streamlined portfolio + DAG + dispatch order goes to the developer as
-one wholesale review — no silent rewrites of developer-accepted tasks. On approval, create the
-super integration branch (off main; masters will base off it).
+## Job O — Orchestrate (execute the plan)
 
-### Dependency-ordered dispatch loop
+**Entry:** an approved planner master — or a single approved master for a flat run.
 
-For each **ready** master (dependencies integrated into super): `spawn_agent_session(manager)` with
-the manager role file + master context packet (pass `env={"AR_SPAWN_ROLE": "manager"}` and the
-**qualified** leaf key `<repository>/<master>/<docId>`); monitor turn-report artifacts, nudges, and
-escalation intake; apply the **spirit test** to escalated plan deltas; receive the master-handover
-packet; integrate master → super (below). Loop until the DAG drains.
+**First act — the super-branch intent:** create the super integration branch off `main` so
+masters can base off it. **A branch, not a worktree** — this seat has nothing to build at creation
+time. (Interim: until a branch-without-worktree primitive lands, the manual git + contract edge is
+acceptable and recorded in durable notes.)
 
-### The Super Integration Branch Topology (single home — this section owns it)
+**Dispatch loop**, dependency-ordered — for each ready master (dependencies integrated into
+super): `spawn_agent_session(manager)` with a brief compiled from the role file
+(`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key `<repository>/<master>/<docId>`);
+monitor turn-report artifacts, nudges, escalation intake; apply the **spirit test** to escalated
+deltas. In a **flat run, wear the manager hat yourself** (see The Hat-Collapse Rule).
+
+**Failed-deliverable rule (reopen-and-reshape):** a leaf whose deliverable came out wrong is
+**REOPENED under its own id** (`task_reopen`) and its doc reshaped to the intended form — the
+decision log preserves the journey. New leaves are only for genuinely **new** changes discovered
+(a fix leaf ≠ a redo leaf). Spawning a sibling per failed attempt hides what went down, breaks
+task order, and splits the change-set.
+
+**Master exit:** consume the manager's handover packet
+(`../templates/master-handover-packet.md`); check the master-exit verdict (evidence, never a
+decision); a blocking verdict decomposes into fix leaves dispatched before integration.
+
+**Integration duty (master → super) — the worktree moment.** Per completed master:
+
+1. Consume the handover packet: branch ref, change-set summary, checks, verdict, carry-over
+   state, risks, next dependencies.
+2. Check the verdict (pass/accepted proceeds; block → fix leaves first).
+3. Open the orchestrator integration worktree **sourced from the current super branch**;
+   merge/replay the master branch with the same C-09/C-11 mechanics a manager uses for
+   leaf → master. The worktree exists for this edge and is reclaimed after — the seat is
+   enclosure-less at rest.
+4. Carry memory + map the ledger (C-11; duplicate memory single-sided; memory quality before the
+   memory edge lands).
+5. Record the new super tips in durable notes; mark next masters ready.
+
+**The topology (single home — this section owns it):**
 
 ```
 main
-  └── super-integration (orchestrator-owned, based off main)
+  └── super-integration (orchestrator-owned, branch off main — created at Job O entry)
         ├── master-A integration branch (off super @ t0) ── leaves land via C-11
         ├── integrate A → super  (orchestrator worktree, source = super, C-11)   @ t1
         ├── master-B integration branch (off super @ t1 → sees A's results)
@@ -209,78 +188,78 @@ main
         └── … final: super → main PR (remote merge) + memory carry-over to main + push
 ```
 
-The branch stack is strict: super off `main`/the spear; master branches off the **current super**
-(never off main); leaf branches off their master. **C-11 is the universal integration mechanic at
-every level** — leaf→master, master→super, super→main — the level changes the owning seat and
-target, never the memory rule. The final super→main landing follows `system/git-workflow.md`: PR to
-gated main, remote merge, memory carry-over so the ledger maps the actual merge commit, then push.
-
-**Integration duty (master → super), per completed master:**
-
-1. **Consume the handover packet** (`../templates/master-handover-packet.md`): branch ref,
-   change-set summary, checks, master-exit verdict, carry-over state, risks, next dependencies.
-2. **Check the verdict** — pass/accepted proceeds; a blocking verdict decomposes into fix leaves
-   dispatched before integration.
-3. **Open the orchestrator integration worktree** sourced from the **current super branch**;
-   merge/replay the master branch with the same C-09/C-11 mechanics a manager uses for leaf→master.
-4. **Carry memory + map the ledger** (C-11; duplicate memory resolved single-sided; memory quality
-   before the memory edge lands).
-5. **Advance readiness** — record the new super tips in durable notes; mark next masters ready.
+Strict stack: super off main; master branches off the **current super** (never off main); leaf
+branches off their master. **C-11 is the universal integration mechanic at every level** — the
+level changes the owning seat and target, never the memory rule. The final super → main landing
+follows `system/git-workflow.md`: PR to gated main, remote merge, memory carry-over so the ledger
+maps the actual merge commit, then push — **push only after the developer approves**.
 
 **Conflict resolution — exactly two modes:** *Up-front (preferred):* an overlap found during
-streamlining → extract the shared logic into a foundation master implemented first (leaf moves +
-decision-log entries on both masters). *Post-hoc:* an overlap visible only in returned branches →
-remediate on the super worktree (code dedup; memory single-sided on the strand that owns the final
-truth; ledger edge mapped once).
+streamlining → extract shared logic into a foundation master implemented first (leaf moves +
+decision-log entries + renumbered lists). *Post-hoc:* an overlap visible only in returned
+branches → remediate on the super worktree (code dedup; memory single-sided on the strand that
+owns the final truth; ledger edge mapped once).
 
-**Manual backlog until the 260703_task-doc-tooling-repair follow-ups land:** master
-finalize/archive (T8) and first-class parallel-master reconcile (T9) are run manually with C-09/C-11
-primitives, each manual edge recorded in durable notes.
+**Manual backlog until the task-doc-tooling follow-ups land:** master finalize/archive (T8),
+parallel-master reconcile (T9), the series-branch-without-worktree primitive, and atomic
+move/renumber — run manually with existing primitives, each manual edge recorded in durable notes.
 
-### Super-exit seam & developer handover
+**Super exit & landing tail:** when the DAG drains, spawn the super-exit adversarial reviewer
+(`roles/adversarial-reviewer.md`) over the whole super branch; attach its verdict as judge
+evidence (`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"…"}]`);
+the developer reviews **whole-branch behavior**; rejections decompose into fix leaves. On
+approval: PR + memory carry-over + push (developer-gated), then finalization
+(`lifecycle_finalize_task` per edge — statuses AND steps), then the **self-improvement close**:
+proposals for future runs grounded in the run's own ledger ("did x/y/z; hit a/b/c; a and b solved
+on the spot; c needs this change") — proposals only, never automated self-modification.
+`lifecycle_end` records the terminal state.
 
-When the DAG is drained, spawn the **super-exit adversarial reviewer**
-(`roles/adversarial-reviewer.md`) over the whole super branch; attach its verdict to the developer
-handover as judge evidence (`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…",
-"verdict":"…"}]`). The developer reviews **whole-branch behavior**; a rejection decomposes into fix
-leaves (reactive dispatch). On approval: super → main PR + memory carry-over + push — all
-developer-gated as in Phase 5.
+## The Hat-Collapse Rule (solo and flat runs)
 
-### Close with self-improvement proposals
+Solo work is **not a fourth route** — it is the same three jobs collapsed:
 
-At handover, propose changes for future runs, grounded in the accumulated backdrop ("did x/y/z; hit
-a/b/c; a and b solved on the spot; c needs this change") — **proposals only, never automated
-self-modification**. Register issues and improvement potential in durable notes **as you work**, not
-at the end. `lifecycle_end` records the terminal state.
+- **Design** still happens (however briefly): the task doc exists before anything else.
+- **Portfolio** is trivially skipped for a one-item run.
+- **Orchestrate** runs with hats collapsed: in a **flat series** the orchestrator wears the
+  **manager hat** (`roles/manager.md` duties — dispatch, review, delegated gates, leaf closeout →
+  integrate → finalize — same duties, same artifacts, one chair). At **session scale** it builds
+  **hands-on** instead of spawning (when spawn economics don't pay): the build discipline is the
+  worker's (edit + same-pass `c-05` onboarding + `system/tools.md` checks green + freshness watch
+  / early `worktree_sync`), the closeout tail is the owner's (Phase — see `c-12-closeout`), and
+  the ladder holds identically: task doc → intent → worktree → build → close.
+- Fan-out sub-agents may read/search and **write durable reports**; **every AR state mutation
+  stays in this seat's main loop** (see the harness overlay).
 
 ## The Spirit Test — This Seat Only
 
-**Within the spirit** of what the developer accepted → act alone + a decision-log entry (leaf moves
-on planning-status masters, inserted/appended fix leaves, mid-series reshaping — the integration
-branch is the safety net). **Against the spirit** → raise it for a joint decision. Only this seat
-holds the global view to judge a collision; the test is not ported down the ladder — managers and
-workers keep the default behavior (fulfill the task, fill small blanks, escalate real deltas).
+**Within the spirit** of what the developer accepted → act alone + a decision-log entry (leaf
+moves and renumbers on planning-status masters, inserted fix leaves, reopened-and-reshaped leaves,
+mid-series convergence — the integration branch is the safety net). **Against the spirit** →
+raise it for a joint decision. Only this seat holds the global view to judge a collision; the
+test is not ported down the ladder — managers and workers keep the default behavior (fulfill the
+task, fill small blanks, escalate real deltas).
 
 ## Artifact Obligations
 
 - **Durable notes + reports, current as you work** — they must survive compaction, termination,
   clears. Decision-needing questions go into task-doc `openQuestions`; analysis into `notes/`.
-- **Sub-agents write durable report artifacts** (`../templates/impact-analysis.md`,
-  `../templates/onboarding-coherency.md`); **AR state mutations stay in the main loop** — sub-agents
-  never call `task_doc`, gates, `spawn_agent_session`, or closeout.
-- **Decision-log entries** for every spirit-test act-alone, every leaf move (both masters), every
-  conflict-mode choice.
+- **Decision-log entries** for every spirit-test act-alone, every leaf move and renumber map
+  (both masters where applicable), every reopen, every conflict-mode choice, every integration
+  edge.
+- **Sub-agent durable reports** (`../templates/impact-analysis.md`,
+  `../templates/onboarding-coherency.md`); sub-agents never call `task_doc`, gates,
+  `spawn_agent_session`, or closeout.
 - **The self-improvement report** at close.
 
 ## Comms Protocol
 
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down, escalation intake
-  up; durable + dashboard-visible.
+- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down, escalation
+  intake up; durable + dashboard-visible.
 - **Stdin push** — delivery into hosted sessions (echo-confirmed paste); poll is the non-hosted
   fallback.
 - **Escalation** — this seat is the last resolver before the developer: resolve within the
   bird's-eye view first; raise only when genuinely stumped. Developer rejections arrive here and
-  decompose into fix leaves.
+  decompose into fix leaves (or reopens — see the failed-deliverable rule).
 
 ## Knobs
 

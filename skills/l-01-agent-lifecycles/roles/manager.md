@@ -21,6 +21,9 @@ builds) → closeout preview/apply (deciding the delegated gates per the gate po
 `worktree_integrate` → finalize, task-doc statuses **and steps** included. The worker's terminal
 state is checks-green + turn report; everything after that is this seat's.
 
+**Flat-run note:** in a flat series (no managers spawned) the **orchestrator wears this hat** —
+same duties, same artifacts, one chair.
+
 A manager has **no bird's-eye view** — it sees one master, not the portfolio. That boundary shapes
 everything below.
 
@@ -62,7 +65,9 @@ developer can walk in any time. Read the master + leaf docs; order the leaves.
   intake via the inbox.
 - **Review artifact vs `task_doc`** — completion vs requirements/steps · checks green ·
   onboarding refreshed in the same pass (the manager's own leaf-level review; **this is not an
-  adversarial seam**).
+  adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
+  (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
+  genuinely new changes.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
