@@ -47,6 +47,18 @@ after the change.
   install-doc claims false** ("injects the same startup directive" no longer held); round 2
   restored byte-identity so the claims became true again (L10 decision log + builder report).
 
+### RV-4 — Decision-log completeness for scope-expanding supplements *(candidate — 1 catch)*
+
+**A scope-expanding owner supplement must be verifiable in the task-doc decision log, not only
+the builder report.** Continuity lives in the task_doc + durable artifacts, never in transcripts;
+a ruling that exists only in a report is one lost file away from unrecoverable. Cross-check every
+supplement the builder report discloses against the decision log.
+
+- Catching evidence (single engagement): 260703-L17 review (L17R-1) — supplement 2 (the
+  wait-loop-era remnant sweep, a whole class-completeness ruling with per-hit verdicts and two
+  named follow-ups) was recorded only in the builder report; the leaf decision log carried just
+  supplement 1. Folded by the owner at closeout.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): ways

@@ -39,6 +39,22 @@ mutation that precedes validation leaves half-states behind on refusal.
 - Catching evidence: 260703-L8 cycle 6 — the `wait=false` raise was reworked to be
   validate-then-mutate and seam-kind-restricted (L8 decision log, cycle-6 entry).
 
+## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
+
+Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
+when it catches in a second engagement (the ratchet below).
+
+### CS-4 — Reused-primitive affordance parity *(candidate — 1 catch)*
+
+**When a screen reuses a shared content primitive, verify every branch of the ORIGINAL's
+affordances (banners, status chips, truncation notices, error states) still fires on the reuse
+path.** A dropped affordance is a silent regression the reuse's own tests won't catch — they
+assert the new screen's happy paths, not the primitive's full surface.
+
+- Catching evidence (single engagement): 260703-L17 review (L17R-2) — the notes reader's
+  `DualPane` reuse drops the "first 2 MiB" truncation banner on the markdown path (the banner
+  lives in `CodeSide`, which markdown never reaches); text and binary keep it.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): attack
