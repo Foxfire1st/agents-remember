@@ -90,6 +90,21 @@ mandatory turn report, which is never delegated because it must reflect the main
 state. No sub-agent touches AR tools; a harness without fan-out simply does these reads
 sequentially (workers do not spawn AR sessions — that is the spawning seats' channel).
 
+## Loop Position (when the leaf runs as a three-party loop)
+
+The owning seat scores each leaf into a tier at dispatch (loop doctrine: `../SKILL.md`, The
+Three-Party Loop). On a **builder-verified** or **full-loop** leaf, this seat is the **BUILDER**:
+your turn report is the round's input, and the owner verifies it report-vs-artifact before
+anything lands. Two consequences for you:
+
+- **Fix rounds resume THIS session** — the same builder, with its context intact. Your round-2+
+  report **appends** to your report file rather than rewriting it, so the loop history stays
+  legible.
+- **Rounds are capped and must converge**, but the cap, the convergence call, and any escalation
+  are the OWNER's controls, not yours. You build and report honestly; if you disagree with a
+  reviewer finding you were handed, say so **with evidence in your report** — the owner rules,
+  you never argue a verdict into the code.
+
 ## Default Behavior
 
 **Fulfill the task, fill small blanks.** No creative-liberty prompting in either direction. The

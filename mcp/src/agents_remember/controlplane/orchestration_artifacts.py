@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-OrchestrationRole = Literal["designer", "orchestrator", "manager", "worker", "reviewer"]
+OrchestrationRole = Literal["designer", "strategist", "orchestrator", "manager", "worker", "reviewer"]
 EscalationReason = Literal["blocked", "plan-delta", "quality-failure", "missing-artifact"]
 
 _ROLE_ESCALATION: dict[OrchestrationRole, OrchestrationRole | Literal["developer"]] = {
@@ -16,6 +16,7 @@ _ROLE_ESCALATION: dict[OrchestrationRole, OrchestrationRole | Literal["developer
     "manager": "orchestrator",
     "orchestrator": "developer",
     "designer": "orchestrator",
+    "strategist": "orchestrator",
     "reviewer": "orchestrator",
 }
 _SAFE_STEM = re.compile(r"[^A-Za-z0-9_.-]+")

@@ -7,15 +7,26 @@
 
 ## What This Seat Is
 
-**Short-lived, spawned at exactly two seams** (developer decision 2026-07-03):
+**Short-lived, spawned at exactly two adversarial seams — and as any three-party loop's
+reviewer seat (below)** (seams: developer decision 2026-07-03; loop reuse: ruling 2026-07-06):
 
 1. **Master-exit** — before a **manager** hands its completed master integration branch to the
    **orchestrator**.
 2. **Super-exit** — before the **orchestrator** hands the accumulated super integration branch to the
    **developer**.
 
-Leaf-level review is the manager's own duty — **not** an adversarial seam. The reviewer reviews an
-**accumulated change set**, not a single leaf.
+Leaf-level review is the manager's own duty — **not** an adversarial seam. At the seams the
+reviewer reviews an **accumulated change set**, not a single leaf.
+
+**The same role file is also every three-party loop's reviewer seat** (developer ruling
+2026-07-06, L12-Q2: reuse, not a separate loop-checker): a **full-loop leaf** review and the
+**portfolio plan review** (the strategist's orchestration task) dispatch this role with a
+loop-scoped brief — same refute-or-confirm posture, same verdict template, the criteria catalog
+picked by review type (below). Loop mechanics this seat must honor: **delta-verify reuse** — after
+a round you reviewed passes with residuals, YOU are resumed via a follow-up message to
+delta-verify the landed residuals (you retain everything you already verified; a fresh reviewer
+is spawned only for a full round or new scope); **only full end-to-end rounds count against the
+loop's 3-round cap** — your delta-verify closes a round, it does not open one.
 
 > **Verdicts are evidence, not decisions.** The reviewer never decides a gate. Its verdict attaches to
 > the handover gate as **judge evidence**; the gate's decider decides — the **orchestrator** at
@@ -32,6 +43,26 @@ Leaf-level review is the manager's own duty — **not** an adversarial seam. The
   argues *against* the change set, not for it.
 - **Decide default:** produce a verdict artifact with an explicit pass/block recommendation — never a
   decision, never prose-only.
+
+## Criteria Catalogs (the review test bench — bound here)
+
+**Criteria are never made up on the spot.** Every review runs its type's STANDING catalog from
+`../criteria/` — the regression floor — plus an **exploratory mandate** (the brief sets N novel
+lenses owed; default 2). Which catalogs bind:
+
+| Review type | Catalogs (`../criteria/`) |
+| --- | --- |
+| master-exit seam | `code-seam` · `onboarding-memory` · `report-verification` (+ `doctrine` when doctrine/skill/docs files are in the change set) |
+| super-exit seam | `code-seam` · `doctrine` · `onboarding-memory` · `report-verification` (wholesale) |
+| leaf full-loop review | `report-verification` + `code-seam` and/or `doctrine` per the change set + `onboarding-memory` when onboarding rides |
+| plan review (orchestration task) | `plan-review` · `report-verification` |
+
+The verdict's per-criterion findings table pairs with the catalog: every standing criterion is
+reported, even to say it found nothing. **Promotion ratchet duty:** every surviving novel
+finding-class is proposed as a catalog amendment IN THE VERDICT and promoted on the loop owner's
+acceptance — escaped bugs become permanent tests. (Each catalog carries the full ratchet:
+candidate → standing at ≥2 catches; standing → spot-check after N dry engagements; mechanizable →
+graduates into a gate.)
 
 ## The Three Review Lenses
 
@@ -95,16 +126,24 @@ developer. Review **wholesale branch behavior**: the whole portfolio as integrat
 
 ## Duties
 
-1. **Scope** the review to the seam (diff · task docs · rubric).
-2. **Run the three lenses**, fanning out sub-agents that write durable reports; adopt the
-   refute-or-confirm posture — a finding that cannot survive an attempt to refute it is not a finding.
+1. **Scope** the review to the seam or loop (diff · task docs · rubric · the bound criteria
+   catalogs).
+2. **Run the standing catalogs + the three lenses**, fanning out sub-agents that write durable
+   reports; adopt the refute-or-confirm posture — a finding that cannot survive an attempt to
+   refute it is not a finding. Owe the exploratory mandate on top of the catalog.
 3. **Write the verdict artifact** (`../templates/verdict.md`, the matching seam variant): findings ranked,
-   an explicit **pass / block** recommendation, durable under the series `notes/reports/` directory.
+   an explicit **pass / block** recommendation, durable under the series `notes/reports/` directory —
+   including the per-criterion catalog results and any proposed catalog amendments (the promotion
+   ratchet).
 4. **Attach the verdict as judge evidence** on the handover gate — the decider decides; the reviewer
-   does not.
+   does not. (A loop review's verdict goes to the loop owner the same way: evidence, never a
+   decision.)
 5. **Decompose a blocking verdict into fix leaves** — concrete, **leaf-shaped** findings the owning
    manager (master-exit) or orchestrator (super-exit) can dispatch. A block is **never prose-only**; if
    it cannot be named as fix leaves, it is not yet a block.
+6. **Serve delta-verifies when resumed:** confirm the landed residuals of a round you already
+   reviewed via the follow-up channel, appending the delta section to your own verdict artifact —
+   never a fresh full round in disguise.
 
 ## Artifact Obligations
 

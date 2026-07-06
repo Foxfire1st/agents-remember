@@ -100,6 +100,52 @@ const ROUTER: FlowModel = {
   ],
 };
 
+// --- strategist (the sprint planner, spawn-first) ------------------------------------------------
+
+const STRATEGIST: FlowModel = {
+  id: "strategist",
+  label: "Strategist",
+  title: "strategist — the sprint planner, spawn-first",
+  takeaway:
+    "A strategist run is a MANDATORY precondition for any orchestrated run — even a single master " +
+    "gets the pass. Spawn-first by design: portfolio analysis is token-heavy, so it runs as its " +
+    "own process (the designer stays an inline hat; the strategist never is one). The orchestrator " +
+    "dispatches it with a portfolio brief carrying REFS to durable state, never pasted state. It " +
+    "runs an eight-phase method — inventory, two-sided touch surfaces, evidence-cited dependency " +
+    "edges, blast-radius register, coherence sweep, ordering — and delivers the ORCHESTRATION " +
+    "TASK: the sprint plan and the sprint scope. The plan is adversarially reviewed (plan-review " +
+    "catalog), then converges over drawing-board rounds with the developer. The strategist READS " +
+    "everything and MUTATES nothing — the orchestrator adopts the draft.",
+  segments: [
+    { kind: "start", label: "▸ spawned before an orchestrated run may begin (AR_SPAWN_ROLE=strategist) — portfolio brief = session start", next: "the mandatory pre-run gate", nextStatus: "proposed" },
+    {
+      kind: "rundown",
+      title: "the mandatory pre-run gate — no orchestration task, no orchestrated run",
+      lines: [
+        { line: "without the pass the portfolio operates blindly, waiting for issues to surface mid-implementation" },
+        { line: "even a single master gets the pass — impact must be understood; its leaves may still shuffle" },
+        { line: "⟁ re-evaluation: in-sprint master added before implementation starts → re-plan · out-of-sprint → next sprint", junction: true },
+      ],
+    },
+    {
+      kind: "rundown",
+      title: "the eight-phase method — mechanical phases use real tools; judgment phases cite",
+      lines: [
+        { line: "1 inventory (task docs · contracts · notes) · 2 touch surfaces, TWO-SIDED: existing → route map; NEW → declared parent + shape" },
+        { line: "3 structural edges — cgc_dependencies/callers/callees · grepai search/trace → ORDER / CONFLICT / INDEPENDENT (new surfaces: declaration cross-reference)" },
+        { line: "4 doctrine edges, cited — an uncited edge is refutable by default · 5 blast-radius register (low/med/high — feeds the loop-tier scoring)" },
+        { line: "6 cross-master coherence/contradiction sweep · 7 topological order + leaf moves (from→to + rationale) + parallel waves" },
+        { line: "⟁ a leaf naming neither existing surfaces nor a parent anchor → finding: unplannable as scoped — never a silent guess", junction: true },
+      ],
+    },
+    { kind: "node", phase: "deliver", tool: "the ORCHESTRATION TASK", detail: "sprint scope · dependency graph with per-edge evidence · blast-radius register · coherence findings · leaf moves · waves · re-evaluation triggers — drafted as a notes artifact", next: "plan review", nextStatus: "proposed" },
+    { kind: "node", phase: "loop", tool: "plan review (plan-review catalog)", detail: "the portfolio three-party loop: owner = orchestrator · builder = strategist · reviewer refutes uncited edges, hunts missed shared surfaces, re-derives blast radii", rides: "portfolio loop", ridesNote: "⊘ verdicts are evidence — the orchestrator rules; 3 full rounds max, convergence required", next: "drawing-board rounds", nextStatus: "proposed" },
+    { kind: "node", phase: "converge", tool: "drawing-board rounds (developer)", detail: "multi-round convergence EXPECTED — the orchestrator relays · ⟁ quo-vadis (masters heavily disagreeing) → straight to the developer", next: "adoption", nextStatus: "proposed" },
+    { kind: "node", phase: "handover", tool: "orchestrator adopts the plan", detail: "reader-not-mutator: the strategist drafts; the ORCHESTRATOR adopts it into durable task form (decision-log entry)", next: "session ends", nextStatus: "proposed" },
+    { kind: "node", phase: "close", tool: "session ends", detail: "the orchestration task remains the sprint's standing scope" },
+  ],
+};
+
 // --- orchestrator (260703-ORCH) ----------------------------------------------------------------
 
 const ORCHESTRATOR: FlowModel = {
@@ -135,9 +181,10 @@ const ORCHESTRATOR: FlowModel = {
         { line: "reshape proposals — leaf moves (planning-status only) · foundation-master extraction · mixed masters first-or-last" },
         { line: "⟁ interleaved leaf-level cross-deps? → reshape master boundaries — NEVER interleave dispatch", junction: true },
         { line: "dependency DAG — must be expressible at MASTER granularity" },
+        { line: "STRATEGIST pre-run — spawn-first, MANDATORY before any orchestrated run → the ORCHESTRATION TASK = sprint plan + scope (drawing-board rounds; the orchestrator adopts)" },
       ],
     },
-    { kind: "node", phase: "portfolio · gate", tool: "portfolio plan gate", detail: "developer approves the reshaped portfolio + DAG + dispatch order — one wholesale review", rides: "plan-approval", ridesNote: "⊘ the streamlining output is a PROPOSAL — no silent rewrites of dev-accepted tasks", next: "create super integration branch", nextStatus: "proposed" },
+    { kind: "node", phase: "portfolio · gate", tool: "portfolio plan gate", detail: "developer approves the reshaped portfolio + the orchestration task (sprint scope + DAG + dispatch order) — one wholesale review", rides: "plan-approval", ridesNote: "⊘ the streamlining output is a PROPOSAL — no silent rewrites of dev-accepted tasks", next: "create super integration branch", nextStatus: "proposed" },
     { kind: "node", phase: "topology", tool: "super-branch INTENT", detail: "creates a BRANCH off main, nothing more — masters base off IT; the orchestrator worktree exists only per integration edge", next: "dispatch loop", nextStatus: "proposed" },
     { kind: "divider", label: "↺ dependency-ordered dispatch loop — send out the next READY master's manager ↺" },
     { kind: "node", phase: "dispatch", tool: "spawn_agent_session (manager)", detail: "manager-brief.md · AR_SPAWN_ROLE=manager · qualified leaf key · base = the CURRENT super tip", next: "monitor", nextStatus: "proposed" },
@@ -146,7 +193,7 @@ const ORCHESTRATOR: FlowModel = {
     { kind: "node", phase: "integrate", tool: "integrate master → super (C-11)", detail: "orchestrator WORKTREE with super as source · merge/carry-over · memory single-siding · ledger maps every commit", next: "↺ next ready master — until the DAG is drained", nextStatus: "proposed" },
     { kind: "divider", label: "↓ DAG drained — the super branch holds the accumulated change set ↓" },
     { kind: "node", phase: "seam 2", tool: "super-exit adversarial review", detail: "wholesale verdict on the super branch: completion vs tasks · quality · onboarding-vs-code", rides: "super-exit seam", ridesNote: "⊘ adversarial review seam 2 of 2 — before the orchestrator hands over to the developer", next: "developer handover", nextStatus: "proposed" },
-    { kind: "node", phase: "handover", tool: "developer review — super level", detail: "whole-behavior review (UX judged wholesale) · ⟁ rejected? → decompose feedback into fix leaves ↺ reactive dispatch", rides: "integration-approval", next: "super → main PR", nextStatus: "proposed" },
+    { kind: "node", phase: "handover", tool: "developer review — super level", detail: "the developer's SINGLE review point (integrations below are orchestrator-delegated): visible-behavior-first in a REVIEWABLE ENVIRONMENT (the dashboard) with demo notes (what changed visibly), code second · ⟁ rejected? → decompose feedback into fix leaves ↺ reactive dispatch", rides: "integration-approval", next: "super → main PR", nextStatus: "proposed" },
     { kind: "node", phase: "land", tool: "super → main PR + carry-over", detail: "remote merge · memory carried to main-memory · push (git-workflow.md tail)", next: "close + propose", nextStatus: "current" },
     { kind: "node", phase: "close", tool: "self-improvement report", detail: "did x/y/z · hit a/b/c · a,b solved on the spot · c PROPOSES this change — grounded in the accumulated backdrop", next: "lifecycle_end", nextStatus: "proposed" },
     { kind: "node", phase: "close", tool: "lifecycle_end", detail: "terminal — durable notes/reports remain the record" },
@@ -177,6 +224,8 @@ const MANAGER: FlowModel = {
         { line: "read the master task_doc + leaf docs · order leaves (parallel where safe — C-11 reconcile absorbs a moved base)" },
         { line: "default behavior stands: fulfill the task, fill small blanks — no extra creative-liberty prompting either way" },
         { line: "⟁ plan delta beyond filling blanks? → escalate to the ORCHESTRATOR — managers don't reshape plans (no bird's-eye)", junction: true },
+        { line: "score each leaf's loop tier at dispatch — direct · builder-verified · full loop (the strategist's blast-radius register is the input; all-direct = workflow-free manager)" },
+        { line: "⟁ full-loop leaves: HARD cap 3 full rounds (delta-verifies don't count) · a non-shrinking round escalates NOW with the round history", junction: true },
       ],
     },
     { kind: "divider", label: "↺ leaf dispatch loop — next leaf ↺" },
@@ -215,6 +264,7 @@ const WORKER: FlowModel = {
         { line: "orient — paired reads of the files you will touch (read_ar_files = official baseline; native reads in the worktree)" },
         { line: "build — exactly the leaf plan · same-pass c-05 onboarding · local build_route_indexes · NEVER git commit" },
         { line: "checks green — the brief-prescribed focused suite + full wrapper" },
+        { line: "loop position: the BUILDER seat — fix rounds resume the SAME session; round-2+ reports APPEND (loop history stays legible)" },
         { line: "⟁ blocked, or a plan delta beyond blank-filling? → escalate ONE rung to the owning seat — never the developer", junction: true },
       ],
     },
@@ -264,8 +314,10 @@ const COMMS: FlowModel = {
       kind: "rundown",
       title: "escalation · worker → manager → orchestrator → developer",
       lines: [
-        { line: "each level resolves within its own view first; only a stumped orchestrator raises to the developer" },
+        { line: "each level resolves within its own view first; what reaches the developer is decided by the quo-vadis test" },
         { line: "workers/managers: fulfill the task, fill small blanks — plan deltas ESCALATE; no spirit judgment below the bird's-eye" },
+        { line: "loops: HARD cap 3 full rounds (delta-verifies close rounds) · convergence rule — a round that does not shrink the finding set escalates NOW, with the full round history attached" },
+        { line: "⟁ quo-vadis — a high-blast-radius TRUTH (answered wrong = big rewrites later) goes to the developer IMMEDIATELY; presentation-grade (2px vs 3px) never does", junction: true },
         { line: "⟁ spirit test — ORCHESTRATOR-ONLY: within the spirit of accepted plans → act + decision-log entry", junction: true },
         { line: "⟁ against the spirit → JOINT decision with the developer (the unanticipated-wrench case)", junction: true },
       ],
@@ -321,7 +373,8 @@ const REVIEWER: FlowModel = {
     "reports. Its verdict is a templated artifact that attaches to the handover gate as JUDGE " +
     "evidence; the decider decides — the ORCHESTRATOR at master-exit (master-handover-approval), " +
     "the DEVELOPER at super-exit. A blocking verdict must decompose into fix leaves — findings, " +
-    "never prose complaints.",
+    "never prose complaints. The same seat serves every three-party loop's review (leaf full-loop, " +
+    "portfolio plan review) with its type's criteria catalog — criteria are never made up on the spot.",
   segments: [
     { kind: "start", label: "▸ spawned at a seam (AR_SPAWN_ROLE=reviewer) — master-exit or super-exit + change-set context", next: "intake", nextStatus: "proposed" },
     { kind: "node", phase: "intake", tool: "scope the review", detail: "integration branch diff · the master's/portfolio's task docs · the seam's rubric", next: "three-lens review", nextStatus: "proposed" },
@@ -329,10 +382,12 @@ const REVIEWER: FlowModel = {
       kind: "rundown",
       title: "three-lens review — sub-agents fan out, reports are durable",
       lines: [
+        { line: "criteria catalogs bound per review type (criteria/: code-seam · doctrine · onboarding-memory · report-verification · plan-review) — standing floor + exploratory mandate + promotion ratchet" },
         { line: "completion — every requirement/step addressed vs the task docs; deltas justified in decision logs" },
         { line: "code quality — the resolved tools.md suite (lint · typecheck · tests · complexity); regressions vs the past" },
         { line: "onboarding-vs-code — changed files' sidecars updated in the same pass · drift clean · route overviews current" },
         { line: "⟁ refute-or-confirm posture — findings must survive an attempt to refute them", junction: true },
+        { line: "loop-seat reuse: delta-verifies resume the SAME reviewer (they close rounds, never open them); fresh reviewer only for a full round" },
       ],
     },
     { kind: "node", phase: "verdict", tool: "verdict artifact", detail: "templated · findings ranked · explicit pass/block recommendation · durable under the series notes", next: "attach as judge evidence", nextStatus: "proposed" },
@@ -342,4 +397,4 @@ const REVIEWER: FlowModel = {
   ],
 };
 
-export const FLOW_MODELS: FlowModel[] = [ROUTER, DESIGNER, ORCHESTRATOR, MANAGER, WORKER, REVIEWER, COMMS];
+export const FLOW_MODELS: FlowModel[] = [ROUTER, DESIGNER, STRATEGIST, ORCHESTRATOR, MANAGER, WORKER, REVIEWER, COMMS];

@@ -98,6 +98,55 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     ).not.toBeNull();
   });
 
+  it("draws the strategist as the mandatory spawn-first sprint planner", () => {
+    const { getByTestId, getByText } = render(<FlowTab initialModel="strategist" />);
+    expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("strategist");
+    expect(getByText(/the sprint planner, spawn-first/)).not.toBeNull();
+    expect(getByText(/the mandatory pre-run gate — no orchestration task, no orchestrated run/)).not.toBeNull();
+    expect(getByText(/even a single master gets the pass — impact must be understood; its leaves may still shuffle/)).not.toBeNull();
+    expect(
+      getByText(/4 doctrine edges, cited — an uncited edge is refutable by default · 5 blast-radius register \(low\/med\/high — feeds the loop-tier scoring\)/),
+    ).not.toBeNull();
+    expect(
+      getByText(/⟁ a leaf naming neither existing surfaces nor a parent anchor → finding: unplannable as scoped — never a silent guess/),
+    ).not.toBeNull();
+    expect(
+      getByText(/reader-not-mutator: the strategist drafts; the ORCHESTRATOR adopts it into durable task form \(decision-log entry\)/),
+    ).not.toBeNull();
+  });
+
+  it("encodes the three-party-loop invariants across the drawn models", () => {
+    const { getByTestId, getByText } = render(<FlowTab initialModel="manager" />);
+    expect(
+      getByText(/score each leaf's loop tier at dispatch — direct · builder-verified · full loop/),
+    ).not.toBeNull();
+    expect(
+      getByText(/⟁ full-loop leaves: HARD cap 3 full rounds \(delta-verifies don't count\) · a non-shrinking round escalates NOW with the round history/),
+    ).not.toBeNull();
+    fireEvent.click(getByTestId("flow-nav-comms"));
+    expect(
+      getByText(/⟁ quo-vadis — a high-blast-radius TRUTH \(answered wrong = big rewrites later\) goes to the developer IMMEDIATELY; presentation-grade \(2px vs 3px\) never does/),
+    ).not.toBeNull();
+    fireEvent.click(getByTestId("flow-nav-reviewer"));
+    expect(
+      getByText(/criteria catalogs bound per review type \(criteria\/: code-seam · doctrine · onboarding-memory · report-verification · plan-review\)/),
+    ).not.toBeNull();
+    expect(
+      getByText(/loop-seat reuse: delta-verifies resume the SAME reviewer \(they close rounds, never open them\); fresh reviewer only for a full round/),
+    ).not.toBeNull();
+    fireEvent.click(getByTestId("flow-nav-worker"));
+    expect(
+      getByText(/loop position: the BUILDER seat — fix rounds resume the SAME session; round-2\+ reports APPEND \(loop history stays legible\)/),
+    ).not.toBeNull();
+    fireEvent.click(getByTestId("flow-nav-orchestrator"));
+    expect(
+      getByText(/STRATEGIST pre-run — spawn-first, MANDATORY before any orchestrated run → the ORCHESTRATION TASK = sprint plan \+ scope/),
+    ).not.toBeNull();
+    expect(
+      getByText(/visible-behavior-first in a REVIEWABLE ENVIRONMENT \(the dashboard\) with demo notes \(what changed visibly\), code second/),
+    ).not.toBeNull();
+  });
+
   it("draws the designer as the hat the orchestrator pulls", () => {
     const { getByTestId, getByText } = render(<FlowTab initialModel="designer" />);
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("designer");

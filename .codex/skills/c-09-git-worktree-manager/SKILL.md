@@ -198,7 +198,7 @@ moved since task start.
 
 ## Integration
 
-Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
+Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits. Orchestrated-run carve-out (ruled 2026-07-06): dependency-ordered leaf→master and master→super integrations ride the series' standing approval (the developer's portfolio-gate approval recorded in the planner master) — the developer hand-off concentrates at the super PR/carry-over gate per the `l-01-agent-lifecycles` loop/orchestrator doctrine; a raised durable `integration-approval` gate still awaits the developer.
 
 On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun. When no gate addresses the integrating master but open `master-handover-approval` gates exist elsewhere, integrate still proceeds and its result carries a `handover_gate_warning` naming them — treat it as a spelling check on the raised gate's `enclosure`.
 

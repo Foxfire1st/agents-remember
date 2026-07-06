@@ -58,6 +58,15 @@ class ArtifactHelperTests(unittest.TestCase):
         )
         self.assertEqual(packet.toRole, "manager")
 
+    def test_strategist_escalates_to_orchestrator(self) -> None:
+        packet = escalation_packet(
+            from_role="strategist",
+            reason="plan-delta",
+            subject="orchestration task",
+            summary="Two masters heavily disagree on a shared surface (quo-vadis).",
+        )
+        self.assertEqual(packet.toRole, "orchestrator")
+
 
 class NudgePolicyTests(unittest.TestCase):
     def test_missing_artifact_flags_absent_or_empty_report(self) -> None:

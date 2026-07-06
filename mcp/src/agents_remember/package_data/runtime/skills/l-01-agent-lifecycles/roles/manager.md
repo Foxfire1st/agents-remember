@@ -56,6 +56,21 @@ developer can walk in any time. Read the master + leaf docs; order the leaves.
 
 ### 2 — Leaf dispatch loop (per leaf)
 
+- **Score the leaf's loop tier at dispatch** (loop doctrine: `../SKILL.md`, The Three-Party Loop):
+  blast radius · novelty · size → **direct** (NO loop machinery: the leaf's worker implements as
+  usual — worker self-check + checks ladder + this seat's ordinary artifact review; this seat
+  still dispatches per leaf and never grows a build surface) | **builder-verified** (the worker
+  implements; this seat additionally verifies its report claim-by-claim against the artifacts; no
+  reviewer) | **full loop** (worker + independent reviewer rounds). When an orchestration task
+  exists, its **blast-radius register is the scoring input**. Record the mark (tier + scope:
+  manager | orchestrator — the owning level runs the loop with ITS agent set) on the leaf doc with
+  a decision-log entry. **A master whose leaves all score `direct` is a workflow-free manager** —
+  no loop machinery, just the dispatch-review-integrate spine below.
+- On a full-loop leaf, run the loop with this level's controls: a round = implement → review;
+  **hard cap 3 full rounds** (delta-verifies by the SAME reviewer close rounds, they do not count;
+  fix rounds resume the SAME builder); **every round must shrink the finding set** — a
+  non-shrinking round escalates to the orchestrator immediately, with the full round history
+  attached, regardless of the count.
 - `spawn_agent_session(worker)` — a **fresh session** on the leaf: the brief (compiled from
   `../templates/worker-brief.md`) is pasted + submitted, with `env={"AR_SPAWN_ROLE": "worker"}` and
   the **qualified** leaf key `<repository>/<master>/<docId>`; the worker edits inside the leaf
@@ -132,7 +147,11 @@ own lifecycle if you need its state).
 - **Stdin push** — nudges and messages delivered into hosted worker sessions; poll is the fallback.
 - **Escalation** — **up to the orchestrator, never straight to the developer.** A stumped manager, and
   any plan delta beyond blank-filling, raises to the orchestrator. The manager resolves within its own
-  master's view first.
+  master's view first. A loop that hits the 3-round cap or stops converging escalates **with the
+  full round history attached**. **Quo-vadis test:** a question that is a **high-blast-radius
+  truth** — answered wrong it means big rewrites later, not a cosmetic choice — is flagged as
+  quo-vadis when raised, so the orchestrator relays it to the developer immediately instead of
+  absorbing it; presentation-grade choices are never escalated — decide and log.
 
 ## Knobs
 

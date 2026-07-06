@@ -228,3 +228,62 @@ reviewer-verdict evidence. The delegable kinds are `plan-approval`,
 `closeout-approval`, and `master-handover-approval`;
 `integration-approval`, `push-approval`, and `cleanup-approval` are
 human-pinned and cannot be delegated.
+
+## Orchestration Loops (documented schema — storage lands with L13)
+
+`orchestration.loops` configures the three-party review loops (OWNER → BUILDER →
+REVIEWER) the `l-01-agent-lifecycles` skill runs at every level that owns work.
+**This section defines the schema's meaning; it is not parsed yet.** Storage
+lands with the 260703-L13 settings unification in the ar-coordination
+`system/settings.json`, with repo-local settings taking precedence over the
+global file.
+
+```jsonc
+"orchestration": {
+  "loops": {
+    "defaults": {
+      "maxRounds": 3,                 // the HARD cap — only FULL end-to-end rounds count
+      "reviewerReuse": "delta-verify", // residuals of a passing round are delta-verified by the SAME reviewer
+      "complexity": { "fullLoopAt": "high", "builderAt": "medium" }
+    },
+    "perLevel": {
+      "leaf":      { "loop": "scored" },        // tier scored per leaf at dispatch (direct | builder-verified | full loop)
+      "master":    { "loop": "seam-required" }, // loop posture only; "none" = workflow-free manager (the master-exit SEAM stays unconditional)
+      "portfolio": { "loop": "strategist" }     // owner = orchestrator · builder = strategist · reviewer with the plan-review catalog
+    }
+    // local override example (tight mode):
+    // "perMaster": { "260703_agent-orchestration": { "leaf": { "loop": "builder-verified" } } }
+  }
+}
+```
+
+Semantics, as the loop doctrine defines them
+(`skills/l-01-agent-lifecycles/SKILL.md`, The Three-Party Loop):
+
+- `defaults.maxRounds` (default `3`) is the hard cap per loop. **Only full
+  end-to-end rounds count against it**; delta-verifies close rounds, they do
+  not open them. The real control is the convergence rule — every round must
+  shrink the open finding set, and a non-shrinking round escalates immediately
+  regardless of the count — so the cap is the backstop, not the driver.
+- `defaults.reviewerReuse: "delta-verify"` names the ruled reuse: the SAME
+  reviewer instance is resumed via a follow-up message to verify a passing
+  round's landed residuals, and fix rounds resume the SAME builder. A fresh
+  reviewer is spawned only for a full round or when new scope opens.
+- `defaults.complexity` maps the dispatch-time complexity score (blast radius ·
+  novelty · size) to tiers: at/above `fullLoopAt` a leaf runs the full loop
+  (builder + independent reviewer); at/above `builderAt` it runs
+  builder-verified (builder + owner report-vs-artifact check, no reviewer);
+  below both it is direct (the level's ordinary build channel implements —
+  no loop machinery).
+- `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
+  dispatch. `perLevel.master.loop: "seam-required"` names the default loop
+  posture; `"none"` configures the workflow-free manager (a master whose
+  leaves all score direct carries no loop machinery). **This knob governs the
+  LOOP only (review rounds / workflow-free manager): the master-exit SEAM gate
+  is unconditional doctrine — no knob value touches it** (deeper knob semantics
+  are L13's to resolve). Each level runs its loop with its own agent set
+  (`orchestration.roles` knobs per role).
+- `perLevel.portfolio.loop: "strategist"` names the portfolio loop's parties.
+  **The strategist's mandatory pre-run is doctrine, not a knob** — no
+  configuration can waive it: an orchestrated run requires the adopted
+  orchestration task, unconditionally (`roles/strategist.md`).

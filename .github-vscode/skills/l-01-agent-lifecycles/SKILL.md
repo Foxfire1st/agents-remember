@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> role brief -> otherwise orchestrator), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (orchestrator, designer, manager, worker, adversarial reviewer) plus the report-template library. A developer-facing session IS the orchestrator; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
+description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> role brief -> otherwise orchestrator), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (orchestrator, designer, strategist, manager, worker, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. A developer-facing session IS the orchestrator; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
 ---
 
 # l-01-agent-lifecycles — The Agent Lifecycles
@@ -42,9 +42,10 @@ as its own** — the orchestrator always for `roles/designer.md`, and in flat ru
 | --- | --- | --- |
 | **orchestrator** | the developer-facing session; first coordination leaf of an orchestrated series | `roles/orchestrator.md` |
 | **designer** | a HAT the orchestrator pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
+| **strategist** | the sprint planner, SPAWN-FIRST; a strategist run is a **mandatory precondition for any orchestrated run** — its deliverable is the orchestration task (sprint plan + scope); spawn value `strategist` | `roles/strategist.md` |
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
-| **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit); spawn value `reviewer` | `roles/reviewer.md` |
+| **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) and as any three-party loop's reviewer seat (criteria catalogs bound per review type); spawn value `reviewer` | `roles/reviewer.md` |
 
 The **lenses** (bug · feature · triage · research — `lenses.md`) are how the scoping seats
 (orchestrator, designer) read a piece of work; a dispatched role never picks a lens — its brief
@@ -84,6 +85,63 @@ at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifec
   can walk into any seat at any level.
 - **Decision-needing questions land in the task doc's `openQuestions`** — the rendered decision
   surface; `notes/` carries the analysis behind them.
+
+## The Three-Party Loop (one home — this section owns the loop doctrine)
+
+**OWNER → BUILDER → REVIEWER → owner, at every level that owns work.** The owner never
+self-approves; the builder never lands; the reviewer never decides — verdicts are evidence. The
+owner checks the verdict and either redispatches a builder or escalates. Role files reference this
+section; they do not restate it.
+
+| Level | Owner (holds the deliverable, rules, lands) | Builder | Reviewer |
+| --- | --- | --- | --- |
+| Leaf | the leaf's owning seat (manager; orchestrator in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
+| Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
+| Portfolio | the orchestrator | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
+
+**Complexity-scored tiers (per leaf, at dispatch).** The owning seat scores three axes — blast
+radius (doctrine/enforcement/public surface vs leaf-local) · novelty (new subsystem vs
+pattern-following) · size (files × steps) — into three tiers: **direct** (no loop
+machinery — the level's ordinary build channel implements: hands-on at session scale, the leaf's
+worker under a manager; self-check + checks ladder only), **builder-verified** (builder
+implements; owner verifies report-vs-artifact; no reviewer), **full loop** (builder + independent
+reviewer rounds). The
+strategist's blast-radius register is the scoring input when an orchestration task exists. A
+leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
+agent set) is recorded on the leaf doc with a decision-log entry. **A master whose leaves all
+score `direct` is a workflow-free manager** — no loop machinery; the knobs make every loop
+optional per level, never mandatory ceremony.
+
+**Rounds and the HARD cap.** A round = implement → review. **Hard cap: 3 rounds per loop — and
+ONLY full end-to-end rounds count against it.** Residuals of a passing round are landed and
+**delta-verified by the SAME reviewer via a follow-up message** (it retains everything it already
+verified, at a fraction of a fresh round's cost); **fix rounds resume the SAME builder**. A fresh
+reviewer is spawned only for a full round or when new scope opens. Delta-verifies close rounds;
+they do not open them.
+
+**The convergence rule (the real control; the cap is the backstop).** Every round must SHRINK the
+open finding set. A round that does not shrink it escalates immediately, regardless of the count;
+a monotonically converging loop may never hit the cap at all. At the cap, or on non-convergence,
+the owner does not spin another round — it **escalates one seat up the ladder (worker → manager →
+orchestrator → developer) with the full round history attached**; the escalation packet IS the
+upper seat's visibility.
+
+**Quo-vadis (the written developer-escalation criterion).** A question is developer-worthy when it
+is a **high-blast-radius truth** — answered wrong it means big rewrites later (architecture
+direction, security posture, doctrine contradictions, irreversible data/branch operations, where
+agent settings live). Quo-vadis questions escalate IMMEDIATELY, regardless of round count.
+Presentation-grade choices (2px vs 3px) never do — the owner rules and logs.
+
+**Criteria catalogs (the reviewer as test bench).** Criteria are never made up on the spot: every
+review runs its type's standing catalog from `criteria/` (code-seam · doctrine ·
+onboarding-memory · report-verification · plan-review) plus an exploratory mandate, under the
+promotion ratchet (each catalog carries it). `roles/reviewer.md` binds them.
+
+**Per-level agent sets.** Each level runs its loop with its own harness/model/effort set — the
+orchestrator-level set (the strongest models) and the manager-level set (cheaper, possibly
+workflow-free) are configured per level in the `orchestration.loops` settings block (schema in
+`docs/reference/settings-json.md`; storage/parsing land with the settings unification, L13). The
+strategist's mandatory pre-run is doctrine, not a knob — it is unconditional.
 
 ## Knob Block & Capability Doctrine (no per-harness files)
 
@@ -126,17 +184,23 @@ seam decisions** (`master-handover-approval`) to attached reviewer-verdict evide
 policy `manager-decides-leaf-gates` routes leaf gates to the manager and the master-exit handover
 to the **orchestrator** (human review concentrates at the super gate). `orchestration.roles` / `concurrency` are documented
 schema whose parsing/injection is tracked backlog (task-doc-tooling series) — the terminal host
-currently receives knobs per dispatch from the spawning seat.
+currently receives knobs per dispatch from the spawning seat. `orchestration.loops` (the
+three-party-loop knobs: per-level loop sets, round cap, reviewer reuse, complexity thresholds) is
+likewise documented schema — meaning in `docs/reference/settings-json.md`, storage/parsing with
+the L13 settings unification.
 
 ## Companion Files
 
 - `lenses.md` — the four job lenses for the scoping seats.
-- `roles/…` — the five self-contained role lifecycles (the registry above).
+- `roles/…` — the six self-contained role lifecycles (the registry above).
 - `templates/…` — turn-report · worker-brief · manager-brief (`ROLE BRIEF — manager`; the
   orchestrator compiles a manager's session start from it) · master-handover-packet ·
   conversation-handover-packet · verdict · impact-analysis · onboarding-coherency ·
-  deep-research-report. Spawning seats compile briefs FROM these; sub-agents fan out and fill them,
-  so analysis survives compaction.
+  deep-research-report · orchestration-task (the strategist's sprint plan). Spawning seats compile
+  briefs FROM these; sub-agents fan out and fill them, so analysis survives compaction.
+- `criteria/…` — the reviewer criteria catalogs (code-seam · doctrine · onboarding-memory ·
+  report-verification · plan-review), the review test bench the three-party loop binds; maintained
+  through the promotion ratchet, never made up on the spot.
 
 ## The Super Integration Branch (orientation only — the doctrine lives with its owner)
 

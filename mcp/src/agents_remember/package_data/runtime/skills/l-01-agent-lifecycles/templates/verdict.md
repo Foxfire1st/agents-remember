@@ -3,7 +3,8 @@
 The artifact an **adversarial reviewer** writes at a seam (`roles/reviewer.md`). It lands
 under the series `notes/reports/` directory and attaches to the handover gate as **judge evidence**.
 There are two variants: **master-exit** (before a manager hands over to the orchestrator) and
-**super-exit** (before the orchestrator hands over to the developer).
+**super-exit** (before the orchestrator hands over to the developer) — plus a loop-review
+adaptation of the master-exit shape (see Loop-Review Adaptation below).
 
 ## Rules
 
@@ -17,6 +18,10 @@ There are two variants: **master-exit** (before a manager hands over to the orch
    lens is clean.
 5. Record the gate evidence reference exactly: `kind=reviewer-verdict`, `ref=<artifact path>`, and
    `verdict=<pass | pass-with-notes | block>`.
+6. **Report every bound catalog criterion** in the Criteria Catalog Results table (the catalogs the
+   binding table in `roles/reviewer.md` assigns this review type, `../criteria/`) — one row per
+   standing criterion even when it found nothing, candidate rows when run — and carry any proposed
+   catalog amendments (the promotion ratchet) in that section.
 
 ## Master-Exit Variant
 
@@ -50,6 +55,12 @@ There are two variants: **master-exit** (before a manager hands over to the orch
 - drift_check clean and memory_quality_check clean: yes | <finding>
 - master-side route overviews current: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
+
+## Criteria Catalog Results (every bound criterion reported — see roles/reviewer.md binding table)
+| Criterion (id · catalog) | Ran | Finding | Evidence |
+| ------------------------ | --- | ------------- | -------- |
+| <CS-1 · code-seam>       | yes | none | <what was walked/checked> |
+- Proposed catalog amendments (promotion ratchet): <surviving novel finding-class → catalog + evidence> | none
 
 ## Findings (ranked; each refute-tested)
 | # | Severity | Finding | Evidence file/ref | Refutation attempted | Survives? |
@@ -99,6 +110,12 @@ reviewer does not.
 - C-11 carry-over and ledger mapping coherent for the final super branch: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
+## Criteria Catalog Results (every bound criterion reported — see roles/reviewer.md binding table)
+| Criterion (id · catalog) | Ran | Finding | Evidence |
+| ------------------------ | --- | ------------- | -------- |
+| <CS-1 · code-seam>       | yes | none | <what was walked/checked> |
+- Proposed catalog amendments (promotion ratchet): <surviving novel finding-class → catalog + evidence> | none
+
 ## Findings (ranked; each refute-tested)
 | # | Severity | Finding | Evidence file/ref | Refutation attempted | Survives? |
 | - | -------- | ------- | ----------------- | -------------------- | --------- |
@@ -111,3 +128,15 @@ reviewer does not.
 This verdict attaches to the super-exit handover gate as judge evidence. The decider decides; this
 reviewer does not.
 ```
+
+## Loop-Review Adaptation (leaf full-loop · plan review)
+
+A three-party-loop review (a full-loop leaf round, or the plan review over an orchestration task)
+uses the **master-exit variant's shape minus the gate machinery**: drop the `gate evidence` header
+row and the Judge-Evidence Note (a loop review attaches to no gate), set `decider` to the **loop
+owner** (the leaf's owning seat, or the orchestrator for the plan review), scope to the round's
+change set (or the orchestration-task draft), and keep everything else — recommendation, Criteria
+Catalog Results (the loop's bound catalogs, e.g. `plan-review` + `report-verification` for a plan
+review), ranked refute-tested findings, and fix decomposition. The verdict remains **evidence to
+the loop owner, never a decision**; a delta-verify appends a dated delta section to this same
+artifact rather than opening a new one.
