@@ -149,12 +149,23 @@ preference):
    (`perLevel`). Read per-use; edits apply on the next use, no restart.
 3. **Concurrency caps** (`orchestration.concurrency`) - `maxParallelMasters`,
    `maxParallelLeaves`, `maxSubAgents`. Default: uncapped.
-4. **Harness preference** (`orchestration.spawn.harness` and per-role
-   `orchestration.roles.<role>` knobs) - which installed harness
-   `spawn_agent_session` uses when the spawning seat passes none, and per-role
-   harness/model/effort overrides. Values must be harness registry ids
-   (`claude`, `codex`, `pi`). Default: detection-gated (the first detected
-   harness).
+4. **Harness preference + role knobs** (`orchestration.spawn.harness`,
+   per-role `orchestration.roles.<role>`, per-level
+   `orchestration.rolesPerLevel.<level>.<role>`) - which installed harness
+   `spawn_agent_session` uses when the spawning seat passes none, per-role
+   harness/model/effort overrides, and per-LEVEL overrides
+   (leaf|master|portfolio) for tiered economics (e.g. a cheap leaf reviewer,
+   a smarter master-seam reviewer). Harness values must be known ids: the
+   builtin registry (`claude`, `codex`, `pi`) or an `orchestration.harnesses`
+   entry the developer defines (new TUIs, or a pre-customized launch argv for
+   a builtin). `effort` is validated per-harness at dispatch (claude:
+   `low|medium|high|xhigh|max` on the `--effort` flag plus the session-level
+   `ultracode`); mention the FREE-FORM escape hatch for anything outside the
+   vocabularies - `launchArgs` (verbatim argv), `sessionCommands` (pasted
+   before the brief), `promptKeywords` (prepended to the brief) - never
+   validated, recorded in spawn provenance. Default: detection-gated (the
+   first detected harness). The full spawn-surface manual is
+   `docs/reference/harnesses.md`.
 
 If the developer wants to skip the interview, confirm the seeded defaults
 apply and continue; tell them the file can be edited any time (picked up

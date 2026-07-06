@@ -160,6 +160,9 @@ own lifecycle if you need its state).
 | harness | claude         | default preference only — settings picks the actual harness       |
 | model   | mid-reasoning  | leaf review + coordination; strong but below the orchestrator    |
 | effort  | medium         | one master's scope, not the portfolio                            |
+| launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
+| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
+| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
 | tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |
 
-Settings.json `orchestration.roles.manager` overrides these (role-file defaults < settings).
+Settings.json `orchestration.roles.manager` overrides these, and `orchestration.rolesPerLevel.<level>.manager` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

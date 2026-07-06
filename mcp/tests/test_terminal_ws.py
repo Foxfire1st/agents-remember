@@ -21,6 +21,7 @@ import unittest
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
+from unittest import mock
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -922,6 +923,35 @@ class TerminalImageEndpointTests(unittest.TestCase):
         path = Path(response.json()["path"])
         self.assertTrue(path.is_relative_to(restored_cwd.resolve()))
         self.assertEqual(path.read_bytes(), png)
+
+
+class MalformedSettingsScratchTerminalTests(unittest.TestCase):
+    """L16 review follow-up (L16R-1): a malformed agentic settings file must fail the
+    launches that USE the registry (harness opens), never a plain scratch terminal --
+    the /api/terminal route loads the effective registry only when the request
+    resolves a harness."""
+
+    def test_plain_terminal_open_skips_the_settings_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            system = tmp / "system"
+            system.mkdir(parents=True)
+            (system / "settings.json").write_text("{not json", encoding="utf-8")
+            config = _config(tmp)
+            app = create_app(config)
+            seen: dict[str, object] = {}
+
+            def fake_open(**kwargs: object) -> object:
+                seen.update(kwargs)
+                raise RuntimeError("stop-before-tmux")
+
+            with mock.patch("agents_remember.serving.app.open_terminal_session", fake_open):
+                client = TestClient(app, raise_server_exceptions=False)
+                client.post("/api/terminal/scratch-1", json={"kind": "terminal"})
+            # The registry load never ran for a scratch terminal: harnesses arrives as
+            # None (builtin fallback) despite the malformed settings file on disk.
+            self.assertIn("harnesses", seen)
+            self.assertIsNone(seen["harnesses"])
 
 
 class ResolveTerminalLaunchTests(unittest.TestCase):

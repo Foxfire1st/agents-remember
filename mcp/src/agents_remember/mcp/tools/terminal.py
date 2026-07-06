@@ -3,15 +3,33 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettings,
+    RoleKnobs,
+    load_agentic_settings,
+)
 from agents_remember.observer.ambient import ambient
-from agents_remember.serving.harnesses import HARNESSES, Which, find_harness, is_detected
+from agents_remember.serving.harnesses import (
+    Harness,
+    Which,
+    effort_session_commands,
+    find_harness,
+    invalid_effort_detail,
+    invalid_model_detail,
+    is_detected,
+    unknown_harness_detail,
+)
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    TerminalCatalogEntry,
+    terminal_catalog_path,
+)
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.serving.terminal_opener import open_terminal_session
 from agents_remember.serving.terminal_paste import TerminalPaster
@@ -22,6 +40,12 @@ if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
 
 _DEFAULT_SHELL = "/bin/bash"
+
+# The dispatch levels (260703-L16, ruling 2026-07-07T08:15) -- the same vocabulary as
+# orchestration.loops.perLevel / orchestration.rolesPerLevel so the per-level families stay
+# congruent. The dispatcher knows its level: a manager dispatching leaf seats = leaf, the seam
+# reviewer = master, portfolio/end-to-end seats = portfolio. Omitted = leaf.
+_SPAWN_LEVELS = ("leaf", "master", "portfolio")
 
 
 def attach_terminal_session_to_leaf_payload(
@@ -97,25 +121,30 @@ def _spawn_repo_root(config: McpRuntimeConfig, leaf_key: str | None) -> Path | N
 
 
 def _resolve_spawn_harness(
-    config: McpRuntimeConfig,
+    settings: AgenticSettings,
     harness: str | None,
-    leaf_key: str | None,
     which: Which | None,
-) -> tuple[str | None, dict[str, Any] | None]:
-    """Resolve the harness id for a spawn (260703-L13 seam).
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """Resolve the harness for a spawn (260703-L13 seam; effective registry 260703-L16).
 
     Precedence: explicit argument > repo-local settings > global settings >
-    detection-gated default (the first registry harness detected on PATH).
-    Settings are read PER-USE through the agentic-settings loader (which
-    validates preference values against the harness registry ids); a malformed
-    settings file raises -- never a silent fallback. Returns
-    ``(harness_id, refusal_payload)`` with exactly one side set.
+    detection-gated default (the first EFFECTIVE-registry harness detected on
+    PATH). Every id resolves against ``settings.harnesses`` -- the builtin
+    registry merged with the ``orchestration.harnesses`` family, so users can
+    teach the system a new TUI or pre-customize a builtin's launch. An id known
+    nowhere refuses loudly pointing at the manual (never a crash); ``settings``
+    comes from the per-use loader (a malformed file raises -- never a silent
+    fallback). Returns ``(harness, refusal_payload)`` with exactly one side set.
     """
+    registry = settings.harnesses
     if harness is not None:
-        found = find_harness(harness)
+        found = find_harness(harness, registry=registry)
         if found is None:
             return None, _spawn_refusal(
-                "harness-unknown", harness, "harness", detail=f"unknown harness: {harness!r}"
+                "harness-unknown",
+                harness,
+                "harness",
+                detail=unknown_harness_detail(harness, registry=registry),
             )
         if not is_detected(found, which=which):
             return None, _spawn_refusal(
@@ -124,15 +153,12 @@ def _resolve_spawn_harness(
                 "harness",
                 detail=f"harness not installed: {harness!r}",
             )
-        return harness, None
+        return found, None
 
-    settings = load_agentic_settings(
-        config.coordination_root, repo_root=_spawn_repo_root(config, leaf_key)
-    )
     preferred = settings.spawn_harness
     if preferred is not None:
-        found = find_harness(preferred)
-        assert found is not None  # the loader validates against the registry ids
+        found = find_harness(preferred, registry=registry)
+        assert found is not None  # the loader validates against the effective ids
         if not is_detected(found, which=which):
             source = ", ".join(str(path) for path in settings.sources)
             return None, _spawn_refusal(
@@ -144,12 +170,12 @@ def _resolve_spawn_harness(
                     f"(orchestration.spawn.harness in {source})"
                 ),
             )
-        return preferred, None
+        return found, None
 
-    for candidate in HARNESSES:
+    for candidate in registry:
         if is_detected(candidate, which=which):
-            return candidate.id, None
-    ids = ", ".join(candidate.id for candidate in HARNESSES)
+            return candidate, None
+    ids = ", ".join(candidate.id for candidate in registry)
     return None, _spawn_refusal(
         "harness-not-detected",
         None,
@@ -159,6 +185,166 @@ def _resolve_spawn_harness(
             f"PATH; install one of: {ids} (or pass harness explicitly)"
         ),
     )
+
+
+@dataclass(frozen=True)
+class _HarnessDispatch:
+    """The pre-spawn knob bundle for one harness-kind dispatch (260703-L16).
+
+    Everything the settings rungs resolved for this seat: the harness id (effective-registry
+    validated), the effective registry itself, the folded model/effort (explicit args over role
+    knobs), the free-form escape hatch, the RESOLVED session-command list (effort vehicle first),
+    and the level provenance.
+    """
+
+    harness_id: str
+    registry: tuple[Harness, ...]
+    model: str | None
+    effort: str | None
+    launch_args: list[str] | None
+    prompt_keywords: list[str] | None
+    session_commands: list[str]
+    spawn_level: str
+    spawn_level_source: str
+
+
+def _resolve_harness_dispatch(
+    config: McpRuntimeConfig,
+    *,
+    harness: str | None,
+    leaf_key: str | None,
+    level: str | None,
+    model: str | None,
+    effort: str | None,
+    env: dict[str, str] | None,
+    launch_args: list[str] | None,
+    prompt_keywords: list[str] | None,
+    session_commands: list[str] | None,
+    which: Which | None,
+) -> tuple[_HarnessDispatch | None, dict[str, Any] | None]:
+    """Resolve + validate every knob BEFORE anything spawns (260703-L16).
+
+    Realizes the dispatch chain explicit args > repo-local level override > global level override >
+    repo-local role default > global role default > spawn preference > detection-gated default: the
+    settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the
+    repo-local layer selected by the qualified leaf key), the harness resolves against the EFFECTIVE
+    registry, and model/effort are refused per-harness (``model-invalid``/``effort-invalid``) before
+    any tmux exists. A session-vocabulary effort (claude ``ultracode``) contributes the FIRST
+    session command. Returns ``(dispatch, refusal)`` with exactly one side set.
+    """
+    spawn_level = level or "leaf"
+    spawn_level_source = "explicit" if level is not None else "default"
+    if spawn_level not in _SPAWN_LEVELS:
+        valid = ", ".join(_SPAWN_LEVELS)
+        return None, _spawn_refusal(
+            "level-invalid",
+            harness,
+            "harness",
+            detail=f"unknown dispatch level {spawn_level!r}; valid levels: [{valid}]",
+        )
+    settings = load_agentic_settings(
+        config.coordination_root, repo_root=_spawn_repo_root(config, leaf_key)
+    )
+    # The settings rungs, keyed by the AR_SPAWN_ROLE riding the caller's env (no role = no settings
+    # rung, today's behavior); unset explicit args fold in from the level-merged role knobs.
+    role = (env or {}).get("AR_SPAWN_ROLE")
+    knobs = settings.resolved_role_knobs(role, spawn_level) if role else RoleKnobs()
+    model = model or knobs.model
+    effort = effort or knobs.effort
+    if launch_args is None and knobs.launch_args:
+        launch_args = list(knobs.launch_args)
+    if prompt_keywords is None and knobs.prompt_keywords:
+        prompt_keywords = list(knobs.prompt_keywords)
+    resolved_session_commands = (
+        list(session_commands) if session_commands is not None else list(knobs.session_commands)
+    )
+    # Harness rung order: explicit argument > role knobs (level-merged) > spawn preference >
+    # detection-gated default (the last two inside _resolve_spawn_harness).
+    found, refusal = _resolve_spawn_harness(settings, harness or knobs.harness, which)
+    if refusal is not None:
+        return None, refusal
+    assert found is not None  # no refusal => a resolved effective-registry harness
+    # Validate the EFFECTIVE values (env wins over arg wins over settings, mirroring _spawn_env).
+    effective_model = (env or {}).get("AR_SPAWN_MODEL") or model
+    effective_effort = (env or {}).get("AR_SPAWN_EFFORT") or effort
+    refusal = _knob_refusal(found, effective_model, effective_effort)
+    if refusal is not None:
+        return None, refusal
+    # A session-vocabulary effort is delivered as the FIRST post-launch session command, ahead of
+    # any caller/settings free-form ones, then the brief.
+    resolved_session_commands = (
+        effort_session_commands(found, effective_effort) + resolved_session_commands
+    )
+    return (
+        _HarnessDispatch(
+            harness_id=found.id,
+            registry=settings.harnesses,
+            model=model,
+            effort=effort,
+            launch_args=launch_args,
+            prompt_keywords=prompt_keywords,
+            session_commands=resolved_session_commands,
+            spawn_level=spawn_level,
+            spawn_level_source=spawn_level_source,
+        ),
+        None,
+    )
+
+
+def _knob_refusal(
+    found: Harness, effective_model: str | None, effective_effort: str | None
+) -> dict[str, Any] | None:
+    """The ``model-invalid``/``effort-invalid`` pre-spawn refusal, or ``None`` when the knobs apply."""
+    checks = (
+        ("model-invalid", invalid_model_detail(found, effective_model) if effective_model else None),
+        (
+            "effort-invalid",
+            invalid_effort_detail(found, effective_effort) if effective_effort else None,
+        ),
+    )
+    for status, detail in checks:
+        if detail is not None:
+            return _spawn_refusal(status, found.id, "harness", detail=detail)
+    return None
+
+
+def _brief_packet(context: str | None, prompt_keywords: list[str] | None) -> str | None:
+    """The brief paste text: promptKeywords ride as its first line (delivered alone with no brief)."""
+    if not prompt_keywords:
+        return context
+    keyword_line = " ".join(prompt_keywords)
+    return f"{keyword_line}\n\n{context}" if context else keyword_line
+
+
+def _deliver_spawn_pastes(
+    paster: TerminalPaster,
+    tmux_name: str,
+    session_commands: list[str],
+    packet: str | None,
+    submit: bool,
+) -> tuple[bool | None, bool | None, bool | None]:
+    """Deliver the session layer: session commands FIRST (each its own echo-confirmed paste, always
+    submitted -- an unexecuted ``/effort ultracode`` would be a silent downgrade), THEN the brief.
+
+    Returns ``(session_commands_delivered, context_delivered, submitted)`` (``None`` = not sent).
+    """
+    session_commands_delivered: bool | None = None
+    context_delivered: bool | None = None
+    submitted: bool | None = None
+    if session_commands:
+        session_commands_delivered = True
+        for command_line in session_commands:
+            outcome = paster.paste(tmux_name, command_line, submit=True)
+            session_commands_delivered = (
+                session_commands_delivered and outcome.delivered and outcome.submitted
+            )
+    if packet:
+        # Workers auto-start (paste + submit); a human draft-only flow leaves submit=False so the
+        # draft stays editable. Echo-confirmed server-side (the frontend pasteAndConfirm mirror).
+        outcome = paster.paste(tmux_name, packet, submit=submit)
+        context_delivered = outcome.delivered
+        submitted = outcome.submitted if submit else None
+    return session_commands_delivered, context_delivered, submitted
 
 
 def spawn_agent_session_payload(
@@ -172,6 +358,10 @@ def spawn_agent_session_payload(
     model: str | None = None,
     effort: str | None = None,
     env: dict[str, str] | None = None,
+    launch_args: list[str] | None = None,
+    prompt_keywords: list[str] | None = None,
+    session_commands: list[str] | None = None,
+    level: str | None = None,
     spawned_by_session: str | None = None,
     spawned_by_lifecycle: str | None = None,
     kind: str = "harness",
@@ -189,12 +379,57 @@ def spawn_agent_session_payload(
     settings (repo-local over global ``orchestration.spawn.harness``), else the detection-gated
     default. Leaf uniqueness stays server-arbitrated: a taken leaf returns ``leaf-taken`` (never
     overridden). ``host``/``paster``/``which``/``session_id`` are injectable seams for tests.
+
+    Per-level knob resolution (ruling 2026-07-07T08:15): the settings rungs come from
+    ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` -- the ``orchestration.rolesPerLevel[level]``
+    override deep-merged over the flat ``orchestration.roles`` default -- realizing the chain
+    explicit args > repo-local level override > global level override > repo-local role default >
+    global role default > detection-gated default. ``level`` is the dispatcher's declaration
+    (leaf|master|portfolio, default leaf); the RESOLVED level + its source (explicit/default) are
+    recorded in spawn provenance.
+
+    Knob application (260703-L16): ``model``/``effort`` keep riding the spawn env AND are mapped onto
+    the harness argv per-harness via the EFFECTIVE registry -- the builtin table merged with the
+    ``orchestration.harnesses`` settings family (new ids add a harness, builtin ids can be
+    pre-customized; an id known nowhere refuses loudly pointing at ``docs/reference/harnesses.md``,
+    never a crash). Env-only builtins get no flags; a settings-defined harness with no declared
+    mapping refuses the knob with guidance (``model-invalid``/``effort-invalid``). ``effort`` is
+    validated against the resolved harness's known vocabulary BEFORE anything spawns -- an unknown
+    value returns the ``effort-invalid`` refusal naming the harness and its valid sets (the CLI
+    would warn-and-silently-degrade). A session-level effort value (claude ``ultracode``) rides a
+    post-launch session command instead of the flag. The free-form escape hatch is never validated,
+    only recorded in spawn provenance: ``launch_args`` (verbatim argv), ``session_commands`` (each
+    line pasted + submitted into the fresh session BEFORE the brief; the resolved list -- effort
+    vehicle first, then the caller's -- is what gets recorded), ``prompt_keywords`` (prepended as
+    the first line of the brief paste).
     """
+    dispatch: _HarnessDispatch | None = None
     if kind == "harness":
-        harness, refusal = _resolve_spawn_harness(config, harness, leaf_key, which)
+        dispatch, refusal = _resolve_harness_dispatch(
+            config,
+            harness=harness,
+            leaf_key=leaf_key,
+            level=level,
+            model=model,
+            effort=effort,
+            env=env,
+            launch_args=launch_args,
+            prompt_keywords=prompt_keywords,
+            session_commands=session_commands,
+            which=which,
+        )
         if refusal is not None:
             return refusal
+        assert dispatch is not None  # no refusal => a resolved dispatch bundle
+        harness = dispatch.harness_id
+        model = dispatch.model
+        effort = dispatch.effort
+        launch_args = dispatch.launch_args
+        prompt_keywords = dispatch.prompt_keywords
 
+    resolved_session_commands = (
+        dispatch.session_commands if dispatch is not None else list(session_commands or [])
+    )
     sid = session_id or uuid4().hex
     spawn_env = _spawn_env(model, effort, env)
     provenance_lifecycle = spawned_by_lifecycle or _ambient_lifecycle_id()
@@ -213,9 +448,15 @@ def spawn_agent_session_payload(
         label=label,
         leaf_key=leaf_key,
         env=spawn_env,
+        launch_args=launch_args,
+        prompt_keywords=prompt_keywords,
+        session_commands=resolved_session_commands or None,
+        spawn_level=dispatch.spawn_level if dispatch is not None else None,
+        spawn_level_source=dispatch.spawn_level_source if dispatch is not None else None,
         spawned_by_session=spawned_by_session,
         spawned_by_lifecycle=provenance_lifecycle,
         which=which,
+        harnesses=dispatch.registry if dispatch is not None else None,
     )
 
     if result.status == "bad-kind":
@@ -238,36 +479,54 @@ def spawn_agent_session_payload(
     entry = result.entry
     assert entry is not None  # opened => an upserted row
 
+    packet = _brief_packet(context, prompt_keywords)
+    session_commands_delivered: bool | None = None
     context_delivered: bool | None = None
     submitted: bool | None = None
-    if context:
-        # Workers auto-start (paste + submit); a human draft-only flow leaves submit=False so the
-        # draft stays editable. Echo-confirmed server-side (the frontend pasteAndConfirm mirror).
+    if resolved_session_commands or packet:
         spawn_paster = paster if paster is not None else TerminalPaster()
-        outcome = spawn_paster.paste(entry.tmux_name, context, submit=submit)
-        context_delivered = outcome.delivered
-        submitted = outcome.submitted if submit else None
+        session_commands_delivered, context_delivered, submitted = _deliver_spawn_pastes(
+            spawn_paster, entry.tmux_name, resolved_session_commands, packet, submit
+        )
 
     return _tool_payload(
         "spawn_agent_session",
-        {
-            "ok": True,
-            "operation": "spawn_agent_session",
-            "status": "spawned",
-            "session": entry.id,
-            "harness": entry.harness,
-            "kind": entry.kind,
-            "leafKey": entry.leaf_key,
-            "label": entry.label,
-            "cwd": str(entry.cwd),
-            "tmuxName": entry.tmux_name,
-            "spawnedBySession": entry.spawned_by_session,
-            "spawnedByLifecycle": entry.spawned_by_lifecycle,
-            "spawnRole": entry.spawn_role,
-            "contextDelivered": context_delivered,
-            "submitted": submitted,
-        },
+        _spawned_payload(entry, session_commands_delivered, context_delivered, submitted),
     )
+
+
+def _spawned_payload(
+    entry: TerminalCatalogEntry,
+    session_commands_delivered: bool | None,
+    context_delivered: bool | None,
+    submitted: bool | None,
+) -> dict[str, Any]:
+    """The ``spawned`` payload: the upserted row (incl. the L16 provenance) + delivery outcomes."""
+    return {
+        "ok": True,
+        "operation": "spawn_agent_session",
+        "status": "spawned",
+        "session": entry.id,
+        "harness": entry.harness,
+        "kind": entry.kind,
+        "leafKey": entry.leaf_key,
+        "label": entry.label,
+        "cwd": str(entry.cwd),
+        "tmuxName": entry.tmux_name,
+        "spawnedBySession": entry.spawned_by_session,
+        "spawnedByLifecycle": entry.spawned_by_lifecycle,
+        "spawnRole": entry.spawn_role,
+        # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
+        "spawnLevel": entry.spawn_level,
+        "spawnLevelSource": entry.spawn_level_source,
+        # Free-form spawn provenance (260703-L16), echoed as recorded on the catalog row.
+        "launchArgs": list(entry.launch_args) if entry.launch_args else None,
+        "promptKeywords": list(entry.prompt_keywords) if entry.prompt_keywords else None,
+        "sessionCommands": list(entry.session_commands) if entry.session_commands else None,
+        "sessionCommandsDelivered": session_commands_delivered,
+        "contextDelivered": context_delivered,
+        "submitted": submitted,
+    }
 
 
 def _spawn_refusal(

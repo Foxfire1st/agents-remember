@@ -396,7 +396,8 @@ def _parse_legacy_authority_gate_delegation(
             f"unsupported orchestration setting(s): {unknown_text}; the MCP "
             "authority file only reads the legacy gateDelegation fallback -- "
             "agentic orchestration settings (gateDelegation, loops, roles, "
-            f"concurrency, spawn) live in {agentic_settings_path(coordination_root)}"
+            "rolesPerLevel, concurrency, spawn, harnesses) live in "
+            f"{agentic_settings_path(coordination_root)}"
         )
     gate_raw = raw.get("gateDelegation")
     if gate_raw is None:

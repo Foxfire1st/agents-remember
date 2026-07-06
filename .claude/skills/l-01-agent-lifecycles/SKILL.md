@@ -168,9 +168,15 @@ defaults < global settings < repo-local settings.
 ```jsonc
 {
   "orchestration": {
-    "roles": {  // role → knob override (harness / model / effort); harness = registry id
+    "roles": {  // role → knob override; validated: harness/model/effort · free-form: launchArgs/promptKeywords/sessionCommands
       "orchestrator": { "harness": "claude", "effort": "high" },
+      "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
+      "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
       "worker":       { "harness": "codex",  "effort": "medium" }
+    },
+    "rolesPerLevel": {  // per-LEVEL agent sets (leaf|master|portfolio), deep-merged over roles
+      "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
+      "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
     },
     "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
     "spawn": { "harness": "claude" },  // spawn_agent_session default when the seat passes none
@@ -182,8 +188,9 @@ defaults < global settings < repo-local settings.
 }
 ```
 
-**As-built (L13):** the whole block is parsed by the kernel agentic-settings loader
-(`kernel/agentic_settings.py`) — typed models for `roles` / `concurrency` / `spawn` / `loops`,
+**As-built (L13 + L16):** the whole block is parsed by the kernel agentic-settings loader
+(`kernel/agentic_settings.py`) — typed models for `roles` / `rolesPerLevel` / `concurrency` /
+`spawn` / `harnesses` / `loops`,
 read PER-USE (an edit applies on the next use, no restart). `orchestration.gateDelegation` is
 parsed and **enforced** (`controlplane/gate_policy.py` — all-human default, opt-in delegation,
 human-pinned kinds `integration-approval` / `push-approval` / `cleanup-approval`, owner never
@@ -192,10 +199,19 @@ needs a restart (an authority-file value is a one-cycle legacy fallback with a b
 `requireReviewerVerdictAtSeams` **binds delegated seam decisions** (`master-handover-approval`) to
 attached reviewer-verdict evidence; the named policy `manager-decides-leaf-gates` routes leaf gates
 to the manager and the master-exit handover to the **orchestrator** (human review concentrates at
-the super gate). `spawn_agent_session` resolves its harness as explicit argument > repo-local
-settings > global settings > detection-gated default; `orchestration.roles` knobs are the spawning
-seat's source when compiling a dispatch (model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`
-env). `orchestration.loops` (the three-party-loop knobs: per-level loop sets, round cap, reviewer
+the super gate). `spawn_agent_session` resolves its knobs (260703-L16) as explicit args >
+repo-local level override > global level override > repo-local role default > global role default
+> detection-gated default — the dispatcher declares its `level` (leaf|master|portfolio, default
+leaf) and the resolved level rides spawn provenance — and **applies** them at the harness
+boundary: model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` env AND map onto the launch argv
+per-harness via the effective registry (claude `--model`/`--effort`; a mapping-less harness stays
+env-only; a session-vocabulary effort like claude's `ultracode` is delivered as a post-launch
+`/effort` paste). Unknown effort values REFUSE at dispatch naming the harness's vocabulary — the
+CLI would warn-and-silently-degrade. The free-form escape hatch (`launchArgs` verbatim argv,
+`promptKeywords` riding the brief paste, `sessionCommands` pasted before the brief) is never
+validated, only recorded in spawn provenance; `orchestration.harnesses` teaches the framework new
+TUIs or pre-customizes builtin launches (manual: `docs/reference/harnesses.md`).
+`orchestration.loops` (the three-party-loop knobs: per-level loop sets, round cap, reviewer
 reuse, complexity thresholds) lives in the same block — meaning in
 `docs/reference/settings-json.md`; no knob touches the master-exit seam gate.
 

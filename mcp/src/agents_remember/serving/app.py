@@ -64,6 +64,7 @@ from agents_remember.controlplane.attention_dismissals import (
 )
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
@@ -632,9 +633,14 @@ def create_app(
     def api_harnesses() -> dict[str, Any]:
         # The supported TUI harnesses + whether each is installed here (slice 6e-2b). The dashboard
         # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
+        # 260703-L16: the EFFECTIVE registry (builtin merged with orchestration.harnesses in the
+        # GLOBAL agentic settings, per-use) -- settings-defined harnesses get buttons too. Repo-local
+        # overrides are leaf-scoped dispatch material (the MCP spawn tool), not workspace buttons.
+        registry = load_agentic_settings(config.coordination_root).harnesses
         return {
             "harnesses": [
-                {"id": h.id, "name": h.name, "detected": h.detected} for h in detect_harnesses()
+                {"id": h.id, "name": h.name, "detected": h.detected}
+                for h in detect_harnesses(registry=registry)
             ]
         }
 
@@ -656,6 +662,15 @@ def create_app(
             label=request.label,
             lifecycle_id=request.lifecycle_id,
             leaf_key=request.leaf_key,
+            # 260703-L16: resolve harness ids against the effective GLOBAL registry (builtin merged
+            # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
+            # Loaded only for harness-kind opens (review L16R-1): a malformed settings file must
+            # fail the launches that USE it, never a plain scratch terminal.
+            harnesses=(
+                load_agentic_settings(config.coordination_root).harnesses
+                if request.kind == "harness" or request.harness
+                else None
+            ),
         )
         if result.status == "bad-kind":
             return JSONResponse(

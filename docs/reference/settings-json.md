@@ -6,7 +6,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles, concurrency, spawn preference) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -217,8 +217,9 @@ one migration cycle the authority file may still carry
 `orchestration.gateDelegation` — it is honored as a fallback when the global
 file does not set the key, with a boot warning naming the new home (and it is
 ignored, with a warning, when the global file does set it). Any other
-`orchestration.*` key in the authority file (`loops`, `roles`, `concurrency`,
-`spawn`) fails the boot loudly, pointing at the global file.
+`orchestration.*` key in the authority file (`loops`, `roles`, `rolesPerLevel`,
+`concurrency`, `spawn`, `harnesses`) fails the boot loudly, pointing at the
+global file.
 
 ## Agentic Settings (global + repo-local)
 
@@ -274,32 +275,93 @@ reviewer-verdict evidence. The delegable kinds are `plan-approval`,
 human-pinned and cannot be delegated. Boot-snapshot: restart required (see
 Read cadence above).
 
-### orchestration.roles, orchestration.concurrency, orchestration.spawn
+### orchestration.roles, orchestration.rolesPerLevel
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
-(`orchestrator`, `designer`, `strategist`, `manager`, `worker`, `reviewer`)
-with `harness`, `model`, and `effort`. Precedence: role-file defaults < global
-settings < repo-local settings. `harness` values must be harness registry ids
-(`claude`, `codex`, `pi`); the spawning seat maps `model`/`effort` into the
-`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` spawn env when dispatching.
+(`orchestrator`, `designer`, `strategist`, `manager`, `worker`, `reviewer`).
+Precedence: role-file defaults < global settings < repo-local settings. The
+knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
+with every parameter, vocabulary, and refusal is
+**`docs/reference/harnesses.md`**):
+
+1. **Validated enum knobs** — `harness` (a known harness id: builtin
+   `claude`/`codex`/`pi` or an `orchestration.harnesses`-defined one),
+   `model`, `effort`. The spawn path seeds `model`/`effort` into the spawn env
+   (`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`) AND applies them onto the harness
+   launch argv per-harness (claude: `--model`/`--effort`; a mapping-less
+   harness stays env-only). `effort` is validated per-harness at DISPATCH:
+   unknown values refuse loudly naming the harness and its valid sets.
+2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
+   launch argv. Never validated; recorded in spawn provenance.
+3. **`sessionCommands`** (list of strings; each line pasted + submitted into
+   the fresh session BEFORE the brief) and **`promptKeywords`** (list of
+   strings prepended as the first line of the dispatch-brief paste). Never
+   validated; recorded in spawn provenance.
+
+The claude effort vocabulary (empirical, 2026-07-07) is TWO-VEHICLE:
+
+| Value | Delivery vehicle |
+| --- | --- |
+| `low`, `medium`, `high`, `xhigh`, `max` | the `--effort` launch flag |
+| `ultracode` | the `/effort ultracode` session command, pasted post-launch before the brief |
+
+Rationale: the installed claude CLI **warns-then-silently-degrades** on
+unknown `--effort` values (probed with `ultracode`, which its interactive
+`/effort` command DOES accept), so unvalidated values would quietly downgrade
+the most reasoning-hungry seats — dispatch accepts the union of both sets and
+refuses anything in neither.
+
+`orchestration.rolesPerLevel.<level>.<role>` (ruling 2026-07-07T08:15) adds
+the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
+`portfolio` (the `loops.perLevel` vocabulary), each holding the same
+knob-override shape. A level override deep-merges over the flat
+`orchestration.roles` default at leaf-key granularity (harness inherited
+unless overridden; arrays replace). The dispatcher declares its level via
+`spawn_agent_session(level=...)`, default `leaf`. Full resolution chain:
+explicit args > repo-local level override > global level override >
+repo-local role default > global role default > detection-gated default. The
+resolved level rides spawn provenance (`spawnLevel`/`spawnLevelSource`).
+
+### orchestration.harnesses
+
+Extends/overrides the builtin harness registry (developer ruling 2026-07-07:
+the registry is good defaults, not a wall). Entries are keyed by harness id:
+a NEW id adds a harness (`command` and/or `argv` required — the command array
+launches it exactly the way you would run it yourself), an EXISTING id
+pre-customizes the builtin defaults (its `argv` replaces ours). Optional
+knob-mapping fields: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
+`effortSessionValues` + `effortSessionCommand` (pairs required together).
+Detection still gates dispatch; an id known nowhere refuses loudly pointing
+at the manual. Schema, semantics, and a worked add-`hermes` example:
+`docs/reference/harnesses.md`.
+
+### orchestration.concurrency, orchestration.spawn
 
 `orchestration.concurrency` caps parallel orchestration fan-out:
 `maxParallelMasters`, `maxParallelLeaves`, `maxSubAgents` (positive integers;
 omitted means uncapped). The caps are doctrine input for the spawning seats.
 
 `orchestration.spawn.harness` names the default harness `spawn_agent_session`
-uses when the caller passes none. Resolution order at the spawn seam: explicit
-argument > repo-local settings > global settings > detection-gated default
-(the first registry harness found on PATH; the repo-local layer is selected by
-the qualified leaf key's repository segment). Values are validated against the
-harness registry ids and gated by detection — a settings value can never
-inject a command.
+uses when the caller passes none and no role knob supplies one. Resolution
+order at the spawn seam: explicit argument > role knobs (level-merged) >
+repo-local settings > global settings > detection-gated default (the first
+effective-registry harness found on PATH; the repo-local layer is selected by
+the qualified leaf key's repository segment). Values are validated against
+the effective harness ids (builtin + `orchestration.harnesses`) and gated by
+detection — a settings value can never inject a command through a reference;
+argv is definable only in the explicit `orchestration.harnesses` family.
 
 ```jsonc
 "orchestration": {
   "roles": {
     "orchestrator": { "harness": "claude", "effort": "high" },
+    "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
+    "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
     "worker":       { "harness": "codex",  "effort": "medium" }
+  },
+  "rolesPerLevel": {
+    "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
+    "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
   },
   "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
   "spawn": { "harness": "claude" }

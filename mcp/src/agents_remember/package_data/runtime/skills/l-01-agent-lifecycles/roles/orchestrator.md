@@ -369,6 +369,9 @@ task, fill small blanks, escalate real deltas).
 | harness | claude            | default preference only — settings picks the actual harness |
 | model   | highest-reasoning | portfolio blast-radius judgment wants the strongest model |
 | effort  | high              | the bird's-eye seat; not the place to economize |
+| launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
+| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
+| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
 | tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · worktree/C-11 |
 
-Settings.json `orchestration.roles.orchestrator` overrides these (role-file defaults < settings).
+Settings.json `orchestration.roles.orchestrator` overrides these, and `orchestration.rolesPerLevel.<level>.orchestrator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

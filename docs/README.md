@@ -56,6 +56,7 @@ The default setup stores durable memory in the target repository under `ar-memor
 - [MCP Tool Reference](reference/mcp-tools.md)
 - [Runtime Layout](reference/runtime-layout.md)
 - [settings.json](reference/settings-json.md)
+- [Harnesses & Spawn Knobs](reference/harnesses.md)
 - [Path Rules](reference/path-rules.md)
 - [Skills](reference/skills.md)
 - [c-08-ar-coordination-context-resolver Resolver](reference/resolver-c08.md)

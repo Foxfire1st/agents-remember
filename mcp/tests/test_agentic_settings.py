@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -424,6 +425,268 @@ class TypedModelTests(unittest.TestCase):
             self._load(
                 {"gateDelegation": {"kinds": {"agent-question": {"role": "manager"}}}}
             )
+
+
+class FreeFormRoleKnobTests(unittest.TestCase):
+    """260703-L16: the free-form escape hatch on role knobs -- launchArgs / promptKeywords /
+    sessionCommands parse ADDITIVELY (old files unchanged), shape-checked only, never
+    content-validated; effort stays a free string at load (per-harness dispatch validation)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.coordination_root = Path(self.tmp.name) / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _load(self, orchestration: dict):
+        write_settings(self.coordination_root, {"orchestration": orchestration})
+        return load_agentic_settings(self.coordination_root)
+
+    def test_free_form_knobs_parse_additively(self) -> None:
+        settings = self._load(
+            {
+                "roles": {
+                    "strategist": {
+                        "effort": "ultracode",
+                        "launchArgs": ["--dangerously-skip-permissions"],
+                        "promptKeywords": ["ultracode"],
+                        "sessionCommands": ["/statusline off"],
+                    }
+                }
+            }
+        )
+        self.assertEqual(
+            settings.roles["strategist"],
+            RoleKnobs(
+                effort="ultracode",
+                launch_args=("--dangerously-skip-permissions",),
+                prompt_keywords=("ultracode",),
+                session_commands=("/statusline off",),
+            ),
+        )
+
+    def test_old_files_without_the_new_fields_are_unchanged(self) -> None:
+        settings = self._load({"roles": {"worker": {"harness": "codex"}}})
+        knobs = settings.roles["worker"]
+        self.assertEqual(knobs.launch_args, ())
+        self.assertEqual(knobs.prompt_keywords, ())
+        self.assertEqual(knobs.session_commands, ())
+
+    def test_effort_is_a_free_string_at_load_time(self) -> None:
+        # The per-harness vocabulary refusal happens at DISPATCH (the harness is only known then);
+        # the loader accepts any non-empty string -- the developer's ultracode file boots.
+        settings = self._load({"roles": {"strategist": {"effort": "ultracode"}}})
+        self.assertEqual(settings.roles["strategist"].effort, "ultracode")
+
+    def test_free_form_shape_violations_fail_loud(self) -> None:
+        for bad in ("--flag", [""], [1], {}):
+            with self.assertRaisesRegex(AgenticSettingsError, "launchArgs"):
+                self._load({"roles": {"worker": {"launchArgs": bad}}})
+        with self.assertRaisesRegex(AgenticSettingsError, "promptKeywords"):
+            self._load({"roles": {"worker": {"promptKeywords": "ultracode"}}})
+        with self.assertRaisesRegex(AgenticSettingsError, "sessionCommands"):
+            self._load({"roles": {"worker": {"sessionCommands": "/effort x"}}})
+
+
+class RolesPerLevelTests(unittest.TestCase):
+    """260703-L16 (ruling 2026-07-07T08:15): orchestration.rolesPerLevel -- per-LEVEL role knob
+    overrides deep-merging over the flat orchestration.roles defaults at leaf-key granularity,
+    with the loops.perLevel level vocabulary (leaf|master|portfolio)."""
+
+    # The developer's canonical reviewer economics: cheap per leaf, smarter at the master seam,
+    # smartest + workflows for the portfolio end-to-end.
+    ECONOMICS: ClassVar[dict] = {
+        "roles": {
+            "reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}
+        },
+        "rolesPerLevel": {
+            "master": {"reviewer": {"model": "opus", "effort": "xhigh"}},
+            "portfolio": {"reviewer": {"model": "fable", "effort": "ultracode"}},
+        },
+    }
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.coordination_root = Path(self.tmp.name) / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _load(self, orchestration: dict):
+        write_settings(self.coordination_root, {"orchestration": orchestration})
+        return load_agentic_settings(self.coordination_root)
+
+    def test_level_override_deep_merges_over_the_flat_default(self) -> None:
+        settings = self._load(self.ECONOMICS)
+        # leaf: no override -- the flat default applies untouched.
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer", "leaf"),
+            RoleKnobs(harness="claude", model="sonnet", effort="high"),
+        )
+        # master: model/effort overridden, harness INHERITED from the flat default.
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer", "master"),
+            RoleKnobs(harness="claude", model="opus", effort="xhigh"),
+        )
+        # portfolio: the smartest set, harness still inherited.
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer", "portfolio"),
+            RoleKnobs(harness="claude", model="fable", effort="ultracode"),
+        )
+
+    def test_default_level_is_leaf(self) -> None:
+        settings = self._load(self.ECONOMICS)
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer"),
+            settings.resolved_role_knobs("reviewer", "leaf"),
+        )
+
+    def test_absent_family_changes_nothing(self) -> None:
+        settings = self._load({"roles": {"reviewer": {"model": "sonnet"}}})
+        self.assertEqual(settings.roles_per_level, {})
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer", "master"),
+            RoleKnobs(model="sonnet"),
+        )
+
+    def test_unknown_level_key_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "epic"):
+            self._load({"rolesPerLevel": {"epic": {"reviewer": {"model": "opus"}}}})
+
+    def test_unknown_role_inside_a_level_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "wroker"):
+            self._load({"rolesPerLevel": {"master": {"wroker": {"model": "opus"}}}})
+
+    def test_level_override_free_form_lists_replace(self) -> None:
+        settings = self._load(
+            {
+                "roles": {"reviewer": {"promptKeywords": ["careful"]}},
+                "rolesPerLevel": {
+                    "portfolio": {"reviewer": {"promptKeywords": ["ultracode"]}}
+                },
+            }
+        )
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer", "portfolio").prompt_keywords,
+            ("ultracode",),
+        )
+        self.assertEqual(
+            settings.resolved_role_knobs("reviewer", "leaf").prompt_keywords,
+            ("careful",),
+        )
+
+
+class HarnessesFamilyTests(unittest.TestCase):
+    """260703-L16 registry openness: orchestration.harnesses extends/overrides the builtin registry
+    (new ids add, builtin ids pre-customize), with fail-loud shapes, delivery-vehicle pair rules,
+    and harness references validated against the EFFECTIVE id set."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        self.repo_root = root / "workspace" / "repo-a"
+        self.coordination_root.mkdir(parents=True)
+        self.repo_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _load(self, orchestration: dict, local: dict | None = None):
+        write_settings(self.coordination_root, {"orchestration": orchestration})
+        if local is not None:
+            write_settings(self.repo_root, {"orchestration": local})
+        return load_agentic_settings(
+            self.coordination_root, self.repo_root if local is not None else None
+        )
+
+    def test_absent_family_means_the_builtin_registry(self) -> None:
+        settings = self._load({})
+        self.assertEqual([h.id for h in settings.harnesses], ["claude", "codex", "pi"])
+
+    def test_new_id_adds_a_harness_with_defaults_derived(self) -> None:
+        settings = self._load({"harnesses": {"hermes": {"command": "hermes"}}})
+        hermes = settings.find_harness("hermes")
+        assert hermes is not None
+        self.assertEqual(hermes.argv, ("hermes",))
+        self.assertEqual(hermes.name, "hermes")
+        self.assertEqual(hermes.defined_in, "settings")
+        # Builtin order is preserved; new ids append.
+        self.assertEqual(
+            [h.id for h in settings.harnesses], ["claude", "codex", "pi", "hermes"]
+        )
+
+    def test_argv_only_entry_derives_its_command(self) -> None:
+        settings = self._load({"harnesses": {"hermes": {"argv": ["hermes", "--tui"]}}})
+        hermes = settings.find_harness("hermes")
+        assert hermes is not None
+        self.assertEqual(hermes.command, "hermes")
+        self.assertEqual(hermes.argv, ("hermes", "--tui"))
+
+    def test_builtin_override_replaces_fields_and_keeps_the_rest(self) -> None:
+        settings = self._load({"harnesses": {"claude": {"argv": ["claude", "--continue"]}}})
+        claude = settings.find_harness("claude")
+        assert claude is not None
+        self.assertEqual(claude.argv, ("claude", "--continue"))
+        # The curated knob mapping and identity survive a partial override.
+        self.assertEqual(claude.command, "claude")
+        self.assertEqual(claude.effort_flag, "--effort")
+        self.assertEqual(claude.defined_in, "registry")
+
+    def test_new_id_without_command_or_argv_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "command and/or argv"):
+            self._load({"harnesses": {"hermes": {"name": "Hermes"}}})
+
+    def test_unknown_entry_key_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "commandline"):
+            self._load({"harnesses": {"hermes": {"commandline": "hermes"}}})
+
+    def test_vocabulary_pairs_must_come_together(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "effortFlagValues"):
+            self._load(
+                {"harnesses": {"hermes": {"command": "hermes", "effortFlag": "--r"}}}
+            )
+        with self.assertRaisesRegex(AgenticSettingsError, "effortSessionCommand"):
+            self._load(
+                {
+                    "harnesses": {
+                        "hermes": {"command": "hermes", "effortSessionValues": ["ultra"]}
+                    }
+                }
+            )
+
+    def test_role_and_spawn_references_accept_settings_defined_ids(self) -> None:
+        settings = self._load(
+            {
+                "harnesses": {"hermes": {"command": "hermes"}},
+                "spawn": {"harness": "hermes"},
+                "roles": {"worker": {"harness": "hermes"}},
+            }
+        )
+        self.assertEqual(settings.spawn_harness, "hermes")
+        self.assertEqual(settings.roles["worker"].harness, "hermes")
+
+    def test_cross_layer_reference_and_partial_override_merge(self) -> None:
+        # The GLOBAL layer declares hermes; the LOCAL layer may reference it and override a single
+        # leaf (per-file validation is shape-only; cross-references bind on the MERGED block).
+        settings = self._load(
+            {"harnesses": {"hermes": {"command": "hermes", "argv": ["hermes", "--global"]}}},
+            local={
+                "harnesses": {"hermes": {"argv": ["hermes", "--local"]}},
+                "spawn": {"harness": "hermes"},
+            },
+        )
+        hermes = settings.find_harness("hermes")
+        assert hermes is not None
+        self.assertEqual(hermes.argv, ("hermes", "--local"))
+        self.assertEqual(settings.spawn_harness, "hermes")
+
+    def test_reference_to_an_id_known_nowhere_fails_naming_the_manual(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "harnesses.md"):
+            self._load({"spawn": {"harness": "hermes"}})
 
 
 class SeedTests(unittest.TestCase):

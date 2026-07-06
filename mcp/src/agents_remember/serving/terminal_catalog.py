@@ -57,6 +57,18 @@ class TerminalCatalogEntry:
     # spawn so the Chats command tree (L14) can group command chats without re-reading tmux env.
     # Same migration-safe written-only-when-set pattern as the provenance fields above.
     spawn_role: str | None = None
+    # Free-form spawn provenance (260703-L16): the escape-hatch role knobs, recorded VERBATIM and
+    # never validated -- launch_args rode the harness argv, session_commands were pasted post-launch
+    # before the brief, prompt_keywords were prepended to the brief paste. Same migration-safe
+    # written-only-when-set pattern as the fields above.
+    launch_args: tuple[str, ...] | None = None
+    prompt_keywords: tuple[str, ...] | None = None
+    session_commands: tuple[str, ...] | None = None
+    # The RESOLVED dispatch level (leaf|master|portfolio) this seat was spawned AT, plus whether the
+    # dispatcher supplied it ("explicit") or it defaulted ("default") -- the rolesPerLevel knob
+    # resolution input (260703-L16, ruling 2026-07-07T08:15). Written-only-when-set.
+    spawn_level: str | None = None
+    spawn_level_source: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -89,6 +101,13 @@ class TerminalCatalogEntry:
                 else None
             ),
             spawn_role=str(data["spawnRole"]) if data.get("spawnRole") is not None else None,
+            launch_args=_string_tuple(data.get("launchArgs")),
+            prompt_keywords=_string_tuple(data.get("promptKeywords")),
+            session_commands=_string_tuple(data.get("sessionCommands")),
+            spawn_level=str(data["spawnLevel"]) if data.get("spawnLevel") is not None else None,
+            spawn_level_source=(
+                str(data["spawnLevelSource"]) if data.get("spawnLevelSource") is not None else None
+            ),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -117,6 +136,16 @@ class TerminalCatalogEntry:
             data["spawnedByLifecycle"] = self.spawned_by_lifecycle
         if self.spawn_role is not None:
             data["spawnRole"] = self.spawn_role
+        if self.launch_args is not None:
+            data["launchArgs"] = list(self.launch_args)
+        if self.prompt_keywords is not None:
+            data["promptKeywords"] = list(self.prompt_keywords)
+        if self.session_commands is not None:
+            data["sessionCommands"] = list(self.session_commands)
+        if self.spawn_level is not None:
+            data["spawnLevel"] = self.spawn_level
+        if self.spawn_level_source is not None:
+            data["spawnLevelSource"] = self.spawn_level_source
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
@@ -192,9 +221,7 @@ class TerminalCatalog:
             (
                 entry
                 for entry in self.list()
-                if entry.leaf_key == leaf_key
-                and entry.status == "running"
-                and entry.role == role
+                if entry.leaf_key == leaf_key and entry.status == "running" and entry.role == role
             ),
             None,
         )
@@ -230,9 +257,7 @@ class TerminalCatalog:
             self._write(entries)
             return updated
 
-    def mark_terminated(
-        self, session_id: str, terminated_at: str
-    ) -> TerminalCatalogEntry | None:
+    def mark_terminated(self, session_id: str, terminated_at: str) -> TerminalCatalogEntry | None:
         with self._lock:
             entries = self._read()
             index = _index_of(entries, session_id)
@@ -252,11 +277,7 @@ class TerminalCatalog:
         sessions = raw.get("sessions", [])
         if not isinstance(sessions, list):
             return []
-        return [
-            TerminalCatalogEntry.from_json(item)
-            for item in sessions
-            if isinstance(item, dict)
-        ]
+        return [TerminalCatalogEntry.from_json(item) for item in sessions if isinstance(item, dict)]
 
     def _write(self, entries: list[TerminalCatalogEntry]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,6 +297,13 @@ class TerminalCatalog:
             with contextlib.suppress(OSError):
                 tmp.unlink()
             raise
+
+
+def _string_tuple(raw: object) -> tuple[str, ...] | None:
+    """A free-form string list read back from JSON (``None`` for absent/legacy rows)."""
+    if not isinstance(raw, list):
+        return None
+    return tuple(str(item) for item in raw)
 
 
 def _index_of(entries: list[TerminalCatalogEntry], session_id: str) -> int | None:

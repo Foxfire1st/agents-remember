@@ -157,6 +157,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         model: str | None = None,
         effort: str | None = None,
         env: dict[str, str] | None = None,
+        launch_args: list[str] | None = None,
+        prompt_keywords: list[str] | None = None,
+        session_commands: list[str] | None = None,
+        level: str | None = None,
         spawned_by_session: str | None = None,
         spawned_by_lifecycle: str | None = None,
         kind: str = "harness",
@@ -167,16 +171,32 @@ def create_server(config: McpRuntimeConfig) -> Any:
         a worker without dashboard clicks: create a hosted session via the serving opener, attach it
         to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
         overridden), seed the role knobs (`model`/`effort`/`env` injected as spawn env — the terminal
-        host's `tmux new-session -e KEY=VALUE` seam), and deliver `context` as an echo-confirmed
-        bracketed paste. `submit=true` presses Enter so a worker auto-starts; leave it false for a
+        host's `tmux new-session -e KEY=VALUE` seam — AND mapped onto the harness argv per-harness
+        via the registry: claude gets `--model`/`--effort`; a mapping-less harness stays env-only),
+        and deliver `context` as an echo-confirmed bracketed paste. `effort` is validated against the
+        resolved harness's known vocabulary BEFORE spawning: an unknown value returns status
+        'effort-invalid' naming the harness and its valid sets (the CLI would warn-and-silently-
+        degrade); a session-level value (claude 'ultracode') is delivered as a post-launch session
+        command instead of the flag. The free-form escape hatch is never validated, only recorded in
+        spawn provenance: `launch_args` (appended to the harness argv verbatim), `session_commands`
+        (each line pasted + submitted into the fresh session BEFORE the brief), `prompt_keywords`
+        (prepended as the first line of the brief paste — session modes the model interprets).
+        `level` declares the dispatch level (leaf|master|portfolio, default leaf — a manager
+        dispatching leaf seats passes leaf, the seam reviewer master, portfolio seats portfolio):
+        unset knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]`
+        deep-merged over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding
+        `env`; the resolved level + source land in spawn provenance.
+        `submit=true` presses Enter so a worker auto-starts; leave it false for a
         draft. `harness` is optional: explicit values are validated against the detection set; omitted,
-        it resolves per-use from the agentic settings (repo-local `<repo>/system/settings.json` over
-        the global coordination-root file, `orchestration.spawn.harness`; the repo comes from the
+        it resolves per-use from the agentic settings (role knobs, else repo-local
+        `<repo>/system/settings.json` over the global coordination-root file,
+        `orchestration.spawn.harness`; the repo comes from the
         qualified leaf key), else the first detected registry harness. Each spawned session
         is its own harness process (the ambient-lifecycle singleton is untouched). Spawned-by
         provenance (`spawned_by_session` + the active/`spawned_by_lifecycle` lifecycle) is recorded on
         the catalog row so the dashboard can render the orchestration tree. Status 'spawned' on
-        success; 'harness-unknown'/'harness-not-detected'/'bad-kind' are pre-spawn refusals."""
+        success; 'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/
+        'level-invalid'/'bad-kind' are pre-spawn refusals."""
         return spawn_agent_session_payload(
             config,
             harness=harness,
@@ -187,6 +207,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
             model=model,
             effort=effort,
             env=env,
+            launch_args=launch_args,
+            prompt_keywords=prompt_keywords,
+            session_commands=session_commands,
+            level=level,
             spawned_by_session=spawned_by_session,
             spawned_by_lifecycle=spawned_by_lifecycle,
             kind=kind,

@@ -17,6 +17,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_opener import open_terminal_session
@@ -165,6 +166,150 @@ class OpenTerminalSessionTests(unittest.TestCase):
     def test_undetected_harness_is_bad_kind(self) -> None:
         result = self._open(which=lambda _cmd: None)
         self.assertEqual(result.status, "bad-kind")
+        self.assertEqual(self.host.ensured, [])
+
+
+class KnobApplicationTests(unittest.TestCase):
+    """260703-L16: the opener maps the env-riding knobs onto the harness argv per-harness via the
+    registry (the env keeps riding for session-start visibility), applies launch_args verbatim, and
+    records the free-form escape hatch on the durable row as spawn provenance."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
+        self.host = _FakeHost()
+
+    def _open(self, **kwargs: object):
+        base: dict[str, object] = {
+            "catalog": self.catalog,
+            "host": self.host,
+            "session_id": "worker-1",
+            "kind": "harness",
+            "workspace_root": self.tmp,
+            "shell": "/bin/bash",
+            "harness": "claude",
+            "which": _detected,
+        }
+        base.update(kwargs)
+        return open_terminal_session(**base)  # type: ignore[arg-type]
+
+    def test_claude_env_knobs_ride_the_argv_as_flags(self) -> None:
+        result = self._open(env={"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "max"})
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(
+            self.host.ensured[0]["command"],
+            ("claude", "--model", "opus", "--effort", "max"),
+        )
+        # The env vars KEEP riding for session-start visibility.
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "max"},
+        )
+
+    def test_session_vocabulary_effort_stays_off_the_flag(self) -> None:
+        result = self._open(env={"AR_SPAWN_EFFORT": "ultracode"})
+        self.assertEqual(result.status, "opened")
+        # No --effort flag: the claude CLI would warn-and-degrade on it; the session vehicle
+        # ("/effort ultracode") is delivered by the dispatch layer, not the launch argv.
+        self.assertEqual(self.host.ensured[0]["command"], ("claude",))
+        self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_EFFORT": "ultracode"})
+
+    def test_unknown_effort_refuses_naming_harness_and_both_sets(self) -> None:
+        result = self._open(env={"AR_SPAWN_EFFORT": "turbo"})
+        self.assertEqual(result.status, "bad-kind")
+        assert result.detail is not None
+        self.assertIn("'turbo'", result.detail)
+        self.assertIn("'claude'", result.detail)
+        self.assertIn("low, medium, high, xhigh, max", result.detail)
+        self.assertIn("ultracode", result.detail)
+        # Refused BEFORE spawning anything.
+        self.assertEqual(self.host.ensured, [])
+        self.assertIsNone(self.catalog.get("worker-1"))
+
+    def test_mapping_less_harness_is_env_only(self) -> None:
+        result = self._open(
+            harness="codex", env={"AR_SPAWN_MODEL": "gpt-5", "AR_SPAWN_EFFORT": "whatever"}
+        )
+        self.assertEqual(result.status, "opened")
+        # No mapping: the argv stays untouched and no vocabulary is enforced -- env-only.
+        self.assertEqual(self.host.ensured[0]["command"], ("codex",))
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {"AR_SPAWN_MODEL": "gpt-5", "AR_SPAWN_EFFORT": "whatever"},
+        )
+
+    def test_launch_args_append_verbatim_after_the_knob_flags(self) -> None:
+        result = self._open(
+            env={"AR_SPAWN_EFFORT": "max"},
+            launch_args=["--dangerously-skip-permissions", "--foo", "bar"],
+        )
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(
+            self.host.ensured[0]["command"],
+            ("claude", "--effort", "max", "--dangerously-skip-permissions", "--foo", "bar"),
+        )
+
+    def test_free_form_provenance_is_recorded_and_round_trips(self) -> None:
+        self._open(
+            launch_args=["--foo"],
+            prompt_keywords=["ultracode"],
+            session_commands=["/effort ultracode"],
+        )
+        entry = self.catalog.get("worker-1")
+        assert entry is not None
+        self.assertEqual(entry.launch_args, ("--foo",))
+        self.assertEqual(entry.prompt_keywords, ("ultracode",))
+        self.assertEqual(entry.session_commands, ("/effort ultracode",))
+        as_json = entry.to_json()
+        self.assertEqual(as_json["launchArgs"], ["--foo"])
+        self.assertEqual(as_json["promptKeywords"], ["ultracode"])
+        self.assertEqual(as_json["sessionCommands"], ["/effort ultracode"])
+        # Preserved across a free-form-less re-open (the write-once-preserve provenance rule).
+        self._open()
+        entry = self.catalog.get("worker-1")
+        assert entry is not None
+        self.assertEqual(entry.launch_args, ("--foo",))
+        # A hand-opened row records none of them (migration-safe absent keys).
+        self._open(session_id="hand-opened")
+        hand_opened = self.catalog.get("hand-opened")
+        assert hand_opened is not None
+        self.assertIsNone(hand_opened.launch_args)
+        self.assertNotIn("launchArgs", hand_opened.to_json())
+
+    def test_effective_registry_resolves_settings_defined_harness(self) -> None:
+        hermes = Harness(
+            id="hermes",
+            name="Hermes",
+            command="hermes",
+            argv=("hermes", "--tui"),
+            defined_in="settings",
+        )
+        result = self._open(harness="hermes", harnesses=(hermes,))
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(self.host.ensured[0]["command"], ("hermes", "--tui"))
+
+    def test_unknown_everywhere_harness_refuses_pointing_at_the_manual(self) -> None:
+        result = self._open(harness="hermes")
+        self.assertEqual(result.status, "bad-kind")
+        assert result.detail is not None
+        self.assertIn("'hermes'", result.detail)
+        self.assertIn("claude, codex, pi", result.detail)
+        self.assertIn("orchestration.harnesses", result.detail)
+        self.assertIn("docs/reference/harnesses.md", result.detail)
+        self.assertEqual(self.host.ensured, [])
+
+    def test_vocab_less_settings_harness_refuses_the_effort_knob_with_guidance(self) -> None:
+        hermes = Harness(
+            id="hermes", name="Hermes", command="hermes", argv=("hermes",), defined_in="settings"
+        )
+        result = self._open(
+            harness="hermes", harnesses=(hermes,), env={"AR_SPAWN_EFFORT": "high"}
+        )
+        self.assertEqual(result.status, "bad-kind")
+        assert result.detail is not None
+        self.assertIn("'hermes'", result.detail)
+        self.assertIn("effortFlag", result.detail)
+        self.assertIn("launchArgs", result.detail)
         self.assertEqual(self.host.ensured, [])
 
 

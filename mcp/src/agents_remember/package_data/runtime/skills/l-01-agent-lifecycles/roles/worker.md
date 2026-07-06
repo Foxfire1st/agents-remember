@@ -128,6 +128,9 @@ itself is in question" default.
 | harness | codex          | default preference only — settings picks the actual harness |
 | model   | mid-reasoning  | competent implementer on a scoped leaf |
 | effort  | medium         | scales with leaf difficulty via settings |
+| launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
+| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
+| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
 | tools   | build surface  | native edit · read-only AR retrieval · prescribed checks · inbox |
 
-Settings.json `orchestration.roles.worker` overrides these (role-file defaults < settings).
+Settings.json `orchestration.roles.worker` overrides these, and `orchestration.rolesPerLevel.<level>.worker` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

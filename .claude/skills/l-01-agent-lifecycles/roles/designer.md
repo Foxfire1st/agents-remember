@@ -83,6 +83,9 @@ planned-vs-past). The designer's duty is to *declare* the limit, not to close it
 | harness | (the wearer's)     | the hat runs inside the orchestrator session, or a spawned design chair |
 | model   | high-reasoning     | reframe + blast-radius reasoning wants a strong model                 |
 | effort  | high               | design leverage justifies the thinking budget                        |
+| launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
+| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
+| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
 | tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · inbox |
 
-Settings.json `orchestration.roles.designer` overrides these (role-file defaults < settings).
+Settings.json `orchestration.roles.designer` overrides these, and `orchestration.rolesPerLevel.<level>.designer` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
