@@ -162,8 +162,8 @@ upgrade is picked up by the next session
 ([Settings Reference](docs/reference/settings-json.md)).
 
 Pinning a version is the debugging/repro path, not the default: `uv tool
-install 'agents-remember-mcp==3.0.0rc2'`, or one-shot without installing,
-`uvx --from 'agents-remember-mcp==3.0.0rc2' agents-remember dashboard`.
+install 'agents-remember-mcp==3.0.0rc3'`, or one-shot without installing,
+`uvx --from 'agents-remember-mcp==3.0.0rc3' agents-remember dashboard`.
 
 > **Pre-release note (until 3.0.0 final):** the dashboard currently ships in
 > `3.0.0rcN` pre-releases, which default version resolution skips. Install with
@@ -239,7 +239,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `3.0.0rc2` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `3.0.0rc3` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
 
