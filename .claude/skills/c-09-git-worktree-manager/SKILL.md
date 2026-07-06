@@ -7,7 +7,7 @@ description: "Create, attach to, report on, integrate, finalize, and clean up Ag
 
 Use this skill when a task should run through an explicit code/memory worktree wrapper.
 
-The `c-09-git-worktree-manager` skill wraps the existing chat-build, light-task, or external workflow. It owns Git worktree state, series contracts, leaf enclosures, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
+The `c-09-git-worktree-manager` skill wraps the existing light-task or external workflow (a build that fits one session still rides a THIN `w-02-light-task-workflow` doc — chat is never a build route, per the `l-01-agent-lifecycles` invariant). It owns Git worktree state, series contracts, leaf enclosures, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
 
 For closeout, use the `c-12-closeout` skill. The `c-09-git-worktree-manager` skill only supplies the worktree-specific
 contract path and integration/finalization follow-up rules.
@@ -67,7 +67,7 @@ The intended order is:
 1. run the `c-08-ar-coordination-context-resolver` skill for the target repository
 2. run the `c-02-memory-quality-control` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
-4. decide whether the work is a chat build, a `w-02-light-task-workflow` light task (or master + light sub-task series), or external workflow
+4. decide whether the work is a `w-02-light-task-workflow` light task — possibly a THIN one for single-session work; chat never builds — a master + light sub-task series, or external workflow
 5. read the repository's `system/git-workflow.md` and identify the parent branch
    edge. For a standalone task, the leaf worktree branches from the approved
    source branch. For a master series, the master owns a root `series-contract.md`

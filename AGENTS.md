@@ -13,30 +13,36 @@ on a sibling repository, use the installed runtime instructions instead:
 When working on this repository itself, use `agents-remember` as the target
 code repository for resolver, onboarding, workflow, and closeout commands.
 
-## Start Here — Enter the Job Lifecycle
+## Start Here — Route By Role
 
-Every session enters `l-01-session-job-lifecycle` — the lifecycle this checkout
-routes into. The `l-01-session-job-lifecycle` skill owns the whole arc: orient → ground → frame → decide → build →
-close. Classify the job (bug / feature / triage / research) as a *lens* during
-framing — a hint, re-pickable, never a gate.
+Sessions route by role through the `l-01-agent-lifecycles` skill — the lifecycle
+roof this checkout routes into. A **spawned agent** (the `AR_SPAWN_ROLE` env var
+is set, or the first message is a role brief) follows its brief — the brief is
+its session start, and the rest of this section is not addressed to it. A
+**developer-facing session** is the **orchestrator**: it runs
+`skills/l-01-agent-lifecycles/roles/orchestrator.md`, whose phase axis is
+request → trust-checkpoint → reframe-research → decide → build → close.
+Classify the job (bug / feature / triage / research) as a *lens* during
+reframe-research — a hint, re-pickable, never a gate.
 
-The only task-format decision is the `l-01-session-job-lifecycle` skill's **build-mode** step, taken at `decide`:
+The build decision is taken at `decide`. Chat is never a build route — every
+code change lives under an approved task doc:
 
-1. **Read-only exit** — answers or assessments that change no code: no worktree,
-   no task file.
-2. **Chat build** — a code change carried inline this session: worktree-backed,
-   no durable task file.
-3. **Durable task** — `w-02-light-task-workflow`: a `task.md` with checklist,
-   decision log, and proposed code examples; escalates to a master + light
-   sub-task series when the work outgrows a single-page plan.
+1. **Research-only exit** — answers or assessments that change no code: no
+   worktree, no task file; chat is the right medium.
+2. **Durable task** — `w-02-light-task-workflow`: a task document with
+   checklist, decision log, and proposed code examples; small code work takes
+   the minimal `w-02-light-task-workflow` artifact, and the work escalates to a
+   master + light sub-task series when it outgrows a single-page plan.
 
-The task-collaboration doctrine in `tasks/AGENTS.md` applies inside the `l-01-session-job-lifecycle` skill's
-`frame` phase, in plain chat, before any task file or format is chosen.
+The task-collaboration doctrine in `tasks/AGENTS.md` applies inside the
+orchestrator lifecycle's reframe-research phase, in plain chat, before any task
+file or format is chosen.
 
 ---
 
 **IMPORTANT:**
-Do not change code or documentation without entering the lifecycle and clearing its `frame` plan gate.
+Do not change code or documentation without entering the orchestrator lifecycle and clearing its plan gate.
 Do not change task plan items without approval. Think before acting.
 Do not randomly commit. Use the `c-12-closeout` skill instead!
 

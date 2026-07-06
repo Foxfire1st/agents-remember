@@ -102,7 +102,6 @@ Onboarding records approved current state. It does not record speculation.
 
 That means:
 
-- chat builds wait for developer approval before implementation
 - `w-02-light-task-workflow` tasks wait for task approval before implementation
 - a master + light sub-task series gates each slice's approval and commit in turn
 - onboarding updates happen after approved changes, not before

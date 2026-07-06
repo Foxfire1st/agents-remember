@@ -129,7 +129,7 @@ That is the normal first-run path. `skills_install()` remains available as a
 maintenance/manual MCP tool, but the starter packages already provide the
 initial skills and harness files.
 
-After that, normal work runs through the `l-01-session-job-lifecycle` skill. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the `l-01-agent-lifecycles` skill: a developer-facing session is the orchestrator; spawned agents follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Run The Dashboard
 
@@ -177,7 +177,7 @@ install 'agents-remember-mcp==3.0.0rc2'`, or one-shot without installing,
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
 - [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
-- [Workflows](docs/workflows.md) - the `l-01-session-job-lifecycle` skill and its build modes (read-only / chat build / `w-02-light-task-workflow` skill), and when to use each.
+- [Workflows](docs/workflows.md) - the `l-01-agent-lifecycles` skill and its build modes (research-only exit / `w-02-light-task-workflow` skill task / master + light sub-task series), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
 - [External Memory Guide](docs/guides/use-external-memory.md) - separate memory repos for selected code repos.
@@ -241,7 +241,7 @@ ar-coordination/
 
 Agents Remember is at `3.0.0rc2` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
-The 3.0 arc: the working session itself is now observable and steerable — a system-managed session job lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
+The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
 
 ## Stability
 

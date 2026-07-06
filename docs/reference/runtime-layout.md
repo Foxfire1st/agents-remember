@@ -26,7 +26,7 @@ agents-remember/
             patches/
           skills/
             c-00-initialize-memory-repo/   # generated copy of root skills/
-            l-01-session-job-lifecycle/
+            l-01-agent-lifecycles/
             w-02-light-task-workflow/
           system/defaults/examples/
         benchmarks/

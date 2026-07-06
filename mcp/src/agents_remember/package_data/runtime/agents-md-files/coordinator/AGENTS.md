@@ -1,18 +1,22 @@
 # AGENTS.md
 
-## Start Here — Enter the Job Lifecycle
+## Start Here — Route By Role
 
-Every session enters `l-01-session-job-lifecycle` — the canvas this coordinator
-routes into.
+Sessions route by role through the `l-01-agent-lifecycles` skill. A **spawned
+agent** (the `AR_SPAWN_ROLE` env var is set, or the first message is a role
+brief) follows its brief — the brief is its session start, and the rest of this
+section is not addressed to it. A **developer-facing session** is the
+**orchestrator**: it enters `skills/l-01-agent-lifecycles/roles/orchestrator.md`
+before working in any managed repository.
 
 During an already-running session, the agent must stay aware of managed-repo
 boundaries. If a new turn or tool target may cross from outside Agents Remember
-scope into a managed repository, enter the lifecycle at `l-01-session-job-lifecycle`.
+scope into a managed repository, enter the orchestrator lifecycle first.
 
 ---
 
 **IMPORTANT:**
-Do not change code without entering the lifecycle and clearing its `frame` plan gate.
+Do not change code without entering the orchestrator lifecycle and clearing its plan gate.
 Do not change task plan items without approval.
 Do not randomly commit. Use the `c-12-closeout` skill instead!
 
@@ -27,8 +31,8 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in the `l-01-session-job-lifecycle` skill's
-  `frame` phase; see _Start Here — Enter the Job Lifecycle_ above).
+- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in the `l-01-agent-lifecycles` orchestrator lifecycle's
+  reframe-research phase; see _Start Here — Route By Role_ above).
 
 ### Onboarding Documentation
 
@@ -38,7 +42,7 @@ inspected. Route retrieval through `c-04-retrieval-strategy-router` (see
 _Memory Retrieval Strategies_ below) before relying on onboarding, providers, or
 repository source.
 
-Until the build/job decision, read managed-repo source through the `read_ar_files` MCP tool
+Until the build decision, read managed-repo source through the `read_ar_files` MCP tool
 rather than the native read tool — it pairs each file with its onboarding by construction and
 keeps the read trail observable. Native read is the edit precondition once building begins.
 Count your `read_ar_files` calls as retrieval evidence alongside CGC and GrepAI.

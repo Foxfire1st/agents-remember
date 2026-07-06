@@ -300,7 +300,7 @@ const DESIGNER: FlowModel = {
         { line: "⟁ assumptions / truth gaps only the developer can resolve → ask — never fill silently", junction: true },
       ],
     },
-    { kind: "node", phase: "frame", tool: "reframe agreement", detail: "the developer agrees the frame before structure exists", rides: "reframe", ridesNote: "⊘ material scope/intent/sequencing changes are played back and WAIT for confirmation (tasks/AGENTS.md)", next: "task_doc authoring", nextStatus: "proposed" },
+    { kind: "node", phase: "reframe", tool: "reframe agreement", detail: "the developer agrees the frame before structure exists", rides: "reframe", ridesNote: "⊘ material scope/intent/sequencing changes are played back and WAIT for confirmation (tasks/AGENTS.md)", next: "task_doc authoring", nextStatus: "proposed" },
     { kind: "node", phase: "author", tool: "task_doc authoring", detail: "master + leaves · requirements · steps · code examples (w-02 shape) · leaves scoped around routes/areas", next: "declare the limits", nextStatus: "current" },
     { kind: "node", phase: "limits", tool: "designer limits note", detail: "master-scoped bird's-eye: cross-master and FUTURE-master collisions can slip — declared on the doc, never hidden", next: "handover → portfolio", nextStatus: "proposed" },
     { kind: "node", phase: "handover", tool: "join the portfolio", detail: "at streamlining the ORCHESTRATOR adversarially reviews the design — planned-vs-planned AND planned-vs-past", next: "(orchestrator · portfolio phase)", nextStatus: "proposed" },
