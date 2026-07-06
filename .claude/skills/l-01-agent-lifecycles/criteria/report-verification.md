@@ -20,21 +20,37 @@ of the load-bearing ones.
   history-only**; review 4 caught the **OWNER's own canvas overclaim** (L8 decision log, cycle-7
   entry) — builder reports and owner claims fail the same way.
 
-## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
-
-Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
-when it catches in a second engagement (the ratchet below).
-
-### RV-2 — CLASS-completeness *(candidate — 1 catch)*
+### RV-2 — CLASS-completeness *(promoted to standing at 260703-L18 — 2 catches)*
 
 **Hunt the siblings of every found instance.** A finding or a fix names an instance of a CLASS
 (a directive surface, a census count, a vocabulary token). Enumerate the class — every sibling
 surface, not just the instances the report names — and check each one.
 
-- Catching evidence (single engagement): 260703-L10 round 1 — the reviewer's completeness sweep
-  found **six of ten first-action surfaces** still shipping the retired directive when the report
-  claimed the flip done (L10 decision log: "hunt siblings of the class, not just the named
-  instances").
+- Catching evidence: (1) 260703-L10 round 1 — the reviewer's completeness sweep found **six of
+  ten first-action surfaces** still shipping the retired directive when the report claimed the
+  flip done (L10 decision log). (2) 260703-L18 review (L18R-3) — the fix for
+  advertised-but-unimplemented recovery choices named the `cli.py` `custom` residual but missed
+  the SIBLING `_load_memory_ledger` block still advertising an inert `reconciliation`; the
+  sibling hunt found it.
+
+### RV-4 — Decision-log completeness for scope-expanding disclosures *(promoted to standing at 260703-L18 — 2 catches)*
+
+**A scope-expanding owner supplement or load-bearing builder disclosure must be verifiable in
+the task-doc decision log, not only the builder report.** Continuity lives in the task_doc +
+durable artifacts, never in transcripts; a ruling or environment finding that exists only in a
+report is one lost file away from unrecoverable. Cross-check every supplement and disclosure the
+builder report carries against the decision log.
+
+- Catching evidence: (1) 260703-L17 review (L17R-1) — supplement 2 (the wait-loop-era remnant
+  sweep with per-hit verdicts and two named follow-ups) was recorded only in the builder report.
+  (2) 260703-L18 review (L18R-4) — the load-bearing editable-install/PYTHONPATH environment
+  finding + named follow-ups lived only in the builder report; the leaf's `decisions[]` was
+  empty. Both folded by the owner at closeout.
+
+## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
+
+Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
+when it catches in a second engagement (the ratchet below).
 
 ### RV-3 — Partial-fix-creates-falsehoods *(candidate — 1 catch)*
 
@@ -47,17 +63,18 @@ after the change.
   install-doc claims false** ("injects the same startup directive" no longer held); round 2
   restored byte-identity so the claims became true again (L10 decision log + builder report).
 
-### RV-4 — Decision-log completeness for scope-expanding supplements *(candidate — 1 catch)*
+### RV-5 — Worktree-shadowed regression pins *(candidate — 1 catch)*
 
-**A scope-expanding owner supplement must be verifiable in the task-doc decision log, not only
-the builder report.** Continuity lives in the task_doc + durable artifacts, never in transcripts;
-a ruling that exists only in a report is one lost file away from unrecoverable. Cross-check every
-supplement the builder report discloses against the decision log.
+**A regression test must bite under the invocation the owner actually runs.** An editable
+install pointing at another checkout can shadow the worktree's sources, making a mutation-tested
+pin pass vacuously under the canonical invocation while failing only under a hand-set
+`PYTHONPATH`. Verify sensitivity by mutating the target and running the CANONICAL invocation;
+a pin that only bites under a nonstandard environment is not yet a pin.
 
-- Catching evidence (single engagement): 260703-L17 review (L17R-1) — supplement 2 (the
-  wait-loop-era remnant sweep, a whole class-completeness ruling with per-hit verdicts and two
-  named follow-ups) was recorded only in the builder report; the leaf decision log carried just
-  supplement 1. Folded by the owner at closeout.
+- Catching evidence (single engagement): 260703-L18 review (L18R-1) — the inbox
+  delivered/unconfirmed pin failed its mutation check only under `PYTHONPATH=src`; under the
+  canonical `pytest mcp/tests` the main-repo editable install shadowed the worktree and the
+  mutated code still passed. Remedy: the `sys.path` pin idiom the sibling suites carry.
 
 ## Exploratory Mandate
 

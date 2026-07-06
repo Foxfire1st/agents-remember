@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
@@ -329,3 +333,44 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "ar-agent-a")
         self.assertTrue(calls[0][2])
         self.assertIn("[Agents Remember inbox:message]", calls[0][1])
+
+    def test_deliver_inbox_entry_records_unconfirmed_when_paste_is_not_echoed(self) -> None:
+        # FINDING 3 (260703-L18, pins friction F-A's echo-confirm seam): a paste the target session
+        # did NOT echo back must record deliveryState 'unconfirmed', never 'delivered'. This is the
+        # exact boot-discard failure echo-confirmation was built to catch (a booting harness silently
+        # drops stdin). If someone collapses inbox_delivery's branch to always-'delivered' this test
+        # FAILS -- the reachable session with an un-echoed paste is the only thing separating the two.
+        entry = create_operator_inbox_entry(
+            entry_id="A",
+            now=T1,
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            sender_role="manager",
+            recipient_role="worker",
+            ask="Please continue.",
+            response="Review the report.",
+            created_by="manager-1",
+            created_via="cli",
+        )
+        self.store.append(entry)
+        attempts: list[tuple[str, str]] = []
+
+        class _UnechoedPaster:
+            def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
+                # A booting harness accepts the keystrokes but never echoes them back.
+                attempts.append((tmux_name, text))
+                return PasteResult(delivered=False, submitted=submit)
+
+        recorded = deliver_inbox_entry(
+            store=self.store,
+            catalog=self.catalog,
+            host=self.host,
+            paster=_UnechoedPaster(),  # type: ignore[arg-type]
+            entry=entry,
+        )
+        # The paste WAS attempted into the reachable session -- delivery just was not echo-confirmed.
+        self.assertEqual(attempts[0][0], "ar-agent-a")
+        self.assertEqual(recorded.deliveryState, "unconfirmed")
+        self.assertNotEqual(recorded.deliveryState, "delivered")
+        self.assertEqual(recorded.deliveredToSession, "agent-a")
+        self.assertEqual(recorded.deliveryDetail, "paste was not echoed")

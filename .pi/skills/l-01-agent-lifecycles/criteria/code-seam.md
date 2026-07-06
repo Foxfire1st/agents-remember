@@ -55,6 +55,18 @@ assert the new screen's happy paths, not the primitive's full surface.
   `DualPane` reuse drops the "first 2 MiB" truncation banner on the markdown path (the banner
   lives in `CodeSide`, which markdown never reaches); text and binary keep it.
 
+### CS-5 — Cross-repo side-effect safety *(candidate — seeded from a clean exemplar, 0 catches)*
+
+**Any step that writes to a repository OTHER than the one it operates in gets the full
+validate-then-mutate treatment plus partial-failure and dirty-target analysis.** Check the order
+of validation vs the foreign write, the state left behind when the write lands but the caller
+fails afterward, behavior against a dirty target repo, and an exact format round-trip with the
+foreign artifact's consumer.
+
+- Seeding evidence: 260703-L18 finding 7 (`_reconcile_missing_mapping` writing the official
+  memory repo's ledger mid-`worktree_start`) PASSED all four lenses under this analysis — the
+  clean exemplar that defined the class. A catch in a later engagement promotes.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): attack

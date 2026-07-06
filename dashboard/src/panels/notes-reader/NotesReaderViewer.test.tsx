@@ -134,6 +134,31 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
     );
   });
 
+  it("shows the 2-MiB truncation banner for a truncated markdown note (L18 finding 2)", async () => {
+    // Markdown is the dominant note type but takes DualPane's partnerless-markdown path, which has
+    // no banner (only CodeSide does) -- so without this a truncated markdown note would silently drop
+    // the "showing the first 2 MiB" contract. The banner renders here, above the rendered markdown.
+    stubNotesApi([entry("big.md")], {
+      "big.md": content("big.md", { truncated: true, size: 2_097_162, content: "# big\n\nlots" }),
+    });
+    const view = render(
+      <NotesReaderViewer repo={REPO} master={MASTER} path="big.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    const banner = await view.findByTestId("notes-trunc-banner");
+    expect(banner.textContent).toContain("Showing the first 2 MiB of 2,097,162 bytes");
+    // The markdown still renders (the banner is ABOVE the pane, not instead of it).
+    await view.findByTestId("sidecar-pane");
+  });
+
+  it("shows no truncation banner for a normal (untruncated) markdown note", async () => {
+    stubNotesApi([entry("small.md")], { "small.md": content("small.md") });
+    const view = render(
+      <NotesReaderViewer repo={REPO} master={MASTER} path="small.md" onSelectNote={vi.fn()} onBack={vi.fn()} />,
+    );
+    await view.findByTestId("sidecar-pane");
+    expect(view.queryByTestId("notes-trunc-banner")).toBeNull();
+  });
+
   it("calls onBack when the back control is clicked", async () => {
     stubNotesApi([entry("a.md")], { "a.md": content("a.md") });
     const onBack = vi.fn();

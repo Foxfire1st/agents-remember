@@ -95,6 +95,23 @@ const railSize = css({ flexShrink: 0, color: "muted", fontSize: "0.68rem" });
 const railHint = css({ paddingInline: "0.6rem", paddingBlock: "0.25rem", color: "muted", fontSize: "0.68rem" });
 const handle = css({ width: "3px", flexShrink: "0", background: "grid", cursor: "col-resize", _hover: { background: "amber" } });
 const placeholder = css({ height: "100%", display: "grid", placeItems: "center", padding: "1rem", color: "muted", fontSize: "0.8rem", textAlign: "center" });
+// Content-pane fill + the truncation banner (mirrors DualPane's own `fill`/`banner`): a truncated
+// MARKDOWN note takes DualPane's partnerless-markdown path, which has no banner (only CodeSide does),
+// so a >2-MiB markdown note -- the dominant note type -- would silently drop its "showing the first
+// 2 MiB" contract. We render the same banner here, above the pane, for that case (L18 finding 2).
+const paneFill = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
+const paneBody = css({ flex: "1", minHeight: "0" });
+const truncBanner = css({
+  flexShrink: 0,
+  paddingInline: "0.6rem",
+  paddingBlock: "0.2rem",
+  fontSize: "0.72rem",
+  color: "amber",
+  background: "bgPanel",
+  borderBottomWidth: "1px",
+  borderBottomStyle: "solid",
+  borderBottomColor: "grid",
+});
 
 // A fetched note mapped to DualPane's props: markdown renders full-pane as a partnerless markdown doc
 // (the File Viewer's overview treatment); other text / binary render through CodeSide.
@@ -203,7 +220,16 @@ export function NotesReaderViewer({
               Loading…
             </div>
           ) : (
-            <DualPane {...dualPaneProps(note)} split={false} />
+            <div className={paneFill}>
+              {note.truncated && note.language === "markdown" ? (
+                <div className={truncBanner} data-testid="notes-trunc-banner">
+                  Showing the first 2 MiB of {note.size.toLocaleString()} bytes
+                </div>
+              ) : null}
+              <div className={paneBody}>
+                <DualPane {...dualPaneProps(note)} split={false} />
+              </div>
+            </div>
           )}
         </Panel>
       </PanelGroup>

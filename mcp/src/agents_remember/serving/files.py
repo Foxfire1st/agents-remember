@@ -44,6 +44,7 @@ from agents_remember.serving.scope import (
     FileScope,
     _iter_repo_contracts,
     _resolve_within,
+    decode_capped,
     language_for,
     run_scoped,
 )
@@ -136,7 +137,9 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
     raw = src.read_bytes()
     truncated = len(raw) > _MAX_FILE_BYTES
     try:
-        content = raw[:_MAX_FILE_BYTES].decode("utf-8")
+        # Cut at a UTF-8 codepoint boundary so an oversize text file whose multi-byte char straddles
+        # the cap returns its first ~2 MiB with truncated=True, never an empty "binary" (L18 finding 5).
+        content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
         language = language_for(src)
     except UnicodeDecodeError:
         content, language = "", "binary"
@@ -193,7 +196,9 @@ def _onboarding_doc_body(scope: FileScope, rel: str) -> str | None:
     except OSError:
         return None
     try:
-        return raw[:_MAX_FILE_BYTES].decode("utf-8")
+        # Same codepoint-boundary cut as read_file (260703-L18 finding 5): a >2 MiB overview whose
+        # multi-byte char straddles the cap renders its first ~2 MiB instead of degrading to a placeholder.
+        return decode_capped(raw, _MAX_FILE_BYTES)[0]
     except UnicodeDecodeError:
         return None
 

@@ -201,6 +201,34 @@ class FailLoudTests(unittest.TestCase):
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(local_path), str(caught.exception))
 
+    def test_null_at_a_family_key_in_the_local_layer_refuses_not_a_silent_wipe(self) -> None:
+        """FINDING 6 (260703-L18, developer-ruled null = REFUSE): a JSON null at a known
+        orchestration family key reads as *absent* to every parser and merge_settings REPLACES a
+        non-dict, so a repo-local ``"concurrency": null`` would SILENTLY wipe the global caps. Refuse
+        it loudly, naming the offending file, with the 'remove the key to inherit the global value'
+        guidance -- proving no silent global wipe. Every family the ruling names is covered."""
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"concurrency": {"maxParallelLeaves": 3}}},
+        )
+        for family in ("concurrency", "roles", "loops", "spawn", "rolesPerLevel", "harnesses"):
+            local_path = write_settings(self.repo_root, {"orchestration": {family: None}})
+            with self.assertRaisesRegex(
+                AgenticSettingsError, "inherit the global value"
+            ) as caught:
+                load_agentic_settings(self.coordination_root, self.repo_root)
+            self.assertIn(f"orchestration.{family} is null", str(caught.exception))
+            self.assertIn(str(local_path), str(caught.exception))
+
+    def test_null_at_a_family_key_in_the_global_layer_also_refuses(self) -> None:
+        """The null rule is uniform across BOTH layers (finding 6). A global-layer null refuses too."""
+        global_path = write_settings(
+            self.coordination_root, {"orchestration": {"loops": None}}
+        )
+        with self.assertRaisesRegex(AgenticSettingsError, "orchestration.loops is null") as caught:
+            load_agentic_settings(self.coordination_root, self.repo_root)
+        self.assertIn(str(global_path), str(caught.exception))
+
     def test_unknown_top_level_family_is_tolerated_not_parsed(self) -> None:
         """The fail-loud scope is orchestration.* ONLY (gate amendment 2026-07-06).
 
@@ -657,6 +685,50 @@ class HarnessesFamilyTests(unittest.TestCase):
                     }
                 }
             )
+
+    def test_effort_session_command_template_may_reference_only_value(self) -> None:
+        """FINDING 4 (260703-L18): effortSessionCommand renders via ``.format(value=…)`` at spawn; a
+        stray field (``{mode}``), a positional ``{}``, or an unmatched brace would raise a RAW
+        KeyError/ValueError there instead of the structured refusal every other bad knob gets. Refuse
+        all of them post-merge, naming the harness -- the raw error at serving/harnesses.py is now
+        unreachable from validated settings."""
+        for bad in ("/set {mode}={value}", "{}", "/effort {value", "/effort value}"):
+            with self.assertRaisesRegex(AgenticSettingsError, "effortSessionCommand"):
+                self._load(
+                    {
+                        "harnesses": {
+                            "hermes": {
+                                "command": "hermes",
+                                "effortSessionValues": ["ultra"],
+                                "effortSessionCommand": bad,
+                            }
+                        }
+                    }
+                )
+
+    def test_builtin_override_supplying_only_a_bad_command_is_validated(self) -> None:
+        """The builtin-override path (finding 4): claude already declares effortSessionValues, so an
+        override may supply JUST the command -- which must still be template-validated, naming claude."""
+        with self.assertRaisesRegex(AgenticSettingsError, "effortSessionCommand") as caught:
+            self._load({"harnesses": {"claude": {"effortSessionCommand": "/set {mode}={value}"}}})
+        self.assertIn("orchestration.harnesses.claude", str(caught.exception))
+
+    def test_valid_effort_session_command_is_accepted(self) -> None:
+        """A template referencing only ``{value}`` passes (the check is not over-eager)."""
+        settings = self._load(
+            {
+                "harnesses": {
+                    "hermes": {
+                        "command": "hermes",
+                        "effortSessionValues": ["ultra"],
+                        "effortSessionCommand": "/effort {value}",
+                    }
+                }
+            }
+        )
+        hermes = settings.find_harness("hermes")
+        assert hermes is not None
+        self.assertEqual(hermes.effort_session_command, "/effort {value}")
 
     def test_role_and_spawn_references_accept_settings_defined_ids(self) -> None:
         settings = self._load(

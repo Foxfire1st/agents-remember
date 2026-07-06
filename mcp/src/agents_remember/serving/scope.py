@@ -63,6 +63,28 @@ def language_for(path: Path) -> str:
     return _LANG_BY_EXT.get(path.suffix.lower(), "text")
 
 
+def decode_capped(raw: bytes, cap: int) -> tuple[str, bool]:
+    """Decode the first ``cap`` bytes of ``raw`` as UTF-8, cut on a codepoint boundary.
+
+    260703-L18 finding 5: the read APIs slice ``raw[:cap]`` before ``decode("utf-8")``. When an
+    oversize file's multi-byte character straddles the cap the slice ends mid-character, ``decode``
+    raises ``UnicodeDecodeError``, and the caller's binary fallback misreports the whole (perfectly
+    textual) file as ``language: "binary"`` with empty content. Backward-scan off any partial trailing
+    character before decoding: UTF-8 continuation bytes are ``0b10xxxxxx`` and a character is at most
+    4 bytes, so walking ``end`` back over up to 3 continuation bytes lands it on a lead byte -> a clean
+    boundary. Returns ``(text, truncated)``; genuinely non-UTF-8 content still raises
+    ``UnicodeDecodeError`` (the caller keeps classifying that as binary)."""
+    if len(raw) <= cap:
+        return raw.decode("utf-8"), False
+    end = cap
+    limit = max(0, cap - 3)
+    # raw[end] is the FIRST excluded byte; while it is a continuation byte the cut splits a character,
+    # so step back to the character's lead byte (bounded to <=3 steps = UTF-8's max continuation run).
+    while end > limit and (raw[end] & 0xC0) == 0x80:
+        end -= 1
+    return raw[:end].decode("utf-8"), True
+
+
 class _UnknownScope(Exception):
     """The requested ``scope`` is not the mainline or a known active enclosure."""
 

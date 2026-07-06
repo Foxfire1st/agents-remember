@@ -62,6 +62,12 @@ merges over the registry **by id**:
   `effortFlag` with `effortFlagValues`, `effortSessionValues` with
   `effortSessionCommand`. A flag without a vocabulary would reintroduce the
   silent-degrade risk, so the loader refuses it.
+- The `effortSessionCommand` **template** must render with `{value}` and
+  reference no other placeholder: a stray field (`/set {mode}={value}`), a
+  positional `{}`, or an unmatched brace is refused by the loader naming the
+  harness. The check runs post-merge (a builtin override may supply just the
+  command), so a bad template surfaces the same structured refusal every other
+  bad knob gets instead of crashing the spawn with a raw `str.format` error.
 
 An id known neither in the registry nor in settings refuses **loudly** at
 dispatch, naming the known set and pointing here — never a crash.

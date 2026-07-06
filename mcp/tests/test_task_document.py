@@ -1257,6 +1257,29 @@ class MasterControllerTests(unittest.TestCase):
                 subtask={"number": "1"},
             )
 
+    def test_remove_subtask_response_validates_on_both_paths(self) -> None:
+        # FINDING 1 (260703-L18, closes friction F-N): the remove_subtask result must satisfy the
+        # TaskDocResponse contract (extra=forbid). Before removedSubtask/deletedFiles/wouldDeleteFiles
+        # were declared, the destructive success FAILED response validation, so the caller saw a tool
+        # error after the removal already happened (and could retry an already-done op). Both the
+        # delete-with-files and keep_file paths -- and the dry-run preview -- must validate.
+        self._create()
+        self._author_leaf(number="1", slug="01_a")
+        deleted = self._op("remove_subtask", subtask={"number": "1"})
+        self.assertEqual(deleted["removedSubtask"], "1")
+        self.assertTrue(deleted["deletedFiles"])  # the leaf json + md paths
+        TaskDocResponse.model_validate(deleted)  # would raise ValidationError before the fix
+
+        self._author_leaf(number="2", slug="02_b")
+        kept = self._op("remove_subtask", subtask={"number": "2", "keep_file": True})
+        self.assertEqual(kept["deletedFiles"], [])
+        TaskDocResponse.model_validate(kept)
+
+        self._author_leaf(number="3", slug="03_c")
+        preview = self._op("remove_subtask", subtask={"number": "3"}, dry_run=True)
+        self.assertTrue(preview["wouldDeleteFiles"])
+        TaskDocResponse.model_validate(preview)
+
 
 class RegistrationTests(unittest.TestCase):
     def setUp(self) -> None:

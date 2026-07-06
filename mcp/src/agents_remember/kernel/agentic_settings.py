@@ -35,6 +35,7 @@ the strategist's mandatory pre-run (L12 ruling; restated in the schema doc).
 from __future__ import annotations
 
 import json
+import string
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -352,12 +353,34 @@ def _validated_orchestration_block(data: dict[str, Any], path: Path) -> dict[str
     source = str(path)
     if not isinstance(raw, dict):
         raise AgenticSettingsError(f"orchestration settings must be an object: {source}")
+    _refuse_null_families(raw, source)
     # strict=False: one LAYER may legitimately be partial (a repo-local file overriding a single
     # leaf of a globally-defined harness entry, or referencing a harness id the OTHER layer
     # declares), so per-file validation checks shapes/keys only; cross-reference and completeness
     # rules run on the MERGED block in load_agentic_settings.
     _parse_orchestration(raw, source=source, sources=(path,), strict=False)
     return raw
+
+
+def _refuse_null_families(raw: dict[str, Any], source: str) -> None:
+    """A JSON ``null`` at a known ``orchestration`` family key is REFUSED (260703-L18 finding 6,
+    developer-ruled ``null`` = refuse, not reset-to-default).
+
+    ``None`` reads as *absent* to every family parser, and ``merge_settings`` REPLACES (never
+    deep-merges) a non-dict override -- so ``"concurrency": null`` in the repo-local layer would
+    SILENTLY wipe the global caps, ``"roles": null`` -> ``{}``, ``"loops": null`` -> the defaults.
+    It was the one scalar collision that did not fail loud, violating both documented invariants
+    (deep-merge + fail-loud). Refuse it in EITHER layer, naming the offending file; ``gateDelegation``
+    keeps its own stronger repo-local presence refusal (checked after this in ``load_agentic_settings``).
+    The fix the guidance names: remove the key (absence inherits the global value) or give it a real
+    object."""
+    null_families = sorted(key for key in KNOWN_ORCHESTRATION_FIELDS if raw.get(key) is None and key in raw)
+    if null_families:
+        offending = ", ".join(f"orchestration.{key}" for key in null_families)
+        raise AgenticSettingsError(
+            f"{offending} is null; a null at a known orchestration family key is refused because it "
+            f"would silently wipe the merged value. Remove the key to inherit the global value: {source}"
+        )
 
 
 def _source_label(sources: tuple[Path, ...]) -> str:
@@ -591,6 +614,7 @@ def _merged_harness(
             overrides[field_name] = declared_value
     merged = replace(fallback, **overrides)
     _refuse_unpaired_vehicles(merged, owner, source)
+    _refuse_bad_effort_template(merged, owner, source)
     return merged
 
 
@@ -606,6 +630,42 @@ def _refuse_unpaired_vehicles(merged: Harness, owner: str, source: str) -> None:
             f"{owner}: effortSessionValues and effortSessionCommand must be declared "
             f"together (session values need their delivery command): {source}"
         )
+
+
+def _refuse_bad_effort_template(merged: Harness, owner: str, source: str) -> None:
+    """The ``effortSessionCommand`` template must render with ONLY ``{value}`` (260703-L18 finding 4).
+
+    ``serving.harnesses.effort_session_commands`` renders it via ``.format(value=…)`` at spawn; a stray
+    replacement field (``/set {mode}={value}``), a positional ``{}``, or an unmatched brace raises a
+    RAW ``KeyError``/``ValueError``/``IndexError`` there instead of the structured refusal every other
+    bad knob gets. A builtin override may supply JUST the command (merged over the builtin's session
+    values), so the check lives post-merge next to the pairing rule -- once validated here, the raw
+    error at ``serving/harnesses.py`` is unreachable from settings. Only checked when a template is
+    present (an absent one has already passed the pairing rule)."""
+    template = merged.effort_session_command
+    if template is None:
+        return
+    try:
+        field_names = [name for _, name, _, _ in string.Formatter().parse(template)]
+    except ValueError as error:  # an unmatched / stray brace: not a parseable format template
+        raise AgenticSettingsError(
+            f"{owner}: effortSessionCommand {template!r} is not a valid format template "
+            f"({error}); it may contain no replacement field other than {{value}}: {source}"
+        ) from error
+    unexpected = sorted({name for name in field_names if name is not None and name != "value"})
+    if unexpected:
+        shown = ", ".join(repr(name) for name in unexpected)
+        raise AgenticSettingsError(
+            f"{owner}: effortSessionCommand {template!r} may reference only the {{value}} field; "
+            f"unexpected replacement field(s): {shown}: {source}"
+        )
+    try:
+        template.format(value="probe")
+    except (KeyError, IndexError, ValueError) as error:
+        raise AgenticSettingsError(
+            f"{owner}: effortSessionCommand {template!r} failed to render with value=… "
+            f"({error!r}): {source}"
+        ) from error
 
 
 def parse_gate_delegation(raw: object, *, source: str) -> tuple[GatePolicy, bool]:

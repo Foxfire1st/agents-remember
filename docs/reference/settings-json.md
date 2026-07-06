@@ -242,6 +242,15 @@ are rejected naming the offending file — a typo can never be silently ignored.
 Unknown TOP-LEVEL families in the same file are tolerated-not-parsed (see
 Reserved Families below).
 
+**Null rule.** A JSON `null` at a known `orchestration.*` family key
+(`gateDelegation` · `loops` · `roles` · `rolesPerLevel` · `concurrency` ·
+`spawn` · `harnesses`), in EITHER layer, is REFUSED naming the offending file.
+`null` reads as *absent* to every family parser and the deep merge REPLACES a
+non-object, so `"concurrency": null` in the repo-local layer would otherwise
+SILENTLY wipe the global caps — the one scalar collision that used to defeat
+both the deep-merge and fail-loud invariants. Remove the key to inherit the
+global value (or give it a real object); `null` never means reset-to-default.
+
 **Read cadence.** Read PER-USE through the kernel agentic-settings loader
 (`kernel/agentic_settings.py`): an edit takes effect on the next use with no
 restart. The ONE exception is `orchestration.gateDelegation`, which the MCP

@@ -162,6 +162,24 @@ class NotesRouteTests(unittest.TestCase):
         self.assertEqual(len(body["content"]), _MAX_FILE_BYTES)
         self.assertEqual(body["size"], _MAX_FILE_BYTES + 10)
 
+    def test_read_oversize_multibyte_boundary_returns_text_not_binary(self) -> None:
+        # FINDING 5 (260703-L18): a multi-byte UTF-8 char straddling the 2-MiB cap must NOT make an
+        # oversize markdown note misdecode into an empty "binary" (markdown is the dominant note
+        # type). "é" is two bytes, placed so its continuation byte falls just past the cap; the cut
+        # backward-scans to the codepoint boundary and returns the first ~2 MiB with truncated=True.
+        self.notes.mkdir(parents=True)
+        (self.notes / "big.md").write_text("a" * (_MAX_FILE_BYTES - 1) + "é", encoding="utf-8")
+        with self._client() as client:
+            response = client.get(
+                "/api/notes/read", params={"repo": "R", "master": _MASTER, "path": "big.md"}
+            )
+        body = response.json()
+        self.assertEqual(body["language"], "markdown")  # NOT "binary"
+        self.assertTrue(body["truncated"])
+        self.assertNotEqual(body["content"], "")
+        self.assertEqual(body["content"], "a" * (_MAX_FILE_BYTES - 1))
+        self.assertEqual(body["size"], _MAX_FILE_BYTES + 1)
+
     def test_read_absent_note_is_404_not_found(self) -> None:
         self._seed_notes()
         with self._client() as client:
