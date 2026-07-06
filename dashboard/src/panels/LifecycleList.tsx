@@ -482,7 +482,7 @@ function docRow(
   const repo = doc.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? doc.status;
   const variant = lifecycle?.state ?? statusVariant(doc.status);
-  const gate = gateHint(lifecycle?.gate?.kind, lifecycle?.ask);
+  const gate = gateHint(lifecycle?.gate?.kind);
   const command = commandFacts(doc, allDocs);
   return {
     key: taskDocSelectionKey(doc.docPath),
@@ -527,7 +527,7 @@ function seriesRow(
   const repo = series.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? series.status;
   const variant = lifecycle?.state ?? statusVariant(series.status);
-  const gate = gateHint(lifecycle?.gate?.kind, lifecycle?.ask);
+  const gate = gateHint(lifecycle?.gate?.kind);
   // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
   // task folder), its title, or its doc folder when an orchestration doc names it (L14).
   const commander = orchestratorParentKey(
@@ -581,7 +581,7 @@ function lifecycleRow(
 ): OperationRow {
   const label = taskLabel(lifecycle, docs, enclosure);
   const repo = lifecycle.repoId ?? "—";
-  const gate = gateHint(lifecycle.gate?.kind, lifecycle.ask);
+  const gate = gateHint(lifecycle.gate?.kind);
   const currentStep = docs.length === 1 ? docs[0].currentStep : undefined;
   return {
     key: lifecycleSelectionKey(lifecycle.id),
@@ -686,11 +686,12 @@ function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string 
   return lifecycleSelectionKey(selection.lifecycleId);
 }
 
-function gateHint(kind: string | undefined, ask: Record<string, unknown> | undefined): string {
-  if (kind) return kind;
-  const question = ask?.question;
-  if (typeof question === "string" && question.trim()) return question;
-  return ask ? "ask" : "";
+// The row's gate chip is the DURABLE gate kind only. The wait-loop-era fallback to the lifecycle's bare
+// `ask` payload (the question string, else the literal "ask") was retired with notify-and-continue: the
+// attention queue carries the notification and GateResponder owns durable gates, so a bare `ask` no
+// longer renders a gate affordance in the tasks row (L17 supplement).
+function gateHint(kind: string | undefined): string {
+  return kind ?? "";
 }
 
 function taskTitle(facts: {
@@ -789,7 +790,7 @@ function enclosureForDoc(
 // The lifecycle bound to an enclosure, following the cross-ref in either direction: the
 // contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
 // (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
-// unset or stale: the bound lifecycle's ask/gate/staleness enrich the leaf's single row instead
+// unset or stale: the bound lifecycle's gate/staleness enrich the leaf's single row instead
 // of rendering a duplicate lifecycle card for the same enclosureId (L11).
 function lifecycleForEnclosure(
   enclosure: EnclosureNode,

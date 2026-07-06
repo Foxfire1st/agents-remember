@@ -31,6 +31,7 @@ import type {
 } from "../types/projection";
 
 import type { ChangeSetTarget } from "./changeset/ChangeSetViewer";
+import type { NotesReaderTarget } from "./notes-reader/NotesReaderViewer";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
 import { GateResponder } from "./GateResponder";
 import { TaskNotes } from "./TaskNotes";
@@ -315,18 +316,20 @@ const taskdocDecisions = css({
 const taskdocDecision = css({ fontSize: "0.84rem" });
 const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
 
-// The selected lifecycle: phase stepper, the chat-routed Gate Respond drawer or ask fallback, the
+// The selected lifecycle: phase stepper, the canonical Gate Respond surface (durable gates only), the
 // task-document content (analytics.taskDocuments), the lifecycle → worktree → provider spine, and tokens.
 export function DetailPanel({
   selectedId,
   onOpenLifecycle,
   onOpenChangeSet,
+  onOpenNotes,
   onViewLeaf,
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
   // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view (L4a).
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
   // Report the QUALIFIED LEAF ID of the leaf the panel is actually SHOWING — a drilled sub-task or a
   // directly-opened leaf doc — so the rail chat + "attach to leaf" key by that leaf, not the master
   // (L5 fix 1). `undefined` while only a master/series overview (or the empty state) is shown.
@@ -423,18 +426,18 @@ export function DetailPanel({
         <div className={where}>task document · {selectedTaskDoc.repository}</div>
         {selectedTaskDoc.kind === "master" ? (
           openDoc ? (
-            <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
+            <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
           ) : (
             <MasterOverview
               doc={masterDocWithSeriesTokens(selectedTaskDoc, analytics?.series ?? [])}
               sliceDocs={sliceDocs}
               onOpen={setOpenSlug}
               onJump={jump}
-              onOpenChangeSet={onOpenChangeSet}
+              onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
             />
           )
         ) : (
-          <TaskReader doc={selectedTaskDoc} onOpenChangeSet={onOpenChangeSet} />
+          <TaskReader doc={selectedTaskDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
         )}
       </Panel>
     );
@@ -476,14 +479,14 @@ export function DetailPanel({
       <Panel testid="detail-panel" head={head} className={sizing}>
         <div className={where}>series master · {selectedSeries.repository}</div>
         {openDoc ? (
-          <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
+          <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
         ) : (
           <MasterOverview
             doc={seriesDoc}
             sliceDocs={seriesSlices}
             onOpen={setOpenSlug}
             onJump={jump}
-            onOpenChangeSet={onOpenChangeSet}
+            onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
           />
         )}
       </Panel>
@@ -582,14 +585,14 @@ export function DetailPanel({
       ) : null}
 
       {openDoc ? (
-        <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} />
+        <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
       ) : seriesDoc ? (
         <MasterOverview
           doc={seriesDoc}
           sliceDocs={seriesSlices}
           onOpen={setOpenSlug}
           onJump={jump}
-          onOpenChangeSet={onOpenChangeSet}
+          onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
         />
       ) : master ? (
         <MasterOverview
@@ -597,10 +600,10 @@ export function DetailPanel({
           sliceDocs={slices}
           onOpen={setOpenSlug}
           onJump={jump}
-          onOpenChangeSet={onOpenChangeSet}
+          onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
         />
       ) : (
-        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} />
+        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
       )}
 
       {enclosure ? (
@@ -865,11 +868,13 @@ function TaskContent({
   onOpen,
   onJump,
   onOpenChangeSet,
+  onOpenNotes,
 }: {
   docs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this task.</p>;
@@ -883,12 +888,12 @@ function TaskContent({
         sliceDocs={sliceDocs}
         onOpen={onOpen}
         onJump={onJump}
-        onOpenChangeSet={onOpenChangeSet}
+        onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
       />
     );
   }
   if (sliceDocs.length === 1) {
-    return <TaskReader doc={sliceDocs[0]} onOpenChangeSet={onOpenChangeSet} />;
+    return <TaskReader doc={sliceDocs[0]} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />;
   }
   return <SliceList sliceDocs={sliceDocs} onOpen={onOpen} />;
 }
@@ -902,12 +907,14 @@ function MasterOverview({
   onOpen,
   onJump,
   onOpenChangeSet,
+  onOpenNotes,
 }: {
   doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
   return (
     <div className={taskdoc}>
@@ -947,7 +954,12 @@ function MasterOverview({
       ))}
       {/* L9: the series' coordination notes (design records, friction ledger, reports/) —
           browsable from the master overview too, not only from a drilled leaf reader. */}
-      <TaskNotes repo={doc.repository} master={dirName(doc.docPath)} references={[]} />
+      <TaskNotes
+        repo={doc.repository}
+        master={dirName(doc.docPath)}
+        references={[]}
+        onOpenNotes={onOpenNotes}
+      />
     </div>
   );
 }
@@ -1153,9 +1165,11 @@ function SpineLane({
 function TaskReader({
   doc,
   onOpenChangeSet,
+  onOpenNotes,
 }: {
   doc: TaskDocNode;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
   const progress = topLevelStepProgress(doc);
   const leafKey = qualifiedLeafKey(doc);
@@ -1227,6 +1241,7 @@ function TaskReader({
         repo={doc.repository}
         master={dirName(doc.docPath)}
         references={doc.references}
+        onOpenNotes={onOpenNotes}
       />
     </div>
   );
