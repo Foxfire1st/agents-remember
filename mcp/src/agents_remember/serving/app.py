@@ -70,6 +70,7 @@ from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.serving.actions import ActionRequest, evaluate_action
+from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
@@ -100,14 +101,42 @@ def _encode(data: BaseModel | dict[str, Any]) -> Any:
     return data
 
 
-async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]:
+def _if_none_match_matches(header: str | None, revision: str) -> bool:
+    """RFC 7232 weak comparison of an ``If-None-Match`` header against our revision.
+
+    The revision is the projector's opaque content fingerprint (boot nonce + content
+    sequence); the served ETag is its weak form ``W/"<revision>"``. Weak comparison strips
+    ``W/`` prefixes, so any listed entity-tag whose opaque value equals the revision
+    matches; ``*`` matches any current representation.
+    """
+    if header is None:
+        return False
+    for candidate in header.split(","):
+        tag = candidate.strip()
+        if tag == "*":
+            return True
+        if tag.startswith(("W/", "w/")):
+            tag = tag[2:]
+        if tag.strip('"') == revision:
+            return True
+    return False
+
+
+async def stream_events(
+    projector: Projector, *, build: ServingBuild | None = None
+) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one connection: snapshot, then per-entity deltas.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
+    ``build`` (the boot-time serving stamp, 260703-L15) rides the snapshot as
+    ``servingBuild`` so the cockpit can render which process/commit is answering.
     """
     seq, snapshot = projector.current()
     if snapshot is not None:
-        yield ServerSentEvent(data=_encode(snapshot), event="snapshot", id=str(seq), retry=2000)
+        payload = _encode(snapshot)
+        if build is not None:
+            payload["servingBuild"] = build.payload()
+        yield ServerSentEvent(data=payload, event="snapshot", id=str(seq), retry=2000)
     async for seq, delta in projector.subscribe():
         yield ServerSentEvent(data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000)
 
@@ -380,6 +409,8 @@ def create_app(
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
     paster = terminal_paster if terminal_paster is not None else TerminalPaster()
+    # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
+    build = resolve_serving_build()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -396,15 +427,29 @@ def create_app(
     app = FastAPI(title="Agents Remember dashboard", lifespan=lifespan)
 
     @app.get("/api/state")
-    def api_state() -> dict[str, Any]:
-        _, snapshot = projector.current()
+    def api_state(
+        if_none_match: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        # The change gate (260703-L15): the ETag is the projector's content revision, which only
+        # advances when the stable projection form changes (volatile ages excluded -- delta.py).
+        # An If-None-Match poll of an unchanged projection therefore costs a header exchange
+        # instead of a ~780 KB dump+parse; when content DID change, the full fresh dump serves
+        # exactly as before. `Cache-Control: no-cache` keeps any cache honest (always revalidate).
+        seq, snapshot = projector.current()
         if snapshot is None:
             raise HTTPException(status_code=503, detail="projection not ready")
-        return snapshot.model_dump(by_alias=True, exclude_none=True)
+        revision = projector.revision(seq)
+        etag = f'W/"{revision}"'
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if _if_none_match_matches(if_none_match, revision):
+            return Response(status_code=304, headers=headers)
+        body = snapshot.model_dump(by_alias=True, exclude_none=True)
+        body["servingBuild"] = build.payload()
+        return JSONResponse(content=body, headers=headers)
 
     @app.get("/api/stream", response_class=EventSourceResponse)
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(projector):
+        async for event in stream_events(projector, build=build):
             yield event
 
     @app.get("/api/events", response_class=EventSourceResponse)

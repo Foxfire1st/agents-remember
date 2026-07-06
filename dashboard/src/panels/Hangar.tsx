@@ -1,5 +1,6 @@
 import { css, cva } from "../../styled-system/css";
 import { fmtWait, hasLiveWorktree } from "../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../data/servedAges";
 import { useDashboard } from "../data/store";
 import { Affordance } from "../grammar/Affordance";
 import { Panel } from "../grammar/Panel";
@@ -71,6 +72,9 @@ const actions = css({ display: "flex", gap: "0.3rem" });
 export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
   const enclosures = useDashboard((s) => s.enclosures);
   const lifecycles = useDashboard((s) => s.lifecycles);
+  // Served ages advance locally between emissions — the change gate (260703-L15) no longer
+  // re-serves a node whose only movement is its age, so the display ticks here instead.
+  const nowMs = useNowMs();
   const rows = Object.values(enclosures)
     .filter(hasLiveWorktree)
     .sort((a, b) => a.enclosure.localeCompare(b.enclosure));
@@ -98,7 +102,9 @@ export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
                   >
                     {enclosure.repoName} · {enclosure.taskName}
                   </button>
-                  <span className="muted">{fmtWait(lifecycle?.staleSeconds)}</span>
+                  <span className="muted">
+                    {fmtWait(servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs))}
+                  </span>
                 </div>
                 <div className={badges}>
                   <span className={badge}>review {enclosure.humanReviewStatus}</span>

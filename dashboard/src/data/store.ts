@@ -8,8 +8,10 @@ import type {
   LifecycleProjection,
   Metrics,
   ProviderNode,
+  ServingBuild,
   WorkspaceProjection,
 } from "../types/projection";
+import { stableEquals, stampServed } from "./servedAges";
 
 export type ConnState = "connecting" | "live" | "signal-lost";
 
@@ -27,6 +29,9 @@ export interface DashboardState {
   activeWorktreeGroups: string[]; // worktree-group basenames with a live enclosure (Topology scope)
   metrics: Metrics | null;
   analytics: Analytics | null;
+  // The boot-time serving stamp (260703-L15): which build/process is answering. Rides the
+  // snapshot; rendered muted in the top bar so a stale server is visible at a glance.
+  servingBuild: ServingBuild | null;
   events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
   eventsHydrated: boolean;
   suppressedAttentionIds: Record<string, true>;
@@ -46,8 +51,64 @@ export interface DashboardState {
 // is the real history bound, and EventRiver virtualizes the window so render cost stays flat.
 const EVENT_WINDOW = 2000;
 
-const byKey = <T>(items: T[], key: (item: T) => string): Record<string, T> =>
-  Object.fromEntries(items.map((item) => [key(item), item]));
+// ── The change gate (260703-L15) ────────────────────────────────────────────────────────
+// Both apply paths are IDENTITY-PRESERVING: an arriving node that stable-equals the stored
+// one (volatile age fields ignored — data/servedAges.ts mirrors serving/delta.py) keeps the
+// EXISTING object, and an apply in which nothing changed performs NO store write at all. A
+// long-lived tab receiving reconnect snapshots or redundant deltas therefore allocates
+// nothing and re-renders nothing; applied nodes are age-anchored via `stampServed` so
+// staleness displays advance locally between real emissions.
+
+/** Reuse the current value when the incoming one is stable-equal (keeps identity + anchor). */
+const reuse = <T>(current: T, incoming: T): T => (stableEquals(current, incoming) ? current : incoming);
+
+/**
+ * Merge an incoming collection into the id-keyed map, reusing every stable-equal node.
+ * Returns the EXISTING map object when nothing changed (added/updated/removed).
+ */
+const mergeKeyed = <T extends object>(
+  existing: Record<string, T>,
+  incoming: T[],
+  key: (item: T) => string,
+): Record<string, T> => {
+  const next: Record<string, T> = {};
+  let changed = false;
+  for (const item of incoming) {
+    const ident = key(item);
+    const current = existing[ident];
+    if (current !== undefined && stableEquals(current, item)) {
+      next[ident] = current;
+    } else {
+      stampServed(item);
+      next[ident] = item;
+      changed = true;
+    }
+  }
+  if (!changed && Object.keys(existing).length === incoming.length) return existing;
+  return next;
+};
+
+// The analytics object replaces wholesale (matching the wire protocol), so each replacement
+// re-anchors every age-bearing node it carries — their served ages are fresh at that moment.
+const stampAnalytics = (analytics: Analytics | null): void => {
+  if (!analytics) return;
+  const at = Date.now();
+  const collections: (readonly object[] | undefined)[] = [
+    analytics.driftSnapshots,
+    analytics.stalestSidecars,
+    analytics.setupSummaries,
+    analytics.setupProgress,
+    analytics.toolReports,
+    analytics.agentPickups,
+    analytics.taskDocuments,
+    analytics.series,
+    analytics.attentionQueue,
+    analytics.engineProcesses,
+  ];
+  for (const list of collections) {
+    for (const node of list ?? []) stampServed(node, at);
+  }
+};
 
 const upsert = <T>(
   collection: Record<string, T>,
@@ -56,7 +117,6 @@ const upsert = <T>(
 ): Record<string, T> => ({ ...collection, [key(item)]: item });
 
 const remove = <T>(collection: Record<string, T>, id: string): Record<string, T> => {
-  if (!(id in collection)) return collection;
   const next = { ...collection };
   delete next[id];
   return next;
@@ -75,44 +135,72 @@ const pruneSuppressedAttention = (
 };
 
 // The state channel's named deltas, merged into the flat id-keyed maps. The server diffs
-// consecutive projections (serving/delta.py) and emits upserts / `*.removed` markers;
-// `metrics` / `analytics` arrive as whole-object replacements.
+// consecutive projections on their STABLE forms (serving/delta.py) and emits upserts /
+// `*.removed` markers; `metrics` / `analytics` arrive as whole-object replacements. Returns
+// `null` when the delta would not change the store — the caller then skips the write.
 function reduceDelta(
   state: DashboardState,
   event: string,
   data: unknown,
-): Partial<DashboardState> {
+): Partial<DashboardState> | null {
   switch (event) {
-    case "lifecycle":
-      return { lifecycles: upsert(state.lifecycles, data as LifecycleProjection, (x) => x.id) };
-    case "lifecycle.removed":
-      return { lifecycles: remove(state.lifecycles, (data as { id: string }).id) };
-    case "enclosure":
-      return { enclosures: upsert(state.enclosures, data as EnclosureNode, (x) => x.enclosure) };
-    case "enclosure.removed":
-      return { enclosures: remove(state.enclosures, (data as { enclosure: string }).enclosure) };
-    case "provider":
-      return { providers: upsert(state.providers, data as ProviderNode, (x) => x.id) };
-    case "provider.removed":
-      return { providers: remove(state.providers, (data as { id: string }).id) };
-    case "activeWorktreeGroups":
+    case "lifecycle": {
+      const node = data as LifecycleProjection;
+      if (stableEquals(state.lifecycles[node.id], node)) return null;
+      stampServed(node);
+      return { lifecycles: upsert(state.lifecycles, node, (x) => x.id) };
+    }
+    case "lifecycle.removed": {
+      const { id } = data as { id: string };
+      return id in state.lifecycles ? { lifecycles: remove(state.lifecycles, id) } : null;
+    }
+    case "enclosure": {
+      const node = data as EnclosureNode;
+      if (stableEquals(state.enclosures[node.enclosure], node)) return null;
+      stampServed(node);
+      return { enclosures: upsert(state.enclosures, node, (x) => x.enclosure) };
+    }
+    case "enclosure.removed": {
+      const { enclosure } = data as { enclosure: string };
+      return enclosure in state.enclosures
+        ? { enclosures: remove(state.enclosures, enclosure) }
+        : null;
+    }
+    case "provider": {
+      const node = data as ProviderNode;
+      if (stableEquals(state.providers[node.id], node)) return null;
+      stampServed(node);
+      return { providers: upsert(state.providers, node, (x) => x.id) };
+    }
+    case "provider.removed": {
+      const { id } = data as { id: string };
+      return id in state.providers ? { providers: remove(state.providers, id) } : null;
+    }
+    case "activeWorktreeGroups": {
       // Whole-value replacement (a bare list, no key) — see serving/delta.py.
-      return { activeWorktreeGroups: (data as { activeWorktreeGroups: string[] }).activeWorktreeGroups };
-    case "metrics":
-      return { metrics: data as Metrics };
+      const { activeWorktreeGroups } = data as { activeWorktreeGroups: string[] };
+      if (stableEquals(state.activeWorktreeGroups, activeWorktreeGroups)) return null;
+      return { activeWorktreeGroups };
+    }
+    case "metrics": {
+      const metrics = data as Metrics;
+      return stableEquals(state.metrics, metrics) ? null : { metrics };
+    }
     case "analytics": {
       const analytics = data as Analytics;
+      if (stableEquals(state.analytics, analytics)) return null;
+      stampAnalytics(analytics);
       return {
         analytics,
         suppressedAttentionIds: pruneSuppressedAttention(state.suppressedAttentionIds, analytics),
       };
     }
     default:
-      return {};
+      return null;
   }
 }
 
-export const dashboardStore = createStore<DashboardState>((set) => ({
+export const dashboardStore = createStore<DashboardState>((set, get) => ({
   conn: "connecting",
   generatedAt: null,
   gen: 0,
@@ -122,26 +210,60 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
   activeWorktreeGroups: [],
   metrics: null,
   analytics: null,
+  servingBuild: null,
   events: [],
   eventsHydrated: false,
   suppressedAttentionIds: {},
-  setConn: (conn) => set({ conn }),
-  applySnapshot: (projection) =>
-    set((state) => ({
+  setConn: (conn) => {
+    if (get().conn !== conn) set({ conn });
+  },
+  applySnapshot: (projection) => {
+    const state = get();
+    const lifecycles = mergeKeyed(state.lifecycles, projection.lifecycles, (x) => x.id);
+    const enclosures = mergeKeyed(state.enclosures, projection.enclosures, (x) => x.enclosure);
+    const providers = mergeKeyed(state.providers, projection.providers, (x) => x.id);
+    const activeWorktreeGroups = reuse(
+      state.activeWorktreeGroups,
+      projection.activeWorktreeGroups ?? [],
+    );
+    const metrics = reuse(state.metrics, projection.metrics);
+    const analytics = reuse(state.analytics, projection.analytics);
+    if (analytics !== state.analytics) stampAnalytics(analytics);
+    const servingBuild = reuse(state.servingBuild, projection.servingBuild ?? null);
+    const suppressedAttentionIds = pruneSuppressedAttention(
+      state.suppressedAttentionIds,
+      analytics,
+    );
+    const unchanged =
+      lifecycles === state.lifecycles &&
+      enclosures === state.enclosures &&
+      providers === state.providers &&
+      activeWorktreeGroups === state.activeWorktreeGroups &&
+      metrics === state.metrics &&
+      analytics === state.analytics &&
+      servingBuild === state.servingBuild &&
+      suppressedAttentionIds === state.suppressedAttentionIds;
+    // An unchanged snapshot (a reconnect while idle) is a NO-OP: no store write at all.
+    if (unchanged && state.conn === "live") return;
+    set({
       conn: "live",
-      generatedAt: projection.generatedAt,
-      lifecycles: byKey(projection.lifecycles, (x) => x.id),
-      enclosures: byKey(projection.enclosures, (x) => x.enclosure),
-      providers: byKey(projection.providers, (x) => x.id),
-      activeWorktreeGroups: projection.activeWorktreeGroups ?? [],
-      metrics: projection.metrics,
-      analytics: projection.analytics,
-      suppressedAttentionIds: pruneSuppressedAttention(
-        state.suppressedAttentionIds,
-        projection.analytics,
-      ),
-    })),
-  applyDelta: (event, data) => set((state) => reduceDelta(state, event, data)),
+      // `generatedAt` is the stamp of the last APPLIED content (the top bar's "@ hh:mm:ss"),
+      // so an unchanged re-snapshot must not advance it — ages and stamp stay coherent.
+      generatedAt: unchanged ? state.generatedAt : projection.generatedAt,
+      lifecycles,
+      enclosures,
+      providers,
+      activeWorktreeGroups,
+      metrics,
+      analytics,
+      servingBuild,
+      suppressedAttentionIds,
+    });
+  },
+  applyDelta: (event, data) => {
+    const partial = reduceDelta(get(), event, data);
+    if (partial !== null) set(partial);
+  },
   pushEvent: (line) =>
     set((state) => {
       try {
@@ -181,6 +303,7 @@ export const dashboardStore = createStore<DashboardState>((set) => ({
       activeWorktreeGroups: [],
       metrics: null,
       analytics: null,
+      servingBuild: null,
       events: [],
       eventsHydrated: false,
       suppressedAttentionIds: {},

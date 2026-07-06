@@ -68,6 +68,8 @@ from agents_remember.observer.projection_store import (
     write_projection,
 )
 from agents_remember.observer.reducer import (
+    TOKEN_SERIES_MAX,
+    TOKEN_SERIES_RECENT,
     build_analytics,
     build_attention_queue,
     build_engine_processes,
@@ -1507,6 +1509,43 @@ class TokenSeriesTests(unittest.TestCase):
 
     def test_no_tool_events_is_empty(self) -> None:
         self.assertEqual(token_series([_started()]), [])
+
+    def _tool_log(self, count: int) -> list[Event]:
+        log = [_started()]
+        for index in range(count):
+            log.append(
+                _event(
+                    "tool.completed",
+                    ts=f"2026-06-13T18:{index // 60000:02d}:{(index // 1000) % 60:02d}.{index % 1000:03d}+00:00",
+                    trust="observed",
+                    tool="a",
+                    tokens=10,
+                    ok=True,
+                )
+            )
+        return log
+
+    def test_series_at_the_bound_is_untouched(self) -> None:
+        series = token_series(self._tool_log(TOKEN_SERIES_MAX))
+        self.assertEqual(len(series), TOKEN_SERIES_MAX)
+        self.assertEqual(series[-1].cumulative, 10 * TOKEN_SERIES_MAX)
+
+    def test_long_series_is_decimated_to_the_bound(self) -> None:
+        # 260703-L15: the served fuel gauge is bounded -- a long lifecycle's series decimates
+        # to TOKEN_SERIES_MAX (newest TOKEN_SERIES_RECENT exact, older history uniform-thinned,
+        # first sample kept) instead of growing ~60 B/sample into every lifecycle delta.
+        count = 3000
+        series = token_series(self._tool_log(count))
+        self.assertEqual(len(series), TOKEN_SERIES_MAX)
+        # The newest window is exact: the last TOKEN_SERIES_RECENT cumulative values.
+        recent = [sample.cumulative for sample in series[-TOKEN_SERIES_RECENT:]]
+        self.assertEqual(recent, [10 * n for n in range(count - TOKEN_SERIES_RECENT + 1, count + 1)])
+        # The thinned history keeps the first sample and stays monotonic (a decimated
+        # cumulative series must still read as a fuel gauge).
+        self.assertEqual(series[0].cumulative, 10)
+        cumulative = [sample.cumulative for sample in series]
+        self.assertEqual(cumulative, sorted(cumulative))
+        self.assertEqual(series[-1].cumulative, 10 * count)
 
 
 class StalenessHistogramTests(unittest.TestCase):

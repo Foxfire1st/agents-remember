@@ -11,6 +11,14 @@ tick projects at (a replay clock under sim, wall-clock UTC live), and ``before_t
 an optional hook run with that same moment just before each projection -- sim uses it to
 feed the next due fixture events into the sim store so the projection evolves over replay
 time. Both default to the live no-op behaviour, so the live path is unchanged.
+
+The change gate (260703-L15): the diff compares *stable forms* (volatile age fields
+stripped -- ``serving/delta.py``), so ``_seq`` only advances when projection CONTENT
+changes. That makes ``revision`` a truthful content fingerprint: ``/api/state`` serves it
+as the ETag, and an ``If-None-Match`` poll of an unchanged projection costs a header
+exchange, not a ~780 KB dump+parse. The previous tick's stable form is cached here so
+each tick pays for one stable dump, and ``(seq, projection)`` publish atomically as one
+tuple so a threadpool reader can never pair a new revision with an old snapshot.
 """
 
 from __future__ import annotations
@@ -20,9 +28,15 @@ import logging
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from agents_remember.observer.projection_store import project_and_write
-from agents_remember.serving.delta import DeltaEvent, diff_projection
+from agents_remember.serving.delta import (
+    DeltaEvent,
+    StableProjectionState,
+    diff_projection,
+    stable_projection_state,
+)
 
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
@@ -56,8 +70,14 @@ class Projector:
         self._now: Callable[[], datetime] = now or _utcnow
         self._before_tick = before_tick
         self._provider_refresher = provider_refresher
-        self._latest: WorkspaceProjection | None = None
-        self._seq = 0
+        # (seq, projection) publish as ONE tuple: /api/state runs in a threadpool, so pairing
+        # them via two attributes could tear (a bumped seq read against the previous snapshot
+        # would hand a poller a stale body under a fresh ETag).
+        self._published: tuple[int, WorkspaceProjection | None] = (0, None)
+        self._latest_stable: StableProjectionState | None = None
+        # Boot nonce: seq restarts at 0 on every process start, so the ETag must not -- a client
+        # holding "0" from the previous process would 304 against different content otherwise.
+        self._boot_id = uuid4().hex[:12]
         self._subscribers: set[asyncio.Queue[_Item]] = set()
 
     async def prime(self) -> None:
@@ -67,9 +87,12 @@ class Projector:
         server still starts and serves ``503`` from ``/api/state`` until a tick succeeds.
         """
         try:
-            self._latest = await asyncio.to_thread(self._tick_sync, self._now())
+            first = await asyncio.to_thread(self._tick_sync, self._now())
         except Exception:
             logger.exception("initial projection failed; the tick loop will retry")
+            return
+        self._latest_stable = stable_projection_state(first)
+        self._published = (0, first)
 
     async def run(self) -> None:
         """Tick forever: re-project, diff, broadcast. One bad tick never kills the loop."""
@@ -80,10 +103,18 @@ class Projector:
             except Exception:
                 logger.exception("projection tick failed; retrying next interval")
                 continue
-            for delta in diff_projection(self._latest, current):
-                self._seq += 1
-                self._broadcast((self._seq, delta))
-            self._latest = current
+            current_stable = stable_projection_state(current)
+            seq, previous = self._published
+            for delta in diff_projection(
+                previous,
+                current,
+                previous_state=self._latest_stable,
+                current_state=current_stable,
+            ):
+                seq += 1
+                self._broadcast((seq, delta))
+            self._latest_stable = current_stable
+            self._published = (seq, current)
 
     def _tick_sync(self, moment: datetime) -> WorkspaceProjection:
         """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread)."""
@@ -97,7 +128,16 @@ class Projector:
 
     def current(self) -> tuple[int, WorkspaceProjection | None]:
         """The latest (sequence, projection) for a new connection's snapshot."""
-        return self._seq, self._latest
+        return self._published
+
+    def revision(self, seq: int) -> str:
+        """The opaque content fingerprint for ``seq``: boot nonce + content sequence.
+
+        ``seq`` only advances on stable-form changes (the volatile-age-free diff), so this
+        is a truthful ``/api/state`` ETag value: same revision => same projection content
+        (up to volatile ages and ``generatedAt``, which change every tick by design).
+        """
+        return f"{self._boot_id}-{seq}"
 
     def _broadcast(self, item: _Item) -> None:
         for queue in self._subscribers:

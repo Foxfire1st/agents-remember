@@ -519,6 +519,32 @@ function ViewBody({ view, onOpen }: { view: View; onOpen: (id: string) => void }
   }
 }
 
+// The serving-build stamp, muted (260703-L15 — the July-4 ghost-process lesson): commit
+// short-hash (or the package version off-checkout) + process boot time, so a STALE serving
+// process is visible at a glance. Data rides the snapshot (`servingBuild`, boot-time cached).
+function ServingBuildStamp() {
+  const build = useDashboard((s) => s.servingBuild);
+  if (!build) return null;
+  const booted = new Date(build.bootedAt);
+  const bootLabel = Number.isNaN(booted.getTime())
+    ? build.bootedAt
+    : booted.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+  return (
+    <span
+      className={dim}
+      data-testid="serving-build"
+      title={`Serving build v${build.version}${build.commit ? ` @ ${build.commit}` : ""} · process up since ${build.bootedAt}`}
+    >
+      {build.commit ?? `v${build.version}`} · up {bootLabel}
+    </span>
+  );
+}
+
 function TopBar() {
   const conn = useDashboard((s) => s.conn);
   const metrics = useDashboard((s) => s.metrics);
@@ -540,6 +566,7 @@ function TopBar() {
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
+        <ServingBuildStamp />
         <ConnBadge conn={conn} />
         <EffectsToggle />
       </div>

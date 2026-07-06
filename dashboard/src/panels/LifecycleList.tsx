@@ -11,6 +11,7 @@ import {
 
 import { css, cva } from "../../styled-system/css";
 import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../data/servedAges";
 import { useDashboard } from "../data/store";
 import {
   isOrchestrationDoc,
@@ -215,6 +216,9 @@ export function LifecycleList({
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
+  // Row staleness advances locally between emissions — the change gate (260703-L15) no longer
+  // re-serves a lifecycle every tick just because its age moved.
+  const nowMs = useNowMs();
   const docs = analytics?.taskDocuments ?? [];
   const series = analytics?.series ?? [];
   const agentPickups = analytics?.agentPickups ?? [];
@@ -227,6 +231,7 @@ export function LifecycleList({
     docs,
     series,
     agentPickups,
+    nowMs,
   });
   const groups = groupRows(rows, pivot);
   const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
@@ -324,6 +329,7 @@ interface OperationRowsInput {
   docs: TaskDocNode[];
   series: SeriesNode[];
   agentPickups: AgentPickupNode[];
+  nowMs: number; // the age-display clock — served staleness advances locally (260703-L15)
 }
 
 interface OperationRow {
@@ -401,6 +407,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
         docPaths,
         pickupForLifecycle(lifecycle, pickupsByLifecycle),
         input.docs,
+        input.nowMs,
       ),
     );
   }
@@ -410,7 +417,13 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
     rows.push(
-      seriesRow(series, lifecycle, pickupForLifecycle(lifecycle, pickupsByLifecycle), input.docs),
+      seriesRow(
+        series,
+        lifecycle,
+        pickupForLifecycle(lifecycle, pickupsByLifecycle),
+        input.docs,
+        input.nowMs,
+      ),
     );
   }
 
@@ -434,6 +447,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
         pickupForLifecycle(lifecycle, pickupsByLifecycle),
         input.series,
         docPaths,
+        input.nowMs,
       ),
     );
   }
@@ -461,6 +475,7 @@ function docRow(
   masterDocPaths: Set<string>,
   pickup: AgentPickupNode | undefined,
   allDocs: TaskDocNode[],
+  nowMs: number,
 ): OperationRow {
   const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : topLevelStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
@@ -485,7 +500,11 @@ function docRow(
     phase,
     secondary: doc.kind,
     variant,
-    meta: rowMetaText(progressHint(progress), doc.status, lifecycle?.staleSeconds),
+    meta: rowMetaText(
+      progressHint(progress),
+      doc.status,
+      servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
+    ),
     gate,
     pickup,
     createdAt: doc.createdAt ?? "",
@@ -503,6 +522,7 @@ function seriesRow(
   lifecycle: LifecycleProjection | undefined,
   pickup: AgentPickupNode | undefined,
   allDocs: TaskDocNode[],
+  nowMs: number,
 ): OperationRow {
   const repo = series.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? series.status;
@@ -536,7 +556,7 @@ function seriesRow(
     meta: rowMetaText(
       progressHint({ done: series.doneCount, total: series.totalCount }),
       series.status,
-      lifecycle?.staleSeconds,
+      servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
     ),
     gate,
     pickup,
@@ -557,6 +577,7 @@ function lifecycleRow(
   pickup: AgentPickupNode | undefined,
   seriesList: SeriesNode[],
   masterDocPaths: Set<string>,
+  nowMs: number,
 ): OperationRow {
   const label = taskLabel(lifecycle, docs, enclosure);
   const repo = lifecycle.repoId ?? "—";
@@ -578,7 +599,7 @@ function lifecycleRow(
     phase: lifecycle.phase,
     secondary: lifecycle.phase,
     variant: lifecycle.state,
-    meta: rowMetaText(taskHint(docs), "", lifecycle.staleSeconds),
+    meta: rowMetaText(taskHint(docs), "", servedAgeSeconds(lifecycle, lifecycle.staleSeconds, nowMs)),
     gate,
     pickup,
     createdAt: lifecycle.startedAt,

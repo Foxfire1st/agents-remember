@@ -463,11 +463,36 @@ def _metrics(
 # --- analytical rollups (slice 3b) -------------------------------------------
 
 
+# The served fuel-gauge bound (260703-L15): one sample per token-bearing ``tool.completed``
+# event is UNBOUNDED over a long lifecycle (~60 wire bytes/sample), and the lifecycle node
+# re-emits on every real change while its agent works -- an uncapped series multiplies into
+# the serving hot path (10k tool calls ≈ 600 KB riding every lifecycle delta). The gauge is
+# a chart, so the bound decimates: the newest TOKEN_SERIES_RECENT samples stay exact and the
+# older history thins uniformly (first sample always kept) to TOKEN_SERIES_MAX total. The
+# observer LOG keeps every event -- this bounds only the served projection.
+TOKEN_SERIES_MAX = 512
+TOKEN_SERIES_RECENT = 256
+
+
+def _decimate_token_series(samples: list[TokenSample]) -> list[TokenSample]:
+    """Bound the series: uniform-thin the older history, keep the newest window exact."""
+    if len(samples) <= TOKEN_SERIES_MAX:
+        return samples
+    history = samples[:-TOKEN_SERIES_RECENT]
+    budget = TOKEN_SERIES_MAX - TOKEN_SERIES_RECENT
+    step = len(history) / budget
+    thinned = [history[int(index * step)] for index in range(budget)]
+    return thinned + samples[-TOKEN_SERIES_RECENT:]
+
+
 def token_series(events: list[Event]) -> list[TokenSample]:
     """Cumulative token spend over time, from the log's ``tool.completed`` events (§2.4).
 
     The per-lifecycle fuel gauge: gap #2 ("no token-spend persistence") is closed by
-    the event substrate, so the running total is a pure fold of the log.
+    the event substrate, so the running total is a pure fold of the log. Served bounded
+    (260703-L15): past :data:`TOKEN_SERIES_MAX` points the older history is decimated
+    (shape- and total-preserving -- ``cumulative`` stays exact per retained sample) while
+    the newest :data:`TOKEN_SERIES_RECENT` samples stay complete.
     """
     total = 0
     samples: list[TokenSample] = []
@@ -478,7 +503,7 @@ def token_series(events: list[Event]) -> list[TokenSample]:
         if isinstance(tokens, int):
             total += tokens
             samples.append(TokenSample(ts=event.ts, cumulative=total))
-    return samples
+    return _decimate_token_series(samples)
 
 
 # Upper bound (exclusive, seconds) per verification-age bucket; the final bucket is

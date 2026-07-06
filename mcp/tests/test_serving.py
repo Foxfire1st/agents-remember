@@ -20,15 +20,19 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+import httpx
 from fastapi.testclient import TestClient
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
+
+import inspect
 
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
@@ -40,6 +44,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.config import ConfigError, McpRuntimeConfig
+from agents_remember.observer import projection as projection_module
 from agents_remember.observer.event_retention import (
     initial_event_offsets,
     prune_expired_lifecycle_event_logs,
@@ -54,6 +59,7 @@ from agents_remember.observer.projection import (
     Metrics,
     ProviderNode,
     RouteCoverageNode,
+    TaskDocNode,
     WorkspaceProjection,
 )
 from agents_remember.observer.projection_store import project_and_write
@@ -62,8 +68,14 @@ from agents_remember.serving.actions import (
     GateDecisionIntent,
     evaluate_action,
 )
-from agents_remember.serving.app import create_app, stream_events
-from agents_remember.serving.delta import DeltaEvent, diff_projection
+from agents_remember.serving.app import _if_none_match_matches, create_app, stream_events
+from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
+from agents_remember.serving.delta import (
+    VOLATILE_AGE_FIELDS,
+    DeltaEvent,
+    diff_projection,
+    stable_projection_state,
+)
 from agents_remember.serving.events import (
     decode_cursor,
     encode_cursor,
@@ -79,6 +91,7 @@ from agents_remember.serving.sim import (
     parse_sim_speed,
 )
 from agents_remember.serving.static import dashboard_static_dir
+from pydantic import BaseModel
 
 _TS = "2026-06-14T10:00:00Z"
 _FRESH_GATE_TS = "2999-01-01T10:00:00+00:00"
@@ -212,6 +225,74 @@ class DeltaTests(unittest.TestCase):
             [{"id": "L1"}, {"id": "L2"}, {"id": "L3"}],
         )
 
+    # ── The change gate (260703-L15): volatile now-relative ages never emit ──────────
+
+    def test_volatile_only_lifecycle_change_yields_no_deltas(self) -> None:
+        # staleSeconds is recomputed from the tick clock every projection; without the
+        # stable-form compare it re-emitted every node every tick (~780 KB/s measured live).
+        prev = _projection(lifecycles=(_lifecycle("L1"),))
+        aged = _lifecycle("L1").model_copy(update={"staleSeconds": 99.5})
+        self.assertEqual(diff_projection(prev, _projection(lifecycles=(aged,))), [])
+
+    def test_volatile_only_analytics_change_yields_no_deltas(self) -> None:
+        def doc(age: float) -> TaskDocNode:
+            return TaskDocNode(
+                id="t", repository="r", title="T", status="planning", kind="light",
+                docPath="/t.json", ageSeconds=age,
+            )
+
+        prev = _projection(analytics=Analytics(taskDocuments=[doc(1.0)]))
+        cur = _projection(analytics=Analytics(taskDocuments=[doc(2.0)]))
+        self.assertEqual(diff_projection(prev, cur), [])
+
+    def test_real_change_emits_with_fresh_ages_riding_along(self) -> None:
+        prev = _projection(lifecycles=(_lifecycle("L1"),))
+        changed = _lifecycle("L1", tokens=9).model_copy(update={"staleSeconds": 42.0})
+        deltas = diff_projection(prev, _projection(lifecycles=(changed,)))
+        self.assertEqual(len(deltas), 1)
+        self.assertEqual(deltas[0].event, "lifecycle")
+        self.assertEqual(deltas[0].data, changed)  # the emitted node carries the fresh age
+
+    def test_every_seconds_field_is_classified_volatile_or_content(self) -> None:
+        """L15 review follow-up (L15R-1): the server<->client volatile-field sets are a
+        two-sided lockstep guarded only by literal pins. This reflection guard catches the
+        server side of the drift: every ``*Seconds`` field on every projection model must be
+        EITHER in VOLATILE_AGE_FIELDS (now-relative, stripped from stable forms) OR in the
+        curated content allow-list below (static durations, never now-relative). A new
+        now-relative field added to the models without joining VOLATILE_AGE_FIELDS would
+        silently re-degrade the SSE diff -- this test makes that addition loud."""
+        content_seconds_allow_list = {"ttlSeconds"}  # static constant (AGENT_PICKUP_TTL_SECONDS)
+        unclassified: set[str] = set()
+        for _, model in inspect.getmembers(projection_module, inspect.isclass):
+            if not issubclass(model, BaseModel):
+                continue
+            for field_name in getattr(model, "model_fields", {}):
+                if not field_name.endswith("Seconds"):
+                    continue
+                if field_name in VOLATILE_AGE_FIELDS or field_name in content_seconds_allow_list:
+                    continue
+                unclassified.add(field_name)
+        self.assertEqual(
+            unclassified,
+            set(),
+            "unclassified *Seconds projection fields -- add each to VOLATILE_AGE_FIELDS "
+            "(and the client mirror in dashboard/src/data/servedAges.ts) if now-relative, "
+            "or to this test's content allow-list if a static duration: "
+            f"{sorted(unclassified)}",
+        )
+
+    def test_precomputed_stable_states_match_the_pure_form(self) -> None:
+        prev = _projection(lifecycles=(_lifecycle("L1"),), providers=(_provider("p"),))
+        cur = _projection(lifecycles=(_lifecycle("L1", tokens=3),))
+        pure = diff_projection(prev, cur)
+        cached = diff_projection(
+            prev,
+            cur,
+            previous_state=stable_projection_state(prev),
+            current_state=stable_projection_state(cur),
+        )
+        self.assertEqual(pure, cached)
+
 
 class ProjectorTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -282,6 +363,20 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.event, "lifecycle")
         await gen.aclose()
 
+    async def test_snapshot_carries_the_serving_build_stamp(self) -> None:
+        projector = Projector(_config(self.tmp), interval=100)
+        await projector.prime()
+        build = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")
+        gen = stream_events(projector, build=build)
+        first = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(first.event, "snapshot")
+        assert isinstance(first.data, dict)
+        self.assertEqual(
+            first.data["servingBuild"],
+            {"version": "9.9.9", "bootedAt": "2026-07-07T05:00:00Z", "commit": "abc1234"},
+        )
+        await gen.aclose()
+
 
 class AppTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -309,6 +404,109 @@ class AppTests(unittest.TestCase):
         # mount point and the app title are stable across rebuilds; hashed asset names are not.
         self.assertIn('<div id="root">', response.text)
         self.assertIn("Agents Remember", response.text)
+
+
+class StateEtagTests(unittest.TestCase):
+    """The /api/state change gate (260703-L15): 200 -> ETag -> 304, real change -> new ETag."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def _client_with_held_projection(
+        self, held: list[WorkspaceProjection], *, interval: float = 0.02
+    ) -> TestClient:
+        patcher = mock.patch(
+            "agents_remember.serving.projector.project_and_write",
+            side_effect=lambda config, *, now, provider_refresher=None: held[0],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return TestClient(create_app(_config(self.tmp), interval=interval))
+
+    def _get_until(self, client: TestClient, *, etag: str, want_status: int) -> httpx.Response:
+        """Poll /api/state with If-None-Match until the tick loop publishes ``want_status``."""
+        deadline = time.monotonic() + 5.0
+        while True:
+            response = client.get("/api/state", headers={"If-None-Match": etag})
+            if response.status_code == want_status or time.monotonic() > deadline:
+                return response
+            time.sleep(0.02)
+
+    def test_etag_304_cycle_then_new_etag_on_content_change(self) -> None:
+        held = [_projection(lifecycles=(_lifecycle("L1"),))]
+        with self._client_with_held_projection(held) as client:
+            first = client.get("/api/state")
+            self.assertEqual(first.status_code, 200)
+            etag = first.headers["etag"]
+            self.assertTrue(etag.startswith('W/"'))
+            self.assertEqual(first.headers["cache-control"], "no-cache")
+
+            unchanged = client.get("/api/state", headers={"If-None-Match": etag})
+            self.assertEqual(unchanged.status_code, 304)
+            self.assertEqual(unchanged.headers["etag"], etag)
+            self.assertEqual(unchanged.content, b"")  # zero body: the whole point
+
+            # Volatile-only movement (ages advance every tick) must NOT mint a new revision.
+            held[0] = _projection(
+                lifecycles=(_lifecycle("L1").model_copy(update={"staleSeconds": 77.0}),)
+            )
+            time.sleep(0.1)  # several ticks at interval=0.02
+            still = client.get("/api/state", headers={"If-None-Match": etag})
+            self.assertEqual(still.status_code, 304)
+            self.assertEqual(still.headers["etag"], etag)
+
+            # A real content change mints a new revision: 200 with a fresh ETag + fresh body.
+            held[0] = _projection(lifecycles=(_lifecycle("L1", tokens=9),))
+            changed = self._get_until(client, etag=etag, want_status=200)
+            self.assertEqual(changed.status_code, 200)
+            self.assertNotEqual(changed.headers["etag"], etag)
+            body = changed.json()
+            self.assertEqual(body["lifecycles"][0]["tokens"], 9)
+
+    def test_state_body_carries_the_serving_build_stamp(self) -> None:
+        held = [_projection()]
+        with self._client_with_held_projection(held) as client:
+            body = client.get("/api/state").json()
+        self.assertIn("servingBuild", body)
+        self.assertIn("version", body["servingBuild"])
+        self.assertIn("bootedAt", body["servingBuild"])
+
+    def test_if_none_match_comparison_is_weak_and_list_aware(self) -> None:
+        self.assertTrue(_if_none_match_matches('W/"abc-3"', "abc-3"))
+        self.assertTrue(_if_none_match_matches('"abc-3"', "abc-3"))
+        self.assertTrue(_if_none_match_matches('W/"x-1", W/"abc-3"', "abc-3"))
+        self.assertTrue(_if_none_match_matches("*", "abc-3"))
+        self.assertFalse(_if_none_match_matches('W/"abc-2"', "abc-3"))
+        self.assertFalse(_if_none_match_matches(None, "abc-3"))
+
+
+class BuildInfoTests(unittest.TestCase):
+    def test_resolves_commit_in_a_git_checkout(self) -> None:
+        build = resolve_serving_build()
+        self.assertTrue(build.version)
+        self.assertTrue(build.booted_at)
+        # The test tree lives in a checkout, so the short hash resolves and rides the payload.
+        self.assertIsNotNone(build.commit)
+        payload = build.payload()
+        self.assertEqual(payload["commit"], build.commit)
+        self.assertEqual(payload["bootedAt"], build.booted_at)
+
+    def test_off_checkout_serves_version_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = resolve_serving_build(anchor=Path(tmp))
+        self.assertIsNone(build.commit)
+        self.assertNotIn("commit", build.payload())  # never a faked hash
+
+    def test_payload_shape_is_camel_case(self) -> None:
+        build = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")
+        self.assertEqual(
+            build.payload(),
+            {"version": "9.9.9", "bootedAt": "2026-07-07T05:00:00Z", "commit": "abc1234"},
+        )
 
 
 class ActionGateTests(unittest.TestCase):

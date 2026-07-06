@@ -422,6 +422,16 @@ export interface Analytics {
   engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map (slice 5e)
 }
 
+// The boot-time serving stamp (260703-L15, serving/build_info.py): which build/process is
+// answering. Injected app-side onto /api/state and the SSE snapshot (NOT reducer truth, so it
+// is optional here and absent from persisted latest-state.json). `commit` is best-effort —
+// omitted when the server runs off-checkout (an installed wheel).
+export interface ServingBuild {
+  version: string;
+  bootedAt: string;
+  commit?: string;
+}
+
 export interface WorkspaceProjection {
   version: number;
   generatedAt: string;
@@ -435,4 +445,5 @@ export interface WorkspaceProjection {
   activeWorktreeGroups: string[];
   metrics: Metrics;
   analytics: Analytics;
+  servingBuild?: ServingBuild; // app-injected on the wire only — see ServingBuild
 }
