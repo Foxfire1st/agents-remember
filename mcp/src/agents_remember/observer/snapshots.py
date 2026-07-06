@@ -1161,6 +1161,7 @@ def _task_doc_node(
             for section in doc.sections
         ],
         masterLifecycleId=parent_lifecycle,
+        orchestrates=list(doc.orchestrates),
     )
 
 

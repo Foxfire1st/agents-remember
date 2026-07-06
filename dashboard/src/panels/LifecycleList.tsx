@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 import {
   Header,
@@ -13,6 +13,9 @@ import { css, cva } from "../../styled-system/css";
 import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
 import { useDashboard } from "../data/store";
 import {
+  isOrchestrationDoc,
+  masterCommandNames,
+  orchestratorParentKey,
   pathDir,
   pathStem,
   taskDocHierarchyLabel,
@@ -29,6 +32,7 @@ import {
 } from "../data/taskIdentity";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
+import { RankBadge, type RankTier } from "../grammar/RankBadge";
 import type { AgentPickupNode, EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
 import { AgentPickupIndicator } from "./AgentPickupIndicator";
 
@@ -93,6 +97,7 @@ const groupHeader = css({
 });
 const row = cva({
   base: {
+    position: "relative", // anchors the tier fold-corner pseudo-element (L14)
     display: "flex",
     alignItems: "baseline",
     gap: "0.3rem",
@@ -116,6 +121,40 @@ const row = cva({
       true: {
         paddingLeft: "1rem",
         borderLeftColor: "grid",
+      },
+    },
+    // The V4 command treatment (L14 sketch): a folded corner top-left, a tier ghost wash fading
+    // into the row bg, and — orchestration only — a gold top hairline. Renders ONLY on rows whose
+    // tier is set, i.e. when an orchestration task exists (D3); flat runs never see it.
+    tier: {
+      orchestration: {
+        borderTopWidth: "1px",
+        borderTopStyle: "solid",
+        borderTopColor: "goldDim",
+        backgroundImage:
+          "linear-gradient(90deg, token(colors.goldGhost), token(colors.bg) 34%)",
+        _before: {
+          content: '""',
+          position: "absolute",
+          top: "0",
+          left: "0",
+          borderStyle: "solid",
+          borderWidth: "13px 13px 0 0",
+          borderColor: "token(colors.gold) transparent transparent transparent",
+        },
+      },
+      management: {
+        backgroundImage:
+          "linear-gradient(90deg, token(colors.purpleGhost), token(colors.bg) 30%)",
+        _before: {
+          content: '""',
+          position: "absolute",
+          top: "0",
+          left: "0",
+          borderStyle: "solid",
+          borderWidth: "13px 13px 0 0",
+          borderColor: "token(colors.purpleDim) transparent transparent transparent",
+        },
       },
     },
   },
@@ -242,11 +281,20 @@ export function LifecycleList({
                     key={item.key}
                     id={item.key}
                     textValue={item.label}
-                    className={row({ fleeting: item.fleeting, nested: item.depth > 0 })}
+                    className={row({
+                      fleeting: item.fleeting,
+                      // Tier rows carry the V4 treatment and indent by margin (below); non-tier
+                      // nesting keeps today's leaf look untouched (the flat-run regression rule).
+                      nested: item.depth > 0 && !item.tier,
+                      tier: item.tier,
+                    })}
+                    style={indentStyle(item)}
                     data-depth={item.depth}
                     data-parent-key={item.parentKey}
+                    data-tier={item.tier}
                   >
                     <Dot variant={item.variant} />
+                    {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
                     <span className={rowId} title={item.title}>
                       {item.label}
                     </span>
@@ -293,8 +341,19 @@ interface OperationRow {
   fallbackOrder: string;
   parentKey?: string;
   depth: number;
+  // The command tier (L14): "orchestration" for a master doc carrying `orchestrates`,
+  // "management" for a master commanded by one. Unset (no insignia) everywhere else.
+  tier?: RankTier;
   fleeting: boolean;
   inferred: boolean;
+}
+
+// The 22px indent grammar (L14 sketch): tier rows indent by their full depth; a non-tier row's
+// first level of nesting is today's `nested` padding (unchanged — the flat-run regression rule),
+// so only levels beyond it add margin (a leaf under a commanded master sits one step further).
+function indentStyle(item: Pick<OperationRow, "depth" | "tier">): CSSProperties | undefined {
+  const steps = item.tier ? item.depth : Math.max(0, item.depth - 1);
+  return steps > 0 ? { marginLeft: `${steps * 22}px` } : undefined;
 }
 
 interface OperationGroup {
@@ -334,14 +393,25 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
         : undefined);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
     if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
-    rows.push(docRow(doc, lifecycle, input.series, docPaths, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
+    rows.push(
+      docRow(
+        doc,
+        lifecycle,
+        input.series,
+        docPaths,
+        pickupForLifecycle(lifecycle, pickupsByLifecycle),
+        input.docs,
+      ),
+    );
   }
 
   for (const series of input.series) {
     if (docPaths.has(series.docPath)) continue;
     const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(seriesRow(series, lifecycle, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
+    rows.push(
+      seriesRow(series, lifecycle, pickupForLifecycle(lifecycle, pickupsByLifecycle), input.docs),
+    );
   }
 
   for (const lifecycle of input.lifecycles) {
@@ -371,12 +441,26 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   return rows.sort(compareRows);
 }
 
+// The command facts for a master-shaped row (L14): an orchestration doc IS the gold tier; a master
+// named in some orchestration doc's `orchestrates` takes the purple tier and nests under it. Docs
+// commanded by nothing carry neither — the whole treatment vanishes in a flat run (D3).
+function commandFacts(
+  doc: Pick<TaskDocNode, "kind" | "docPath" | "id" | "title" | "orchestrates">,
+  allDocs: TaskDocNode[],
+): { tier?: RankTier; parentKey?: string } {
+  if (doc.kind !== "master") return {};
+  if (isOrchestrationDoc(doc)) return { tier: "orchestration" };
+  const commander = orchestratorParentKey(masterCommandNames(doc), allDocs, doc.docPath);
+  return commander ? { tier: "management", parentKey: commander } : {};
+}
+
 function docRow(
   doc: TaskDocNode,
   lifecycle: LifecycleProjection | undefined,
   seriesList: SeriesNode[],
   masterDocPaths: Set<string>,
   pickup: AgentPickupNode | undefined,
+  allDocs: TaskDocNode[],
 ): OperationRow {
   const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : topLevelStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
@@ -384,6 +468,7 @@ function docRow(
   const phase = lifecycle?.phase ?? doc.status;
   const variant = lifecycle?.state ?? statusVariant(doc.status);
   const gate = gateHint(lifecycle?.gate?.kind, lifecycle?.ask);
+  const command = commandFacts(doc, allDocs);
   return {
     key: taskDocSelectionKey(doc.docPath),
     label,
@@ -405,8 +490,9 @@ function docRow(
     pickup,
     createdAt: doc.createdAt ?? "",
     fallbackOrder: doc.docPath,
-    parentKey: taskDocParentKey(doc, seriesList, masterDocPaths),
+    parentKey: command.parentKey ?? taskDocParentKey(doc, seriesList, masterDocPaths),
     depth: 0,
+    tier: command.tier,
     fleeting: lifecycle?.fleeting ?? false,
     inferred: lifecycle?.inferred ?? false,
   };
@@ -416,11 +502,22 @@ function seriesRow(
   series: SeriesNode,
   lifecycle: LifecycleProjection | undefined,
   pickup: AgentPickupNode | undefined,
+  allDocs: TaskDocNode[],
 ): OperationRow {
   const repo = series.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? series.status;
   const variant = lifecycle?.state ?? statusVariant(series.status);
   const gate = gateHint(lifecycle?.gate?.kind, lifecycle?.ask);
+  // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
+  // task folder), its title, or its doc folder when an orchestration doc names it (L14).
+  const commander = orchestratorParentKey(
+    [
+      series.seriesId,
+      series.title,
+      pathDir(series.docPath).split("/").filter(Boolean).pop() ?? "",
+    ].filter(Boolean),
+    allDocs,
+  );
   return {
     key: seriesSelectionKey(series.seriesId),
     label: series.title,
@@ -445,7 +542,9 @@ function seriesRow(
     pickup,
     createdAt: series.createdAt ?? "",
     fallbackOrder: series.docPath,
+    parentKey: commander,
     depth: 0,
+    tier: commander ? "management" : undefined,
     fleeting: lifecycle?.fleeting ?? false,
     inferred: lifecycle?.inferred ?? false,
   };
@@ -526,22 +625,37 @@ function groupRows(rows: OperationRow[], pivot: Pivot): OperationGroup[] {
     }));
 }
 
+// Depth-first hierarchy flatten. Historically two levels (master > leaf); the L14 orchestration
+// tier adds a third (orchestration > master > leaf), so this walks parent links to any depth.
+// A `seen` guard plus the trailing sweep keep pathological parent data (a cycle, e.g. two
+// orchestration docs naming each other) from dropping rows: unreachable rows append top-level.
 function hierarchyRows(rows: OperationRow[]): OperationRow[] {
   const byParent = new Map<string, OperationRow[]>();
   const byKey = new Map(rows.map((item) => [item.key, item]));
   for (const item of rows) {
-    if (!item.parentKey || !byKey.has(item.parentKey)) continue;
+    if (!item.parentKey || !byKey.has(item.parentKey) || item.parentKey === item.key) continue;
     const children = byParent.get(item.parentKey);
     if (children) children.push(item);
     else byParent.set(item.parentKey, [item]);
   }
   const roots = rows
-    .filter((item) => !item.parentKey || !byKey.has(item.parentKey))
+    .filter((item) => !item.parentKey || !byKey.has(item.parentKey) || item.parentKey === item.key)
     .sort(compareRows);
-  return roots.flatMap((root) => [
-    { ...root, depth: 0 },
-    ...(byParent.get(root.key) ?? []).sort(compareRows).map((child) => ({ ...child, depth: 1 })),
-  ]);
+  const out: OperationRow[] = [];
+  const seen = new Set<string>();
+  const visit = (item: OperationRow, depth: number) => {
+    if (seen.has(item.key)) return;
+    seen.add(item.key);
+    out.push({ ...item, depth });
+    for (const child of (byParent.get(item.key) ?? []).sort(compareRows)) {
+      visit(child, depth + 1);
+    }
+  };
+  for (const root of roots) visit(root, 0);
+  for (const item of [...rows].sort(compareRows)) {
+    if (!seen.has(item.key)) visit(item, 0);
+  }
+  return out;
 }
 
 function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string | null {

@@ -16,6 +16,14 @@
   --mint: oklch(0.88 0.16 165); /* fresh-online / live */
   --dormant: oklch(0.45 0.06 25); /* skeletal dark-red dormant */
 
+  /* Rank-insignia tiers (L14): gold = orchestration seat, purple = management. */
+  --gold: oklch(0.87 0.15 95);
+  --gold-dim: oklch(0.55 0.09 95);
+  --gold-ghost: oklch(0.32 0.05 95);
+  --purple: oklch(0.76 0.14 305);
+  --purple-dim: oklch(0.5 0.09 305);
+  --purple-ghost: oklch(0.3 0.05 305);
+
   --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
   --glow-strength: 1;
 }

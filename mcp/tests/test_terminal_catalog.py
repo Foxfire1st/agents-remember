@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -118,6 +119,24 @@ class TerminalCatalogTests(unittest.TestCase):
     def test_to_json_omits_leaf_key_when_unset(self) -> None:
         self.catalog.upsert(_entry("a"))
         self.assertNotIn("leafKey", self.catalog.get("a").to_json())  # type: ignore[union-attr]
+
+    def test_spawn_role_round_trips_and_is_omitted_when_unset(self) -> None:
+        # L14: the AR_SPAWN_ROLE recorded at spawn is a durable column (the Chats command-tree
+        # grouping key) — written only when set, so legacy/hand-opened rows read back as None.
+        self.catalog.upsert(replace(_entry("a"), spawn_role="manager"))
+        self.catalog.upsert(_entry("b"))
+
+        raw = json.loads(self.catalog.path.read_text(encoding="utf-8"))
+        by_id = {row["id"]: row for row in raw["sessions"]}
+        self.assertEqual(by_id["a"]["spawnRole"], "manager")
+        self.assertNotIn("spawnRole", by_id["b"])
+
+        entry = self.catalog.get("a")
+        assert entry is not None
+        self.assertEqual(entry.spawn_role, "manager")
+        unset = self.catalog.get("b")
+        assert unset is not None
+        self.assertIsNone(unset.spawn_role)
 
     def test_legacy_row_without_leaf_key_reads_as_none(self) -> None:
         # A v1 row written before L5 has no leafKey; it must read back as None (migration-safe).

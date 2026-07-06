@@ -243,6 +243,9 @@ export interface TaskDocNode {
   subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
   sections: TaskSectionNode[]; // master render plan or non-master freeform sections
   masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
+  // The orchestration-command relation (L14): non-empty only on a master doc that IS an orchestration
+  // task — the master task names it commands. Optional so projections persisted before L14 still parse.
+  orchestrates?: string[];
 }
 
 export interface SeriesNode {

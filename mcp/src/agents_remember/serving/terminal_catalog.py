@@ -52,6 +52,11 @@ class TerminalCatalogEntry:
     # render the orchestration tree (spawner -> spawned edges) once that surface lands.
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
+    # The l-01 role this session was spawned AS (``AR_SPAWN_ROLE`` seeded into the spawn env by the
+    # dispatching seat -- orchestrator/strategist/manager/worker/reviewer/designer), recorded at first
+    # spawn so the Chats command tree (L14) can group command chats without re-reading tmux env.
+    # Same migration-safe written-only-when-set pattern as the provenance fields above.
+    spawn_role: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -83,6 +88,7 @@ class TerminalCatalogEntry:
                 if data.get("spawnedByLifecycle") is not None
                 else None
             ),
+            spawn_role=str(data["spawnRole"]) if data.get("spawnRole") is not None else None,
         )
 
     def to_json(self) -> dict[str, object]:
@@ -109,6 +115,8 @@ class TerminalCatalogEntry:
             data["spawnedBySession"] = self.spawned_by_session
         if self.spawned_by_lifecycle is not None:
             data["spawnedByLifecycle"] = self.spawned_by_lifecycle
+        if self.spawn_role is not None:
+            data["spawnRole"] = self.spawn_role
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:

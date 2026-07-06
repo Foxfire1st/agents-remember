@@ -163,7 +163,10 @@ distinction — spawn with `AR_SPAWN_ROLE=designer`).
   subTasks = the coordination leaves (orchestrator seat first, one per manager); body = the DAG +
   dispatch order + conflict decisions + (once Job O starts) the super branch name; decision log =
   every spirit-test act and reshape; `openQuestions` = the standing decision surface; the
-  orchestration task = the sprint scope the run executes.
+  orchestration task = the sprint scope the run executes. Its durable form is a `kind:"master"`
+  task doc carrying a top-level `orchestrates` list naming the master tasks it commands — the
+  dashboard derives the orchestration > master > leaf hierarchy (and the rank insignia) from that
+  field, so setting it is part of adoption.
 - **Gate:** the portfolio plan gate — one wholesale developer review of the reshaped portfolio +
   the orchestration task (sprint scope + DAG + dispatch order). **No git surface** — not even the
   super branch exists yet.

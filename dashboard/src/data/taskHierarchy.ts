@@ -58,6 +58,46 @@ export function parentTaskLinkForDoc(
   };
 }
 
+// --- the orchestration-command relation (L14) --------------------------------------------------
+// An ORCHESTRATION TASK is a `kind:"master"` doc carrying a non-empty top-level `orchestrates`
+// list — the master task NAMES it commands (owner data-model ruling; no new task kind). A master
+// is "commanded" when any orchestration doc's list contains one of the names it answers to: its
+// task folder (the durable series key), its doc id, or its title — forgiving but exact-string.
+// Masters named nowhere stay top-level exactly as today (D3: flat runs stay flat).
+
+export function isOrchestrationDoc(
+  doc: Pick<TaskDocNode, "kind" | "orchestrates">,
+): boolean {
+  return doc.kind === "master" && (doc.orchestrates?.length ?? 0) > 0;
+}
+
+/** The names a master answers to when matched against an `orchestrates` list. */
+export function masterCommandNames(
+  doc: Pick<TaskDocNode, "docPath" | "id" | "title">,
+): string[] {
+  const folder = pathDir(doc.docPath).split("/").filter(Boolean).pop() ?? "";
+  return [folder, doc.id, doc.title].filter(Boolean);
+}
+
+/**
+ * The selection key of the orchestration doc commanding a master that answers to `names`,
+ * or undefined when no orchestration task names it. A doc never commands itself.
+ */
+export function orchestratorParentKey(
+  names: string[],
+  docs: TaskDocNode[],
+  selfDocPath?: string,
+): string | undefined {
+  const nameSet = new Set(names);
+  const commander = docs.find(
+    (doc) =>
+      isOrchestrationDoc(doc) &&
+      doc.docPath !== selfDocPath &&
+      (doc.orchestrates ?? []).some((name) => nameSet.has(name)),
+  );
+  return commander ? taskDocSelectionKey(commander.docPath) : undefined;
+}
+
 export function pathDir(path: string): string {
   return path.split("/").slice(0, -1).join("/");
 }

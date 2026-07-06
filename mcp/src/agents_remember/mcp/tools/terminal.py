@@ -263,6 +263,7 @@ def spawn_agent_session_payload(
             "tmuxName": entry.tmux_name,
             "spawnedBySession": entry.spawned_by_session,
             "spawnedByLifecycle": entry.spawned_by_lifecycle,
+            "spawnRole": entry.spawn_role,
             "contextDelivered": context_delivered,
             "submitted": submitted,
         },

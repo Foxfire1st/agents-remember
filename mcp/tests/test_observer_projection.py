@@ -2677,6 +2677,27 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertIsNone(nodes[0].lifecycleId)
         self.assertEqual(nodes[0].docPath, (root / "03c_x.json").as_posix())
 
+    def test_exposes_orchestrates_on_the_task_doc_node(self) -> None:
+        # L14: the orchestration-command relation rides the projection so the dashboard can derive
+        # the orchestration > master > leaf hierarchy; docs without the field project [].
+        sprint_root = self.coord / "tasks" / "repo-a" / "sprint-02"
+        write_task_doc(
+            sprint_root,
+            self._doc(
+                id="SPRINT-02",
+                slug="task",
+                kind="master",
+                title="Sprint 02",
+                orchestrates=["260706_management-repo"],
+            ),
+        )
+        plain_root = self.coord / "tasks" / "repo-a" / "demo"
+        write_task_doc(plain_root, self._doc())
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        by_id = {node.id: node for node in nodes}
+        self.assertEqual(by_id["SPRINT-02"].orchestrates, ["260706_management-repo"])
+        self.assertEqual(by_id["D"].orchestrates, [])
+
     def test_leaf_contract_alone_is_not_a_task_document(self) -> None:
         contract = default_contract(
             task_name="demo",

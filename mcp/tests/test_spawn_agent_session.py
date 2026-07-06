@@ -168,6 +168,16 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(paster.calls[0]["tmux"], "ar-worker-1")
         self.assertTrue(paster.calls[0]["submit"])
 
+    def test_spawn_records_role_from_env_and_reports_it(self) -> None:
+        # L14: the AR_SPAWN_ROLE riding the caller's env is persisted on the catalog row and
+        # reported in the payload — the Chats command tree groups command chats by it.
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"})
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["spawnRole"], "manager")
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertEqual(row.spawn_role, "manager")
+
     def test_draft_paste_does_not_submit(self) -> None:
         paster = _FakePaster(delivered=True, submitted=True)
         payload = self._spawn(context="draft packet", submit=False, paster=paster)

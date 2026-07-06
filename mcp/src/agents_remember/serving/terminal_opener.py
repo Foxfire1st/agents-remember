@@ -169,6 +169,10 @@ def open_terminal_session(
         or (existing.spawned_by_session if existing is not None else None),
         spawned_by_lifecycle=spawned_by_lifecycle
         or (existing.spawned_by_lifecycle if existing is not None else None),
+        # The dispatch seam already rides the role as AR_SPAWN_ROLE in the spawn env (l-01); record
+        # it on the durable row so the Chats command tree (L14) can group by role provenance.
+        spawn_role=(env or {}).get("AR_SPAWN_ROLE")
+        or (existing.spawn_role if existing is not None else None),
     )
     catalog.upsert(entry)
     return OpenTerminalResult(status="opened", entry=entry, kind=resolved_kind)

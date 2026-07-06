@@ -686,6 +686,159 @@ describe("LifecycleList task labels", () => {
     expect(onSelect).toHaveBeenCalledWith("taskdoc:/tasks/repo-a/plan/task.json");
   });
 
+  it("renders the orchestration tier above its commanded masters with the V4 treatment (L14)", () => {
+    // An orchestration task is a master doc carrying `orchestrates` (the owner data-model ruling).
+    // It renders gold-tier at depth 0; a master it names nests one step with the purple tier; that
+    // master's leaves keep today's rendering one step further; an uncommanded master is unchanged.
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/15",
+            lifecycleId: "",
+            leafId: "15_parallel-leaf-enclosure-workflow",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "SPRINT-02",
+              kind: "master",
+              title: "SPRINT 02 · rollout",
+              docPath: "/tasks/sprint-02/task.json",
+              orchestrates: ["260610_browser-dashboard"],
+              createdAt: "2026-06-19T09:00:00+00:00",
+            }),
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+              createdAt: "2026-06-20T08:00:00+00:00",
+            }),
+            taskDoc({
+              kind: "master",
+              title: "Free Standing Series",
+              docPath: "/tasks/260620_free-standing/task.json",
+              createdAt: "2026-06-21T08:00:00+00:00",
+            }),
+            taskDoc({
+              id: "15",
+              title: "Parallel Leaf Enclosure Workflow",
+              docPath: "/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
+              createdAt: "2026-06-22T08:00:00+00:00",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "15",
+                  name: "Parallel Leaf Enclosure Workflow",
+                  file: "15_parallel-leaf-enclosure-workflow.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-20T09:00:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+
+    // Gold tier: the orchestration row, top-level, chevron badge rendered.
+    const sprintRow = getByText("SPRINT 02 · rollout").closest("[role='option']");
+    expect(sprintRow?.getAttribute("data-tier")).toBe("orchestration");
+    expect(sprintRow?.getAttribute("data-depth")).toBe("0");
+    expect(sprintRow?.querySelector("[data-rank-tier='orchestration']")).not.toBeNull();
+
+    // Purple tier: the commanded master nests under the orchestration row at 22px.
+    const masterRow = getByText("Browser Dashboard Series").closest("[role='option']");
+    expect(masterRow?.getAttribute("data-tier")).toBe("management");
+    expect(masterRow?.getAttribute("data-depth")).toBe("1");
+    expect(masterRow?.getAttribute("data-parent-key")).toBe("taskdoc:/tasks/sprint-02/task.json");
+    expect((masterRow as HTMLElement).style.marginLeft).toBe("22px");
+    expect(masterRow?.querySelector("[data-rank-tier='management']")).not.toBeNull();
+
+    // Leaves keep today's rendering one step further (depth 2, one 22px margin step + nested look).
+    const leafRow = getByText("15. Parallel Leaf Enclosure Workflow").closest("[role='option']");
+    expect(leafRow?.getAttribute("data-depth")).toBe("2");
+    expect(leafRow?.getAttribute("data-tier")).toBeNull();
+    expect((leafRow as HTMLElement).style.marginLeft).toBe("22px");
+    expect(leafRow?.querySelector("[data-rank-tier]")).toBeNull();
+
+    // The uncommanded master is untouched: top-level, no tier, no badge, no margin.
+    const freeRow = getByText("Free Standing Series").closest("[role='option']");
+    expect(freeRow?.getAttribute("data-tier")).toBeNull();
+    expect(freeRow?.getAttribute("data-depth")).toBe("0");
+    expect((freeRow as HTMLElement).style.marginLeft).toBe("");
+    expect(freeRow?.querySelector("[data-rank-tier]")).toBeNull();
+  });
+
+  it("renders NO orchestration row or insignia in a flat run (D3 regression)", () => {
+    // No doc carries `orchestrates` ⇒ the list is byte-identical to the pre-L14 rendering:
+    // masters top-level, leaves one nested step, zero tier attributes, zero badges.
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/15",
+            lifecycleId: "",
+            leafId: "15_parallel-leaf-enclosure-workflow",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+            taskDoc({
+              id: "15",
+              title: "Parallel Leaf Enclosure Workflow",
+              docPath: "/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "15",
+                  name: "Parallel Leaf Enclosure Workflow",
+                  file: "15_parallel-leaf-enclosure-workflow.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-20T09:00:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { container, getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    expect(container.querySelector("[data-tier]")).toBeNull();
+    expect(container.querySelector("[data-rank-tier]")).toBeNull();
+    const masterRow = getByText("Browser Dashboard Series").closest("[role='option']");
+    expect(masterRow?.getAttribute("data-depth")).toBe("0");
+    expect((masterRow as HTMLElement).style.marginLeft).toBe("");
+    const leafRow = getByText("15. Parallel Leaf Enclosure Workflow").closest("[role='option']");
+    expect(leafRow?.getAttribute("data-depth")).toBe("1");
+    expect((leafRow as HTMLElement).style.marginLeft).toBe("");
+  });
+
   it("exposes the full long task title and row context on title hover", () => {
     const longTitle =
       "Operations task reader row title that is intentionally long enough to require ellipsis in the left rail";

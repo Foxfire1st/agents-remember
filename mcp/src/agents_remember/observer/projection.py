@@ -492,6 +492,10 @@ class TaskDocNode(BaseModel):
     # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
     # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
     masterLifecycleId: str | None = None
+    # The orchestration-command relation (260703-L14): non-empty only on a ``master`` doc that IS an
+    # orchestration task -- the master task names it commands. The dashboard derives the
+    # orchestration > master > leaf hierarchy from it; docs without the field render as before.
+    orchestrates: list[str] = Field(default_factory=list)
 
 
 class SeriesSubTaskNode(BaseModel):

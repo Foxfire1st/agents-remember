@@ -27,6 +27,8 @@ export interface OpenSession {
   lifecycleId?: string;
   /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat is bound to. */
   leafKey?: string;
+  /** The AR_SPAWN_ROLE recorded at spawn (L14) — the Chats command-tree grouping key. */
+  spawnRole?: string;
   status?: TerminalSessionStatus;
 }
 
@@ -350,6 +352,7 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     ...(info.harness ? { harness: info.harness } : {}),
     ...(info.lifecycleId ? { lifecycleId: info.lifecycleId } : {}),
     ...(info.leafKey ? { leafKey: info.leafKey } : {}),
+    ...(info.spawnRole ? { spawnRole: info.spawnRole } : {}),
     status: info.status,
   };
 }

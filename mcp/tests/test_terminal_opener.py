@@ -109,7 +109,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
     def test_opened_records_provenance_env_and_leaf(self) -> None:
         result = self._open(
             leaf_key="repo/master/leaf-1",
-            env={"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high"},
+            env={"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high", "AR_SPAWN_ROLE": "worker"},
             spawned_by_session="manager-9",
             spawned_by_lifecycle="LC-manager",
         )
@@ -120,13 +120,32 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.spawned_by_session, "manager-9")
         self.assertEqual(entry.spawned_by_lifecycle, "LC-manager")
         self.assertEqual(entry.harness, "claude")
+        # The AR_SPAWN_ROLE riding the spawn env is recorded on the durable row (L14).
+        self.assertEqual(entry.spawn_role, "worker")
         # The knob env was seeded into the detached tmux spawn.
         self.assertEqual(
-            self.host.ensured[0]["env"], {"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high"}
+            self.host.ensured[0]["env"],
+            {"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high", "AR_SPAWN_ROLE": "worker"},
         )
         # Provenance survives the catalog round-trip (migration-safe camelCase keys).
         self.assertEqual(entry.to_json()["spawnedBySession"], "manager-9")
         self.assertEqual(entry.to_json()["spawnedByLifecycle"], "LC-manager")
+        self.assertEqual(entry.to_json()["spawnRole"], "worker")
+
+    def test_reopen_preserves_spawn_role_and_hand_open_records_none(self) -> None:
+        # Role provenance is set once at first spawn and survives a role-less re-open (the same
+        # `replace`-preserving rule as leaf_key); a hand-opened session records no role at all.
+        self._open(env={"AR_SPAWN_ROLE": "manager"})
+        self._open()  # re-open with no env — must not drop the recorded role
+        entry = self.catalog.get("worker-1")
+        assert entry is not None
+        self.assertEqual(entry.spawn_role, "manager")
+
+        self._open(session_id="hand-opened")
+        hand_opened = self.catalog.get("hand-opened")
+        assert hand_opened is not None
+        self.assertIsNone(hand_opened.spawn_role)
+        self.assertNotIn("spawnRole", hand_opened.to_json())
 
     def test_leaf_taken_surfaces_owner_without_spawning(self) -> None:
         self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))

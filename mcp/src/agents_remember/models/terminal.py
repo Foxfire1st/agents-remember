@@ -51,6 +51,8 @@ class SpawnAgentSessionResponse(ToolResponse):
     # Spawned-by provenance recorded on the catalog row (the dashboard orchestration-tree seam).
     spawnedBySession: str | None = None
     spawnedByLifecycle: str | None = None
+    # The AR_SPAWN_ROLE recorded on the catalog row (L14: the Chats command-tree grouping key).
+    spawnRole: str | None = None
     # Set on ``leaf-taken``: the running same-role session that already owns the leaf.
     ownerSession: str | None = None
     # Context-packet delivery outcome (echo-confirmed paste; submit only when requested).
