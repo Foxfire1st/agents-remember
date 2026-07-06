@@ -140,8 +140,9 @@ promotion ratchet (each catalog carries it). `roles/reviewer.md` binds them.
 **Per-level agent sets.** Each level runs its loop with its own harness/model/effort set — the
 orchestrator-level set (the strongest models) and the manager-level set (cheaper, possibly
 workflow-free) are configured per level in the `orchestration.loops` settings block (schema in
-`docs/reference/settings-json.md`; storage/parsing land with the settings unification, L13). The
-strategist's mandatory pre-run is doctrine, not a knob — it is unconditional.
+`docs/reference/settings-json.md`; stored in the global agentic settings file with repo-local
+override, parsed by the kernel agentic-settings loader — L13, landed). The strategist's mandatory
+pre-run is doctrine, not a knob — it is unconditional.
 
 ## Knob Block & Capability Doctrine (no per-harness files)
 
@@ -158,17 +159,21 @@ required) — the DBMS principle: one behavior, any engine.
 
 ## settings.json Orchestration Block
 
-Machine/user overrides layer over the role-file defaults, in the **MCP authority settings file**
-(`docs/reference/settings-json.md`). Precedence: role-file defaults < settings.
+Machine/user overrides layer over the role-file defaults, in the **global agentic settings file**
+(`<coordination-root>/system/settings.json`), with `<code-repo>/system/settings.json` as the
+repo-local override layer (leaf-key deep merge, arrays replace, unknown `orchestration.*` keys
+fail loud — schema in `docs/reference/settings-json.md`, Agentic Settings). Precedence: role-file
+defaults < global settings < repo-local settings.
 
 ```jsonc
 {
   "orchestration": {
-    "roles": {  // role → knob override (harness / model / effort)
-      "orchestrator": { "harness": "claude-code", "effort": "high" },
-      "worker":       { "harness": "codex",       "effort": "medium" }
+    "roles": {  // role → knob override (harness / model / effort); harness = registry id
+      "orchestrator": { "harness": "claude", "effort": "high" },
+      "worker":       { "harness": "codex",  "effort": "medium" }
     },
     "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
+    "spawn": { "harness": "claude" },  // spawn_agent_session default when the seat passes none
     "gateDelegation": {
       "policy": "manager-decides-leaf-gates",
       "requireReviewerVerdictAtSeams": true
@@ -177,17 +182,22 @@ Machine/user overrides layer over the role-file defaults, in the **MCP authority
 }
 ```
 
-**As-built:** `orchestration.gateDelegation` is parsed and **enforced** (`controlplane/gate_policy.py`
-— all-human default, opt-in delegation, human-pinned kinds `integration-approval` / `push-approval` /
-`cleanup-approval`, owner never self-approves). `requireReviewerVerdictAtSeams` **binds delegated
-seam decisions** (`master-handover-approval`) to attached reviewer-verdict evidence; the named
-policy `manager-decides-leaf-gates` routes leaf gates to the manager and the master-exit handover
-to the **orchestrator** (human review concentrates at the super gate). `orchestration.roles` / `concurrency` are documented
-schema whose parsing/injection is tracked backlog (task-doc-tooling series) — the terminal host
-currently receives knobs per dispatch from the spawning seat. `orchestration.loops` (the
-three-party-loop knobs: per-level loop sets, round cap, reviewer reuse, complexity thresholds) is
-likewise documented schema — meaning in `docs/reference/settings-json.md`, storage/parsing with
-the L13 settings unification.
+**As-built (L13):** the whole block is parsed by the kernel agentic-settings loader
+(`kernel/agentic_settings.py`) — typed models for `roles` / `concurrency` / `spawn` / `loops`,
+read PER-USE (an edit applies on the next use, no restart). `orchestration.gateDelegation` is
+parsed and **enforced** (`controlplane/gate_policy.py` — all-human default, opt-in delegation,
+human-pinned kinds `integration-approval` / `push-approval` / `cleanup-approval`, owner never
+self-approves); it is the ONE boot-snapshot key — read from the global file at MCP boot, a change
+needs a restart (an authority-file value is a one-cycle legacy fallback with a boot warning).
+`requireReviewerVerdictAtSeams` **binds delegated seam decisions** (`master-handover-approval`) to
+attached reviewer-verdict evidence; the named policy `manager-decides-leaf-gates` routes leaf gates
+to the manager and the master-exit handover to the **orchestrator** (human review concentrates at
+the super gate). `spawn_agent_session` resolves its harness as explicit argument > repo-local
+settings > global settings > detection-gated default; `orchestration.roles` knobs are the spawning
+seat's source when compiling a dispatch (model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`
+env). `orchestration.loops` (the three-party-loop knobs: per-level loop sets, round cap, reviewer
+reuse, complexity thresholds) lives in the same block — meaning in
+`docs/reference/settings-json.md`; no knob touches the master-exit seam gate.
 
 ## Companion Files
 

@@ -185,7 +185,7 @@ Everything else — `task_doc`, `worktree_*`, `lifecycle_*`, `gate_*`, `spawn_ag
 
 | Knob    | Default           | Notes |
 | ------- | ----------------- | ----- |
-| harness | claude-code       | default preference only — settings picks the actual harness |
+| harness | claude            | default preference only — settings picks the actual harness |
 | model   | highest-reasoning | whole-portfolio dependency + blast-radius reasoning wants the strongest model |
 | effort  | high              | the sprint plan parameterizes every downstream loop; not the place to economize |
 | tools   | read-only analysis surface | `read_ar_files` · `grepai_*` · `cgc_*` · `context_packet` · `drift_check` · notes-draft write · inbox |

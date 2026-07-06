@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.tools.terminal import spawn_agent_session_payload
 from agents_remember.observer import (
     AmbientLifecycle,
@@ -216,6 +217,103 @@ class SpawnAgentSessionTests(unittest.TestCase):
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertEqual(row.spawned_by_lifecycle, started.id)
+
+
+class SpawnHarnessResolutionTests(unittest.TestCase):
+    """The L13 spawn seam: explicit arg > repo-local settings > global settings >
+    detection-gated default, read per-use through the agentic-settings loader."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.coordination_root = self.tmp / "ar-coordination"
+        self.repo_root = self.tmp / "workspace" / "repo-a"
+        self.repo_root.mkdir(parents=True)
+        self.config = McpRuntimeConfig(
+            config_path=self.tmp / "settings.json",
+            coordination_root=self.coordination_root,
+            workspace_root=self.tmp / "workspace",
+            transcript_root=self.tmp / "logs" / "mcp",
+            repositories={
+                "repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)
+            },
+        )
+        self.host = _FakeHost()
+        reset_ambient()
+
+    def tearDown(self) -> None:
+        reset_ambient()
+
+    def _write_settings(self, root: Path, harness: str) -> None:
+        path = agentic_settings_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f'{{"orchestration": {{"spawn": {{"harness": "{harness}"}}}}}}',
+            encoding="utf-8",
+        )
+
+    def _spawn(self, **kwargs: object) -> dict:
+        base: dict[str, object] = {
+            "session_id": "worker-1",
+            "host": self.host,
+            "which": _detected,
+        }
+        base.update(kwargs)
+        return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
+
+    def test_omitted_harness_uses_the_global_settings_preference(self) -> None:
+        self._write_settings(self.coordination_root, "codex")
+        payload = self._spawn()
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["harness"], "codex")
+
+    def test_repo_local_settings_override_global_via_the_qualified_leaf_key(self) -> None:
+        self._write_settings(self.coordination_root, "codex")
+        self._write_settings(self.repo_root, "pi")
+        payload = self._spawn(leaf_key="repo-a/master/leaf-1")
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["harness"], "pi")
+
+    def test_leafless_spawn_reads_the_global_layer_only(self) -> None:
+        self._write_settings(self.coordination_root, "codex")
+        self._write_settings(self.repo_root, "pi")
+        payload = self._spawn()
+        self.assertEqual(payload["harness"], "codex")
+
+    def test_explicit_argument_beats_every_settings_layer(self) -> None:
+        self._write_settings(self.coordination_root, "codex")
+        self._write_settings(self.repo_root, "pi")
+        payload = self._spawn(harness="claude", leaf_key="repo-a/master/leaf-1")
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["harness"], "claude")
+
+    def test_no_settings_falls_back_to_the_first_detected_registry_harness(self) -> None:
+        payload = self._spawn(
+            which=lambda cmd: "/usr/bin/codex" if cmd == "codex" else None
+        )
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["harness"], "codex")
+
+    def test_nothing_detected_is_a_refusal_not_a_silent_default(self) -> None:
+        payload = self._spawn(which=lambda _cmd: None)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "harness-not-detected")
+        self.assertIn("none detected", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+
+    def test_configured_but_undetected_preference_is_refused_naming_the_source(self) -> None:
+        self._write_settings(self.coordination_root, "pi")
+        payload = self._spawn(which=lambda cmd: "/usr/bin/claude" if cmd == "claude" else None)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "harness-not-detected")
+        self.assertIn("orchestration.spawn.harness", payload["detail"])
+        self.assertIn(str(agentic_settings_path(self.coordination_root)), payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+
+    def test_unconfigured_leaf_repo_segment_resolves_globally(self) -> None:
+        self._write_settings(self.coordination_root, "codex")
+        payload = self._spawn(leaf_key="not-a-repo/master/leaf-9")
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["harness"], "codex")
 
 
 class TerminalPasteEndpointTests(unittest.TestCase):

@@ -5,7 +5,6 @@
   "transcriptRoot": "C:/absolute/path/to/ar-coordination/logs/mcp",
   "repositories": {
     "agents-remember": {
-      "memorySettingsIncludes": [],
       "contractPath": null
     }
   },
@@ -21,15 +20,5 @@
   "dashboard": {
     "autoStart": false,
     "port": 8765
-  },
-  "orchestration": {
-    "gateDelegation": {
-      "policy": "all-human",
-      "kinds": {
-        "closeout-approval": {
-          "role": "human"
-        }
-      }
-    }
   }
 }

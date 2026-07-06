@@ -166,7 +166,7 @@ developer. Review **wholesale branch behavior**: the whole portfolio as integrat
 
 | Knob    | Default          | Notes                                                        |
 | ------- | ---------------- | ------------------------------------------------------------ |
-| harness | claude-code      | default preference only — settings picks the actual harness |
+| harness | claude           | default preference only — settings picks the actual harness |
 | model   | high-reasoning   | adversarial review wants a strong, skeptical model           |
 | effort  | high             | the last line of defense before a handover; do not economize |
 | tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates · inbox |

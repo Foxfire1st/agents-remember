@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.observer.ambient import ambient
-from agents_remember.serving.harnesses import Which, find_harness, is_detected
+from agents_remember.serving.harnesses import HARNESSES, Which, find_harness, is_detected
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
@@ -79,10 +81,90 @@ def _ambient_lifecycle_id() -> str | None:
     return None
 
 
+def _spawn_repo_root(config: McpRuntimeConfig, leaf_key: str | None) -> Path | None:
+    """The code-repo root whose repo-local agentic settings apply to this spawn.
+
+    Derived from the qualified leaf key (``<repository>/<master>/<docId>`` -- the
+    l-01 catalog-binding contract): a leaf-attached spawn works on that repo, so
+    its ``<repo>/system/settings.json`` layer participates. Leafless spawns (and
+    unconfigured repo segments) resolve against the global layer only.
+    """
+    if not leaf_key:
+        return None
+    repo_id = leaf_key.split("/", 1)[0]
+    scope = config.repositories.get(repo_id)
+    return scope.path if scope is not None else None
+
+
+def _resolve_spawn_harness(
+    config: McpRuntimeConfig,
+    harness: str | None,
+    leaf_key: str | None,
+    which: Which | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Resolve the harness id for a spawn (260703-L13 seam).
+
+    Precedence: explicit argument > repo-local settings > global settings >
+    detection-gated default (the first registry harness detected on PATH).
+    Settings are read PER-USE through the agentic-settings loader (which
+    validates preference values against the harness registry ids); a malformed
+    settings file raises -- never a silent fallback. Returns
+    ``(harness_id, refusal_payload)`` with exactly one side set.
+    """
+    if harness is not None:
+        found = find_harness(harness)
+        if found is None:
+            return None, _spawn_refusal(
+                "harness-unknown", harness, "harness", detail=f"unknown harness: {harness!r}"
+            )
+        if not is_detected(found, which=which):
+            return None, _spawn_refusal(
+                "harness-not-detected",
+                harness,
+                "harness",
+                detail=f"harness not installed: {harness!r}",
+            )
+        return harness, None
+
+    settings = load_agentic_settings(
+        config.coordination_root, repo_root=_spawn_repo_root(config, leaf_key)
+    )
+    preferred = settings.spawn_harness
+    if preferred is not None:
+        found = find_harness(preferred)
+        assert found is not None  # the loader validates against the registry ids
+        if not is_detected(found, which=which):
+            source = ", ".join(str(path) for path in settings.sources)
+            return None, _spawn_refusal(
+                "harness-not-detected",
+                preferred,
+                "harness",
+                detail=(
+                    f"configured spawn harness not installed: {preferred!r} "
+                    f"(orchestration.spawn.harness in {source})"
+                ),
+            )
+        return preferred, None
+
+    for candidate in HARNESSES:
+        if is_detected(candidate, which=which):
+            return candidate.id, None
+    ids = ", ".join(candidate.id for candidate in HARNESSES)
+    return None, _spawn_refusal(
+        "harness-not-detected",
+        None,
+        "harness",
+        detail=(
+            "no harness given, none preferred in settings, and none detected on "
+            f"PATH; install one of: {ids} (or pass harness explicitly)"
+        ),
+    )
+
+
 def spawn_agent_session_payload(
     config: McpRuntimeConfig,
     *,
-    harness: str,
+    harness: str | None = None,
     leaf_key: str | None = None,
     context: str | None = None,
     submit: bool = False,
@@ -103,17 +185,15 @@ def spawn_agent_session_payload(
     Composes the EXISTING session primitives -- the shared serving opener (create + leaf claim +
     detached tmux ensure with env-seeded knobs), then an echo-confirmed context-packet paste with an
     optional submit -- so orchestrators spawn managers and managers spawn workers without dashboard
-    clicks. Leaf uniqueness stays server-arbitrated: a taken leaf returns ``leaf-taken`` (never
+    clicks. ``harness`` is optional (260703-L13): omitted, it resolves per-use through the agentic
+    settings (repo-local over global ``orchestration.spawn.harness``), else the detection-gated
+    default. Leaf uniqueness stays server-arbitrated: a taken leaf returns ``leaf-taken`` (never
     overridden). ``host``/``paster``/``which``/``session_id`` are injectable seams for tests.
     """
     if kind == "harness":
-        found = find_harness(harness)
-        if found is None:
-            return _spawn_refusal("harness-unknown", harness, kind, detail=f"unknown harness: {harness!r}")
-        if not is_detected(found, which=which):
-            return _spawn_refusal(
-                "harness-not-detected", harness, kind, detail=f"harness not installed: {harness!r}"
-            )
+        harness, refusal = _resolve_spawn_harness(config, harness, leaf_key, which)
+        if refusal is not None:
+            return refusal
 
     sid = session_id or uuid4().hex
     spawn_env = _spawn_env(model, effort, env)
@@ -191,7 +271,7 @@ def spawn_agent_session_payload(
 
 def _spawn_refusal(
     status: str,
-    harness: str,
+    harness: str | None,
     kind: str,
     *,
     detail: str | None = None,

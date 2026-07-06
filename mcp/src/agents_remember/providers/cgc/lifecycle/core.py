@@ -35,9 +35,7 @@ def cgc_uses_settings(args: argparse.Namespace) -> bool:
 
 def cgc_layout_from_args(args: argparse.Namespace) -> CgcRuntimeLayout:
     if cgc_uses_settings(args):
-        _, provider_settings = cgc_settings_from_file(
-            args.coordination_root, getattr(args, "from_settings", None)
-        )
+        _, provider_settings = cgc_settings_from_file(getattr(args, "from_settings", None))
         root_settings = cgc_root_from_settings(provider_settings, args.repo_id)
         return cgc_runtime_layout_from_provider_settings(
             coordination_root=args.coordination_root,
@@ -93,9 +91,7 @@ def cgc_root_from_settings(
 def cgc_all_layouts_from_settings(
     args: argparse.Namespace,
 ) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout]]:
-    settings_path, provider_settings = cgc_settings_from_file(
-        args.coordination_root, getattr(args, "from_settings", None)
-    )
+    settings_path, provider_settings = cgc_settings_from_file(getattr(args, "from_settings", None))
     repo_id = getattr(args, "repo_id", None)
     selected = (
         [cgc_root_from_settings(provider_settings, repo_id)]
@@ -119,9 +115,7 @@ def cgc_project_layouts_from_settings(
 ) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout]]:
     """Return all configured layouts with the target repo first for runner mounts."""
 
-    settings_path, provider_settings = cgc_settings_from_file(
-        args.coordination_root, getattr(args, "from_settings", None)
-    )
+    settings_path, provider_settings = cgc_settings_from_file(getattr(args, "from_settings", None))
     roots = cgc_validated_roots(provider_settings)
     primary = cgc_root_from_settings(provider_settings, primary_repo_id)
     primary_stable = stable_provider_id(str(primary["repoId"]))

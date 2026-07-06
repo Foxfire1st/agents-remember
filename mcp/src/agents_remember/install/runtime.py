@@ -20,6 +20,10 @@ from agents_remember.install.provider_watchers import (
     stop_provider_watchers_before_refresh,
     write_temp_provider_settings,
 )
+from agents_remember.kernel.agentic_settings import (
+    agentic_settings_path,
+    default_agentic_settings_seed_text,
+)
 from agents_remember.mcp.config import DEFAULT_PROVIDER_SETUP_SECONDS, McpRuntimeConfig
 from agents_remember.providers import lifecycle
 from agents_remember.providers.settings import lifecycle_settings_from_config
@@ -99,6 +103,27 @@ def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
         if not dry_run:
             path.mkdir(parents=True, exist_ok=True)
         summary.created_dirs += 1
+
+
+def seed_agentic_settings(
+    coordination_root: Path, summary: InstallSummary, dry_run: bool
+) -> None:
+    """Seed the GLOBAL agentic settings file, copy-if-missing (260703-L13).
+
+    ``<coordinationRoot>/system/settings.json`` is user-owned coordinator state
+    (like ``memory-repos/``): an existing file is NEVER touched, whatever it
+    contains -- the c-13 install interview and the developer own its content.
+    A missing file gets the documented defaults
+    (:func:`agents_remember.kernel.agentic_settings.default_agentic_settings_seed`).
+    """
+    target = agentic_settings_path(coordination_root)
+    if target.exists():
+        summary.unchanged_files += 1
+        return
+    ensure_dir(target.parent, summary, dry_run)
+    if not dry_run:
+        target.write_text(default_agentic_settings_seed_text(), encoding="utf-8")
+    summary.copied_files += 1
 
 
 def copy_file(source: Path, destination: Path, summary: InstallSummary, dry_run: bool) -> None:
@@ -486,6 +511,10 @@ def install_runtime(
             *PROVIDER_USER_DIRS,
         ):
             ensure_dir(coordination_root / user_owned, summary, dry_run)
+
+        # The global agentic settings file rides the same user-owned posture:
+        # seeded once with the documented defaults, never clobbered.
+        seed_agentic_settings(coordination_root, summary, dry_run)
 
         if include_benchmarks:
             install_benchmarks(source_root, coordination_root, summary, dry_run)

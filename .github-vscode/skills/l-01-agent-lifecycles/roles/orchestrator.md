@@ -363,7 +363,7 @@ task, fill small blanks, escalate real deltas).
 
 | Knob    | Default           | Notes |
 | ------- | ----------------- | ----- |
-| harness | claude-code       | default preference only — settings picks the actual harness |
+| harness | claude            | default preference only — settings picks the actual harness |
 | model   | highest-reasoning | portfolio blast-radius judgment wants the strongest model |
 | effort  | high              | the bird's-eye seat; not the place to economize |
 | tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · worktree/C-11 |

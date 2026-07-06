@@ -157,7 +157,7 @@ own lifecycle if you need its state).
 
 | Knob    | Default        | Notes                                                            |
 | ------- | -------------- | ---------------------------------------------------------------- |
-| harness | claude-code    | default preference only — settings picks the actual harness       |
+| harness | claude         | default preference only — settings picks the actual harness       |
 | model   | mid-reasoning  | leaf review + coordination; strong but below the orchestrator    |
 | effort  | medium         | one master's scope, not the portfolio                            |
 | tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |

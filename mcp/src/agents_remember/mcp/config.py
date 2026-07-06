@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    GatePolicy,
-    GatePolicyRule,
-    apply_seam_verdict_requirement,
-    coerce_decision_role,
-    make_gate_policy,
-    named_gate_policy,
-)
-from agents_remember.controlplane.records import GateKind, coerce_gate_kind
+from agents_remember.controlplane.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettingsError,
+    agentic_settings_path,
+    load_agentic_settings,
+    parse_gate_delegation,
+)
 from agents_remember.providers.identity import (
     explicit_provider_instance_id,
     provider_instance_id,
@@ -39,11 +37,12 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
-KNOWN_ORCHESTRATION_FIELDS = frozenset({"roles", "concurrency", "gateDelegation"})
-KNOWN_GATE_DELEGATION_FIELDS = frozenset(
-    {"policy", "kinds", "requireReviewerVerdictAtSeams"}
-)
-KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
+# The agentic orchestration family moved to the coordinator's global settings
+# file (260703-L13); the authority file keeps ONLY the one-cycle gateDelegation
+# legacy fallback. loops/roles/concurrency/spawn here fail loud, pointing at
+# the new home (roles/concurrency were previously reserved-and-silently-dropped
+# -- that trap is closed).
+KNOWN_AUTHORITY_ORCHESTRATION_FIELDS = frozenset({"gateDelegation"})
 
 
 class ConfigError(AgentsRememberError):
@@ -55,7 +54,6 @@ class RepositoryScope:
     repo_id: str
     path: Path
     memory_root: Path | None = None
-    memory_settings_includes: tuple[Path, ...] = ()
     contract_path: Path | None = None
 
 
@@ -159,7 +157,11 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
     dashboard = parse_dashboard_settings(data.get("dashboard"))
-    orchestration = parse_orchestration_settings(data.get("orchestration"))
+    orchestration = parse_orchestration_settings(
+        data.get("orchestration"),
+        coordination_root=coordination_root,
+        config_path=config_path,
+    )
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -195,22 +197,13 @@ def _parse_repository_entry(
     )
     if contract_path is not None and not path_is_relative_to(contract_path, coordination_root):
         raise ConfigError(f"repository {repo_id} contractPath must be inside the coordinator root")
-    includes = parse_path_list(
-        value.get("memorySettingsIncludes", []),
-        owner=f"repository {repo_id} memorySettingsIncludes",
-    )
-    allowed_roots = (repo_path, memory_root)
-    for include_path in includes:
-        if not any(path_is_relative_to(include_path, root) for root in allowed_roots):
-            raise ConfigError(
-                f"repository {repo_id} include points outside configured repo "
-                f"boundaries: {include_path}"
-            )
+    # memorySettingsIncludes was dead plumbing (parsed, never consumed); it was
+    # removed with 260703-L13. A leftover key in an existing settings file is
+    # tolerated-ignored like any other unknown repository field.
     return RepositoryScope(
         repo_id=repo_id,
         path=repo_path,
         memory_root=memory_root,
-        memory_settings_includes=tuple(includes),
         contract_path=contract_path,
     )
 
@@ -348,108 +341,99 @@ def parse_dashboard_settings(raw: object) -> DashboardSettings:
     return DashboardSettings(auto_start=auto_start, port=port)
 
 
-def parse_orchestration_settings(raw: object) -> OrchestrationSettings:
+def parse_orchestration_settings(
+    raw: object,
+    *,
+    coordination_root: Path,
+    config_path: Path,
+) -> OrchestrationSettings:
+    """Resolve the boot-snapshot orchestration settings (260703-L13, GQ1).
+
+    ``orchestration.gateDelegation``'s home is the GLOBAL agentic settings file
+    (``<coordinationRoot>/system/settings.json``), read once at boot through the
+    kernel agentic-settings loader -- a change still needs a restart (documented
+    boot-snapshot semantics; the downstream ``gate_policy`` wiring is
+    unchanged). An authority-file value is honored as a one-cycle legacy
+    fallback WITH a boot warning naming the new home; when the global file also
+    sets the key, the global value wins and the shadowed authority value warns.
+    Any other ``orchestration.*`` key in the authority file fails loud -- those
+    knobs never belonged here (loops) or moved home (roles/concurrency/spawn).
+    """
+    legacy = _parse_legacy_authority_gate_delegation(raw, coordination_root, config_path)
+    try:
+        agentic = load_agentic_settings(coordination_root)
+    except AgenticSettingsError as error:
+        raise ConfigError(str(error)) from error
+    if agentic.gate_delegation_configured:
+        if legacy is not None:
+            _warn_legacy_gate_delegation(
+                config_path, coordination_root, shadowed=True
+            )
+        return OrchestrationSettings(
+            gate_policy=agentic.gate_policy,
+            require_reviewer_verdict_at_seams=agentic.require_reviewer_verdict_at_seams,
+        )
+    if legacy is not None:
+        _warn_legacy_gate_delegation(config_path, coordination_root, shadowed=False)
+        return legacy
+    return OrchestrationSettings()
+
+
+def _parse_legacy_authority_gate_delegation(
+    raw: object,
+    coordination_root: Path,
+    config_path: Path,
+) -> OrchestrationSettings | None:
+    """The authority file's ``orchestration`` block: gateDelegation-only, legacy."""
     if raw is None:
-        return OrchestrationSettings()
+        return None
     if not isinstance(raw, dict):
         raise ConfigError("orchestration settings must be an object")
-    unknown = sorted(set(raw) - KNOWN_ORCHESTRATION_FIELDS)
+    unknown = sorted(set(raw) - KNOWN_AUTHORITY_ORCHESTRATION_FIELDS)
     if unknown:
-        allowed = ", ".join(sorted(KNOWN_ORCHESTRATION_FIELDS))
         unknown_text = ", ".join(unknown)
         raise ConfigError(
-            f"unsupported orchestration setting(s): {unknown_text}; allowed: {allowed}"
+            f"unsupported orchestration setting(s): {unknown_text}; the MCP "
+            "authority file only reads the legacy gateDelegation fallback -- "
+            "agentic orchestration settings (gateDelegation, loops, roles, "
+            f"concurrency, spawn) live in {agentic_settings_path(coordination_root)}"
         )
-    gate_policy, require_verdict_at_seams = parse_gate_delegation(raw.get("gateDelegation"))
+    gate_raw = raw.get("gateDelegation")
+    if gate_raw is None:
+        return None
+    try:
+        gate_policy, require_verdict_at_seams = parse_gate_delegation(
+            gate_raw, source=str(config_path)
+        )
+    except AgenticSettingsError as error:
+        raise ConfigError(str(error)) from error
     return OrchestrationSettings(
         gate_policy=gate_policy,
         require_reviewer_verdict_at_seams=require_verdict_at_seams,
     )
 
 
-def parse_gate_delegation(raw: object) -> tuple[GatePolicy, bool]:
-    if raw is None:
-        return DEFAULT_GATE_POLICY, False
-    if not isinstance(raw, dict):
-        raise ConfigError("orchestration.gateDelegation must be an object")
-    unknown = sorted(set(raw) - KNOWN_GATE_DELEGATION_FIELDS)
-    if unknown:
-        allowed = ", ".join(sorted(KNOWN_GATE_DELEGATION_FIELDS))
-        unknown_text = ", ".join(unknown)
-        raise ConfigError(
-            "unsupported orchestration.gateDelegation setting(s): "
-            f"{unknown_text}; allowed: {allowed}"
-        )
-    policy_name = raw.get("policy", "all-human")
-    if not isinstance(policy_name, str) or not policy_name:
-        raise ConfigError("orchestration.gateDelegation.policy must be a non-empty string")
-    try:
-        policy = named_gate_policy(policy_name)
-    except ValueError as error:
-        raise ConfigError(str(error)) from error
-    require_verdict_at_seams = raw.get("requireReviewerVerdictAtSeams", False)
-    if not isinstance(require_verdict_at_seams, bool):
-        raise ConfigError(
-            "orchestration.gateDelegation.requireReviewerVerdictAtSeams must be a boolean"
-        )
-    kinds = raw.get("kinds", {})
-    if not isinstance(kinds, dict):
-        raise ConfigError("orchestration.gateDelegation.kinds must be an object")
-    rules = {rule.kind: rule for rule in policy.rules}
-    for raw_kind, raw_rule in kinds.items():
-        if not isinstance(raw_kind, str) or not raw_kind:
-            raise ConfigError("gate policy kind names must be non-empty strings")
-        try:
-            kind = coerce_gate_kind(raw_kind)
-            rules[kind] = _parse_gate_policy_rule(kind, raw_rule, prior=rules.get(kind))
-        except ValueError as error:
-            raise ConfigError(str(error)) from error
-    try:
-        policy = make_gate_policy(list(rules.values()))
-    except ValueError as error:
-        raise ConfigError(str(error)) from error
-    if require_verdict_at_seams:
-        policy = apply_seam_verdict_requirement(policy)
-    return policy, require_verdict_at_seams
-
-
-def _parse_gate_policy_rule(
-    kind: GateKind,
-    raw_rule: object,
+def _warn_legacy_gate_delegation(
+    config_path: Path,
+    coordination_root: Path,
     *,
-    prior: GatePolicyRule | None,
-) -> GatePolicyRule:
-    if isinstance(raw_rule, str):
-        return GatePolicyRule(kind=kind, delegated_role=coerce_decision_role(raw_rule))
-    if not isinstance(raw_rule, dict):
-        raise ConfigError(f"orchestration.gateDelegation.kinds.{kind} must be an object")
-    unknown = sorted(set(raw_rule) - KNOWN_GATE_POLICY_KIND_FIELDS)
-    if unknown:
-        allowed = ", ".join(sorted(KNOWN_GATE_POLICY_KIND_FIELDS))
-        unknown_text = ", ".join(unknown)
-        raise ConfigError(
-            f"unsupported gate policy field(s) for {kind}: {unknown_text}; allowed: {allowed}"
+    shadowed: bool,
+) -> None:
+    """One-cycle migration warning (GQ1): the authority-file key must move home."""
+    new_home = agentic_settings_path(coordination_root)
+    if shadowed:
+        message = (
+            f"orchestration.gateDelegation in the MCP authority file ({config_path}) "
+            f"is IGNORED: the global agentic settings file ({new_home}) already "
+            "defines it -- remove the authority-file copy"
         )
-    role_raw = raw_rule.get("role")
-    delegated_role = prior.delegated_role if prior is not None else None
-    if role_raw is not None:
-        if not isinstance(role_raw, str) or not role_raw:
-            raise ConfigError(f"orchestration.gateDelegation.kinds.{kind}.role must be a string")
-        delegated_role = coerce_decision_role(role_raw)
-    require_verdict = raw_rule.get(
-        "requireReviewerVerdict",
-        prior.require_reviewer_verdict if prior is not None else False,
-    )
-    if not isinstance(require_verdict, bool):
-        raise ConfigError(
-            f"orchestration.gateDelegation.kinds.{kind}.requireReviewerVerdict "
-            "must be a boolean"
+    else:
+        message = (
+            "orchestration.gateDelegation moved to the global agentic settings "
+            f"file ({new_home}); the MCP authority file value ({config_path}) is "
+            "honored as a one-cycle legacy fallback -- move it now"
         )
-    return GatePolicyRule(
-        kind=kind,
-        delegated_role=delegated_role,
-        require_reviewer_verdict=require_verdict,
-    )
+    warnings.warn(message, stacklevel=2)
 
 
 def parse_timeout_caps(raw: object) -> dict[str, int]:
@@ -503,16 +487,6 @@ def optional_coordination_path(
     if not path_is_relative_to(resolved, coordination_root):
         raise ConfigError(f"{owner} {key} must be inside the coordinator root")
     return resolved
-
-
-def parse_path_list(raw: object, *, owner: str) -> list[Path]:
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ConfigError(f"{owner} must be a list")
-    return [
-        require_absolute_json_path(value, f"{owner}[{index}]") for index, value in enumerate(raw)
-    ]
 
 
 def require_absolute_json_path(value: object, label: str) -> Path:

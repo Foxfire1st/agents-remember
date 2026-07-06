@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -331,26 +332,26 @@ class McpConfigTests(unittest.TestCase):
             assert contract_path is not None
             self.assertEqual(contract_path.name, "series-contract.md")
 
-    def test_memory_settings_include_cannot_escape_repo_boundaries(self) -> None:
+    def test_legacy_memory_settings_includes_key_is_tolerated_and_ignored(self) -> None:
+        """The dead memorySettingsIncludes plumbing was removed with 260703-L13.
+
+        Existing settings files may still carry the key; its absence from the
+        parser must be harmless -- the entry is ignored like any other unknown
+        repository field and the parsed scope no longer exposes it.
+        """
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             payload = settings_payload(root)
             payload["repositories"]["agents-remember"]["memorySettingsIncludes"] = [
-                str(
-                    root
-                    / "ar-coordination"
-                    / "memory-repos"
-                    / "ar-agents-remember"
-                    / "system"
-                    / "settings.json"
-                ),
-                str(root / "outside" / "settings.json"),
+                str(root / "anywhere" / "settings.json")
             ]
             path = root / "mcp-settings.json"
             write_json(path, payload)
 
-            with self.assertRaisesRegex(ConfigError, "outside configured repo boundaries"):
-                load_config(path)
+            config = load_config(path)
+
+            scope = config.repositories["agents-remember"]
+            self.assertFalse(hasattr(scope, "memory_settings_includes"))
 
     def test_harness_skill_root_must_be_absolute_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -479,35 +480,101 @@ class DashboardSettingsTests(unittest.TestCase):
 
 
 class OrchestrationSettingsTests(unittest.TestCase):
-    def _load(self, orchestration: object | None) -> McpRuntimeConfig:
+    """gateDelegation boot sourcing (260703-L13, GQ1).
+
+    The key's home is the GLOBAL agentic settings file
+    (``<coordinationRoot>/system/settings.json``), read once at boot through the
+    kernel loader (boot-snapshot). An authority-file value is a one-cycle
+    legacy fallback with a boot warning; every other ``orchestration.*`` key in
+    the authority file fails loud naming the new home.
+    """
+
+    def _load(
+        self,
+        *,
+        authority: object | None = None,
+        global_orchestration: object | None = None,
+    ) -> McpRuntimeConfig:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             payload = settings_payload(root)
-            if orchestration is not None:
-                payload["orchestration"] = orchestration
+            if authority is not None:
+                payload["orchestration"] = authority
+            if global_orchestration is not None:
+                global_path = root / "ar-coordination" / "system" / "settings.json"
+                write_json(global_path, {"orchestration": global_orchestration})
             path = root / "mcp-settings.json"
             write_json(path, payload)
             return load_config(path)
 
     def test_defaults_to_all_human_gate_policy(self) -> None:
-        config = self._load(None)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            config = self._load()
 
         closeout = config.orchestration.gate_policy.rule_for("closeout-approval")
         self.assertIsNone(closeout.delegated_role)
+        self.assertEqual(caught, [])
 
-    def test_named_manager_leaf_gate_policy(self) -> None:
-        config = self._load(
-            {"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
-        )
+    def test_global_agentic_file_sources_gate_delegation(self) -> None:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            config = self._load(
+                global_orchestration={
+                    "gateDelegation": {"policy": "manager-decides-leaf-gates"}
+                }
+            )
 
         policy = config.orchestration.gate_policy
         self.assertEqual(policy.rule_for("plan-approval").delegated_role, "manager")
         self.assertEqual(policy.rule_for("closeout-approval").delegated_role, "manager")
         self.assertIsNone(policy.rule_for("push-approval").delegated_role)
+        self.assertEqual(caught, [])
+
+    def test_authority_gate_delegation_is_legacy_fallback_with_warning(self) -> None:
+        with self.assertWarnsRegex(
+            UserWarning, "moved to the global agentic settings file"
+        ):
+            config = self._load(
+                authority={"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
+            )
+
+        policy = config.orchestration.gate_policy
+        self.assertEqual(policy.rule_for("plan-approval").delegated_role, "manager")
+
+    def test_global_file_shadows_authority_value_with_warning(self) -> None:
+        with self.assertWarnsRegex(UserWarning, "is IGNORED"):
+            config = self._load(
+                authority={"gateDelegation": {"policy": "manager-decides-leaf-gates"}},
+                global_orchestration={"gateDelegation": {"policy": "all-human"}},
+            )
+
+        # The global (all-human) value wins over the shadowed authority value.
+        self.assertIsNone(
+            config.orchestration.gate_policy.rule_for("plan-approval").delegated_role
+        )
+
+    def test_loops_in_authority_file_is_rejected_naming_the_new_home(self) -> None:
+        with self.assertRaisesRegex(
+            ConfigError, r"unsupported orchestration setting\(s\): loops.*system.settings\.json"
+        ):
+            self._load(authority={"loops": {"defaults": {"maxRounds": 3}}})
+
+    def test_roles_and_concurrency_in_authority_file_are_rejected(self) -> None:
+        """Previously reserved-and-silently-dropped; the L13 move closes the trap."""
+        with self.assertRaisesRegex(
+            ConfigError, r"unsupported orchestration setting\(s\): concurrency, roles"
+        ):
+            self._load(
+                authority={
+                    "roles": {"worker": {"harness": "codex"}},
+                    "concurrency": {"maxParallelLeaves": 3},
+                }
+            )
 
     def test_custom_delegated_kind_can_require_reviewer_verdict(self) -> None:
         config = self._load(
-            {
+            global_orchestration={
                 "gateDelegation": {
                     "kinds": {
                         "closeout-approval": {
@@ -525,7 +592,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
 
     def test_at_seams_flag_binds_delegated_seam_rules_through_parse(self) -> None:
         config = self._load(
-            {
+            global_orchestration={
                 "gateDelegation": {
                     "policy": "manager-decides-leaf-gates",
                     "requireReviewerVerdictAtSeams": True,
@@ -540,25 +607,36 @@ class OrchestrationSettingsTests(unittest.TestCase):
         self.assertFalse(policy.rule_for("plan-approval").require_reviewer_verdict)
         self.assertTrue(config.orchestration.require_reviewer_verdict_at_seams)
 
-    def test_human_pinned_kind_cannot_be_delegated(self) -> None:
+    def test_human_pinned_kind_in_global_file_fails_boot(self) -> None:
         with self.assertRaisesRegex(ConfigError, "human-pinned"):
             self._load(
-                {
-                    "gateDelegation": {
-                        "kinds": {"push-approval": {"role": "manager"}}
-                    }
+                global_orchestration={
+                    "gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}
                 }
             )
 
-    def test_unsupported_kind_delegation_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ConfigError, "cannot be delegated"):
+    def test_human_pinned_kind_in_legacy_authority_fallback_still_fails(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "human-pinned"):
             self._load(
-                {
-                    "gateDelegation": {
-                        "kinds": {"agent-question": {"role": "manager"}}
-                    }
+                authority={
+                    "gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}
                 }
             )
+
+    def test_malformed_global_agentic_file_fails_boot_naming_the_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            global_path = root / "ar-coordination" / "system" / "settings.json"
+            global_path.parent.mkdir(parents=True)
+            global_path.write_text("{not json", encoding="utf-8")
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            with self.assertRaisesRegex(
+                ConfigError, r"cannot parse agentic settings JSON.*settings\.json"
+            ):
+                load_config(path)
 
 
 if __name__ == "__main__":

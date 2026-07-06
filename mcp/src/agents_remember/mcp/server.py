@@ -149,7 +149,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
 
     @server.tool()
     def spawn_agent_session(
-        harness: str,
+        harness: str | None = None,
         leaf_key: str | None = None,
         context: str | None = None,
         submit: bool = False,
@@ -169,7 +169,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         overridden), seed the role knobs (`model`/`effort`/`env` injected as spawn env — the terminal
         host's `tmux new-session -e KEY=VALUE` seam), and deliver `context` as an echo-confirmed
         bracketed paste. `submit=true` presses Enter so a worker auto-starts; leave it false for a
-        draft. `harness` is validated against the fetch-harnesses detection set. Each spawned session
+        draft. `harness` is optional: explicit values are validated against the detection set; omitted,
+        it resolves per-use from the agentic settings (repo-local `<repo>/system/settings.json` over
+        the global coordination-root file, `orchestration.spawn.harness`; the repo comes from the
+        qualified leaf key), else the first detected registry harness. Each spawned session
         is its own harness process (the ambient-lifecycle singleton is untouched). Spawned-by
         provenance (`spawned_by_session` + the active/`spawned_by_lifecycle` lifecycle) is recorded on
         the catalog row so the dashboard can render the orchestration tree. Status 'spawned' on
