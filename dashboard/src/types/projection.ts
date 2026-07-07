@@ -70,6 +70,11 @@ export interface EnclosureNode {
   closeoutStatus: string;
   integrationStatus: string;
   cleanup: string;
+  // Worktree-existence truth (L11): stat'ed server-side at snapshot time (never inferred from
+  // cleanup state). The tasks surface renders a leaf ONLY while a worktree physically exists —
+  // cleanup=reopened means contract-reset-awaiting-restart, not live work.
+  codeWorktreeExists: boolean;
+  memoryWorktreeExists: boolean;
   actions: ActionAvailability[];
 }
 
@@ -238,6 +243,9 @@ export interface TaskDocNode {
   subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
   sections: TaskSectionNode[]; // master render plan or non-master freeform sections
   masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
+  // The orchestration-command relation (L14): non-empty only on a master doc that IS an orchestration
+  // task — the master task names it commands. Optional so projections persisted before L14 still parse.
+  orchestrates?: string[];
 }
 
 export interface SeriesNode {
@@ -278,7 +286,14 @@ export interface AgentPickupNode {
   entryId: string;
   lifecycleId?: string;
   agentId?: string;
+  senderAgentId?: string;
+  senderRole?: string;
+  recipientRole?: string;
   gateId?: string;
+  messageKind: string;
+  artifactPath?: string;
+  deliveryState: "queued" | "no-hosted-session" | "delivered" | "unconfirmed" | string;
+  deliveredToSession?: string;
   state: "waiting-for-agent" | "check-chat" | string;
   ageSeconds?: number;
   ttlSeconds: number;
@@ -407,6 +422,16 @@ export interface Analytics {
   engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map (slice 5e)
 }
 
+// The boot-time serving stamp (260703-L15, serving/build_info.py): which build/process is
+// answering. Injected app-side onto /api/state and the SSE snapshot (NOT reducer truth, so it
+// is optional here and absent from persisted latest-state.json). `commit` is best-effort —
+// omitted when the server runs off-checkout (an installed wheel).
+export interface ServingBuild {
+  version: string;
+  bootedAt: string;
+  commit?: string;
+}
+
 export interface WorkspaceProjection {
   version: number;
   generatedAt: string;
@@ -420,4 +445,5 @@ export interface WorkspaceProjection {
   activeWorktreeGroups: string[];
   metrics: Metrics;
   analytics: Analytics;
+  servingBuild?: ServingBuild; // app-injected on the wire only — see ServingBuild
 }

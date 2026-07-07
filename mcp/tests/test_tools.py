@@ -311,6 +311,7 @@ class McpToolTests(unittest.TestCase):
             "operator_inbox_poll",
             "operator_inbox_consume",
             "attach_terminal_session_to_leaf",
+            "spawn_agent_session",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
         for retired in (

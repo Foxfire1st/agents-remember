@@ -11,6 +11,8 @@ from agents_remember.kernel.memory_ledger import (
     MemoryLedger,
     find_mapping,
     load_ledger,
+    prepend_mapping,
+    write_ledger,
 )
 from agents_remember.providers import provider_setup
 from agents_remember.tasks import read_task_doc
@@ -20,6 +22,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
     branch_exists,
+    commit_if_dirty,
     current_branch,
     ensure_worktree,
     has_changes,
@@ -300,19 +303,24 @@ def _blocked_memory_start_result(
 def _contract_after_memory_start(
     contract: WorktreeContract, memory_state: dict[str, object]
 ) -> WorktreeContract:
-    if contract.memory_mode != "external" or memory_state["state"] != "disabled":
-        return contract
-    return replace(
-        contract,
-        memory_mode="disabled",
-        memory_repo_path=None,
-        memory_source_branch="",
-        memory_work_branch="",
-        memory_base_commit="",
-        memory_worktree=None,
-        ledger_path=None,
-        memory_state="disabled",
-    )
+    if contract.memory_mode == "external" and memory_state["state"] == "disabled":
+        return replace(
+            contract,
+            memory_mode="disabled",
+            memory_repo_path=None,
+            memory_source_branch="",
+            memory_work_branch="",
+            memory_base_commit="",
+            memory_worktree=None,
+            ledger_path=None,
+            memory_state="disabled",
+        )
+    reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
+    if isinstance(reconciled_base, str) and reconciled_base:
+        # A reconciliation recovery (finding 7) advanced the official memory tip; persist the base the
+        # mapping was recorded against so a freshly created memory branch carries the mapping.
+        return replace(contract, memory_base_commit=reconciled_base)
+    return contract
 
 
 def _blocked_provider_start_result(
@@ -1008,8 +1016,18 @@ def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> 
     if isinstance(ledger, dict):
         return ledger
     mapping = find_mapping(ledger, contract.code_base_commit)
+    reconciled_base: str | None = None
     if mapping is None:
-        return _missing_mapping_state(contract, ledger)
+        disabled = _disabled_memory_choice(args)
+        if disabled:
+            return disabled
+        reconciled = _reconcile_missing_mapping(contract, ledger, args)
+        if reconciled is None:
+            return _missing_mapping_state(contract, ledger)
+        contract, ledger = reconciled
+        reconciled_base = contract.memory_base_commit
+    # The reconciliation rebind re-widens the contract's optional memory fields; re-narrow both.
+    assert contract.memory_repo_path is not None
     assert contract.memory_worktree is not None
     memory_source_branch = _ensure_memory_source_branch(contract, args.dry_run)
     memory_branch_state = ensure_worktree(
@@ -1020,7 +1038,7 @@ def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> 
         args.dry_run,
     )
     mtime_sync = _sync_worktree_memory_mtimes(contract, args.dry_run)
-    return {
+    result: dict[str, object] = {
         "state": "compatible",
         "worktree": memory_branch_state,
         "memorySourceBranch": memory_source_branch,
@@ -1028,6 +1046,11 @@ def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> 
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
     }
+    if reconciled_base is not None:
+        # A reconciliation just advanced the official memory tip; the caller re-bases the persisted
+        # contract onto it so status/closeout see the base the mapping was recorded against.
+        result["reconciledMemoryBaseCommit"] = reconciled_base
+    return result
 
 
 def _ensure_memory_source_branch(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
@@ -1130,15 +1153,68 @@ def _load_memory_ledger(
         return {
             "state": "blocked",
             "reason": str(error),
-            "choices": ["initialize-memory-repo", "reconciliation", "disabled-memory", "custom"],
+            # Only consumable choices (260703-L18 review L18R-3): "reconciliation" needs a
+            # parseable ledger to map against, which a LedgerError path cannot supply, and
+            # "custom" has no handler — advertising either here would be an F-R dead-end.
+            "choices": ["initialize-memory-repo", "disabled-memory"],
         }
 
 
+def _reconcile_missing_mapping(
+    contract: WorktreeContract, ledger: MemoryLedger, args: WorktreeArgs
+) -> tuple[WorktreeContract, MemoryLedger] | None:
+    """``memory_choice="reconciliation"`` (260703-L18 finding 7 / friction F-R): record the unmapped
+    code base -> the ledger's current memory content tip, exactly the way closeout ledger syncs do,
+    then let the start proceed on the now-present mapping.
+
+    Mirrors the owner's hand precedent (memory commit ``af50a05``): the header ``lastVerifiedCodeCommit``
+    advances to the code base commit, a newest-first mapping row is prepended, and a ``Ledger sync``
+    commit lands in the memory SOURCE repo -- the memory CONTENT tip is unchanged (this is a code-only
+    catch-up, no onboarding changed). Returns the advanced ``(contract, ledger)`` so the caller bases
+    the memory branch off the recorded commit; ``None`` when reconciliation was not the chosen recovery."""
+    if args.memory_choice != "reconciliation":
+        return None
+    assert contract.memory_repo_path is not None
+    # PR #100 review (Codex P1): the mapping commit must land on the memory SOURCE branch —
+    # the worktree is created FROM that branch, so committing to whatever happens to be
+    # checked out would leave the source branch unmapped while start reports compatible.
+    # Refuse loudly instead of writing to the wrong branch.
+    current_branch = require_git(contract.memory_repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if current_branch != contract.memory_source_branch:
+        raise LedgerError(
+            "reconciliation writes the ledger mapping to the memory source branch "
+            f"'{contract.memory_source_branch}', but the official memory repo is checked out "
+            f"on '{current_branch}'; checkout the source branch and re-run worktree_start"
+        )
+    code_commit = contract.code_base_commit
+    memory_commit = ledger.last_memory_content_commit
+    updated = prepend_mapping(ledger, code_commit, memory_commit)
+    if args.dry_run:
+        return contract, updated
+    write_ledger(contract.memory_repo_path / "memory.md", updated)
+    require_git(contract.memory_repo_path, ["add", "memory.md"])
+    commit_if_dirty(
+        contract.memory_repo_path,
+        args.ledger_commit_message
+        or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
+    )
+    advanced = replace(
+        contract,
+        memory_base_commit=_memory_base_for_source(
+            contract.memory_repo_path, contract.memory_source_branch
+        ),
+    )
+    return advanced, updated
+
+
 def _missing_mapping_state(contract: WorktreeContract, ledger) -> dict[str, object]:
+    # Advertise ONLY executable choices (260703-L18 finding 7): both are consumed in
+    # prepare_memory_for_start's missing-mapping path (reconciliation records the mapping and proceeds;
+    # disabled-memory drops external memory). 'custom' was advertised but wired nowhere -- removed.
     return {
         "state": "blocked",
         "reason": "no exact ledger mapping for selected code base commit",
         "codeBaseCommit": contract.code_base_commit,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
-        "choices": ["reconciliation", "disabled-memory", "custom"],
+        "choices": ["reconciliation", "disabled-memory"],
     }

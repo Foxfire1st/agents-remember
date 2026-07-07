@@ -6,6 +6,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
+from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
+from agents_remember.controlplane.orchestration_nudges import NudgeReason
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
 from agents_remember.serving.daemon import maybe_autostart_dashboard
 
@@ -43,6 +45,7 @@ from .tools import (
     operator_inbox_consume_payload,
     operator_inbox_poll_payload,
     operator_inbox_post_payload,
+    orchestration_nudge_manager_payload,
     ping_payload,
     provider_diagnostics_payload,
     provider_status_payload,
@@ -53,6 +56,7 @@ from .tools import (
     runtime_install_payload,
     server_info_payload,
     skills_install_payload,
+    spawn_agent_session_payload,
     switch_lifecycle_payload,
     task_doc_payload,
     task_reopen_payload,
@@ -123,7 +127,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         per session (served once, re-served only when changed; pass refresh=true to force
         re-serve, e.g. after a compaction). Route-index rule: a file inside sourceScope but
         absent from coveredFiles reports missing without probing. In a managed repo this is
-        the read for the research phase (the lifecycle up to the build/job decision): use it
+        the read for the research phase (the lifecycle up to the build decision): use it
         instead of a native read to get each file paired with its onboarding plus the
         repository and governing route overviews. Native read is the edit precondition once
         building begins."""
@@ -141,6 +145,75 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             session_id=session_id,
             leaf_key=leaf_key,
+        )
+
+    @server.tool()
+    def spawn_agent_session(
+        harness: str | None = None,
+        leaf_key: str | None = None,
+        context: str | None = None,
+        submit: bool = False,
+        label: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        env: dict[str, str] | None = None,
+        launch_args: list[str] | None = None,
+        prompt_keywords: list[str] | None = None,
+        session_commands: list[str] | None = None,
+        level: str | None = None,
+        spawned_by_session: str | None = None,
+        spawned_by_lifecycle: str | None = None,
+        kind: str = "harness",
+    ) -> dict[str, Any]:
+        """Spawn a role-configured, leaf-attached, context-primed hosted agent session.
+
+        Composes the EXISTING session primitives so an orchestrator can spawn a manager and a manager
+        a worker without dashboard clicks: create a hosted session via the serving opener, attach it
+        to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
+        overridden), seed the role knobs (`model`/`effort`/`env` injected as spawn env — the terminal
+        host's `tmux new-session -e KEY=VALUE` seam — AND mapped onto the harness argv per-harness
+        via the registry: claude gets `--model`/`--effort`; a mapping-less harness stays env-only),
+        and deliver `context` as an echo-confirmed bracketed paste. `effort` is validated against the
+        resolved harness's known vocabulary BEFORE spawning: an unknown value returns status
+        'effort-invalid' naming the harness and its valid sets (the CLI would warn-and-silently-
+        degrade); a session-level value (claude 'ultracode') is delivered as a post-launch session
+        command instead of the flag. The free-form escape hatch is never validated, only recorded in
+        spawn provenance: `launch_args` (appended to the harness argv verbatim), `session_commands`
+        (each line pasted + submitted into the fresh session BEFORE the brief), `prompt_keywords`
+        (prepended as the first line of the brief paste — session modes the model interprets).
+        `level` declares the dispatch level (leaf|master|portfolio, default leaf — a manager
+        dispatching leaf seats passes leaf, the seam reviewer master, portfolio seats portfolio):
+        unset knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]`
+        deep-merged over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding
+        `env`; the resolved level + source land in spawn provenance.
+        `submit=true` presses Enter so a worker auto-starts; leave it false for a
+        draft. `harness` is optional: explicit values are validated against the detection set; omitted,
+        it resolves per-use from the agentic settings (role knobs, else repo-local
+        `<repo>/system/settings.json` over the global coordination-root file,
+        `orchestration.spawn.harness`; the repo comes from the
+        qualified leaf key), else the first detected registry harness. Each spawned session
+        is its own harness process (the ambient-lifecycle singleton is untouched). Spawned-by
+        provenance (`spawned_by_session` + the active/`spawned_by_lifecycle` lifecycle) is recorded on
+        the catalog row so the dashboard can render the orchestration tree. Status 'spawned' on
+        success; 'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/
+        'level-invalid'/'bad-kind' are pre-spawn refusals."""
+        return spawn_agent_session_payload(
+            config,
+            harness=harness,
+            leaf_key=leaf_key,
+            context=context,
+            submit=submit,
+            label=label,
+            model=model,
+            effort=effort,
+            env=env,
+            launch_args=launch_args,
+            prompt_keywords=prompt_keywords,
+            session_commands=session_commands,
+            level=level,
+            spawned_by_session=spawned_by_session,
+            spawned_by_lifecycle=spawned_by_lifecycle,
+            kind=kind,
         )
 
     @server.tool()
@@ -938,13 +1011,20 @@ def create_server(config: McpRuntimeConfig) -> Any:
         repo_id: str | None = None,
         packet: dict[str, Any] | None = None,
         required_decision: list[str] | None = None,
+        evidence_refs: list[dict[str, Any]] | None = None,
+        wait: bool = True,
     ) -> dict[str, Any]:
         """Public lifecycle-gate junction for agents. Creates the durable typed gate,
         blocks the active lifecycle with the developer-facing ask, and waits for the
         developer decision or gate-specific response in one operation. kind is the dashboard junction
         (plan-approval, worktree-intent, closeout-approval, etc.); ask.kind is the
         answer shape (decision, question, conflict). Do not add a separate wait call
-        as live gate choreography."""
+        as live gate choreography. wait=false raises without blocking — reserved for
+        delegated seam kinds (master-handover-approval under a delegating policy; any
+        other kind blocks) and it requires enclosure=<master task name>, the address
+        integration enforcement matches the gate by: the call returns the gateId, the
+        raiser carries it in the handover packet, and the delegated decider resolves
+        it by id via gate_decide(deciding_role=...)."""
         return lifecycle_gate_payload(
             config,
             kind=kind,
@@ -954,6 +1034,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
             repo_id=repo_id,
             packet=packet,
             required_decision=required_decision,
+            evidence_refs=evidence_refs,
+            wait=wait,
         )
 
     @server.tool()
@@ -962,27 +1044,33 @@ def create_server(config: McpRuntimeConfig) -> Any:
         decision: str,
         lifecycle_id: str | None = None,
         note: str | None = None,
+        deciding_role: str | None = None,
+        evidence_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Record a decision on an open gate (decision: approve | reject | request-revision
-        | cancel). Append-only -- the decision is a new snapshot, never an overwrite. Over
-        MCP the decision is attributed to the model via the cli; the dashboard records
-        developer/dashboard decisions through its own path. That attribution is what a later
-        enforcement slice checks (a commit gate needs a developer-attributed approval), so an
-        agent recording a model decision here never counts as developer approval."""
+        | cancel). Append-only -- the decision is a new snapshot, never an overwrite. By
+        default the decision is attributed to the model via the cli; with deciding_role it is
+        attributed to the active lifecycle via orchestration and checked against the configured
+        gate policy."""
+        decided_via = "orchestration" if deciding_role is not None else "cli"
         return gate_decide_payload(
             config,
             gate_id=gate_id,
             lifecycle_id=lifecycle_id,
             decision=decision,
-            decided_by="model",
-            decided_via="cli",
+            decided_by=None if deciding_role is not None else "model",
+            decided_via=decided_via,
+            deciding_role=deciding_role,
             note=note,
+            evidence_refs=evidence_refs,
         )
 
     @server.tool()
     def gate_list(lifecycle_id: str | None = None) -> dict[str, Any]:
-        """List the current (folded) gates for a lifecycle, or the workspace gates when no
-        lifecycle id is given. Read-only."""
+        """List the current (folded) gates for a lifecycle. With no lifecycle id it
+        defaults to the ACTIVE (ambient) lifecycle — poll your own raised gate without
+        handling lifecycle ids — and lists the workspace gates only when no lifecycle
+        is active. Read-only."""
         return gate_list_payload(config, lifecycle_id=lifecycle_id)
 
     @server.tool()
@@ -992,16 +1080,30 @@ def create_server(config: McpRuntimeConfig) -> Any:
         lifecycle_id: str | None = None,
         agent_id: str | None = None,
         gate_id: str | None = None,
+        sender_agent_id: str | None = None,
+        sender_role: AgentRole | None = None,
+        recipient_role: AgentRole | None = None,
+        message_kind: InboxMessageKind = "message",
+        artifact_path: str | None = None,
+        deliver_to_hosted: bool = True,
     ) -> dict[str, Any]:
         """Queue an operator response for an external chat to poll. Supply lifecycle_id
-        and/or agent_id as the mailbox key. Over MCP this route is attributed to the
-        model via cli; trusted dashboard code can call the payload builder directly with
+        and/or agent_id as the mailbox key. Agent-to-agent messages can include sender /
+        recipient role metadata; hosted targets are push-delivered through the terminal paste seam
+        while the durable inbox row remains dashboard-visible. Over MCP this route is attributed to
+        the model via cli; trusted dashboard code can call the payload builder directly with
         developer/dashboard attribution."""
         return operator_inbox_post_payload(
             config,
             lifecycle_id=lifecycle_id,
             agent_id=agent_id,
             gate_id=gate_id,
+            sender_agent_id=sender_agent_id,
+            sender_role=sender_role,
+            recipient_role=recipient_role,
+            message_kind=message_kind,
+            artifact_path=artifact_path,
+            deliver_to_hosted=deliver_to_hosted,
             ask=ask,
             response=response,
             created_by="model",
@@ -1012,13 +1114,15 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def operator_inbox_poll(
         lifecycle_id: str | None = None,
         agent_id: str | None = None,
+        recipient_role: AgentRole | None = None,
     ) -> dict[str, Any]:
-        """List pending external-chat inbox entries for a lifecycle_id and/or agent_id
+        """List pending external-chat inbox entries for a lifecycle_id, agent_id, and/or role
         mailbox key. Consuming an entry is explicit via operator_inbox_consume."""
         return operator_inbox_poll_payload(
             config,
             lifecycle_id=lifecycle_id,
             agent_id=agent_id,
+            recipient_role=recipient_role,
         )
 
     @server.tool()
@@ -1030,6 +1134,30 @@ def create_server(config: McpRuntimeConfig) -> Any:
             entry_id=entry_id,
             consumed_by="model",
             consumed_via="cli",
+        )
+
+    @server.tool()
+    def orchestration_nudge_manager(
+        reason: NudgeReason,
+        subject: str,
+        manager_agent_id: str | None = None,
+        manager_lifecycle_id: str | None = None,
+        subject_agent_id: str | None = None,
+        subject_lifecycle_id: str | None = None,
+        artifact_path: str | None = None,
+        rate_limit_seconds: int = 900,
+    ) -> dict[str, Any]:
+        """Rate-limit, log, and push a manager nudge for inactivity or a missing turn report."""
+        return orchestration_nudge_manager_payload(
+            config,
+            reason=reason,
+            subject=subject,
+            manager_agent_id=manager_agent_id,
+            manager_lifecycle_id=manager_lifecycle_id,
+            subject_agent_id=subject_agent_id,
+            subject_lifecycle_id=subject_lifecycle_id,
+            artifact_path=artifact_path,
+            rate_limit_seconds=rate_limit_seconds,
         )
 
     return server

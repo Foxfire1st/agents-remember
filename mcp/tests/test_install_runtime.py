@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from agents_remember.install import provider_watchers as install_provider_watche
 from agents_remember.install import runtime as install_runtime
 from agents_remember.install import skills as install_skills
 from agents_remember.install.assets import packaged_source_root
+from agents_remember.kernel.agentic_settings import default_agentic_settings_seed
 
 
 def write_file(path: Path, content: str = "x\n") -> None:
@@ -452,6 +454,70 @@ class InstallRuntimeTests(unittest.TestCase):
                     "watchers:status",
                 ],
             )
+
+
+class AgenticSettingsSeedTests(unittest.TestCase):
+    """runtime_install seeds the GLOBAL agentic settings file copy-if-missing (260703-L13)."""
+
+    def test_seeds_global_agentic_settings_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+
+            install_runtime.install_runtime(
+                source_root,
+                coordination_root,
+                dry_run=False,
+                install_provider_deps=False,
+                provider_settings={},
+            )
+
+            settings_path = coordination_root / "system" / "settings.json"
+            self.assertTrue(settings_path.exists())
+            seeded = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual(seeded, default_agentic_settings_seed())
+            self.assertEqual(
+                seeded["orchestration"]["gateDelegation"], {"policy": "all-human"}
+            )
+
+    def test_existing_settings_file_is_never_clobbered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+            settings_path = coordination_root / "system" / "settings.json"
+            developer_content = '{"orchestration": {"spawn": {"harness": "codex"}}}\n'
+            write_file(settings_path, developer_content)
+
+            install_runtime.install_runtime(
+                source_root,
+                coordination_root,
+                dry_run=False,
+                install_provider_deps=False,
+                provider_settings={},
+            )
+
+            self.assertEqual(
+                settings_path.read_text(encoding="utf-8"), developer_content
+            )
+
+    def test_dry_run_counts_the_seed_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source_root = create_runtime_source(root)
+            coordination_root = root / "ar-coordination"
+
+            summary = install_runtime.install_runtime(
+                source_root,
+                coordination_root,
+                dry_run=True,
+                install_provider_deps=False,
+                provider_settings={},
+            )
+
+            self.assertFalse((coordination_root / "system" / "settings.json").exists())
+            self.assertGreater(summary.copied_files, 0)
 
 
 class ProviderDependencyHelperTests(unittest.TestCase):

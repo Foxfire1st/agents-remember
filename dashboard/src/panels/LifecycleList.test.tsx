@@ -54,6 +54,8 @@ function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure
     closeoutStatus: "not-started",
     integrationStatus: "not-started",
     cleanup: "pending",
+    codeWorktreeExists: true,
+    memoryWorktreeExists: true,
     actions: [],
     ...over,
   } satisfies EnclosureNode;
@@ -169,6 +171,8 @@ describe("LifecycleList task labels", () => {
             lifecycleId: "LC-16",
             leafId: "16_engine-room-stack-entry-height",
             cleanup: "completed",
+            codeWorktreeExists: false,
+            memoryWorktreeExists: false,
           }),
           enclosure({
             enclosure: "/contracts/empty",
@@ -358,10 +362,11 @@ describe("LifecycleList task labels", () => {
     );
   });
 
-  it("renders a reopened leaf (cleanup=reopened, no lifecycle yet) as its planned doc row", () => {
-    // task_reopen (L11) reuses the EXACT leaf id: the enclosure returns to planning with its
-    // lifecycle binding cleared, and the doc row must render like any other planned leaf — the old
-    // `-rN` suffix admission heuristic is gone because reopened leaf ids never fork anymore.
+  it("hides a reopened leaf (cleanup=reopened, no worktrees on disk) until worktree_start recreates them", () => {
+    // The tasks-surface visibility rule (L11): a leaf appears ONLY while a worktree physically
+    // exists. A reopened contract is a reset awaiting restart — its worktrees are gone — so it
+    // must NOT render as live work, even though its cleanup state is not completed/abandoned
+    // (the proxy that cleanup=reopened outflanked).
     const onSelect = vi.fn();
     seed(
       projection({
@@ -372,6 +377,65 @@ describe("LifecycleList task labels", () => {
             lifecycleId: "",
             leafId: "29_event-river-retention-and-projection-freshness",
             cleanup: "reopened",
+            codeWorktreeExists: false,
+            memoryWorktreeExists: false,
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+            taskDoc({
+              id: "29",
+              lifecycleId: undefined,
+              title: "Event-River Retention and Projection Freshness",
+              docPath:
+                "/tasks/260610_browser-dashboard/29_event-river-retention-and-projection-freshness.json",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "29",
+                  name: "Event-River Retention and Projection Freshness",
+                  file: "29_event-river-retention-and-projection-freshness.md",
+                  status: "planning",
+                  scope: "",
+                  createdAt: "2026-06-27T22:33:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText, queryByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    expect(getByText("Tasks · 1")).toBeTruthy(); // the master alone — the reopened leaf is hidden
+    expect(queryByText(/Event-River Retention and Projection Freshness/)).toBeNull();
+  });
+
+  it("re-admits a reopened leaf once its worktrees physically exist again (after worktree_start)", () => {
+    // Existence — not the cleanup label — is the visibility rule, so the row returns the moment
+    // the projection stats the recreated worktrees.
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/29",
+            lifecycleId: "",
+            leafId: "29_event-river-retention-and-projection-freshness",
+            cleanup: "reopened",
+            codeWorktreeExists: true,
+            memoryWorktreeExists: true,
           }),
         ],
         analytics: {
@@ -411,9 +475,103 @@ describe("LifecycleList task labels", () => {
 
     const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
     const row = getByText("29. Event-River Retention and Projection Freshness");
+    expect(getByText("Tasks · 2")).toBeTruthy();
     expect(row.closest("[data-depth='1']")).toBeTruthy();
     expect(row.closest("[data-parent-key]")?.getAttribute("data-parent-key")).toBe(
       "taskdoc:/tasks/260610_browser-dashboard/task.json",
+    );
+  });
+
+  it("renders ONE task entry per enclosureId: a bound lifecycle annotates the doc row, never duplicates it", () => {
+    // The L9-reopen defect's second half (L11): the doc row and the live lifecycle's card both
+    // rendered for the same leaf. The identity rule is one row per enclosureId — the lifecycle
+    // bound to the enclosure (by the contract's lifecycleId, or by its own enclosure anchor)
+    // annotates the doc row with its state/gate/staleness instead of adding a card.
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [
+          // Bound through the contract's recorded lifecycleId; the doc itself carries no stamp.
+          lifecycle({
+            id: "LC-CONTRACT",
+            repoId: "agents-remember",
+            state: "blocked",
+            staleSeconds: 120,
+            gate: {
+              id: "gate-11",
+              kind: "closeout-approval",
+              state: "open",
+              decisions: ["approve", "revise"],
+              packet: {},
+              ts: "2026-06-24T06:00:40+00:00",
+            },
+          }),
+          // Bound only by its own anchor (lifecycle.enclosure); the contract binding is unset.
+          lifecycle({
+            id: "LC-ANCHOR",
+            repoId: "agents-remember",
+            state: "running",
+            enclosure: "/contracts/12",
+          }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/11",
+            lifecycleId: "LC-CONTRACT",
+            leafId: "11_hangar-worktree-truth",
+          }),
+          enclosure({
+            enclosure: "/contracts/12",
+            lifecycleId: "",
+            leafId: "12_three-party-loops",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "11",
+              lifecycleId: undefined,
+              title: "Hangar Worktree Truth",
+              docPath: "/tasks/260610_browser-dashboard/11_hangar-worktree-truth.json",
+            }),
+            taskDoc({
+              id: "12",
+              lifecycleId: undefined,
+              title: "Three Party Loops",
+              docPath: "/tasks/260610_browser-dashboard/12_three-party-loops.json",
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText, getAllByRole, queryByText } = render(
+      <LifecycleList selectedId={null} onSelect={onSelect} />,
+    );
+
+    // One entry per enclosureId — the two doc rows and nothing else (no bare lifecycle cards).
+    expect(getByText("Tasks · 2")).toBeTruthy();
+    expect(getAllByRole("option")).toHaveLength(2);
+    expect(queryByText("11_hangar-worktree-truth")).toBeNull(); // the would-be duplicate's label
+    expect(queryByText("12_three-party-loops")).toBeNull();
+
+    // The bound lifecycle ANNOTATES the single row: state, gate, and staleness flow through it.
+    const contractRow = getByText("Hangar Worktree Truth");
+    expect(contractRow.getAttribute("title")).toContain("Lifecycle: LC-CONTRACT");
+    expect(contractRow.getAttribute("title")).toContain("State: blocked");
+    expect(contractRow.getAttribute("title")).toContain("Gate: closeout-approval");
+    expect(getByText("closeout-approval")).toBeTruthy();
+    expect(getByText(/2m/)).toBeTruthy(); // staleSeconds: 120 formatted into the row meta
+
+    const anchorRow = getByText("Three Party Loops");
+    expect(anchorRow.getAttribute("title")).toContain("Lifecycle: LC-ANCHOR");
+    expect(anchorRow.getAttribute("title")).toContain("State: running");
+
+    // Selecting the single row selects the task document — the leaf's durable identity.
+    fireEvent.click(contractRow);
+    expect(onSelect).toHaveBeenCalledWith(
+      "taskdoc:/tasks/260610_browser-dashboard/11_hangar-worktree-truth.json",
     );
   });
 
@@ -432,6 +590,8 @@ describe("LifecycleList task labels", () => {
             lifecycleId: "LC-DEAD",
             leafId: "260628-l10-r1",
             cleanup: "abandoned",
+            codeWorktreeExists: false,
+            memoryWorktreeExists: false,
           }),
         ],
         analytics: {
@@ -526,6 +686,159 @@ describe("LifecycleList task labels", () => {
     expect(onSelect).toHaveBeenCalledWith("taskdoc:/tasks/repo-a/plan/task.json");
   });
 
+  it("renders the orchestration tier above its commanded masters with the V4 treatment (L14)", () => {
+    // An orchestration task is a master doc carrying `orchestrates` (the owner data-model ruling).
+    // It renders gold-tier at depth 0; a master it names nests one step with the purple tier; that
+    // master's leaves keep today's rendering one step further; an uncommanded master is unchanged.
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/15",
+            lifecycleId: "",
+            leafId: "15_parallel-leaf-enclosure-workflow",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "SPRINT-02",
+              kind: "master",
+              title: "SPRINT 02 · rollout",
+              docPath: "/tasks/sprint-02/task.json",
+              orchestrates: ["260610_browser-dashboard"],
+              createdAt: "2026-06-19T09:00:00+00:00",
+            }),
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+              createdAt: "2026-06-20T08:00:00+00:00",
+            }),
+            taskDoc({
+              kind: "master",
+              title: "Free Standing Series",
+              docPath: "/tasks/260620_free-standing/task.json",
+              createdAt: "2026-06-21T08:00:00+00:00",
+            }),
+            taskDoc({
+              id: "15",
+              title: "Parallel Leaf Enclosure Workflow",
+              docPath: "/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
+              createdAt: "2026-06-22T08:00:00+00:00",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "15",
+                  name: "Parallel Leaf Enclosure Workflow",
+                  file: "15_parallel-leaf-enclosure-workflow.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-20T09:00:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+
+    // Gold tier: the orchestration row, top-level, chevron badge rendered.
+    const sprintRow = getByText("SPRINT 02 · rollout").closest("[role='option']");
+    expect(sprintRow?.getAttribute("data-tier")).toBe("orchestration");
+    expect(sprintRow?.getAttribute("data-depth")).toBe("0");
+    expect(sprintRow?.querySelector("[data-rank-tier='orchestration']")).not.toBeNull();
+
+    // Purple tier: the commanded master nests under the orchestration row at 22px.
+    const masterRow = getByText("Browser Dashboard Series").closest("[role='option']");
+    expect(masterRow?.getAttribute("data-tier")).toBe("management");
+    expect(masterRow?.getAttribute("data-depth")).toBe("1");
+    expect(masterRow?.getAttribute("data-parent-key")).toBe("taskdoc:/tasks/sprint-02/task.json");
+    expect((masterRow as HTMLElement).style.marginLeft).toBe("22px");
+    expect(masterRow?.querySelector("[data-rank-tier='management']")).not.toBeNull();
+
+    // Leaves keep today's rendering one step further (depth 2, one 22px margin step + nested look).
+    const leafRow = getByText("15. Parallel Leaf Enclosure Workflow").closest("[role='option']");
+    expect(leafRow?.getAttribute("data-depth")).toBe("2");
+    expect(leafRow?.getAttribute("data-tier")).toBeNull();
+    expect((leafRow as HTMLElement).style.marginLeft).toBe("22px");
+    expect(leafRow?.querySelector("[data-rank-tier]")).toBeNull();
+
+    // The uncommanded master is untouched: top-level, no tier, no badge, no margin.
+    const freeRow = getByText("Free Standing Series").closest("[role='option']");
+    expect(freeRow?.getAttribute("data-tier")).toBeNull();
+    expect(freeRow?.getAttribute("data-depth")).toBe("0");
+    expect((freeRow as HTMLElement).style.marginLeft).toBe("");
+    expect(freeRow?.querySelector("[data-rank-tier]")).toBeNull();
+  });
+
+  it("renders NO orchestration row or insignia in a flat run (D3 regression)", () => {
+    // No doc carries `orchestrates` ⇒ the list is byte-identical to the pre-L14 rendering:
+    // masters top-level, leaves one nested step, zero tier attributes, zero badges.
+    const onSelect = vi.fn();
+    seed(
+      projection({
+        lifecycles: [],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/15",
+            lifecycleId: "",
+            leafId: "15_parallel-leaf-enclosure-workflow",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              kind: "master",
+              title: "Browser Dashboard Series",
+              docPath: "/tasks/260610_browser-dashboard/task.json",
+            }),
+            taskDoc({
+              id: "15",
+              title: "Parallel Leaf Enclosure Workflow",
+              docPath: "/tasks/260610_browser-dashboard/15_parallel-leaf-enclosure-workflow.json",
+            }),
+          ],
+          series: [
+            seriesNode({
+              seriesId: "260610_browser-dashboard",
+              subTasks: [
+                {
+                  number: "15",
+                  name: "Parallel Leaf Enclosure Workflow",
+                  file: "15_parallel-leaf-enclosure-workflow.md",
+                  status: "inProgress",
+                  scope: "",
+                  createdAt: "2026-06-20T09:00:00+00:00",
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { container, getByText } = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
+    expect(container.querySelector("[data-tier]")).toBeNull();
+    expect(container.querySelector("[data-rank-tier]")).toBeNull();
+    const masterRow = getByText("Browser Dashboard Series").closest("[role='option']");
+    expect(masterRow?.getAttribute("data-depth")).toBe("0");
+    expect((masterRow as HTMLElement).style.marginLeft).toBe("");
+    const leafRow = getByText("15. Parallel Leaf Enclosure Workflow").closest("[role='option']");
+    expect(leafRow?.getAttribute("data-depth")).toBe("1");
+    expect((leafRow as HTMLElement).style.marginLeft).toBe("");
+  });
+
   it("exposes the full long task title and row context on title hover", () => {
     const longTitle =
       "Operations task reader row title that is intentionally long enough to require ellipsis in the left rail";
@@ -587,5 +900,45 @@ describe("LifecycleList task labels", () => {
     expect(title.getAttribute("title")).toContain(
       "Current step: Constrain Tasks panel row title layout",
     );
+  });
+});
+
+describe("LifecycleList gate hint (L17 — no bare-ask affordance)", () => {
+  it("renders no gate hint for a lifecycle carrying a bare ask but no durable gate", () => {
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({
+            id: "LC-ASK",
+            repoId: "agents-remember",
+            state: "running",
+            // A wait-loop-era `ask` payload with NO durable gate: under notify-and-continue this must
+            // NOT resurface as a gate affordance in the row (the retired fallback showed the question).
+            ask: { question: "Approve the plan?" },
+          }),
+        ],
+        enclosures: [
+          enclosure({ enclosure: "/contracts/ask", lifecycleId: "LC-ASK", leafId: "01_ask-only" }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "01",
+              lifecycleId: undefined,
+              title: "Ask Only Leaf",
+              docPath: "/tasks/260610_browser-dashboard/01_ask-only.json",
+            }),
+          ],
+        },
+      }),
+    );
+    const { getByText } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    const row = getByText("Ask Only Leaf");
+    // The lifecycle IS bound (its state annotates the row) — so the absent gate line is the contract,
+    // not a missing binding. Neither a "Gate:" line nor the ask question leaks into the row.
+    expect(row.getAttribute("title")).toContain("State: running");
+    expect(row.getAttribute("title")).not.toContain("Gate:");
+    expect(row.getAttribute("title")).not.toContain("Approve the plan?");
   });
 });

@@ -1,5 +1,6 @@
 import { css, cva } from "../../styled-system/css";
-import { fmtWait } from "../data/selectors";
+import { fmtWait, hasLiveWorktree } from "../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../data/servedAges";
 import { useDashboard } from "../data/store";
 import { Affordance } from "../grammar/Affordance";
 import { Panel } from "../grammar/Panel";
@@ -13,13 +14,11 @@ import { GateResponder, isWorktreeGateKind } from "./GateResponder";
 //
 // A finalized worktree keeps its enclosure CONTRACT on disk (it records the landed state for memory
 // lineage) even after its directory is reaped, so the raw enclosure set only ever grows. The hangar is
-// about worktrees that still physically exist / need action, so it hides the archived ones — a
-// completed/abandoned cleanup means there is no worktree left to integrate, clean up, or rot.
-const ARCHIVED_CLEANUP = new Set(["completed", "abandoned"]);
-
-function isArchived(enclosure: EnclosureNode): boolean {
-  return ARCHIVED_CLEANUP.has(enclosure.cleanup);
-}
+// about worktrees that still physically exist / need action, so it renders a row ONLY while a worktree
+// physically exists — the projection's stat'ed hasLiveWorktree truth (L11), never a cleanup-state
+// proxy. Completed/abandoned enclosures drop out by that same rule (their worktrees were reaped), and
+// a reopened contract (cleanup=reopened: contract-reset-awaiting-restart) stays hidden until
+// worktree_start recreates its worktrees.
 
 function isStale(enclosure: EnclosureNode, lifecycle: LifecycleProjection | undefined): boolean {
   if (enclosure.cleanup === "pending" || enclosure.integrationStatus === "completed") return true;
@@ -73,8 +72,11 @@ const actions = css({ display: "flex", gap: "0.3rem" });
 export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
   const enclosures = useDashboard((s) => s.enclosures);
   const lifecycles = useDashboard((s) => s.lifecycles);
+  // Served ages advance locally between emissions — the change gate (260703-L15) no longer
+  // re-serves a node whose only movement is its age, so the display ticks here instead.
+  const nowMs = useNowMs();
   const rows = Object.values(enclosures)
-    .filter((enclosure) => !isArchived(enclosure))
+    .filter(hasLiveWorktree)
     .sort((a, b) => a.enclosure.localeCompare(b.enclosure));
 
   return (
@@ -100,7 +102,9 @@ export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
                   >
                     {enclosure.repoName} · {enclosure.taskName}
                   </button>
-                  <span className="muted">{fmtWait(lifecycle?.staleSeconds)}</span>
+                  <span className="muted">
+                    {fmtWait(servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs))}
+                  </span>
                 </div>
                 <div className={badges}>
                   <span className={badge}>review {enclosure.humanReviewStatus}</span>

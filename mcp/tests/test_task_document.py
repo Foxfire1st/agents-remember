@@ -191,6 +191,20 @@ class SchemaTests(unittest.TestCase):
             "codeExamplesNote", _doc().model_dump_json(by_alias=True, exclude_none=True)
         )
 
+    def test_orchestrates_round_trips_on_master_and_is_master_only(self) -> None:
+        # L14: an orchestration task is a master doc carrying `orchestrates` — additive, no new kind.
+        master = _master(orchestrates=["260706_management-repo", "260707_settings-page"])
+        again = TaskDocument.model_validate(master.model_dump(by_alias=True))
+        self.assertEqual(again, master)
+        self.assertEqual(
+            again.orchestrates, ["260706_management-repo", "260707_settings-page"]
+        )
+        # A leaf/light doc never commands masters.
+        with self.assertRaises(ValidationError):
+            _doc(orchestrates=["260706_management-repo"])
+        # Docs without the field are untouched: it defaults to [] and validates as before.
+        self.assertEqual(_master().orchestrates, [])
+
 
 class RenderTests(unittest.TestCase):
     def test_golden_small_light_doc(self) -> None:
@@ -489,6 +503,21 @@ class MasterRenderTests(unittest.TestCase):
         doc = _master(sections=[{"kind": "subTasks", "heading": "Sub-tasks"}])
         self.assertIn("_No sub-tasks defined yet._", render_markdown(doc))
 
+    def test_master_orchestrates_header_line(self) -> None:
+        # L14: the orchestration-command relation renders as a header line; absent field → no line.
+        doc = _master(
+            orchestrates=["260706_management-repo", "260707_settings-page"],
+            sections=[{"kind": "subTasks", "heading": "Sub-tasks"}],
+        )
+        self.assertIn(
+            "**Orchestrates:** `260706_management-repo`, `260707_settings-page`",
+            render_markdown(doc),
+        )
+        self.assertNotIn(
+            "**Orchestrates:**",
+            render_markdown(_master(sections=[{"kind": "subTasks", "heading": "Sub-tasks"}])),
+        )
+
     def test_master_preserves_bespoke_prose_verbatim(self) -> None:
         # Bespoke prose sections (Resume / North-Star / Mandated ...) survive byte-for-byte,
         # including internal blank lines and nested bullets -- the S4 acceptance.
@@ -689,6 +718,27 @@ class ControllerTests(unittest.TestCase):
         updated = self._call("set_field", fields={"statusNote": "core JSON format landed"})
         doc = read_task_doc(Path(str(updated["docPath"])))
         self.assertEqual(doc.statusNote, "core JSON format landed")
+
+    def test_set_field_orchestrates_on_master(self) -> None:
+        # L14: `orchestrates` is a mutable flat string list on a master (the set_field path
+        # makes an existing master an orchestration task without a replace); the render carries it.
+        self._create_parent_master()
+        updated = task_doc_tool(
+            self.cfg,
+            repo_id="agents-remember",
+            operation="set_field",
+            task_name="3c-x",
+            fields={"orchestrates": ["260706_management-repo"]},
+        )
+        doc = read_task_doc(Path(str(updated["docPath"])))
+        self.assertEqual(doc.orchestrates, ["260706_management-repo"])
+        rendered = Path(str(updated["renderedPath"])).read_text(encoding="utf-8")
+        self.assertIn("**Orchestrates:** `260706_management-repo`", rendered)
+
+    def test_set_field_orchestrates_rejected_on_leaf(self) -> None:
+        self._create()
+        with self.assertRaises(TaskDocError):
+            self._call("set_field", fields={"orchestrates": ["260706_management-repo"]})
 
     def test_dry_run_create_renders_without_writing(self) -> None:
         result = task_doc_tool(
@@ -1206,6 +1256,29 @@ class MasterControllerTests(unittest.TestCase):
                 slug="01_a",
                 subtask={"number": "1"},
             )
+
+    def test_remove_subtask_response_validates_on_both_paths(self) -> None:
+        # FINDING 1 (260703-L18, closes friction F-N): the remove_subtask result must satisfy the
+        # TaskDocResponse contract (extra=forbid). Before removedSubtask/deletedFiles/wouldDeleteFiles
+        # were declared, the destructive success FAILED response validation, so the caller saw a tool
+        # error after the removal already happened (and could retry an already-done op). Both the
+        # delete-with-files and keep_file paths -- and the dry-run preview -- must validate.
+        self._create()
+        self._author_leaf(number="1", slug="01_a")
+        deleted = self._op("remove_subtask", subtask={"number": "1"})
+        self.assertEqual(deleted["removedSubtask"], "1")
+        self.assertTrue(deleted["deletedFiles"])  # the leaf json + md paths
+        TaskDocResponse.model_validate(deleted)  # would raise ValidationError before the fix
+
+        self._author_leaf(number="2", slug="02_b")
+        kept = self._op("remove_subtask", subtask={"number": "2", "keep_file": True})
+        self.assertEqual(kept["deletedFiles"], [])
+        TaskDocResponse.model_validate(kept)
+
+        self._author_leaf(number="3", slug="03_c")
+        preview = self._op("remove_subtask", subtask={"number": "3"}, dry_run=True)
+        self.assertTrue(preview["wouldDeleteFiles"])
+        TaskDocResponse.model_validate(preview)
 
 
 class RegistrationTests(unittest.TestCase):

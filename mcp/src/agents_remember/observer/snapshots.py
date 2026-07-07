@@ -426,6 +426,13 @@ def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
         closeoutStatus=contract.closeout_status,
         integrationStatus=contract.integration_status,
         cleanup=contract.cleanup,
+        # Worktree-existence truth (L11), stat'ed here at snapshot time exactly as
+        # worktree_status reports it: the tasks surface renders a leaf ONLY while a
+        # worktree physically exists, so this must never be inferred from cleanup state.
+        codeWorktreeExists=contract.code_worktree.exists(),
+        memoryWorktreeExists=(
+            contract.memory_worktree.exists() if contract.memory_worktree else False
+        ),
     )
 
 
@@ -484,7 +491,14 @@ def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentP
                     entryId=entry.id,
                     lifecycleId=entry.lifecycleId,
                     agentId=entry.agentId,
+                    senderAgentId=entry.senderAgentId,
+                    senderRole=entry.senderRole,
+                    recipientRole=entry.recipientRole,
                     gateId=entry.gateId,
+                    messageKind=entry.messageKind,
+                    artifactPath=entry.artifactPath,
+                    deliveryState=entry.deliveryState,
+                    deliveredToSession=entry.deliveredToSession,
                     state=pickup_state(entry, now=now),
                     ageSeconds=pickup_age_seconds(entry, now=now),
                     ttlSeconds=AGENT_PICKUP_TTL_SECONDS,
@@ -1147,6 +1161,7 @@ def _task_doc_node(
             for section in doc.sections
         ],
         masterLifecycleId=parent_lifecycle,
+        orchestrates=list(doc.orchestrates),
     )
 
 

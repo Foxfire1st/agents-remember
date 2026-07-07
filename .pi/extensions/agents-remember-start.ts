@@ -23,23 +23,19 @@ export default function (pi) {
     }
 
     const directive = [
-      "MANDATORY FIRST ACTION for this workspace",
+      "**Agents Remember — session start.**",
       "",
-      "You are not allowed to read, write, or execute code on any repository",
-      "until you read `ar-coordination/AGENTS.md` and started its `l-01` procedure.",
+      "If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an",
+      "orchestrating agent: **ignore this notice entirely — your brief is your session",
+      "start.**",
       "",
-      `Read and follow \`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` before working in any sibling project.`,
-      "Treat those rules as workspace instructions.",
-      "",
-      "Until the build/job decision is made, read managed-repo source with the",
-      "`read_ar_files` MCP tool — not the harness's native read tool. One call returns",
-      "each file paired with its onboarding plus the repository and governing route",
-      "overviews. Native read is reserved as the edit precondition once building begins.",
-      "",
-      "During the `l-01` deep research step, keep a tally of the retrieval strategies",
-      "used from `c-04-retrieval-strategy-router` (Semantics, Relationship, Intent), and",
-      "keep a running count of your `read_ar_files` calls. Include the onboarding files",
-      "inspected and every CGC, GrepAI, and `read_ar_files` call made as evidence."
+      "Otherwise you are the developer-facing session, i.e. the **orchestrator**: read",
+      `\`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` and treat those rules as workspace`,
+      "instructions, then run your lifecycle at",
+      "`skills/l-01-agent-lifecycles/roles/orchestrator.md` — trust checkpoint before",
+      "relying on memory, `read_ar_files` (paired source+onboarding) until the build",
+      "decision, retrieval-strategy tally as evidence, notify-and-stop at every",
+      "developer hand-off."
     ].join("\n");
 
     return {

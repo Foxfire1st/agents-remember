@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,6 +68,8 @@ from agents_remember.observer.projection_store import (
     write_projection,
 )
 from agents_remember.observer.reducer import (
+    TOKEN_SERIES_MAX,
+    TOKEN_SERIES_RECENT,
     build_analytics,
     build_attention_queue,
     build_engine_processes,
@@ -1354,6 +1357,78 @@ class SnapshotReaderTests(unittest.TestCase):
     def test_read_enclosures_absent_is_empty(self) -> None:
         self.assertEqual(read_enclosures((self.tmp / "nope").resolve()), [])
 
+    def _existence_contract(self, coord: Path):  # -> WorktreeContract
+        contract = default_contract(
+            task_name="Observe Lifecycle",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=coord,
+            code_repo_path=coord / "repo-a",
+            code_source_branch="main",
+            code_work_branch="ar/observe",
+            code_base_commit="0" * 40,
+            worktree_name="observe",
+            memory_repo_path=coord / "repo-a-memory",
+            memory_source_branch="main",
+            memory_work_branch="ar/observe-memory",
+            memory_base_commit="1" * 40,
+            lifecycle_id="LC-1",
+        )
+        contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+        write_contract(contract.contract_path, contract)
+        return contract
+
+    def test_read_enclosures_stat_worktree_existence(self) -> None:
+        """L11: codeWorktreeExists/memoryWorktreeExists are stat'ed truth at snapshot time.
+
+        Matches how the worktree tools report existence (``status_payload``'s
+        ``code_worktree.exists()``): the flags flip as the directories appear on disk,
+        with no contract rewrite involved.
+        """
+        coord = (self.tmp / "coord").resolve()
+        contract = self._existence_contract(coord)
+
+        [before] = read_enclosures(coord)
+        self.assertEqual((before.codeWorktreeExists, before.memoryWorktreeExists), (False, False))
+
+        contract.code_worktree.mkdir(parents=True)
+        [code_only] = read_enclosures(coord)
+        self.assertEqual(
+            (code_only.codeWorktreeExists, code_only.memoryWorktreeExists), (True, False)
+        )
+
+        assert contract.memory_worktree is not None
+        contract.memory_worktree.mkdir(parents=True)
+        [both] = read_enclosures(coord)
+        self.assertEqual((both.codeWorktreeExists, both.memoryWorktreeExists), (True, True))
+
+    def test_read_enclosures_reopened_is_reset_awaiting_restart_not_archived(self) -> None:
+        """L11: ``cleanup=reopened`` means contract-reset-awaiting-restart, not live work.
+
+        The reopened contract must still project (it is NOT archived like
+        completed/abandoned — the leaf is coming back), but with existence False so the
+        tasks surface hides it until ``worktree_start`` physically recreates the
+        worktrees — at which point the same contract reads visible again.
+        """
+        coord = (self.tmp / "coord").resolve()
+        contract = self._existence_contract(coord)
+        write_contract(
+            contract.contract_path, replace(contract, cleanup="reopened", lifecycle_id="")
+        )
+
+        [reopened] = read_enclosures(coord)
+        self.assertEqual(reopened.cleanup, "reopened")
+        self.assertEqual(
+            (reopened.codeWorktreeExists, reopened.memoryWorktreeExists), (False, False)
+        )
+
+        # worktree_start recreates the directories: existence truth flips back with no
+        # further contract interpretation needed.
+        contract.code_worktree.mkdir(parents=True)
+        [restarted] = read_enclosures(coord)
+        self.assertTrue(restarted.codeWorktreeExists)
+
     def test_project_and_write_end_to_end(self) -> None:
         config = self._config()
         store = EventStore(observer_root(config))
@@ -1434,6 +1509,43 @@ class TokenSeriesTests(unittest.TestCase):
 
     def test_no_tool_events_is_empty(self) -> None:
         self.assertEqual(token_series([_started()]), [])
+
+    def _tool_log(self, count: int) -> list[Event]:
+        log = [_started()]
+        for index in range(count):
+            log.append(
+                _event(
+                    "tool.completed",
+                    ts=f"2026-06-13T18:{index // 60000:02d}:{(index // 1000) % 60:02d}.{index % 1000:03d}+00:00",
+                    trust="observed",
+                    tool="a",
+                    tokens=10,
+                    ok=True,
+                )
+            )
+        return log
+
+    def test_series_at_the_bound_is_untouched(self) -> None:
+        series = token_series(self._tool_log(TOKEN_SERIES_MAX))
+        self.assertEqual(len(series), TOKEN_SERIES_MAX)
+        self.assertEqual(series[-1].cumulative, 10 * TOKEN_SERIES_MAX)
+
+    def test_long_series_is_decimated_to_the_bound(self) -> None:
+        # 260703-L15: the served fuel gauge is bounded -- a long lifecycle's series decimates
+        # to TOKEN_SERIES_MAX (newest TOKEN_SERIES_RECENT exact, older history uniform-thinned,
+        # first sample kept) instead of growing ~60 B/sample into every lifecycle delta.
+        count = 3000
+        series = token_series(self._tool_log(count))
+        self.assertEqual(len(series), TOKEN_SERIES_MAX)
+        # The newest window is exact: the last TOKEN_SERIES_RECENT cumulative values.
+        recent = [sample.cumulative for sample in series[-TOKEN_SERIES_RECENT:]]
+        self.assertEqual(recent, [10 * n for n in range(count - TOKEN_SERIES_RECENT + 1, count + 1)])
+        # The thinned history keeps the first sample and stays monotonic (a decimated
+        # cumulative series must still read as a fuel gauge).
+        self.assertEqual(series[0].cumulative, 10)
+        cumulative = [sample.cumulative for sample in series]
+        self.assertEqual(cumulative, sorted(cumulative))
+        self.assertEqual(series[-1].cumulative, 10 * count)
 
 
 class StalenessHistogramTests(unittest.TestCase):
@@ -2603,6 +2715,27 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(len(nodes), 1)
         self.assertIsNone(nodes[0].lifecycleId)
         self.assertEqual(nodes[0].docPath, (root / "03c_x.json").as_posix())
+
+    def test_exposes_orchestrates_on_the_task_doc_node(self) -> None:
+        # L14: the orchestration-command relation rides the projection so the dashboard can derive
+        # the orchestration > master > leaf hierarchy; docs without the field project [].
+        sprint_root = self.coord / "tasks" / "repo-a" / "sprint-02"
+        write_task_doc(
+            sprint_root,
+            self._doc(
+                id="SPRINT-02",
+                slug="task",
+                kind="master",
+                title="Sprint 02",
+                orchestrates=["260706_management-repo"],
+            ),
+        )
+        plain_root = self.coord / "tasks" / "repo-a" / "demo"
+        write_task_doc(plain_root, self._doc())
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        by_id = {node.id: node for node in nodes}
+        self.assertEqual(by_id["SPRINT-02"].orchestrates, ["260706_management-repo"])
+        self.assertEqual(by_id["D"].orchestrates, [])
 
     def test_leaf_contract_alone_is_not_a_task_document(self) -> None:
         contract = default_contract(

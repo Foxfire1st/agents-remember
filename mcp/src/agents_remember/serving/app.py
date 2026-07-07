@@ -62,37 +62,32 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
+from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.serving.actions import ActionRequest, evaluate_action
+from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
-from agents_remember.serving.harnesses import (
-    Which,
-    detect_harnesses,
-    find_harness,
-    is_detected,
-)
+from agents_remember.serving.harnesses import detect_harnesses
+from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
-    TerminalSessionKind,
-    TerminalSessionRole,
-    role_for_kind,
     terminal_catalog_path,
 )
-from agents_remember.serving.terminal_leaf_assignment import (
-    assign_terminal_session_to_leaf,
-    leaf_conflict_owner,
-)
+from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
+from agents_remember.serving.terminal_opener import open_terminal_session
+from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -107,14 +102,42 @@ def _encode(data: BaseModel | dict[str, Any]) -> Any:
     return data
 
 
-async def stream_events(projector: Projector) -> AsyncGenerator[ServerSentEvent]:
+def _if_none_match_matches(header: str | None, revision: str) -> bool:
+    """RFC 7232 weak comparison of an ``If-None-Match`` header against our revision.
+
+    The revision is the projector's opaque content fingerprint (boot nonce + content
+    sequence); the served ETag is its weak form ``W/"<revision>"``. Weak comparison strips
+    ``W/`` prefixes, so any listed entity-tag whose opaque value equals the revision
+    matches; ``*`` matches any current representation.
+    """
+    if header is None:
+        return False
+    for candidate in header.split(","):
+        tag = candidate.strip()
+        if tag == "*":
+            return True
+        if tag.startswith(("W/", "w/")):
+            tag = tag[2:]
+        if tag.strip('"') == revision:
+            return True
+    return False
+
+
+async def stream_events(
+    projector: Projector, *, build: ServingBuild | None = None
+) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one connection: snapshot, then per-entity deltas.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
+    ``build`` (the boot-time serving stamp, 260703-L15) rides the snapshot as
+    ``servingBuild`` so the cockpit can render which process/commit is answering.
     """
     seq, snapshot = projector.current()
     if snapshot is not None:
-        yield ServerSentEvent(data=_encode(snapshot), event="snapshot", id=str(seq), retry=2000)
+        payload = _encode(snapshot)
+        if build is not None:
+            payload["servingBuild"] = build.payload()
+        yield ServerSentEvent(data=payload, event="snapshot", id=str(seq), retry=2000)
     async for seq, delta in projector.subscribe():
         yield ServerSentEvent(data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000)
 
@@ -283,82 +306,36 @@ class TerminalAttachLeafRequest(BaseModel):
     leaf_key: str = Field(alias="leafKey")
 
 
+class TerminalPasteRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}/paste``: deliver a context packet to a hosted session.
+
+    The server-side mirror of the frontend ``pasteAndConfirm`` / ``submitAndConfirm`` (L2): paste the
+    text as one echo-confirmed bracketed paste, and only submit it (send ``Enter``) when ``submit`` is
+    true -- a draft stays a draft otherwise.
+    """
+
+    text: str
+    submit: bool = False
+
+
 class OperatorInboxPostRequest(BaseModel):
     """Body of ``POST /api/operator-inbox`` for non-hosted chat replies."""
 
     lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
     agent_id: str | None = Field(default=None, alias="agentId")
+    sender_agent_id: str | None = Field(default=None, alias="senderAgentId")
+    sender_role: AgentRole | None = Field(default=None, alias="senderRole")
+    recipient_role: AgentRole | None = Field(default=None, alias="recipientRole")
     gate_id: str | None = Field(default=None, alias="gateId")
+    message_kind: InboxMessageKind = Field(default="message", alias="messageKind")
+    artifact_path: str | None = Field(default=None, alias="artifactPath")
+    deliver_to_hosted: bool = Field(default=True, alias="deliverToHosted")
     ask: str
     response: str
 
 
-def resolve_terminal_launch(
-    kind: str,
-    *,
-    workspace_root: Path,
-    shell: str,
-    harness: str | None = None,
-    which: Which | None = None,
-) -> tuple[Path, list[str]]:
-    """Resolve a launch ``kind`` to ``(cwd, argv)`` -- the server owns the command.
-
-    ``terminal`` spawns ``shell`` at the workspace root (the dashboard-owned scratch terminal,
-    slice 6e-2a). ``harness`` spawns the registered TUI harness ``harness`` (its id) at the same
-    root (slice 6e-2b), rejecting an absent id, an unknown id, or one whose CLI is not installed
-    (``which`` defaults to :func:`shutil.which`). Every other kind raises ``ValueError`` -- the
-    opener endpoint turns that into a 400.
-    """
-    if kind == "terminal":
-        return workspace_root, [shell]
-    if kind == "harness":
-        if harness is None:
-            raise ValueError("harness kind requires a harness id")
-        found = find_harness(harness)
-        if found is None:
-            raise ValueError(f"unknown harness: {harness!r}")
-        if not is_detected(found, which=which):
-            raise ValueError(f"harness not installed: {harness!r}")
-        return workspace_root, list(found.argv)
-    raise ValueError(f"unknown terminal kind: {kind!r}")
-
-
-def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: str) -> str:
-    if kind == "terminal":
-        return "Terminal"
-    return harness or fallback
-
-
 def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
     return entry.to_json()
-
-
-def _claim_leaf_or_409(
-    catalog: TerminalCatalog,
-    leaf_key: str | None,
-    session_id: str,
-    *,
-    role: TerminalSessionRole,
-) -> JSONResponse | None:
-    """Server-authoritative uniqueness: at most one RUNNING session per (leaf, role) (the guard).
-
-    Uniqueness is scoped to ``role`` (chat vs. terminal): a leaf may hold one agent chat AND one
-    plain terminal at once, so opening a terminal never 409s against the leaf's chat and vice versa.
-    Returns a ``409 leaf-taken`` response when ``leaf_key`` is already owned by a *different* running
-    session of the SAME role, else ``None`` (free, or already this session's). Called immediately
-    before an upsert in the single-process FastAPI app + atomic JSON store, so the check-then-write is
-    effectively atomic; the client guard in ``data/sessions.ts`` is only advisory. ``leaf_key`` is
-    opaque (a leaf key or a reserved ``master:<...>`` key flow identically).
-    """
-    if not leaf_key:
-        return None
-    owner = leaf_conflict_owner(catalog, leaf_key=leaf_key, session_id=session_id, role=role)
-    if owner is not None:
-        return JSONResponse(
-            content={"status": "leaf-taken", "leafKey": leaf_key, "session": owner},
-            status_code=409,
-        )
-    return None
 
 
 def _refresh_catalog_entries(
@@ -413,6 +390,7 @@ def create_app(
     refresh_provider_state: bool | None = None,
     terminal_host: TerminalHost | None = None,
     terminal_catalog: TerminalCatalog | None = None,
+    terminal_paster: TerminalPaster | None = None,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
@@ -431,6 +409,9 @@ def create_app(
     )
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    paster = terminal_paster if terminal_paster is not None else TerminalPaster()
+    # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
+    build = resolve_serving_build()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -447,15 +428,29 @@ def create_app(
     app = FastAPI(title="Agents Remember dashboard", lifespan=lifespan)
 
     @app.get("/api/state")
-    def api_state() -> dict[str, Any]:
-        _, snapshot = projector.current()
+    def api_state(
+        if_none_match: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        # The change gate (260703-L15): the ETag is the projector's content revision, which only
+        # advances when the stable projection form changes (volatile ages excluded -- delta.py).
+        # An If-None-Match poll of an unchanged projection therefore costs a header exchange
+        # instead of a ~780 KB dump+parse; when content DID change, the full fresh dump serves
+        # exactly as before. `Cache-Control: no-cache` keeps any cache honest (always revalidate).
+        seq, snapshot = projector.current()
         if snapshot is None:
             raise HTTPException(status_code=503, detail="projection not ready")
-        return snapshot.model_dump(by_alias=True, exclude_none=True)
+        revision = projector.revision(seq)
+        etag = f'W/"{revision}"'
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if _if_none_match_matches(if_none_match, revision):
+            return Response(status_code=304, headers=headers)
+        body = snapshot.model_dump(by_alias=True, exclude_none=True)
+        body["servingBuild"] = build.payload()
+        return JSONResponse(content=body, headers=headers)
 
     @app.get("/api/stream", response_class=EventSourceResponse)
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(projector):
+        async for event in stream_events(projector, build=build):
             yield event
 
     @app.get("/api/events", response_class=EventSourceResponse)
@@ -571,6 +566,15 @@ def create_app(
                 lifecycle_id=request.lifecycle_id,
                 agent_id=request.agent_id,
                 gate_id=request.gate_id,
+                sender_agent_id=request.sender_agent_id,
+                sender_role=request.sender_role,
+                recipient_role=request.recipient_role,
+                message_kind=request.message_kind,
+                artifact_path=request.artifact_path,
+                deliver_to_hosted=request.deliver_to_hosted,
+                terminal_catalog=catalog,
+                terminal_host=host,
+                terminal_paster=paster,
                 ask=request.ask,
                 response=request.response,
                 created_by="developer",
@@ -629,78 +633,72 @@ def create_app(
     def api_harnesses() -> dict[str, Any]:
         # The supported TUI harnesses + whether each is installed here (slice 6e-2b). The dashboard
         # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
+        # 260703-L16: the EFFECTIVE registry (builtin merged with orchestration.harnesses in the
+        # GLOBAL agentic settings, per-use) -- settings-defined harnesses get buttons too. Repo-local
+        # overrides are leaf-scoped dispatch material (the MCP spawn tool), not workspace buttons.
+        registry = load_agentic_settings(config.coordination_root).harnesses
         return {
             "harnesses": [
-                {"id": h.id, "name": h.name, "detected": h.detected} for h in detect_harnesses()
+                {"id": h.id, "name": h.name, "detected": h.detected}
+                for h in detect_harnesses(registry=registry)
             ]
         }
 
     @app.post("/api/terminal/{session}")
     def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
         # Mode B2 opener (slice 6e-2a; harness kinds 6e-2b): the dashboard *spawns + owns* a
-        # session, then the WebSocket above attaches to it. The command is server-resolved from the
-        # kind/harness id (never wire-supplied) and spawned as the dashboard's OS user/env at the
-        # workspace root.
+        # session, then the WebSocket above attaches to it. L2 moves the leaf-claim + ensure + upsert
+        # composition into the shared `open_terminal_session` so this route and the agent-facing
+        # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
         shell = os.environ.get("SHELL") or DEFAULT_SHELL
-        try:
-            cwd, command = resolve_terminal_launch(
-                request.kind,
-                workspace_root=config.workspace_root,
-                shell=shell,
-                harness=request.harness,
-            )
-        except ValueError as exc:
-            return JSONResponse(content={"status": "bad-kind", "detail": str(exc)}, status_code=400)
-        kind: TerminalSessionKind = "harness" if request.kind == "harness" else "terminal"
-        # Claim the leaf before spawning: a taken leaf is refused 409 so two chats never mingle on
-        # one leaf (contradicting file writes). Scoped to the launch role so a terminal can sit beside
-        # the leaf's agent chat. Enclosure-independent -- no worktree required.
-        conflict = _claim_leaf_or_409(
-            catalog, request.leaf_key, session, role=role_for_kind(kind)
-        )
-        if conflict is not None:
-            return conflict
-        opened = host.ensure(
-            session,
-            cwd=cwd,
-            command=command,
-            lifecycle_id=request.lifecycle_id,
-            # A harness is a bare pane with no shell to `fg`; the host strips Ctrl-Z for it. A plain
-            # shell keeps Ctrl-Z so its job control works (slice 6f hardening).
-            suspend_unsafe=request.kind == "harness",
-        )
-        attached_at = now_iso()
-        existing = catalog.get(session)
-        label = request.label or (
-            existing.label if existing else _terminal_label(kind, request.harness, session)
-        )
-        entry = TerminalCatalogEntry(
-            id=opened.sid,
-            label=label,
-            kind=kind,
+        result = open_terminal_session(
+            catalog=catalog,
+            host=host,
+            session_id=session,
+            kind=request.kind,
+            workspace_root=config.workspace_root,
+            shell=shell,
             harness=request.harness,
+            label=request.label,
             lifecycle_id=request.lifecycle_id,
-            cwd=opened.cwd,
-            tmux_name=opened.tmux_name,
-            command=tuple(command),
-            created_at=existing.created_at if existing is not None else attached_at,
-            last_attached_at=attached_at,
-            status="running",
-            # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already
-            # owns (a re-open / reconnect must not silently drop the leaf binding).
-            leaf_key=request.leaf_key or (existing.leaf_key if existing is not None else None),
+            leaf_key=request.leaf_key,
+            # 260703-L16: resolve harness ids against the effective GLOBAL registry (builtin merged
+            # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
+            # Loaded only for harness-kind opens (review L16R-1): a malformed settings file must
+            # fail the launches that USE it, never a plain scratch terminal.
+            harnesses=(
+                load_agentic_settings(config.coordination_root).harnesses
+                if request.kind == "harness" or request.harness
+                else None
+            ),
         )
-        catalog.upsert(entry)
+        if result.status == "bad-kind":
+            return JSONResponse(
+                content={"status": "bad-kind", "detail": result.detail}, status_code=400
+            )
+        if result.status == "leaf-taken":
+            # Server-authoritative uniqueness (per leaf, role): refuse so two chats never mingle on
+            # one leaf. The client guard in data/sessions.ts is only advisory.
+            return JSONResponse(
+                content={
+                    "status": "leaf-taken",
+                    "leafKey": request.leaf_key,
+                    "session": result.owner_session_id,
+                },
+                status_code=409,
+            )
+        entry = result.entry
+        assert entry is not None  # opened => an upserted row
         return JSONResponse(
             content={
-                "session": opened.sid,
+                "session": entry.id,
                 "label": entry.label,
                 "kind": request.kind,
                 "harness": request.harness,
                 "lifecycleId": request.lifecycle_id,
                 "leafKey": entry.leaf_key,
-                "cwd": str(opened.cwd),
-                "tmuxName": opened.tmux_name,
+                "cwd": str(entry.cwd),
+                "tmuxName": entry.tmux_name,
                 "status": "running",
             },
             status_code=200,
@@ -729,6 +727,29 @@ def create_app(
             )
         return JSONResponse(
             content={"session": session, "status": "attached", "leafKey": request.leaf_key},
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/paste")
+    def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
+        # L2 paste seam: deliver a context packet to a hosted session server-side (the mirror of the
+        # frontend WebSocket pasteAndConfirm/submitAndConfirm), so a packet can be pushed to a durable
+        # tmux session that has no attached browser client. 404 if the session is unknown/terminated or
+        # its tmux session is gone; otherwise echo-confirm the paste (and submit when asked) and report
+        # delivered/submitted. Same localhost posture as the rest of serving/.
+        entry = catalog.get(session)
+        if entry is None or entry.status != "running" or not host.has_session(entry.tmux_name):
+            if entry is not None and entry.status == "running":
+                catalog.mark_exited(session)
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        outcome = paster.paste(entry.tmux_name, request.text, submit=request.submit)
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "delivered" if outcome.delivered else "unconfirmed",
+                "delivered": outcome.delivered,
+                "submitted": outcome.submitted,
+            },
             status_code=200,
         )
 
@@ -791,5 +812,6 @@ def create_app(
 
     register_files_routes(app, config)
     register_changeset_routes(app, config)
+    register_notes_routes(app, config)
     mount_static(app)
     return app

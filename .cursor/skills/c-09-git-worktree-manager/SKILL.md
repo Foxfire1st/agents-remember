@@ -7,7 +7,7 @@ description: "Create, attach to, report on, integrate, finalize, and clean up Ag
 
 Use this skill when a task should run through an explicit code/memory worktree wrapper.
 
-The `c-09-git-worktree-manager` skill wraps the existing chat-build, light-task, or external workflow. It owns Git worktree state, series contracts, leaf enclosures, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
+The `c-09-git-worktree-manager` skill wraps the existing light-task or external workflow (a build that fits one session still rides a THIN `w-02-light-task-workflow` doc — chat is never a build route, per the `l-01-agent-lifecycles` invariant). It owns Git worktree state, series contracts, leaf enclosures, external-memory compatibility checks, integration, lifecycle finalization, and cleanup. It does not replace the workflow that performs the actual implementation.
 
 For closeout, use the `c-12-closeout` skill. The `c-09-git-worktree-manager` skill only supplies the worktree-specific
 contract path and integration/finalization follow-up rules.
@@ -67,7 +67,7 @@ The intended order is:
 1. run the `c-08-ar-coordination-context-resolver` skill for the target repository
 2. run the `c-02-memory-quality-control` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
-4. decide whether the work is a chat build, a `w-02-light-task-workflow` light task (or master + light sub-task series), or external workflow
+4. decide whether the work is a `w-02-light-task-workflow` light task — possibly a THIN one for single-session work; chat never builds — a master + light sub-task series, or external workflow
 5. read the repository's `system/git-workflow.md` and identify the parent branch
    edge. For a standalone task, the leaf worktree branches from the approved
    source branch. For a master series, the master owns a root `series-contract.md`
@@ -198,7 +198,9 @@ moved since task start.
 
 ## Integration
 
-Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits.
+Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits. Orchestrated-run carve-out (ruled 2026-07-06): dependency-ordered leaf→master and master→super integrations ride the series' standing approval (the developer's portfolio-gate approval recorded in the planner master) — the developer hand-off concentrates at the super PR/carry-over gate per the `l-01-agent-lifecycles` loop/orchestrator doctrine; a raised durable `integration-approval` gate still awaits the developer.
+
+On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun. When no gate addresses the integrating master but open `master-handover-approval` gates exist elsewhere, integrate still proceeds and its result carries a `handover_gate_warning` naming them — treat it as a spelling check on the raised gate's `enclosure`.
 
 Run `worktree_integrate(..., dry_run=true)` first, then **hand off**: call
 `lifecycle_turn_end_notification(summary={…the integration plan…})` as the **last tool call**, then

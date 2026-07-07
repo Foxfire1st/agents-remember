@@ -87,12 +87,10 @@ WATCHER_PROVIDER_ACTIONS = {
 
 def watcher_enabled_providers(args: argparse.Namespace) -> tuple[Any, bool, bool]:
     settings_path, grepai_enabled = context_provider_enabled(
-        args.coordination_root,
         getattr(args, "from_settings", None),
         "grepai-memory",
     )
     _, cgc_enabled = context_provider_enabled(
-        args.coordination_root,
         getattr(args, "from_settings", None),
         "codegraphcontext-code",
     )

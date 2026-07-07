@@ -43,8 +43,7 @@ from agents_remember.providers.lifecycle.provider_settings import (
 
 def grepai_layout_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout]:
     settings_path, provider_settings = grepai_settings_from_file(
-        args.coordination_root,
-        getattr(args, "from_settings", None),
+        getattr(args, "from_settings", None)
     )
     if grepai_settings_layout_requested(args, provider_settings):
         return (

@@ -38,6 +38,13 @@ export default defineConfig({
           alarm: { value: "oklch(0.63 0.24 25)" }, // whole-silhouette alarm
           mint: { value: "oklch(0.88 0.16 165)" }, // fresh-online / live
           dormant: { value: "oklch(0.45 0.06 25)" }, // skeletal dark-red dormant
+          // Rank-insignia tiers (L14, V4 spec): gold = orchestration seat, purple = management.
+          gold: { value: "oklch(0.87 0.15 95)" }, // orchestration tier (chevrons, corner)
+          goldDim: { value: "oklch(0.55 0.09 95)" }, // orchestration hairline
+          goldGhost: { value: "oklch(0.32 0.05 95)" }, // orchestration row wash
+          purple: { value: "oklch(0.76 0.14 305)" }, // management tier (chevrons)
+          purpleDim: { value: "oklch(0.5 0.09 305)" }, // management corner
+          purpleGhost: { value: "oklch(0.3 0.05 305)" }, // management row wash
         },
         fonts: {
           mono: { value: 'ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace' },

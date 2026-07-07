@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 
+from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
+from agents_remember.controlplane.gate_policy import GatePolicy
+from agents_remember.controlplane.records import GateRecord
+from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     load_ledger,
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_exists,
@@ -31,9 +37,79 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
+HANDOVER_GATE_KIND = "master-handover-approval"
+
 
 def integration_branch(contract: WorktreeContract) -> str:
     return f"{contract.memory_work_branch}-integration"
+
+
+def handover_gate_guard(
+    gates: Mapping[str, GateRecord],
+    *,
+    task_name: str,
+    parent_task_name: str,
+    policy: GatePolicy,
+) -> GateGuard:
+    """The master-exit seam verdict for one integrating contract. Pure.
+
+    The handover gate carries the MASTER identity: the manager raises it with
+    ``enclosure=<master task name>`` on its own (worktree-less) lifecycle, while
+    the master -> super integration runs on the orchestrator's integration
+    worktree -- a different lifecycle -- so the fold must be cross-lifecycle
+    (:meth:`GateStore.all_current`) and the address is the contract's master or
+    series name, never ``contract.lifecycle_id``. Only gates whose ``enclosure``
+    matches the contract's ``task_name`` or ``parent_task_name`` govern; the
+    latest matching snapshot decides via :func:`evaluate_gate` (open or
+    policy-invalid blocks). Gateless stays additive: with no matching gate the
+    existing approval channel governs.
+    """
+    addresses = {name for name in (task_name, parent_task_name) if name}
+    matching = {
+        gate_id: gate
+        for gate_id, gate in gates.items()
+        if gate.kind == HANDOVER_GATE_KIND and gate.enclosure in addresses
+    }
+    return evaluate_gate(matching, kind=HANDOVER_GATE_KIND, policy=policy)
+
+
+def unmatched_handover_gate_warning(
+    gates: Mapping[str, GateRecord],
+    *,
+    task_name: str,
+    parent_task_name: str,
+) -> dict[str, object] | None:
+    """The enclosure spelling-check for a gateless integrate. Pure.
+
+    The seam address is an exact-string convention (``enclosure`` = master task
+    name), so a mis-spelled address yields a gate :func:`handover_gate_guard`
+    can never match -- gateless-permitted, silently. When NO gate in the fold
+    addresses this contract but open master-handover-approval gates do exist,
+    integration still proceeds (gateless stays additive -- another master's
+    open gate is legitimate) and the result payload carries this warning, so a
+    mis-addressed gate is loud at the exact moment it would have mattered.
+    With a matching gate (any state) the address worked and other masters'
+    in-flight gates are not worth a warning: ``None``.
+    """
+    addresses = {name for name in (task_name, parent_task_name) if name}
+    handover_gates = [gate for gate in gates.values() if gate.kind == HANDOVER_GATE_KIND]
+    if any(gate.enclosure in addresses for gate in handover_gates):
+        return None
+    unmatched = sorted(
+        (gate for gate in handover_gates if gate.state == "open"),
+        key=lambda gate: gate.id,
+    )
+    if not unmatched:
+        return None
+    return {
+        "unmatched_open_gates": [
+            {"gateId": gate.id, "enclosure": gate.enclosure} for gate in unmatched
+        ],
+        "note": (
+            "open master-handover-approval gates exist but none address this master "
+            "(task_name/parent_task_name); verify the enclosure spelling"
+        ),
+    }
 
 
 def blocked_integration_payload(
@@ -226,29 +302,47 @@ def _dry_run_result(
     args: WorktreeArgs,
     code_replay_required: bool,
     memory_replay_required: bool,
+    *,
+    guard: GateGuard,
+    handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
-    return WorktreeCommandResult(
-        0,
-        {
-            "state": "would-integrate",
-            **status_payload(contract),
-            "summary": "Dry run completed; integration preflight can proceed with the selected strategy.",
-            **next_guidance(
-                "request_integration_decision",
-                tool="worktree_integrate",
-                args=contract_next_args(
-                    contract,
-                    strategy=args.strategy,
-                    ledger_commit_message=args.ledger_commit_message,
-                    dry_run=False,
-                ),
-            ),
-            "strategy": args.strategy,
-            "code_replay_required": code_replay_required,
-            "memory_replay_required": memory_replay_required,
-            "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
-        },
+    # The preview EVALUATES (never enforces) the seam guard, so the c-09-mandated
+    # dry_run preflight cannot promise "would-integrate" and then have the real run
+    # refuse with handover-gate-blocked. Nothing on this path persists a contract
+    # mutation.
+    summary = (
+        "Dry run completed; integration preflight can proceed with the selected strategy."
+        if guard.permitted
+        else "Dry run completed; the real run would refuse with handover-gate-blocked — "
+        "decide the addressed master-handover-approval gate first."
     )
+    payload: dict[str, object] = {
+        "state": "would-integrate",
+        **status_payload(contract),
+        "summary": summary,
+        **next_guidance(
+            "request_integration_decision",
+            tool="worktree_integrate",
+            args=contract_next_args(
+                contract,
+                strategy=args.strategy,
+                ledger_commit_message=args.ledger_commit_message,
+                dry_run=False,
+            ),
+        ),
+        "strategy": args.strategy,
+        "code_replay_required": code_replay_required,
+        "memory_replay_required": memory_replay_required,
+        "handover_gate": {
+            "permitted": guard.permitted,
+            "gateId": guard.gate_id,
+            "reason": guard.reason,
+        },
+        "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
+    }
+    if handover_warning is not None:
+        payload["handover_gate_warning"] = handover_warning
+    return WorktreeCommandResult(0, payload)
 
 
 def _integrated_code_commit(
@@ -362,6 +456,8 @@ def _integrated_result(
     integrated_code_commit: str,
     integrated_memory_content_commit: str,
     integrated_ledger_commit: str,
+    *,
+    handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
     updated = replace(
         contract,
@@ -373,19 +469,19 @@ def _integrated_result(
         cleanup="pending",
     )
     write_contract(contract.contract_path, updated)
-    return WorktreeCommandResult(
-        0,
-        {
-            "state": "integrated",
-            **status_payload(updated),
-            "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
-            "strategy": args.strategy,
-            "integrated_code_commit": integrated_code_commit,
-            "integrated_memory_content_commit": integrated_memory_content_commit,
-            "integrated_ledger_commit": integrated_ledger_commit,
-            "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
-        },
-    )
+    payload: dict[str, object] = {
+        "state": "integrated",
+        **status_payload(updated),
+        "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
+        "strategy": args.strategy,
+        "integrated_code_commit": integrated_code_commit,
+        "integrated_memory_content_commit": integrated_memory_content_commit,
+        "integrated_ledger_commit": integrated_ledger_commit,
+        "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
+    }
+    if handover_warning is not None:
+        payload["handover_gate_warning"] = handover_warning
+    return WorktreeCommandResult(0, payload)
 
 
 def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -396,6 +492,38 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if contract.integration_status == "completed":
         return WorktreeCommandResult(0, {"state": "already-integrated", **status_payload(contract)})
     validate_integrate_contract(contract)
+    # The master-exit seam consumer (mirror of the closeout gate): when a
+    # master-handover-approval gate is addressed to this contract's master or
+    # series (its `enclosure`), only a policy-valid approval lets the
+    # integration proceed. The fold is cross-lifecycle because the raiser
+    # (the manager) and the integrator anchor different lifecycles.
+    # Gateless stays additive. The guard is EVALUATED for both runs — the
+    # dry-run preview reports it instead of enforcing it — and the
+    # unmatched-open-gate warning keeps a mis-addressed enclosure (an exact
+    # string that would otherwise fail open) loud on the result payload.
+    gate_store = GateStore(observer_logs_root(contract.coordination_root))
+    gate_fold = gate_store.all_current()
+    guard = handover_gate_guard(
+        gate_fold,
+        task_name=contract.task_name,
+        parent_task_name=contract.parent_task_name,
+        policy=args.gate_policy,
+    )
+    handover_warning = unmatched_handover_gate_warning(
+        gate_fold,
+        task_name=contract.task_name,
+        parent_task_name=contract.parent_task_name,
+    )
+    if not args.dry_run and not guard.permitted:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "handover-gate-blocked",
+                "gateId": guard.gate_id,
+                "reason": guard.reason,
+                **status_payload(contract),
+            },
+        )
 
     current_code_source, current_memory_source, code_replay_required, memory_replay_required = (
         _integration_replay_requirements(contract)
@@ -403,7 +531,14 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if args.strategy == "ff-only" and (code_replay_required or memory_replay_required):
         return _blocked_non_ff_result(contract, args, code_replay_required, memory_replay_required)
     if args.dry_run:
-        return _dry_run_result(contract, args, code_replay_required, memory_replay_required)
+        return _dry_run_result(
+            contract,
+            args,
+            code_replay_required,
+            memory_replay_required,
+            guard=guard,
+            handover_warning=handover_warning,
+        )
 
     integrated_code_commit, blocked = _integrated_code_commit(contract, args, current_code_source)
     if blocked is not None:
@@ -425,4 +560,5 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
         integrated_code_commit,
         integrated_memory_content_commit,
         integrated_ledger_commit,
+        handover_warning=handover_warning,
     )

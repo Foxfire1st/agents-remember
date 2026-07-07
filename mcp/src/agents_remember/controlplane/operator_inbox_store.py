@@ -8,6 +8,8 @@ from pathlib import Path
 
 from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxDeliveryState,
     OperatorInboxEntry,
     OperatorInboxVia,
     consume_operator_inbox_entry,
@@ -60,17 +62,48 @@ class OperatorInboxStore:
         *,
         lifecycle_id: str | None,
         agent_id: str | None,
+        recipient_role: AgentRole | None = None,
     ) -> list[OperatorInboxEntry]:
         """Return pending entries matching all supplied mailbox keys."""
-        require_inbox_address(lifecycle_id=lifecycle_id, agent_id=agent_id)
+        require_inbox_address(
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
+            recipient_role=recipient_role,
+        )
         entries = [
             record
             for record in self.current().values()
             if record.state == "pending"
             and (lifecycle_id is None or record.lifecycleId == lifecycle_id)
             and (agent_id is None or record.agentId == agent_id)
+            and (recipient_role is None or record.recipientRole == recipient_role)
         ]
         return sorted(entries, key=lambda record: record.createdAt)
+
+    def record_delivery(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        delivery_state: InboxDeliveryState,
+        delivered_to_session: str | None = None,
+        delivery_detail: str | None = None,
+    ) -> OperatorInboxEntry:
+        """Append a delivery-status snapshot for one pending entry."""
+        current = self.current().get(entry_id)
+        if current is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        delivered = current.model_copy(
+            update={
+                "ts": now,
+                "deliveryState": delivery_state,
+                "deliveredAt": now if delivery_state == "delivered" else current.deliveredAt,
+                "deliveredToSession": delivered_to_session,
+                "deliveryDetail": delivery_detail,
+            }
+        )
+        self.append(delivered)
+        return delivered
 
     def consume(
         self,

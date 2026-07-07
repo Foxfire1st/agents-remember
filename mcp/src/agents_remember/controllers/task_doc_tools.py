@@ -74,6 +74,7 @@ _MUTABLE_FIELDS = frozenset(
         "master",
         "codeExamplesNote",
         "statusNote",
+        "orchestrates",
     }
 )
 

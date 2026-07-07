@@ -2,7 +2,7 @@
 
 Abandon is the discard sibling of cleanup. cleanup runs only after a completed
 integration; abandon exists for worktrees whose work will NOT land (premature
-trials, dead-end experiments, the l-01-session-job-lifecycle skill read-only/abandon exit). It reclaims the
+trials, dead-end experiments, the l-01-agent-lifecycles orchestrator read-only/abandon exit). It reclaims the
 isolated provider stack (containers, networks, provider-runtime tree), removes
 the code and memory worktrees, deletes the task branches, and removes the
 worktree group dir.

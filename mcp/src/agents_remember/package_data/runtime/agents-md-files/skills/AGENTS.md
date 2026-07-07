@@ -40,7 +40,7 @@ explicitly and in full — never abbreviate, so a reader can always tell a skill
 invocation from an MCP tool call:
 
 - **Skills** — the full lowercase skill id followed by the word "skill":
-  e.g. *the `c-12-closeout` skill*, *the `l-01-session-job-lifecycle` skill*.
+  e.g. *the `c-12-closeout` skill*, *the `l-01-agent-lifecycles` skill*.
   Never use an abbreviation (`C-12`, `L-01`, `W-02`) and never the bare id
   without the word "skill". Skill directory names match the installed lowercase
   ids (e.g. `runtime/skills/c-12-closeout/`).

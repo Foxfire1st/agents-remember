@@ -13,7 +13,7 @@ Companion file:
 
 ## Operating Modes
 
-1. Inside a task workflow (an `l-01-session-job-lifecycle` build job or a `w-02-light-task-workflow` task, including a master + light sub-task series).
+1. Inside a task workflow (an `l-01-agent-lifecycles` orchestrator build phase or a `w-02-light-task-workflow` task, including a master + light sub-task series).
 2. Standalone during direct clarification.
 
 ## Durable Destinations

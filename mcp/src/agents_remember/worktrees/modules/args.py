@@ -13,6 +13,7 @@ from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.controlplane.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 
@@ -61,6 +62,9 @@ class WorktreeArgs:
     code_commit_message: str = ""
     memory_commit_message: str = ""
     ledger_commit_message: str = ""
+
+    # Gate enforcement policy
+    gate_policy: GatePolicy = DEFAULT_GATE_POLICY
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> WorktreeArgs:

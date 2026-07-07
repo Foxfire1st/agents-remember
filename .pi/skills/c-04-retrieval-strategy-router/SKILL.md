@@ -160,7 +160,7 @@ names an unresolved source question.
 
 ### Rules:
 
-- During the research phase (the lifecycle up to the build/job decision), read managed-repo
+- During the research phase (the lifecycle up to the build decision), read managed-repo
   source with `read_ar_files`, not the native read tool — one call returns each file paired
   with its onboarding plus the repository and governing route overviews (the recipe above,
   batched and observable).

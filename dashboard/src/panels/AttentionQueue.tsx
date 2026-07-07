@@ -4,6 +4,7 @@ import { useState } from "react";
 import { css, cva } from "../../styled-system/css";
 import { postAttentionDismiss } from "../data/actions";
 import { fmtWait, selectQueue } from "../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../data/servedAges";
 import { dashboardStore, useDashboard } from "../data/store";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
@@ -120,6 +121,9 @@ function canDismiss(item: AttentionItem): boolean {
 export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
   const queue = useDashboard(selectQueue);
   const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  // Wait times advance locally between emissions — the change gate (260703-L15) no longer
+  // re-serves the queue every tick just because the waits aged.
+  const nowMs = useNowMs();
   const [clearing, setClearing] = useState(false);
   const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
   const dismissableQueue = queue.filter(canDismiss);
@@ -204,7 +208,7 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
                     <div className={itemTitle}>{displayTitle}</div>
                     {displayDetail ? <div className={detail}>{displayDetail}</div> : null}
                     <div className={meta}>
-                      {q.lane} · {fmtWait(q.waitSeconds)}
+                      {q.lane} · {fmtWait(servedAgeSeconds(q, q.waitSeconds, nowMs))}
                     </div>
                   </div>
                   <div className={actionsCol}>

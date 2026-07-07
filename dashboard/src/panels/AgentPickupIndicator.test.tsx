@@ -19,6 +19,8 @@ describe("AgentPickupIndicator", () => {
           id: "pickup:I1",
           entryId: "I1",
           lifecycleId: "LC1",
+          messageKind: "message",
+          deliveryState: "queued",
           state: "waiting-for-agent",
           ttlSeconds: 300,
         }}
@@ -37,6 +39,8 @@ describe("AgentPickupIndicator", () => {
           id: "pickup:I1",
           entryId: "I1",
           lifecycleId: "LC1",
+          messageKind: "message",
+          deliveryState: "queued",
           state: "check-chat",
           ttlSeconds: 300,
         }}

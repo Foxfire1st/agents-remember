@@ -147,6 +147,20 @@ class ListAndReadTests(unittest.TestCase):
         self.assertEqual(len(body["content"]), _MAX_FILE_BYTES)
         self.assertEqual(body["size"], _MAX_FILE_BYTES + 10)
 
+    def test_read_file_oversize_multibyte_boundary_returns_text_not_binary(self) -> None:
+        # FINDING 5 (260703-L18): a multi-byte UTF-8 char straddling the 2-MiB cap must NOT make an
+        # oversize text file misdecode into an empty "binary". "é" is two bytes; placed so its lead
+        # byte is the last included byte and its continuation byte falls just past the cap, a naive
+        # raw[:cap].decode() would raise -> the cut lands on the codepoint boundary instead.
+        big = self.root / "big.txt"
+        big.write_text("a" * (_MAX_FILE_BYTES - 1) + "é", encoding="utf-8")
+        body = read_file(self.scope, "big.txt")
+        self.assertEqual(body["language"], "text")  # NOT "binary"
+        self.assertTrue(body["truncated"])
+        self.assertNotEqual(body["content"], "")
+        self.assertEqual(body["content"], "a" * (_MAX_FILE_BYTES - 1))
+        self.assertEqual(body["size"], _MAX_FILE_BYTES + 1)
+
     def test_read_file_binary_is_marked_not_decoded(self) -> None:
         (self.root / "blob.bin").write_bytes(b"\x00\x01\xff\xfe")
         body = read_file(self.scope, "blob.bin")
@@ -274,6 +288,14 @@ class RouteTests(unittest.TestCase):
     def test_traversal_is_400_bad_path(self) -> None:
         with self._client(with_memory=True) as client:
             response = client.get("/api/files/read", params={"repo": "R", "path": "../../etc/passwd"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "bad-path")
+
+    def test_null_byte_path_is_400_bad_path(self) -> None:
+        with self._client(with_memory=True) as client:
+            response = client.get(
+                "/api/files/read", params={"repo": "R", "path": "pkg/mod\x00.py"}
+            )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["status"], "bad-path")
 

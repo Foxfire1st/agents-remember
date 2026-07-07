@@ -15,6 +15,7 @@ is a later slice. Here we only own the honest, history-preserving fact.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,6 +31,10 @@ GateKind = Literal[
     "closeout-approval",
     "push-approval",
     "integration-approval",
+    # `master-handover-approval` is the master-exit seam gate: the manager raises it with the
+    # reviewer verdict attached as evidence; the orchestrator decides it on the happy path
+    # (delegable, never human-pinned) — human review concentrates at the super gate.
+    "master-handover-approval",
     "cleanup-approval",
     "agent-question",
     "provider-retry",
@@ -50,7 +55,8 @@ GateState = Literal[
 # Through what surface the decision arrived -- kept separate from the actor
 # (``decidedBy``); "who" and "through what" never share a field, the same rule
 # the observer event envelope follows.
-DecidedVia = Literal["chat", "dashboard", "cli"]
+DecidedVia = Literal["chat", "dashboard", "cli", "orchestration"]
+GateEvidenceKind = Literal["reviewer-verdict"]
 
 GATE_KINDS: tuple[GateKind, ...] = get_args(GateKind)
 
@@ -60,6 +66,16 @@ def coerce_gate_kind(raw: str) -> GateKind:
     if raw not in GATE_KINDS:
         raise ValueError(f"unknown gate kind {raw!r}; expected one of {list(GATE_KINDS)}")
     return cast(GateKind, raw)
+
+
+class GateEvidenceRef(BaseModel):
+    """A durable external artifact reference attached to a gate snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: GateEvidenceKind
+    ref: str
+    verdict: str | None = None
 
 
 class GateRecord(BaseModel):
@@ -87,8 +103,10 @@ class GateRecord(BaseModel):
     requiredDecision: list[str] | None = None
     decidedBy: str | None = None  # actor: developer | model | system
     decidedVia: DecidedVia | None = None  # through what surface
+    decidingRole: str | None = None
     decisionNote: str | None = None
     decidedAt: str | None = None
+    evidenceRefs: list[GateEvidenceRef] = Field(default_factory=list)
 
 
 # Decision verbs accepted at the tool boundary, mapped to the resulting state.
@@ -110,6 +128,7 @@ def create_gate(
     repo_id: str | None = None,
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
+    evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None = None,
 ) -> GateRecord:
     """A freshly opened gate. Pure: the caller mints ``gate_id`` and ``now``."""
     return GateRecord(
@@ -122,6 +141,7 @@ def create_gate(
         repoId=repo_id,
         packet=packet or {},
         requiredDecision=required_decision,
+        evidenceRefs=_coerce_evidence_refs(evidence_refs),
     )
 
 
@@ -133,6 +153,8 @@ def decide_gate(
     via: DecidedVia,
     note: str | None,
     now: str,
+    deciding_role: str | None = None,
+    evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None = None,
 ) -> GateRecord:
     """A new snapshot carrying the decision (same ``id``, new ``ts``). Pure.
 
@@ -140,14 +162,17 @@ def decide_gate(
     ``KeyError`` here (the tool boundary validates first for a clean message).
     """
     state = DECISION_STATES[decision]
+    attached_evidence = [*gate.evidenceRefs, *_coerce_evidence_refs(evidence_refs)]
     return gate.model_copy(
         update={
             "ts": now,
             "state": state,
             "decidedBy": by,
             "decidedVia": via,
+            "decidingRole": deciding_role,
             "decisionNote": note,
             "decidedAt": now,
+            "evidenceRefs": attached_evidence,
         }
     )
 
@@ -167,3 +192,14 @@ def apply_gate(gate: GateRecord, *, now: str) -> GateRecord:
     forward unchanged -- only ``state`` and ``ts`` advance.
     """
     return gate.model_copy(update={"ts": now, "state": "applied"})
+
+
+def _coerce_evidence_refs(
+    evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None,
+) -> list[GateEvidenceRef]:
+    if evidence_refs is None:
+        return []
+    return [
+        ref if isinstance(ref, GateEvidenceRef) else GateEvidenceRef.model_validate(ref)
+        for ref in evidence_refs
+    ]

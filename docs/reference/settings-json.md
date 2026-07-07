@@ -1,12 +1,22 @@
 # settings.json Reference
 
-`system/settings.json` is the machine-readable memory settings file for a
-memory root. `system/settings.md` remains the human and agent prose guidance
-file.
+Agents Remember has FOUR settings families, each with exactly one home:
 
-Coordinator roots should not carry a `system/settings.json` authority file for
-MCP/provider behavior. MCP authority settings live outside the coordinator root;
-see `examples/mcp/settings.example.json`.
+| Family | Home | Read cadence |
+| --- | --- | --- |
+| Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
+| Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
+
+`system/settings.md` remains the human and agent prose guidance file beside a
+memory root's `settings.json`.
+
+The coordinator root's `system/settings.json` is the GLOBAL agentic settings
+file — it is NOT an MCP authority file (the server refuses it as `--config`)
+and NOT a provider settings source (the old implicit fallback to it is
+removed; an explicit `--from-settings` path is still read wherever it points). MCP authority settings
+live outside the coordinator root; see `examples/mcp/settings.example.json`.
 
 ## Internal Memory Example
 
@@ -107,7 +117,6 @@ watch settings internally.
   "transcriptRoot": "C:/absolute/path/to/ar-coordination/logs/mcp",
   "repositories": {
     "agents-remember": {
-      "memorySettingsIncludes": [],
       "contractPath": null
     }
   },
@@ -173,11 +182,10 @@ harness starter package and does not need this field.
 
 `repositories` is an allow-list keyed by repo id. The MCP server derives each
 code repository path from `workspaceRoot/<repo-id>` and each memory root from
-`coordinationRoot/memory-repos/ar-<repo-id>`.
-
-`repositories.<repo-id>.memorySettingsIncludes` may list extra absolute settings
-files, but every include must stay inside either the configured code repository
-or its configured memory root.
+`coordinationRoot/memory-repos/ar-<repo-id>`. (The former
+`repositories.<repo-id>.memorySettingsIncludes` key was dead plumbing — parsed,
+never consumed — and was removed with 260703-L13; a leftover key in an existing
+file is tolerated and ignored.)
 
 `repositories.<repo-id>.contractPath` may point at a coordination-root-local
 contract file. It must not point outside the coordinator root.
@@ -202,3 +210,243 @@ next session's boot. Daemon state and logs live under
 `<coordinationRoot>/logs/dashboard/`; `agents-remember dashboard --status` /
 `--stop` manage the same daemon from the CLI. Unknown `dashboard` keys are
 rejected.
+
+`orchestration` in the authority file is LEGACY territory (260703-L13): the
+agentic family moved to the global agentic settings file documented below. For
+one migration cycle the authority file may still carry
+`orchestration.gateDelegation` — it is honored as a fallback when the global
+file does not set the key, with a boot warning naming the new home (and it is
+ignored, with a warning, when the global file does set it). Any other
+`orchestration.*` key in the authority file (`loops`, `roles`, `rolesPerLevel`,
+`concurrency`, `spawn`, `harnesses`) fails the boot loudly, pointing at the
+global file.
+
+## Agentic Settings (global + repo-local)
+
+The agentic settings family — everything under the top-level `orchestration`
+key — lives in TWO JSON files merged on every read (260703-L13):
+
+- **Global:** `<coordinationRoot>/system/settings.json`. Seeded by
+  `runtime_install()` copy-if-missing with every knob at its documented
+  default; the c-13 install skill interviews the developer and writes it.
+  User-owned: an install never overwrites an existing file.
+- **Repo-local override:** `<code-repo>/system/settings.json` (optional). The
+  same `orchestration.*` shape; repo-local values supersede global ones.
+
+**Merge semantics.** Deep merge at leaf-key granularity: a local scalar or
+object leaf overrides the global one, sibling keys survive; arrays REPLACE
+(never concatenate).
+
+**Fail-loud rule.** Unknown keys anywhere inside the `orchestration.*` family
+are rejected naming the offending file — a typo can never be silently ignored.
+Unknown TOP-LEVEL families in the same file are tolerated-not-parsed (see
+Reserved Families below).
+
+**Null rule.** A JSON `null` at a known `orchestration.*` family key
+(`gateDelegation` · `loops` · `roles` · `rolesPerLevel` · `concurrency` ·
+`spawn` · `harnesses`), in EITHER layer, is REFUSED naming the offending file.
+`null` reads as *absent* to every family parser and the deep merge REPLACES a
+non-object, so `"concurrency": null` in the repo-local layer would otherwise
+SILENTLY wipe the global caps — the one scalar collision that used to defeat
+both the deep-merge and fail-loud invariants. Remove the key to inherit the
+global value (or give it a real object); `null` never means reset-to-default.
+
+**Read cadence.** Read PER-USE through the kernel agentic-settings loader
+(`kernel/agentic_settings.py`): an edit takes effect on the next use with no
+restart. The ONE exception is `orchestration.gateDelegation`, which the MCP
+server snapshots at boot (enforcement plumbing is boot-cached): a change needs
+a harness/MCP restart.
+
+**Defaults.** An absent file, or an absent key, means: all-human gate
+delegation, the loop defaults below, no role overrides, no concurrency caps,
+no spawn harness preference (detection-gated spawns).
+
+### orchestration.gateDelegation
+
+GLOBAL-LAYER ONLY: the boot snapshot reads the coordinator file exclusively, and the
+loader REFUSES a `gateDelegation` key in a repo-local settings file (a local value
+would otherwise validate and silently do nothing — a fail-open shape). Gate posture
+is workspace-wide enforcement state, never a per-repo preference.
+
+Configures server-enforced lifecycle gate delegation. If omitted, the policy is
+`all-human`: every gate requires the existing human/developer decision path.
+The built-in `manager-decides-leaf-gates` policy adds the manager role for leaf
+`plan-approval` and `closeout-approval` gates and routes the master-exit
+`master-handover-approval` gate to the orchestrator, while leaving human
+decisions valid. `kinds` may override individual delegable gate kinds with
+`role: "human" | "manager" | "orchestrator"` and
+`requireReviewerVerdict: true`; verdict requirements only apply to delegated
+decisions. `requireReviewerVerdictAtSeams: true` additionally binds every
+delegated seam-kind rule (`master-handover-approval`) to attached
+reviewer-verdict evidence. The delegable kinds are `plan-approval`,
+`closeout-approval`, and `master-handover-approval`;
+`integration-approval`, `push-approval`, and `cleanup-approval` are
+human-pinned and cannot be delegated. Boot-snapshot: restart required (see
+Read cadence above).
+
+### orchestration.roles, orchestration.rolesPerLevel
+
+`orchestration.roles.<role>` overrides a role file's knob block per role
+(`orchestrator`, `designer`, `strategist`, `manager`, `worker`, `reviewer`).
+Precedence: role-file defaults < global settings < repo-local settings. The
+knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
+with every parameter, vocabulary, and refusal is
+**`docs/reference/harnesses.md`**):
+
+1. **Validated enum knobs** — `harness` (a known harness id: builtin
+   `claude`/`codex`/`pi` or an `orchestration.harnesses`-defined one),
+   `model`, `effort`. The spawn path seeds `model`/`effort` into the spawn env
+   (`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`) AND applies them onto the harness
+   launch argv per-harness (claude: `--model`/`--effort`; a mapping-less
+   harness stays env-only). `effort` is validated per-harness at DISPATCH:
+   unknown values refuse loudly naming the harness and its valid sets.
+2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
+   launch argv. Never validated; recorded in spawn provenance.
+3. **`sessionCommands`** (list of strings; each line pasted + submitted into
+   the fresh session BEFORE the brief) and **`promptKeywords`** (list of
+   strings prepended as the first line of the dispatch-brief paste). Never
+   validated; recorded in spawn provenance.
+
+The claude effort vocabulary (empirical, 2026-07-07) is TWO-VEHICLE:
+
+| Value | Delivery vehicle |
+| --- | --- |
+| `low`, `medium`, `high`, `xhigh`, `max` | the `--effort` launch flag |
+| `ultracode` | the `/effort ultracode` session command, pasted post-launch before the brief |
+
+Rationale: the installed claude CLI **warns-then-silently-degrades** on
+unknown `--effort` values (probed with `ultracode`, which its interactive
+`/effort` command DOES accept), so unvalidated values would quietly downgrade
+the most reasoning-hungry seats — dispatch accepts the union of both sets and
+refuses anything in neither.
+
+`orchestration.rolesPerLevel.<level>.<role>` (ruling 2026-07-07T08:15) adds
+the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
+`portfolio` (the `loops.perLevel` vocabulary), each holding the same
+knob-override shape. A level override deep-merges over the flat
+`orchestration.roles` default at leaf-key granularity (harness inherited
+unless overridden; arrays replace). The dispatcher declares its level via
+`spawn_agent_session(level=...)`, default `leaf`. Full resolution chain:
+explicit args > repo-local level override > global level override >
+repo-local role default > global role default > detection-gated default. The
+resolved level rides spawn provenance (`spawnLevel`/`spawnLevelSource`).
+
+### orchestration.harnesses
+
+Extends/overrides the builtin harness registry (developer ruling 2026-07-07:
+the registry is good defaults, not a wall). Entries are keyed by harness id:
+a NEW id adds a harness (`command` and/or `argv` required — the command array
+launches it exactly the way you would run it yourself), an EXISTING id
+pre-customizes the builtin defaults (its `argv` replaces ours). Optional
+knob-mapping fields: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
+`effortSessionValues` + `effortSessionCommand` (pairs required together).
+Detection still gates dispatch; an id known nowhere refuses loudly pointing
+at the manual. Schema, semantics, and a worked add-`hermes` example:
+`docs/reference/harnesses.md`.
+
+### orchestration.concurrency, orchestration.spawn
+
+`orchestration.concurrency` caps parallel orchestration fan-out:
+`maxParallelMasters`, `maxParallelLeaves`, `maxSubAgents` (positive integers;
+omitted means uncapped). The caps are doctrine input for the spawning seats.
+
+`orchestration.spawn.harness` names the default harness `spawn_agent_session`
+uses when the caller passes none and no role knob supplies one. Resolution
+order at the spawn seam: explicit argument > role knobs (level-merged) >
+repo-local settings > global settings > detection-gated default (the first
+effective-registry harness found on PATH; the repo-local layer is selected by
+the qualified leaf key's repository segment). Values are validated against
+the effective harness ids (builtin + `orchestration.harnesses`) and gated by
+detection — a settings value can never inject a command through a reference;
+argv is definable only in the explicit `orchestration.harnesses` family.
+
+```jsonc
+"orchestration": {
+  "roles": {
+    "orchestrator": { "harness": "claude", "effort": "high" },
+    "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
+    "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
+    "worker":       { "harness": "codex",  "effort": "medium" }
+  },
+  "rolesPerLevel": {
+    "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
+    "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
+  },
+  "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
+  "spawn": { "harness": "claude" }
+}
+```
+
+### orchestration.loops
+
+`orchestration.loops` configures the three-party review loops (OWNER → BUILDER →
+REVIEWER) the `l-01-agent-lifecycles` skill runs at every level that owns work.
+Parsed by the agentic-settings loader into typed models; stored in the global
+file with repo-local precedence like every agentic key.
+
+```jsonc
+"orchestration": {
+  "loops": {
+    "defaults": {
+      "maxRounds": 3,                 // the HARD cap — only FULL end-to-end rounds count
+      "reviewerReuse": "delta-verify", // residuals of a passing round are delta-verified by the SAME reviewer
+      "complexity": { "fullLoopAt": "high", "builderAt": "medium" }
+    },
+    "perLevel": {
+      "leaf":      { "loop": "scored" },        // tier scored per leaf at dispatch (direct | builder-verified | full loop)
+      "master":    { "loop": "seam-required" }, // loop posture only; "none" = workflow-free manager (the master-exit SEAM stays unconditional)
+      "portfolio": { "loop": "strategist" }     // owner = orchestrator · builder = strategist · reviewer with the plan-review catalog
+    }
+    // local override example (tight mode):
+    // "perMaster": { "260703_agent-orchestration": { "leaf": { "loop": "builder-verified" } } }
+  }
+}
+```
+
+Semantics, as the loop doctrine defines them
+(`skills/l-01-agent-lifecycles/SKILL.md`, The Three-Party Loop):
+
+- `defaults.maxRounds` (default `3`) is the hard cap per loop. **Only full
+  end-to-end rounds count against it**; delta-verifies close rounds, they do
+  not open them. The real control is the convergence rule — every round must
+  shrink the open finding set, and a non-shrinking round escalates immediately
+  regardless of the count — so the cap is the backstop, not the driver.
+- `defaults.reviewerReuse: "delta-verify"` names the ruled reuse: the SAME
+  reviewer instance is resumed via a follow-up message to verify a passing
+  round's landed residuals, and fix rounds resume the SAME builder. A fresh
+  reviewer is spawned only for a full round or when new scope opens.
+- `defaults.complexity` maps the dispatch-time complexity score (blast radius ·
+  novelty · size) to tiers: at/above `fullLoopAt` a leaf runs the full loop
+  (builder + independent reviewer); at/above `builderAt` it runs
+  builder-verified (builder + owner report-vs-artifact check, no reviewer);
+  below both it is direct (the level's ordinary build channel implements —
+  no loop machinery).
+- `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
+  dispatch. `perLevel.master.loop: "seam-required"` names the default loop
+  posture; `"none"` configures the workflow-free manager (a master whose
+  leaves all score direct carries no loop machinery). **This knob governs the
+  LOOP only (review rounds / workflow-free manager): the master-exit SEAM gate
+  is unconditional doctrine — no knob value touches it.** Loop posture names
+  are model-interpreted doctrine (validated as non-empty strings, not a closed
+  set). Each level runs its loop with its own agent set
+  (`orchestration.roles` knobs per role).
+- `perLevel.portfolio.loop: "strategist"` names the portfolio loop's parties.
+  **The strategist's mandatory pre-run is doctrine, not a knob** — no
+  configuration can waive it: an orchestrated run requires the adopted
+  orchestration task, unconditionally (`roles/strategist.md`).
+
+### Reserved Families (the global file's future)
+
+The global agentic file is the earmarked durable settings home beyond the
+`orchestration.*` family. The fail-loud rule is deliberately scoped to
+`orchestration.*` only, so reserved top-level families cost nothing today:
+
+- **`contextProviders` — reserved; returns here in a follow-up** (developer
+  direction, 2026-07-06). Today provider configuration is authority-file
+  territory (the server derives lifecycle settings from `providers.*`), and
+  the OLD implicit fallback that read `contextProviders` from this file was
+  retired with L13. A future `contextProviders` key at the top level of the
+  global file is tolerated-not-parsed until that migration lands.
+- Other top-level keys (`$comment`, `version`, and any future family) are
+  likewise tolerated-not-parsed by the agentic loader; only documented
+  `orchestration.*` keys are read, and only they fail loud.

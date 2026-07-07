@@ -61,7 +61,11 @@ def add_cgc_common_args(parser: argparse.ArgumentParser) -> None:
         "--from-settings",
         type=Path,
         default=argparse.SUPPRESS,
-        help="Coordinator settings.json containing codegraphcontext-code.",
+        help=(
+            "Provider lifecycle settings JSON (server-generated) containing "
+            "codegraphcontext-code. Required for settings-driven commands; there "
+            "is no coordinator system/settings.json fallback."
+        ),
     )
     parser.add_argument(
         "--repo-id", default=argparse.SUPPRESS, help="Stable provider id for this code repository."
@@ -108,7 +112,11 @@ def add_grepai_common_args(parser: argparse.ArgumentParser) -> None:
         "--from-settings",
         type=Path,
         default=argparse.SUPPRESS,
-        help="Coordinator settings.json containing grepai-memory.",
+        help=(
+            "Provider lifecycle settings JSON (server-generated) containing "
+            "grepai-memory. Required for settings-driven commands; there is no "
+            "coordinator system/settings.json fallback."
+        ),
     )
     parser.add_argument(
         "--force",

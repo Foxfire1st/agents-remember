@@ -62,6 +62,7 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxPollResponse,
     OperatorInboxPostResponse,
 )
+from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.providers import (
     CGCCalleesResponse,
     CGCCallersResponse,
@@ -79,7 +80,10 @@ from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.task_doc import TaskDocResponse, TaskReopenResponse
-from agents_remember.models.terminal import AttachTerminalSessionToLeafResponse
+from agents_remember.models.terminal import (
+    AttachTerminalSessionToLeafResponse,
+    SpawnAgentSessionResponse,
+)
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
@@ -108,6 +112,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "context_packet": ContextPacketV2,
     "read_ar_files": ReadArFilesResponse,
     "attach_terminal_session_to_leaf": AttachTerminalSessionToLeafResponse,
+    "spawn_agent_session": SpawnAgentSessionResponse,
     "runtime_install": RuntimeInstallResponse,
     "resolve_context": ResolveContextResponse,
     "drift_check": DriftCheckResponse,
@@ -160,6 +165,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "operator_inbox_post": OperatorInboxPostResponse,
     "operator_inbox_poll": OperatorInboxPollResponse,
     "operator_inbox_consume": OperatorInboxConsumeResponse,
+    "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
 }
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {

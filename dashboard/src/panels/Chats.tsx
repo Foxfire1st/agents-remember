@@ -20,6 +20,8 @@ import {
   terminateTerminalSession,
   type HarnessInfo,
 } from "../data/terminal";
+import { groupSessions } from "../data/sessionGroups";
+import { useDashboard } from "../data/store";
 import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../data/taskIdentity";
 import type { TaskDocNode } from "../types/projection";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
@@ -332,6 +334,16 @@ export function Chats({
     }
   };
 
+  // The G1 command tree (L14): group the sidebar by claim + spawn-role provenance. Enclosures come
+  // from the projection store (live-vs-landed truth); with no orchestration task and no leaf claims
+  // this derives zero groups and the SessionList renders today's flat list unchanged.
+  const enclosureById = useDashboard((state) => state.enclosures);
+  const grouped = groupSessions({
+    sessions,
+    taskDocuments,
+    enclosures: Object.values(enclosureById),
+  });
+
   return (
     <section className={wrap} data-testid="chats">
       <header className={strip}>
@@ -401,6 +413,7 @@ export function Chats({
               onSelect={(id) => sessionStore.getState().setActive(id)}
               onTerminate={(id) => void terminateSession(id)}
               leafNameFor={leafNameFor}
+              grouped={grouped}
             />
           </aside>
         )}

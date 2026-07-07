@@ -1,11 +1,13 @@
 import { css, cx } from "../../styled-system/css";
 import { driftSegments, fmtWait } from "../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../data/servedAges";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 
 // The memory mirror (mc2 harvest #2 — "a 1-to-1 mirror of the code"): a coverage/drift segmented
 // bar per repo + ledger currency + the stalest-sidecar leaderboard. All read from the slice-3b
-// analytics nodes — no reducer work. Ages are server-computed (`snapshotStaleSeconds`/`ageSeconds`).
+// analytics nodes — no reducer work. Ages are server-anchored (`snapshotStaleSeconds`/`ageSeconds`)
+// and advanced locally between emissions (the 260703-L15 change gate — data/servedAges.ts).
 const sizing = css({ flex: "1" });
 const repo = css({ marginBottom: "0.7rem" });
 const row = css({
@@ -51,6 +53,7 @@ const SEG_BG: Record<string, string> = {
 
 export function MemoryMirror() {
   const analytics = useDashboard((s) => s.analytics);
+  const nowMs = useNowMs();
   const drift = analytics?.driftSnapshots ?? [];
   const ledgers = analytics?.ledgers ?? [];
   const stalest = analytics?.stalestSidecars ?? [];
@@ -72,7 +75,8 @@ export function MemoryMirror() {
             <div className={row}>
               <span>{snapshot.repository}</span>
               <span className={snapshot.actionableCount > 0 ? actionable : "muted"}>
-                {snapshot.actionableCount} actionable · {fmtWait(snapshot.snapshotStaleSeconds)}
+                {snapshot.actionableCount} actionable ·{" "}
+                {fmtWait(servedAgeSeconds(snapshot, snapshot.snapshotStaleSeconds, nowMs))}
               </span>
             </div>
             <div
@@ -116,7 +120,9 @@ export function MemoryMirror() {
             {stalest.slice(0, 6).map((sidecar) => (
               <li key={`${sidecar.repository}:${sidecar.onboardingFile}`} className={row}>
                 <span className={file}>{sidecar.onboardingFile}</span>
-                <span className="muted">{fmtWait(sidecar.ageSeconds)}</span>
+                <span className="muted">
+                  {fmtWait(servedAgeSeconds(sidecar, sidecar.ageSeconds, nowMs))}
+                </span>
               </li>
             ))}
           </ul>

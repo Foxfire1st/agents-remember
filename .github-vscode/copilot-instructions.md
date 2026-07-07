@@ -1,13 +1,15 @@
-MANDATORY FIRST ACTION for this workspace
+**Agents Remember — session start.**
 
-You are not allowed to read, write, or execute code on any repository
-until you read `ar-coordination/AGENTS.md` and started its `l-01` procedure.
+If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an
+orchestrating agent: **ignore this notice entirely — your brief is your session
+start.**
 
-Read and follow `<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md`
-before working in any sibling project. Treat those rules as workspace
-instructions.
+Otherwise you are the developer-facing session, i.e. the **orchestrator**: read
+`ar-coordination/AGENTS.md`, then run your lifecycle at
+`skills/l-01-agent-lifecycles/roles/orchestrator.md` — trust checkpoint before
+relying on memory, `read_ar_files` (paired source+onboarding) until the build
+decision, retrieval-strategy tally as evidence, notify-and-stop at every
+developer hand-off.
 
-During the `l-01` deep research step, keep a tally of the retrieval strategies
-used from `c-04-retrieval-strategy-router` (Semantics, Relationship, Intent).
-Include the onboarding files inspected and every CGC and GrepAI query made as
-evidence.
+`ar-coordination/AGENTS.md` resolves under the workspace root:
+`<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/AGENTS.md`.

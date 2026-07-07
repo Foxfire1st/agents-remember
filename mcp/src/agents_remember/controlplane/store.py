@@ -54,11 +54,46 @@ class GateStore:
             if line.strip()
         ]
 
+    def find(self, gate_id: str) -> GateRecord | None:
+        """Resolve one gate id across the workspace log and every lifecycle log.
+
+        The seam-decide path: a deciding seat holds only the gate id (packet-carried);
+        lifecycle ids stay server-side. Last-wins fold per log, first hit returned
+        (gate ids are ULIDs — collisions across logs do not occur in practice).
+        """
+        hit = self.current(None).get(gate_id)
+        if hit is not None:
+            return hit
+        lifecycles_dir = self._root / "lifecycles"
+        if not lifecycles_dir.is_dir():
+            return None
+        for log in sorted(lifecycles_dir.glob("*/gates.jsonl")):
+            hit = self.current(log.parent.name).get(gate_id)
+            if hit is not None:
+                return hit
+        return None
+
     def current(self, lifecycle_id: str | None) -> dict[str, GateRecord]:
         """Fold the log by gate id, last-wins -- the live gate set."""
         latest: dict[str, GateRecord] = {}
         for record in self.read(lifecycle_id):
             latest[record.id] = record
+        return latest
+
+    def all_current(self) -> dict[str, GateRecord]:
+        """Fold every gate log (workspace + all lifecycles), last-wins per gate id.
+
+        The cross-lifecycle enforcement fold: a seam gate lives on its raiser's
+        lifecycle while the consuming contract anchors a different one (e.g. the
+        manager-raised ``master-handover-approval`` consumed by the orchestrator's
+        integration), so identity-addressed consumers need the whole workspace
+        view. A gate's snapshots all live in one log (``append`` routes by
+        ``record.lifecycleId``) and gate ids are ULIDs, so cross-log collisions do
+        not occur in practice; within one log the fold stays last-wins.
+        """
+        latest: dict[str, GateRecord] = {}
+        for lifecycle_id in self.lifecycle_ids():
+            latest.update(self.current(lifecycle_id))
         return latest
 
     def delete(self, gate_id: str, lifecycle_id: str | None) -> bool:

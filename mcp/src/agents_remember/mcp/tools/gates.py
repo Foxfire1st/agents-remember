@@ -26,6 +26,11 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from agents_remember.controlplane.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    SEAM_GATE_KINDS,
+    delegated_decision_failure_reason,
+)
 from agents_remember.controlplane.interaction_retention import (
     GATE_RESPONSE_WAIT_POLL_SECONDS,
     GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
@@ -36,6 +41,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
     DECISION_STATES,
     DecidedVia,
+    GateEvidenceRef,
     GateRecord,
     coerce_gate_kind,
     create_gate,
@@ -87,6 +93,26 @@ def _decision_payload(gate: GateRecord) -> dict[str, Any]:
     }
 
 
+def _resolve_deciding_actor(decided_by: str | None, decided_via: DecidedVia) -> str:
+    if decided_via != "orchestration":
+        if decided_by is None or not decided_by.strip():
+            raise ValueError("gate decision actor must be non-empty")
+        return decided_by
+    if decided_by is not None and decided_by.strip():
+        return decided_by
+    amb = ambient()
+    current = amb.current if amb is not None else None
+    if current is None:
+        raise LifecycleError("orchestration gate decisions require an active deciding lifecycle")
+    return current.id
+
+
+def _evidence_refs(raw: list[dict[str, Any]] | None) -> list[GateEvidenceRef]:
+    if raw is None:
+        return []
+    return [GateEvidenceRef.model_validate(entry) for entry in raw]
+
+
 def _cancelled_wait_payload(operation: str, gate_id: str) -> dict[str, Any]:
     return _tool_payload(
         operation,
@@ -111,6 +137,7 @@ def gate_create_payload(
     repo_id: str | None = None,
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     now = now_iso()
     store = _store(config)
@@ -127,6 +154,7 @@ def gate_create_payload(
         repo_id=repo_id,
         packet=packet,
         required_decision=required_decision,
+        evidence_refs=evidence_refs,
     )
     store.append(gate)
     return _tool_payload(
@@ -152,8 +180,10 @@ def lifecycle_gate_payload(
     repo_id: str | None = None,
     packet: dict[str, Any] | None = None,
     required_decision: list[str] | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
     timeout_seconds: float | None = None,
     poll_seconds: float = GATE_RESPONSE_WAIT_POLL_SECONDS,
+    wait: bool = True,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
@@ -189,13 +219,43 @@ def lifecycle_gate_payload(
     options = cast(list[str] | None, options_raw)
     structured_ask = build_ask(ask_kind, prompt, options)
 
+    gate_kind = coerce_gate_kind(kind)
+    if not wait:
+        # Raise-and-continue: reserved for SEAM kinds the active policy delegates. A
+        # human-decided kind must keep the blocking/notify contract, and a delegated
+        # non-seam kind (e.g. plan-approval) keeps it too — only the seam gate (the
+        # master-handover-approval the manager raises for the orchestrator) returns
+        # immediately so the raiser can post its packet; the gate id is the hand-off.
+        # The raise also requires the enforcement address: `enclosure` is the master
+        # task name the integrate guard matches the gate by, so an addressless
+        # wait=false gate could only ever fail open at the enforcement rung.
+        # Validate-then-mutate: refuse BEFORE the expire-sweep and append below, so a
+        # refused raise persists no orphan open gate and expires no sibling.
+        policy = (
+            config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
+        )
+        if gate_kind not in SEAM_GATE_KINDS:
+            raise ValueError(
+                f"lifecycle_gate wait=false is reserved for delegated seam kinds; "
+                f"{gate_kind} blocks"
+            )
+        if policy.rule_for(gate_kind).delegated_role is None:
+            raise ValueError(
+                f"lifecycle_gate wait=false requires a kind the active policy delegates; "
+                f"{gate_kind} is not delegated"
+            )
+        if enclosure is None or not enclosure.strip():
+            raise ValueError(
+                f"a {gate_kind} raise-and-continue requires "
+                "enclosure=<master task name> — the integration guard's address"
+            )
     now = now_iso()
     store = _store(config)
     for open_gate in store.current(current.id).values():
         if open_gate.state == "open":
             store.append(expire_gate(open_gate, now=now))
     gate = create_gate(
-        kind=coerce_gate_kind(kind),
+        kind=gate_kind,
         lifecycle_id=current.id,
         gate_id=new_ulid(),
         now=now,
@@ -203,8 +263,37 @@ def lifecycle_gate_payload(
         repo_id=repo_id,
         packet=packet,
         required_decision=required_decision,
+        evidence_refs=evidence_refs,
     )
     store.append(gate)
+    if not wait:
+        return _tool_payload(
+            "lifecycle_gate",
+            {
+                "ok": True,
+                "operation": "lifecycle_gate",
+                "gate": {
+                    "id": gate.id,
+                    "kind": gate.kind,
+                    "state": "open",
+                    "lifecycleId": gate.lifecycleId,
+                },
+                "lifecycle": {
+                    "id": current.id,
+                    "state": current.state,
+                    "phase": getattr(current, "phase", None),
+                },
+                "wait": {
+                    "state": "raised",
+                    "gateId": gate.id,
+                    "lifecycleId": current.id,
+                    "timedOut": False,
+                    "waited": False,
+                    "note": "gate raised without blocking; carry the gateId in the "
+                    "handover packet — the delegated decider resolves it by id",
+                },
+            },
+        )
     blocked = amb.block(kind=ask_kind, prompt=prompt, options=options)
     wait_result = gate_response_wait_payload(
         config,
@@ -216,7 +305,7 @@ def lifecycle_gate_payload(
         sleep=sleep,
         monotonic=monotonic,
     )
-    wait = {
+    wait_info: dict[str, Any] = {
         "state": wait_result["state"],
         "gateId": wait_result["gateId"],
         "lifecycleId": blocked.id,
@@ -228,7 +317,7 @@ def lifecycle_gate_payload(
     }
     for key in ("decidedBy", "decidedVia", "decisionNote"):
         if wait_result.get(key) is not None:
-            wait[key] = wait_result[key]
+            wait_info[key] = wait_result[key]
     payload: dict[str, Any] = {
         "ok": True,
         "operation": "lifecycle_gate",
@@ -243,7 +332,7 @@ def lifecycle_gate_payload(
             "state": blocked.state,
             "phase": blocked.phase,
         },
-        "wait": wait,
+        "wait": wait_info,
     }
     if structured_ask is not None:
         payload["ask"] = structured_ask
@@ -256,9 +345,11 @@ def gate_decide_payload(
     gate_id: str,
     lifecycle_id: str | None,
     decision: str,
-    decided_by: str,
+    decided_by: str | None,
     decided_via: DecidedVia,
+    deciding_role: str | None = None,
     note: str | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if decision not in DECISION_STATES:
         raise ValueError(
@@ -266,19 +357,45 @@ def gate_decide_payload(
         )
     store = _store(config)
     gate = store.current(lifecycle_id).get(gate_id)
+    if gate is None and lifecycle_id is None:
+        # Packet-carried gate ids: the deciding seat holds only the id; resolve it
+        # across lifecycles server-side (lifecycle ids never pass through the model).
+        gate = store.find(gate_id)
     if gate is None:
         raise KeyError(f"no gate {gate_id!r} on lifecycle {lifecycle_id!r}")
+    if decided_via == "cli" and decision != "cancel":
+        policy = (
+            config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
+        )
+        if policy.rule_for(gate.kind).delegated_role is not None:
+            raise ValueError(
+                f"{gate.kind} is delegated by the active gate policy; pass deciding_role "
+                "for an attributed orchestration decision, or leave it to the developer"
+            )
+    actor = _resolve_deciding_actor(decided_by, decided_via)
+    evidence = _evidence_refs(evidence_refs)
     updated = decide_gate(
         gate,
         decision=decision,
-        by=decided_by,
+        by=actor,
         via=decided_via,
+        deciding_role=deciding_role,
         note=note,
         now=now_iso(),
+        evidence_refs=evidence,
     )
+    if decided_via == "orchestration":
+        policy = (
+            config.orchestration.gate_policy
+            if config is not None
+            else DEFAULT_GATE_POLICY
+        )
+        failure = delegated_decision_failure_reason(updated, policy)
+        if failure is not None:
+            raise ValueError(f"gate decision rejected by delegation policy: {failure}")
     store.append(updated)
     if decision == "cancel":
-        store.delete(updated.id, lifecycle_id)
+        store.delete(updated.id, updated.lifecycleId)
         _inbox_store(config).delete_by_gate(updated.id)
     return _tool_payload(
         "gate_decide",
@@ -289,6 +406,10 @@ def gate_decide_payload(
             "state": updated.state,
             "decidedBy": updated.decidedBy,
             "decidedVia": updated.decidedVia,
+            "decidingRole": updated.decidingRole,
+            "evidenceRefs": [
+                ref.model_dump(mode="json", exclude_none=True) for ref in updated.evidenceRefs
+            ],
         },
     )
 
@@ -298,10 +419,12 @@ def gate_decide_for_lifecycle(
     *,
     lifecycle_id: str,
     decision: str,
-    decided_by: str,
+    decided_by: str | None,
     decided_via: DecidedVia,
+    deciding_role: str | None = None,
     expected_gate_id: str | None = None,
     note: str | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Decide the lifecycle's latest still-open gate -- the dashboard's write path.
 
@@ -329,28 +452,16 @@ def gate_decide_for_lifecycle(
         raise KeyError(
             f"gate {expected_gate_id!r} is {state}; current open gate is {gate.id!r}"
         )
-    updated = decide_gate(
-        gate,
+    return gate_decide_payload(
+        config,
+        gate_id=gate.id,
+        lifecycle_id=lifecycle_id,
         decision=decision,
-        by=decided_by,
-        via=decided_via,
+        decided_by=decided_by,
+        decided_via=decided_via,
+        deciding_role=deciding_role,
         note=note,
-        now=now_iso(),
-    )
-    store.append(updated)
-    if decision == "cancel":
-        store.delete(updated.id, lifecycle_id)
-        _inbox_store(config).delete_by_gate(updated.id)
-    return _tool_payload(
-        "gate_decide",
-        {
-            "ok": True,
-            "operation": "gate_decide",
-            "gateId": updated.id,
-            "state": updated.state,
-            "decidedBy": updated.decidedBy,
-            "decidedVia": updated.decidedVia,
-        },
+        evidence_refs=evidence_refs,
     )
 
 
@@ -476,6 +587,15 @@ def gate_list_payload(
     *,
     lifecycle_id: str | None,
 ) -> dict[str, Any]:
+    if lifecycle_id is None:
+        # Ambient-defaulting (matching the other lifecycle-scoped tools): with no
+        # explicit id, list the ACTIVE lifecycle's gates — so a raiser can poll its
+        # own gate without ever handling a lifecycle id (they stay server-side).
+        # The workspace log is the fallback only when no lifecycle is active.
+        amb = ambient()
+        current = amb.current if amb is not None else None
+        if current is not None:
+            lifecycle_id = current.id
     gates = _store(config).current(lifecycle_id)
     return _tool_payload(
         "gate_list",

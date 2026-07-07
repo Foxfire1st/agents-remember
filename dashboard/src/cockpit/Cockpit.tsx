@@ -20,6 +20,7 @@ import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
 import { Chats } from "../panels/Chats";
 import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
+import { NotesReaderViewer, type NotesReaderTarget } from "../panels/notes-reader/NotesReaderViewer";
 import { DetailPanel } from "../panels/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
@@ -330,6 +331,12 @@ export function CockpitShell() {
   // full-bleed; the screen's back link clears it, restoring the rails + Operations. A mode-bar
   // switch or an open() also clears it (the takeover is transient, not a standing tab).
   const [changeSet, setChangeSet] = useState<ChangeSetTarget | null>(null);
+  // The Notes Reader (L17) is a task-scoped TAKEOVER like the Change-Set Viewer, but it PERSISTS its
+  // selection like the File Viewer: `notes` (the open note) is retained once opened so the reader stays
+  // mounted (hidden) — selection survives back/forward — and `notesOpen` toggles the takeover's visibility.
+  // Back + mode-bar/node switches hide it (retaining `notes`); a fresh entry point re-shows it on the note.
+  const [notes, setNotes] = useState<NotesReaderTarget | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
   // The right rail toggles between the Event River (default) and the single-instance leaf chat (L5).
   // Persisted to localStorage (same pattern as the effects toggle) so the choice survives a window refresh.
   const [chatRail, setChatRail] = usePersistedFlag("cockpit.rail-chat", false);
@@ -358,11 +365,14 @@ export function CockpitShell() {
   // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
   // layout breathes.
   const fullBleed = view === "files" || view === "engine" || view === "topology" || view === "chats";
+  // A takeover (Change-Set Viewer or the L17 Notes Reader) replaces the railed body full-bleed.
+  const takeover = Boolean(changeSet) || notesOpen;
 
   // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
   // into the detail view, so a cross-view click lands where you can inspect it.
   const open = (id: string) => {
     setChangeSet(null); // leaving the change-set takeover for a selected node
+    setNotesOpen(false); // and the notes reader takeover (selection retained)
     setSelectedId(
       id.startsWith("taskdoc:") || id.startsWith("series:") || id.startsWith("lifecycle:")
         ? id
@@ -374,7 +384,20 @@ export function CockpitShell() {
   // Mode-bar switches exit the takeover too (it is not one of the standing views).
   const changeView = (next: View) => {
     setChangeSet(null);
+    setNotesOpen(false); // exit the notes reader takeover too (selection retained)
     setView(next);
+  };
+
+  // The Change-Set and Notes takeovers are mutually exclusive full-bleed screens: opening one hides the
+  // other. `openNotes` retains `notes` after back (the reader stays mounted, so selection survives).
+  const openChangeSet = (target: ChangeSetTarget) => {
+    setNotesOpen(false);
+    setChangeSet(target);
+  };
+  const openNotes = (target: NotesReaderTarget) => {
+    setChangeSet(null);
+    setNotes(target);
+    setNotesOpen(true);
   };
 
   // Gated fade-in when the rails return (reduced-motion / data-effects=off → no tween). Leaving to
@@ -392,6 +415,27 @@ export function CockpitShell() {
           </main>
         </div>
       ) : null}
+      {/* The Notes Reader (L17) takeover: mounted once opened and kept mounted (hidden via display) even
+          after Back — like the File Viewer — so its listing + open note survive back/forward. Its own
+          `notesOpen` toggles visibility; a change-set takeover (if both were somehow set) wins the screen. */}
+      {notes ? (
+        <div
+          className={cx(bodyGrid({ bleed: true }), "shell__body")}
+          data-fullbleed={true}
+          style={changeSet || !notesOpen ? { display: "none" } : undefined}
+          aria-hidden={changeSet || !notesOpen ? true : undefined}
+        >
+          <main className={cx(viewport, "viewport")} data-view="notes-reader">
+            <NotesReaderViewer
+              repo={notes.repo}
+              master={notes.master}
+              path={notes.path}
+              onSelectNote={(path) => setNotes((cur) => (cur ? { ...cur, path } : cur))}
+              onBack={() => setNotesOpen(false)}
+            />
+          </main>
+        </div>
+      ) : null}
       {/* The railed body is never UNMOUNTED while the change-set takeover shows — only hidden — so the
           DetailPanel's drill state (which leaf you were reading) survives. The viewer's back link then
           returns you exactly where you opened it from (a drilled leaf, not a reset to the master
@@ -400,13 +444,13 @@ export function CockpitShell() {
         className={cx(bodyGrid({ bleed: fullBleed }), "shell__body")}
         data-fullbleed={fullBleed}
         style={{
-          ...(changeSet ? { display: "none" } : {}),
+          ...(takeover ? { display: "none" } : {}),
           // The railed grid uses the persisted rail widths; full-bleed keeps the cva's single column.
           ...(fullBleed
             ? {}
             : { gridTemplateColumns: `${leftRailWidth}px minmax(380px, 1fr) ${rightRailWidth}px` }),
         }}
-        aria-hidden={changeSet ? true : undefined}
+        aria-hidden={takeover ? true : undefined}
       >
         {!fullBleed && (
           <motion.aside
@@ -436,7 +480,8 @@ export function CockpitShell() {
             <DetailPanel
               selectedId={selectedId}
               onOpenLifecycle={open}
-              onOpenChangeSet={setChangeSet}
+              onOpenChangeSet={openChangeSet}
+              onOpenNotes={openNotes}
               onViewLeaf={setViewedLeafKey}
             />
           </div>
@@ -519,6 +564,32 @@ function ViewBody({ view, onOpen }: { view: View; onOpen: (id: string) => void }
   }
 }
 
+// The serving-build stamp, muted (260703-L15 — the July-4 ghost-process lesson): commit
+// short-hash (or the package version off-checkout) + process boot time, so a STALE serving
+// process is visible at a glance. Data rides the snapshot (`servingBuild`, boot-time cached).
+function ServingBuildStamp() {
+  const build = useDashboard((s) => s.servingBuild);
+  if (!build) return null;
+  const booted = new Date(build.bootedAt);
+  const bootLabel = Number.isNaN(booted.getTime())
+    ? build.bootedAt
+    : booted.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+  return (
+    <span
+      className={dim}
+      data-testid="serving-build"
+      title={`Serving build v${build.version}${build.commit ? ` @ ${build.commit}` : ""} · process up since ${build.bootedAt}`}
+    >
+      {build.commit ?? `v${build.version}`} · up {bootLabel}
+    </span>
+  );
+}
+
 function TopBar() {
   const conn = useDashboard((s) => s.conn);
   const metrics = useDashboard((s) => s.metrics);
@@ -540,6 +611,7 @@ function TopBar() {
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
+        <ServingBuildStamp />
         <ConnBadge conn={conn} />
         <EffectsToggle />
       </div>

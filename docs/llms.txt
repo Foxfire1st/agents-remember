@@ -295,11 +295,13 @@ worktree and thrown away with it.
 ## How it works in a session: judgment up front, determinism underneath
 
 Memory is only as good as the discipline that keeps it honest, and that
-discipline is the second half of the product. Every session runs through one
-lifecycle:
+discipline is the second half of the product. Sessions route by role through
+one skill (`l-01-agent-lifecycles`): a spawned agent follows the role brief
+that spawned it, and a developer-facing session is the **orchestrator**, whose
+lifecycle runs
 
 ```text
-request → trust → reframe & research → decide → build → close
+request → trust-checkpoint → reframe-research → decide → build → close
 ```
 
 Before any code changes, the agent resolves context, checks drift and provider
@@ -307,10 +309,11 @@ state, reframes the request into the best version of the task, gathers evidence,
 and waits for the developer to agree on that framing. Only then does it decide
 *how* to build:
 
-- a **read-only** answer that changes no code,
-- a **chat build** carried inline this session, or
-- a **durable task** with its own plan, checklist, and decision log when the work
-  warrants it.
+- a **research-only** answer that changes no code, or
+- a **durable task** with its own plan, checklist, and decision log — chat is
+  never a build route, so even small code work takes the minimal
+  `w-02-light-task-workflow` artifact, and larger work escalates to a master +
+  light sub-task series.
 
 Two principles run through the whole arc. The first is **evidence-first
 reasoning**: for anything where correctness depends on interpretation, the agent
@@ -467,7 +470,7 @@ what your team already knows.
   providers.
 - [External Memory](guides/use-external-memory.md) — separate memory repos and
   the ledger.
-- [Workflows](workflows.md) — the session lifecycle and its build modes.
+- [Workflows](workflows.md) — the agent lifecycles and their build modes.
 - [Install Guides](install/README.md) — harness-native starter packages.
 - [Settings Reference](reference/settings-json.md) — MCP authority settings.
 - [Getting Started](getting-started.md) — set it up in your own workspace.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 import {
   Header,
@@ -10,9 +10,13 @@ import {
 } from "react-aria-components";
 
 import { css, cva } from "../../styled-system/css";
-import { fmtWait, type Pivot } from "../data/selectors";
+import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../data/servedAges";
 import { useDashboard } from "../data/store";
 import {
+  isOrchestrationDoc,
+  masterCommandNames,
+  orchestratorParentKey,
   pathDir,
   pathStem,
   taskDocHierarchyLabel,
@@ -29,6 +33,7 @@ import {
 } from "../data/taskIdentity";
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
+import { RankBadge, type RankTier } from "../grammar/RankBadge";
 import type { AgentPickupNode, EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
 import { AgentPickupIndicator } from "./AgentPickupIndicator";
 
@@ -93,6 +98,7 @@ const groupHeader = css({
 });
 const row = cva({
   base: {
+    position: "relative", // anchors the tier fold-corner pseudo-element (L14)
     display: "flex",
     alignItems: "baseline",
     gap: "0.3rem",
@@ -116,6 +122,40 @@ const row = cva({
       true: {
         paddingLeft: "1rem",
         borderLeftColor: "grid",
+      },
+    },
+    // The V4 command treatment (L14 sketch): a folded corner top-left, a tier ghost wash fading
+    // into the row bg, and — orchestration only — a gold top hairline. Renders ONLY on rows whose
+    // tier is set, i.e. when an orchestration task exists (D3); flat runs never see it.
+    tier: {
+      orchestration: {
+        borderTopWidth: "1px",
+        borderTopStyle: "solid",
+        borderTopColor: "goldDim",
+        backgroundImage:
+          "linear-gradient(90deg, token(colors.goldGhost), token(colors.bg) 34%)",
+        _before: {
+          content: '""',
+          position: "absolute",
+          top: "0",
+          left: "0",
+          borderStyle: "solid",
+          borderWidth: "13px 13px 0 0",
+          borderColor: "token(colors.gold) transparent transparent transparent",
+        },
+      },
+      management: {
+        backgroundImage:
+          "linear-gradient(90deg, token(colors.purpleGhost), token(colors.bg) 30%)",
+        _before: {
+          content: '""',
+          position: "absolute",
+          top: "0",
+          left: "0",
+          borderStyle: "solid",
+          borderWidth: "13px 13px 0 0",
+          borderColor: "token(colors.purpleDim) transparent transparent transparent",
+        },
       },
     },
   },
@@ -176,6 +216,9 @@ export function LifecycleList({
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
+  // Row staleness advances locally between emissions — the change gate (260703-L15) no longer
+  // re-serves a lifecycle every tick just because its age moved.
+  const nowMs = useNowMs();
   const docs = analytics?.taskDocuments ?? [];
   const series = analytics?.series ?? [];
   const agentPickups = analytics?.agentPickups ?? [];
@@ -188,6 +231,7 @@ export function LifecycleList({
     docs,
     series,
     agentPickups,
+    nowMs,
   });
   const groups = groupRows(rows, pivot);
   const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
@@ -242,11 +286,20 @@ export function LifecycleList({
                     key={item.key}
                     id={item.key}
                     textValue={item.label}
-                    className={row({ fleeting: item.fleeting, nested: item.depth > 0 })}
+                    className={row({
+                      fleeting: item.fleeting,
+                      // Tier rows carry the V4 treatment and indent by margin (below); non-tier
+                      // nesting keeps today's leaf look untouched (the flat-run regression rule).
+                      nested: item.depth > 0 && !item.tier,
+                      tier: item.tier,
+                    })}
+                    style={indentStyle(item)}
                     data-depth={item.depth}
                     data-parent-key={item.parentKey}
+                    data-tier={item.tier}
                   >
                     <Dot variant={item.variant} />
+                    {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
                     <span className={rowId} title={item.title}>
                       {item.label}
                     </span>
@@ -276,6 +329,7 @@ interface OperationRowsInput {
   docs: TaskDocNode[];
   series: SeriesNode[];
   agentPickups: AgentPickupNode[];
+  nowMs: number; // the age-display clock — served staleness advances locally (260703-L15)
 }
 
 interface OperationRow {
@@ -293,8 +347,19 @@ interface OperationRow {
   fallbackOrder: string;
   parentKey?: string;
   depth: number;
+  // The command tier (L14): "orchestration" for a master doc carrying `orchestrates`,
+  // "management" for a master commanded by one. Unset (no insignia) everywhere else.
+  tier?: RankTier;
   fleeting: boolean;
   inferred: boolean;
+}
+
+// The 22px indent grammar (L14 sketch): tier rows indent by their full depth; a non-tier row's
+// first level of nesting is today's `nested` padding (unchanged — the flat-run regression rule),
+// so only levels beyond it add margin (a leaf under a commanded master sits one step further).
+function indentStyle(item: Pick<OperationRow, "depth" | "tier">): CSSProperties | undefined {
+  const steps = item.tier ? item.depth : Math.max(0, item.depth - 1);
+  return steps > 0 ? { marginLeft: `${steps * 22}px` } : undefined;
 }
 
 interface OperationGroup {
@@ -305,11 +370,19 @@ interface OperationGroup {
 
 function operationRows(input: OperationRowsInput): OperationRow[] {
   const representedLifecycleIds = new Set<string>();
+  // The identity rule (L11): one task entry per enclosureId. A doc row that resolved through an
+  // enclosure CLAIMS that leaf; a lifecycle bound to the same enclosure annotates the claimed row
+  // (via the lifecycleForEnclosure fallback below) instead of rendering a second entry.
+  const representedEnclosureIds = new Set<string>();
   const docPaths = new Set(input.docs.map((doc) => doc.docPath));
   const docsByLifecycle = groupDocs(input.docs);
   const pickupsByLifecycle = groupPickups(input.agentPickups);
   const enclosureList = Object.values(input.enclosures);
-  const activeEnclosureList = enclosureList.filter(isActiveEnclosure);
+  // The visibility rule (L11): a leaf is active while its worktree physically exists — the
+  // projection's stat'ed truth, never a cleanup-state proxy. Completed/abandoned worktrees are
+  // gone (hidden, as before), and a reopened contract (cleanup=reopened) has none until
+  // worktree_start recreates them, so it stays hidden like any other planned leaf.
+  const activeEnclosureList = enclosureList.filter(hasLiveWorktree);
   const activeEnclosures = Object.fromEntries(
     activeEnclosureList.map((item) => [item.enclosure, item]),
   );
@@ -319,16 +392,39 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   for (const doc of input.docs) {
     const enclosure = enclosureForDoc(doc, activeEnclosureList);
     if (!isRootTaskDoc(doc) && !enclosure) continue;
-    const lifecycle = runtimeForDoc(doc, input.lifecycleById, enclosureList);
+    const lifecycle =
+      runtimeForDoc(doc, input.lifecycleById, enclosureList) ??
+      (enclosure
+        ? lifecycleForEnclosure(enclosure, input.lifecycles, input.lifecycleById)
+        : undefined);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(docRow(doc, lifecycle, input.series, docPaths, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
+    if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
+    rows.push(
+      docRow(
+        doc,
+        lifecycle,
+        input.series,
+        docPaths,
+        pickupForLifecycle(lifecycle, pickupsByLifecycle),
+        input.docs,
+        input.nowMs,
+      ),
+    );
   }
 
   for (const series of input.series) {
     if (docPaths.has(series.docPath)) continue;
     const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(seriesRow(series, lifecycle, pickupForLifecycle(lifecycle, pickupsByLifecycle)));
+    rows.push(
+      seriesRow(
+        series,
+        lifecycle,
+        pickupForLifecycle(lifecycle, pickupsByLifecycle),
+        input.docs,
+        input.nowMs,
+      ),
+    );
   }
 
   for (const lifecycle of input.lifecycles) {
@@ -339,7 +435,10 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       activeEnclosures,
       activeEnclosuresByLifecycle,
     );
-    if (!enclosure) continue;
+    // No live-worktree enclosure -> no task entry; an already-claimed enclosureId -> the doc row
+    // above IS this leaf's single entry (the lifecycle already annotates it).
+    if (!enclosure || representedEnclosureIds.has(enclosure.enclosureId)) continue;
+    representedEnclosureIds.add(enclosure.enclosureId);
     rows.push(
       lifecycleRow(
         lifecycle,
@@ -348,11 +447,25 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
         pickupForLifecycle(lifecycle, pickupsByLifecycle),
         input.series,
         docPaths,
+        input.nowMs,
       ),
     );
   }
 
   return rows.sort(compareRows);
+}
+
+// The command facts for a master-shaped row (L14): an orchestration doc IS the gold tier; a master
+// named in some orchestration doc's `orchestrates` takes the purple tier and nests under it. Docs
+// commanded by nothing carry neither — the whole treatment vanishes in a flat run (D3).
+function commandFacts(
+  doc: Pick<TaskDocNode, "kind" | "docPath" | "id" | "title" | "orchestrates">,
+  allDocs: TaskDocNode[],
+): { tier?: RankTier; parentKey?: string } {
+  if (doc.kind !== "master") return {};
+  if (isOrchestrationDoc(doc)) return { tier: "orchestration" };
+  const commander = orchestratorParentKey(masterCommandNames(doc), allDocs, doc.docPath);
+  return commander ? { tier: "management", parentKey: commander } : {};
 }
 
 function docRow(
@@ -361,13 +474,16 @@ function docRow(
   seriesList: SeriesNode[],
   masterDocPaths: Set<string>,
   pickup: AgentPickupNode | undefined,
+  allDocs: TaskDocNode[],
+  nowMs: number,
 ): OperationRow {
   const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : topLevelStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
   const repo = doc.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? doc.status;
   const variant = lifecycle?.state ?? statusVariant(doc.status);
-  const gate = gateHint(lifecycle?.gate?.kind, lifecycle?.ask);
+  const gate = gateHint(lifecycle?.gate?.kind);
+  const command = commandFacts(doc, allDocs);
   return {
     key: taskDocSelectionKey(doc.docPath),
     label,
@@ -384,13 +500,18 @@ function docRow(
     phase,
     secondary: doc.kind,
     variant,
-    meta: rowMetaText(progressHint(progress), doc.status, lifecycle?.staleSeconds),
+    meta: rowMetaText(
+      progressHint(progress),
+      doc.status,
+      servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
+    ),
     gate,
     pickup,
     createdAt: doc.createdAt ?? "",
     fallbackOrder: doc.docPath,
-    parentKey: taskDocParentKey(doc, seriesList, masterDocPaths),
+    parentKey: command.parentKey ?? taskDocParentKey(doc, seriesList, masterDocPaths),
     depth: 0,
+    tier: command.tier,
     fleeting: lifecycle?.fleeting ?? false,
     inferred: lifecycle?.inferred ?? false,
   };
@@ -400,11 +521,23 @@ function seriesRow(
   series: SeriesNode,
   lifecycle: LifecycleProjection | undefined,
   pickup: AgentPickupNode | undefined,
+  allDocs: TaskDocNode[],
+  nowMs: number,
 ): OperationRow {
   const repo = series.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? series.status;
   const variant = lifecycle?.state ?? statusVariant(series.status);
-  const gate = gateHint(lifecycle?.gate?.kind, lifecycle?.ask);
+  const gate = gateHint(lifecycle?.gate?.kind);
+  // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
+  // task folder), its title, or its doc folder when an orchestration doc names it (L14).
+  const commander = orchestratorParentKey(
+    [
+      series.seriesId,
+      series.title,
+      pathDir(series.docPath).split("/").filter(Boolean).pop() ?? "",
+    ].filter(Boolean),
+    allDocs,
+  );
   return {
     key: seriesSelectionKey(series.seriesId),
     label: series.title,
@@ -423,13 +556,15 @@ function seriesRow(
     meta: rowMetaText(
       progressHint({ done: series.doneCount, total: series.totalCount }),
       series.status,
-      lifecycle?.staleSeconds,
+      servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
     ),
     gate,
     pickup,
     createdAt: series.createdAt ?? "",
     fallbackOrder: series.docPath,
+    parentKey: commander,
     depth: 0,
+    tier: commander ? "management" : undefined,
     fleeting: lifecycle?.fleeting ?? false,
     inferred: lifecycle?.inferred ?? false,
   };
@@ -442,10 +577,11 @@ function lifecycleRow(
   pickup: AgentPickupNode | undefined,
   seriesList: SeriesNode[],
   masterDocPaths: Set<string>,
+  nowMs: number,
 ): OperationRow {
   const label = taskLabel(lifecycle, docs, enclosure);
   const repo = lifecycle.repoId ?? "—";
-  const gate = gateHint(lifecycle.gate?.kind, lifecycle.ask);
+  const gate = gateHint(lifecycle.gate?.kind);
   const currentStep = docs.length === 1 ? docs[0].currentStep : undefined;
   return {
     key: lifecycleSelectionKey(lifecycle.id),
@@ -463,7 +599,7 @@ function lifecycleRow(
     phase: lifecycle.phase,
     secondary: lifecycle.phase,
     variant: lifecycle.state,
-    meta: rowMetaText(taskHint(docs), "", lifecycle.staleSeconds),
+    meta: rowMetaText(taskHint(docs), "", servedAgeSeconds(lifecycle, lifecycle.staleSeconds, nowMs)),
     gate,
     pickup,
     createdAt: lifecycle.startedAt,
@@ -510,22 +646,37 @@ function groupRows(rows: OperationRow[], pivot: Pivot): OperationGroup[] {
     }));
 }
 
+// Depth-first hierarchy flatten. Historically two levels (master > leaf); the L14 orchestration
+// tier adds a third (orchestration > master > leaf), so this walks parent links to any depth.
+// A `seen` guard plus the trailing sweep keep pathological parent data (a cycle, e.g. two
+// orchestration docs naming each other) from dropping rows: unreachable rows append top-level.
 function hierarchyRows(rows: OperationRow[]): OperationRow[] {
   const byParent = new Map<string, OperationRow[]>();
   const byKey = new Map(rows.map((item) => [item.key, item]));
   for (const item of rows) {
-    if (!item.parentKey || !byKey.has(item.parentKey)) continue;
+    if (!item.parentKey || !byKey.has(item.parentKey) || item.parentKey === item.key) continue;
     const children = byParent.get(item.parentKey);
     if (children) children.push(item);
     else byParent.set(item.parentKey, [item]);
   }
   const roots = rows
-    .filter((item) => !item.parentKey || !byKey.has(item.parentKey))
+    .filter((item) => !item.parentKey || !byKey.has(item.parentKey) || item.parentKey === item.key)
     .sort(compareRows);
-  return roots.flatMap((root) => [
-    { ...root, depth: 0 },
-    ...(byParent.get(root.key) ?? []).sort(compareRows).map((child) => ({ ...child, depth: 1 })),
-  ]);
+  const out: OperationRow[] = [];
+  const seen = new Set<string>();
+  const visit = (item: OperationRow, depth: number) => {
+    if (seen.has(item.key)) return;
+    seen.add(item.key);
+    out.push({ ...item, depth });
+    for (const child of (byParent.get(item.key) ?? []).sort(compareRows)) {
+      visit(child, depth + 1);
+    }
+  };
+  for (const root of roots) visit(root, 0);
+  for (const item of [...rows].sort(compareRows)) {
+    if (!seen.has(item.key)) visit(item, 0);
+  }
+  return out;
 }
 
 function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string | null {
@@ -535,11 +686,12 @@ function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string 
   return lifecycleSelectionKey(selection.lifecycleId);
 }
 
-function gateHint(kind: string | undefined, ask: Record<string, unknown> | undefined): string {
-  if (kind) return kind;
-  const question = ask?.question;
-  if (typeof question === "string" && question.trim()) return question;
-  return ask ? "ask" : "";
+// The row's gate chip is the DURABLE gate kind only. The wait-loop-era fallback to the lifecycle's bare
+// `ask` payload (the question string, else the literal "ask") was retired with notify-and-continue: the
+// attention queue carries the notification and GateResponder owns durable gates, so a bare `ask` no
+// longer renders a gate affordance in the tasks row (L17 supplement).
+function gateHint(kind: string | undefined): string {
+  return kind ?? "";
 }
 
 function taskTitle(facts: {
@@ -635,11 +787,29 @@ function enclosureForDoc(
   });
 }
 
-function isActiveEnclosure(enclosure: Pick<EnclosureNode, "cleanup">): boolean {
-  // "completed" is a retired leaf, "abandoned" a discarded one — neither is active work.
-  // A "reopened" enclosure (L11) IS active: the leaf is back in planning awaiting its
-  // worktree_start, and its doc row must render like any other planned leaf.
-  return enclosure.cleanup !== "completed" && enclosure.cleanup !== "abandoned";
+// The lifecycle bound to an enclosure, following the cross-ref in either direction: the
+// contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
+// (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
+// unset or stale: the bound lifecycle's gate/staleness enrich the leaf's single row instead
+// of rendering a duplicate lifecycle card for the same enclosureId (L11).
+function lifecycleForEnclosure(
+  enclosure: EnclosureNode,
+  lifecycles: LifecycleProjection[],
+  lifecycleById: Record<string, LifecycleProjection>,
+): LifecycleProjection | undefined {
+  if (enclosure.lifecycleId && lifecycleById[enclosure.lifecycleId]) {
+    return lifecycleById[enclosure.lifecycleId];
+  }
+  // Anchor fallback: several lifecycles may anchor one enclosure with no contract
+  // lifecycleId — the most recently active one annotates the row (ISO timestamps
+  // compare lexicographically), never whichever happened to project first.
+  return lifecycles
+    .filter((lifecycle) => lifecycle.enclosure === enclosure.enclosure)
+    .reduce<LifecycleProjection | undefined>(
+      (latest, lifecycle) =>
+        !latest || lifecycle.lastEventTs > latest.lastEventTs ? lifecycle : latest,
+      undefined,
+    );
 }
 
 function topLevelStepProgress(doc: TaskDocNode): { done: number; total: number } {

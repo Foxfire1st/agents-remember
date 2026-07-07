@@ -315,7 +315,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "integration_reopen": _preview_integration_reopen(
             contract, code_dirty=code_dirty, memory_would_commit=memory_would_commit
         ),
-        "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract)),
+        "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract, args)),
         "proposed_commits": {
             "code": {
                 "would_commit": code_dirty,
@@ -381,7 +381,7 @@ def _closeout_approval_note(args: WorktreeArgs) -> str:
     return approval_note
 
 
-def _closeout_gate_guard(contract) -> CloseoutGuard | None:
+def _closeout_gate_guard(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     """The lifecycle's closeout-gate verdict, or ``None`` when the lifecycle is gateless.
 
     Reads the same gate log the dashboard writes -- the observer root under the
@@ -392,10 +392,10 @@ def _closeout_gate_guard(contract) -> CloseoutGuard | None:
     if not contract.lifecycle_id:
         return None
     store = GateStore(observer_logs_root(contract.coordination_root))
-    return evaluate_closeout_gate(store.current(contract.lifecycle_id))
+    return evaluate_closeout_gate(store.current(contract.lifecycle_id), policy=args.gate_policy)
 
 
-def _enforce_closeout_gate(contract) -> CloseoutGuard | None:
+def _enforce_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     """Server-side gate enforcement (slice 6b): block closeout on an unsatisfied gate.
 
     A dashboard-opened ``closeout-approval`` gate is binding; a gateless lifecycle
@@ -403,7 +403,7 @@ def _enforce_closeout_gate(contract) -> CloseoutGuard | None:
     cannot satisfy the gate itself: its own ``gate_decide`` is ``decidedBy="model"``,
     which :func:`evaluate_closeout_gate` rejects.
     """
-    guard = _closeout_gate_guard(contract)
+    guard = _closeout_gate_guard(contract, args)
     if guard is not None and not guard.permitted:
         raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
     return guard
@@ -545,7 +545,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if args.dry_run:
         return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     approval_note = _closeout_approval_note(args)
-    gate_guard = _enforce_closeout_gate(contract)
+    gate_guard = _enforce_closeout_gate(contract, args)
 
     worklist = closeout_changed_paths(contract)
     changed_paths = worklist["all"]

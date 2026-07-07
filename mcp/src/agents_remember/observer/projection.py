@@ -74,6 +74,7 @@ class GateNode(BaseModel):
     state: str
     decidedBy: str | None = None
     decidedVia: str | None = None
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
     packet: dict[str, Any] = Field(default_factory=dict)
     ts: str
@@ -126,6 +127,13 @@ class EnclosureNode(BaseModel):
 
     ``lifecycleId`` cross-references the lifecycle this enclosure anchors (it is
     ``""`` for a legacy contract written before the lifecycle field existed).
+
+    ``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence
+    TRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree
+    tools report existence (``contract.code_worktree.exists()`` in
+    ``worktree_status``). The tasks surface filters visibility on these, never on a
+    cleanup-state proxy — ``cleanup: reopened`` means contract-reset-awaiting-restart
+    (worktrees gone until the next ``worktree_start``), not live work.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -143,6 +151,8 @@ class EnclosureNode(BaseModel):
     closeoutStatus: str
     integrationStatus: str
     cleanup: str
+    codeWorktreeExists: bool = False
+    memoryWorktreeExists: bool = False
     actions: list[ActionAvailability] = Field(default_factory=list)
 
 
@@ -276,7 +286,14 @@ class AgentPickupNode(BaseModel):
     entryId: str
     lifecycleId: str | None = None
     agentId: str | None = None
+    senderAgentId: str | None = None
+    senderRole: str | None = None
+    recipientRole: str | None = None
     gateId: str | None = None
+    messageKind: str = "message"
+    artifactPath: str | None = None
+    deliveryState: str = "queued"
+    deliveredToSession: str | None = None
     state: str
     ageSeconds: float | None = None
     ttlSeconds: float
@@ -475,6 +492,10 @@ class TaskDocNode(BaseModel):
     # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
     # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
     masterLifecycleId: str | None = None
+    # The orchestration-command relation (260703-L14): non-empty only on a ``master`` doc that IS an
+    # orchestration task -- the master task names it commands. The dashboard derives the
+    # orchestration > master > leaf hierarchy from it; docs without the field render as before.
+    orchestrates: list[str] = Field(default_factory=list)
 
 
 class SeriesSubTaskNode(BaseModel):

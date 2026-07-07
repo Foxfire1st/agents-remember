@@ -48,6 +48,15 @@ class TaskDocResponse(ToolResponse):
     diff: str | None = None
     wouldLose: bool = False
     masterSync: TaskDocMasterSync | None = None
+    # remove_subtask outcome (260703-L18 finding 1, closes friction F-N): the op removes the master
+    # row and (unless keep_file) deletes the leaf doc, then echoes what it did. Without these fields
+    # the extra=forbid envelope REJECTED the real payload, surfacing a tool error after a destructive
+    # success -- a caller who believes the error could retry the (already-done) removal. Present only
+    # on remove_subtask (real op: removedSubtask + deletedFiles; dry-run: removedSubtask +
+    # wouldDeleteFiles); every other operation leaves them None (excluded by exclude_none).
+    removedSubtask: str | None = None
+    deletedFiles: list[str] | None = None
+    wouldDeleteFiles: list[str] | None = None
 
 
 class TaskReopenResponse(WorktreeCommandResponse):

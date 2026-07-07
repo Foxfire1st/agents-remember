@@ -997,6 +997,110 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             self.assertEqual(result["state"], "internal")
 
+    def _unmapped_external_contract(self, root: Path):
+        """A contract whose code base commit is NOT in the memory ledger -> the missing-mapping block."""
+        code_repo = root / "repo-a"
+        c1 = init_repo(code_repo, "main")
+        # A code-only commit on top: a new SHA the ledger has never seen (the F-R scenario).
+        unmapped = commit_file(code_repo, "feature.py", "value = 1\n", "code-only change")
+        self.assertNotEqual(unmapped, c1)
+        memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
+        memory_head = initialized_memory_repo(memory_repo, "repo-a", "main", "main", c1)
+        # The ledger's memory CONTENT tip (the README commit init_repo made) -- distinct from the
+        # ledger-commit HEAD; reconciliation maps the unmapped code base to THIS, leaving it unchanged.
+        content_commit = load_ledger(memory_repo / "memory.md").last_memory_content_commit
+        contract = default_contract(
+            task_name="Fix Thing",
+            repo_name="repo-a",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=root / "ar-coordination",
+            code_repo_path=code_repo,
+            code_source_branch="main",
+            code_work_branch="ar/fix-thing",
+            code_base_commit=unmapped,
+            worktree_name="fix-thing",
+            memory_repo_path=memory_repo,
+            memory_source_branch="main",
+            memory_work_branch="ar/fix-thing",
+            memory_base_commit=memory_head,
+        )
+        return contract, memory_repo, unmapped, content_commit
+
+    def test_missing_mapping_block_advertises_only_consumable_choices(self) -> None:
+        # FINDING 7 (260703-L18 / friction F-R): the missing-mapping recovery block must name ONLY
+        # executable choices -- passing each advertised memory_choice must DO something, never return
+        # the identical block. 'custom' (wired nowhere) is no longer advertised.
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, _memory_repo, _unmapped, _content = self._unmapped_external_contract(Path(tmp))
+            blocked: dict[str, Any] = worktree_manager.prepare_memory_for_start(
+                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
+            )
+            self.assertEqual(blocked["state"], "blocked")
+            self.assertEqual(blocked["choices"], ["reconciliation", "disabled-memory"])
+            self.assertNotIn("custom", blocked["choices"])
+            for choice in blocked["choices"]:
+                consumed: dict[str, Any] = worktree_manager.prepare_memory_for_start(
+                    contract, worktree_manager.WorktreeArgs(memory_choice=choice, dry_run=True)
+                )
+                self.assertNotEqual(
+                    consumed["state"], "blocked", f"advertised choice {choice!r} is a dead-end"
+                )
+            self.assertEqual(
+                worktree_manager.prepare_memory_for_start(
+                    contract,
+                    worktree_manager.WorktreeArgs(memory_choice="disabled-memory", dry_run=True),
+                )["state"],
+                "disabled",
+            )
+
+    def test_reconciliation_records_the_mapping_and_starts_the_worktree(self) -> None:
+        # FINDING 7: reconciliation maps the unmapped code base -> the ledger's memory content tip,
+        # records it in the official memory repo exactly the way closeout ledger syncs do (header
+        # advance + newest-first row + a "Ledger sync" commit in the memory SOURCE repo -- the owner's
+        # hand precedent af50a05), then proceeds to a real started worktree.
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, memory_repo, unmapped, content = self._unmapped_external_contract(Path(tmp))
+            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
+                contract,
+                worktree_manager.WorktreeArgs(memory_choice="reconciliation", dry_run=False),
+            )
+            self.assertEqual(result["state"], "compatible")
+            # The official ledger now maps the code base commit to the (unchanged) memory content tip.
+            ledger = load_ledger(memory_repo / "memory.md")
+            row = find_mapping(ledger, unmapped)
+            assert row is not None
+            self.assertEqual(row.memory_commit, content)
+            self.assertEqual(ledger.last_verified_code_commit, unmapped)
+            self.assertEqual(ledger.last_memory_content_commit, content)  # content unchanged
+            # A "Ledger sync" commit landed in the memory SOURCE repo (durable, task-tagged).
+            subject = git(memory_repo, "log", "-1", "--format=%s")
+            self.assertIn("Ledger sync", subject)
+            self.assertIn(unmapped, subject)
+            # And the memory worktree was actually created (a started worktree, not a preview).
+            assert contract.memory_worktree is not None
+            self.assertTrue(contract.memory_worktree.exists())
+            self.assertNotEqual(result["worktree"], "would-create")
+
+    def test_reconciliation_refuses_when_memory_repo_is_on_another_branch(self) -> None:
+        # PR #100 review (Codex P1): the mapping commit must land on the memory SOURCE branch —
+        # the worktree is created FROM that branch. With the official memory repo checked out
+        # elsewhere, reconciliation refuses loudly (naming both branches) instead of committing
+        # the mapping to the wrong branch, which would leave the source branch unmapped while
+        # start reports compatible.
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, memory_repo, _unmapped, _content = self._unmapped_external_contract(Path(tmp))
+            git(memory_repo, "checkout", "-b", "some-other-branch")
+            with self.assertRaises(LedgerError) as raised:
+                worktree_manager.prepare_memory_for_start(
+                    contract,
+                    worktree_manager.WorktreeArgs(memory_choice="reconciliation", dry_run=False),
+                )
+            self.assertIn("'main'", str(raised.exception))
+            self.assertIn("'some-other-branch'", str(raised.exception))
+            # Nothing was committed to the wrong branch.
+            self.assertNotIn("Ledger sync", git(memory_repo, "log", "-1", "--format=%s"))
+
     def test_worktree_contract_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

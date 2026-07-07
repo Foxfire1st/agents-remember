@@ -26,7 +26,7 @@ package skill folder. The pre-push hook runs
 
 | Skill | Purpose |
 | --- | --- |
-| `l-01-session-job-lifecycle` | The session job lifecycle the coordinator routes every session into (orient → ground → frame → decide → build → close); owns the read-only exit and the build-mode decision. |
+| `l-01-agent-lifecycles` | The agent lifecycles, one per agent type under one roof. Routes every session by exactly three conditions (spawn-role env → role brief → otherwise orchestrator), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (orchestrator · designer · strategist · manager · worker · adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. The orchestrator lifecycle (request → trust-checkpoint → reframe-research → decide → build → close) owns the research-only exit and the build-mode decision; a developer-facing session IS the orchestrator. |
 | `w-02-light-task-workflow` | Durable one-page task plan with approval gate and live checklist; escalates to a master + light sub-task series for larger work. |
 
 ## Core Skills

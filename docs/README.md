@@ -26,7 +26,7 @@ The default setup stores durable memory in the target repository under `ar-memor
 - [Features](features.md) - the concentrated product tour: by-path memory, drift, providers, worktrees, harness setup, and operational guardrails.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
-- [Workflows](workflows.md) - the `l-01-session-job-lifecycle` lifecycle, its build modes, and worktrees.
+- [Workflows](workflows.md) - the `l-01-agent-lifecycles` skill (the role router and the orchestrator lifecycle), its build modes, and worktrees.
 - [Benchmark Methodology](benchmarks-methodology.md) - paired benchmark runs, metrics, validity checks, and limitations.
 - [FAQ](FAQ.md) - design principles, objections, and comparisons.
 
@@ -56,6 +56,7 @@ The default setup stores durable memory in the target repository under `ar-memor
 - [MCP Tool Reference](reference/mcp-tools.md)
 - [Runtime Layout](reference/runtime-layout.md)
 - [settings.json](reference/settings-json.md)
+- [Harnesses & Spawn Knobs](reference/harnesses.md)
 - [Path Rules](reference/path-rules.md)
 - [Skills](reference/skills.md)
 - [c-08-ar-coordination-context-resolver Resolver](reference/resolver-c08.md)

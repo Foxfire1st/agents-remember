@@ -118,6 +118,37 @@ afterEach(() => {
   window.localStorage.clear(); // the rail toggle now persists its choice; isolate it between tests
 });
 
+describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)", () => {
+  it("renders the muted stamp from the snapshot's servingBuild (commit-first)", () => {
+    const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
+    if (!fixture) throw new Error("fixture not found: engine-fleet");
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: { version: "9.9.9", commit: "abc1234", bootedAt: "2026-07-07T05:00:00Z" },
+    });
+    const { getByTestId } = render(<CockpitShell />);
+    expect(getByTestId("serving-build").textContent).toContain("abc1234");
+    expect(getByTestId("serving-build").textContent).toContain("up ");
+  });
+
+  it("falls back to the package version off-checkout; renders nothing without a stamp", () => {
+    const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
+    if (!fixture) throw new Error("fixture not found: engine-fleet");
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: { version: "9.9.9", bootedAt: "2026-07-07T05:00:00Z" },
+    });
+    const first = render(<CockpitShell />);
+    expect(first.getByTestId("serving-build").textContent).toContain("v9.9.9");
+    first.unmount();
+
+    dashboardStore.getState().reset();
+    seed("engine-fleet"); // no servingBuild on the wire (a pre-L15 server)
+    const second = render(<CockpitShell />);
+    expect(second.queryByTestId("serving-build")).toBeNull(); // absent stamp: nothing, never faked
+  });
+});
+
 describe("CockpitShell full-bleed machine-map views (5f S1)", () => {
   it("rails the Operations view but goes full-bleed (no rails) for the Engine Room", () => {
     seed("engine-fleet");

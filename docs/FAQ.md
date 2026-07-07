@@ -15,7 +15,7 @@ The core rules are:
 3. implementation waits for developer approval
 4. onboarding records approved current state, not plans
 
-Read-only answers, chat builds, and durable `w-02-light-task-workflow` tasks are different weights of the same discipline.
+Research-only answers, minimal `w-02-light-task-workflow` tasks, and master + light sub-task series are different weights of the same discipline.
 
 ### How does an agent find the right memory?
 
@@ -69,15 +69,15 @@ Repo-wide context belongs in `overview.md`. Larger repos can use route-local ove
 
 ### Do I need a durable task?
 
-Often no. A chat build is the default for changes that fit in one session.
+Yes, but it can be thin. Chat is never a build route: every code change lives under an approved task document, and a change that fits in one session takes the minimal `w-02-light-task-workflow` artifact — a thin doc with a title and a few steps.
 
-Use a `w-02-light-task-workflow` light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
+Use a full `w-02-light-task-workflow` light task when the work needs a durable task file or checklist. When it outgrows a single-page plan — broad, high-risk, or many distinct slices — escalate to a master + light sub-task series.
 
 ### Is this overengineered?
 
 The memory layer is intentionally small: Markdown files, Git metadata, and deterministic paths. The workflow layer can be heavier, but it is optional and should match task risk.
 
-If a change fits in one session, use a chat build. If it needs a durable plan, use a `w-02-light-task-workflow` light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
+If a change fits in one session, use a minimal `w-02-light-task-workflow` task. If it needs a durable plan, use a full `w-02-light-task-workflow` light task. If it outgrows one page or spans several slices, use a master + light sub-task series.
 
 ### What happens when the agent discovers something during implementation?
 

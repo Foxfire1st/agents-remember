@@ -280,11 +280,18 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             root = Path(tmp_dir)
             coordination_root = root / "coordination"
             runtime_root = coordination_root / "providers" / "grepai"
+            # --from-settings is explicit and empty: the manual-override path
+            # carries no docker runtime block (the L13 removal of the implicit
+            # coordinator system/settings.json fallback makes the flag required).
+            settings_path = root / "lifecycle-settings.json"
+            lifecycle.write_json(settings_path, {})
             args = self.parse_grepai(
                 [
                     "run",
                     "--coordination-root",
                     str(coordination_root),
+                    "--from-settings",
+                    str(settings_path),
                     "--runtime-root",
                     str(runtime_root),
                     "--dry-run",
@@ -860,11 +867,15 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             root = Path(tmp_dir)
             coordination_root = root / "coordination"
             runtime_root = coordination_root / "providers" / "grepai"
+            settings_path = root / "lifecycle-settings.json"
+            lifecycle.write_json(settings_path, {})
             args = self.parse_grepai(
                 [
                     "run",
                     "--coordination-root",
                     str(coordination_root),
+                    "--from-settings",
+                    str(settings_path),
                     "--runtime-root",
                     str(runtime_root),
                     "--dry-run",
@@ -1110,7 +1121,7 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             "process_namespace_status": watcher_lifecycle.process_namespace_status,
         }
 
-        def fake_enabled(coordination_root, from_settings, provider):
+        def fake_enabled(from_settings, provider):
             return Path("/tmp/settings.json"), True
 
         watcher_lifecycle.context_provider_enabled = fake_enabled
@@ -1231,6 +1242,53 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertNotIn("--no-cache", result["command"]["command"])
+
+
+class LifecycleSettingsPathTests(unittest.TestCase):
+    """260703-L13 (GQ3): the implicit coordinator system/settings.json fallback is gone.
+
+    Every lifecycle settings reader requires the explicit ``--from-settings``
+    path; a missing one refuses loudly instead of silently reading (or
+    empty-defaulting on) coordinator state the authority discipline already
+    rejected as a provider settings source.
+    """
+
+    def test_cgc_settings_reader_refuses_without_explicit_path(self) -> None:
+        with self.assertRaisesRegex(
+            lifecycle.ContextProviderError,
+            "explicit --from-settings path.*not an authority source",
+        ):
+            lifecycle.cgc_settings_from_file(None)
+
+    def test_grepai_settings_reader_refuses_without_explicit_path(self) -> None:
+        with self.assertRaisesRegex(
+            lifecycle.ContextProviderError, "explicit --from-settings path"
+        ):
+            lifecycle.grepai_settings_from_file(None)
+
+    def test_enabled_probe_refuses_without_explicit_path(self) -> None:
+        with self.assertRaisesRegex(
+            lifecycle.ContextProviderError, "explicit --from-settings path"
+        ):
+            lifecycle.context_provider_enabled(None, "grepai-memory")
+
+    def test_explicit_settings_path_keeps_working(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            settings_path = Path(tmp_dir) / "lifecycle-settings.json"
+            lifecycle.write_json(
+                settings_path,
+                {
+                    "contextProviders": {
+                        "enabled": True,
+                        "providers": {"grepai-memory": {"enabled": True}},
+                    }
+                },
+            )
+            path, enabled = lifecycle.context_provider_enabled(
+                settings_path, "grepai-memory"
+            )
+        self.assertEqual(path, settings_path)
+        self.assertTrue(enabled)
 
 
 if __name__ == "__main__":

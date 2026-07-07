@@ -17,6 +17,8 @@ const enclosure = (overrides: Partial<EnclosureNode> = {}): EnclosureNode => ({
   closeoutStatus: "not-started",
   integrationStatus: "not-started",
   cleanup: "pending",
+  codeWorktreeExists: true,
+  memoryWorktreeExists: true,
   actions: [],
   ...overrides,
 });

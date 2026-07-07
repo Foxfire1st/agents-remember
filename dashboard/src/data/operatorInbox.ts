@@ -4,7 +4,13 @@ export type OperatorInboxDismissStatus = "dismissed" | "not-found" | "error";
 export interface OperatorInboxPostRequest {
   lifecycleId?: string;
   agentId?: string;
+  senderAgentId?: string;
+  senderRole?: string;
+  recipientRole?: string;
   gateId?: string;
+  messageKind?: string;
+  artifactPath?: string;
+  deliverToHosted?: boolean;
   ask: string;
   response: string;
 }

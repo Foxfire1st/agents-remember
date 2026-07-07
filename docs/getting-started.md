@@ -190,7 +190,7 @@ Providers are optional — memory, onboarding, drift, and task workflows all wor
 
 ## Start Working
 
-Normal tasks run through the `l-01-session-job-lifecycle` session job lifecycle (orient → ground → frame → decide → build → close). The agent should:
+Sessions route by role through the `l-01-agent-lifecycles` skill: a developer-facing session is the **orchestrator** and runs the orchestrator lifecycle (request → trust-checkpoint → reframe-research → decide → build → close); a spawned agent follows the role brief that spawned it. For normal tasks the agent should:
 
 1. resolve the repository context with `c-08-ar-coordination-context-resolver`
 2. run `c-02-memory-quality-control` before planning against onboarding

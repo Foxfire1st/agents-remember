@@ -52,10 +52,12 @@ Run this sequence in order:
 0. Preflight: verify the copied package and MCP setup are usable enough to
    continue.
 1. Runtime scaffold: run or verify `runtime_install()`.
-2. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
-3. Bootstrap: when a new memory repo was scaffolded, hand off to
+2. Agentic settings: walk the developer through the orchestration defaults in
+   the seeded global settings file.
+3. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
+4. Bootstrap: when a new memory repo was scaffolded, hand off to
    `c-03-repo-bootstrap`.
-4. Providers: when providers are enabled, start/refresh indexing and verify
+5. Providers: when providers are enabled, start/refresh indexing and verify
    readiness.
 
 This skill orchestrates and delegates. It does not reimplement
@@ -79,7 +81,9 @@ Check, in order:
 3. **Settings sane.** Confirm `server_info` reports the expected
    `coordinationRoot`, `workspaceRoot`, allowed repositories, and providers.
    Surface the resolved absolute paths because wrong paths are the common cause
-   of resolver failures.
+   of resolver failures. Also report whether the global agentic settings file
+   (`<coordinationRoot>/system/settings.json`) exists yet; Stage 1 seeds it
+   when missing and Stage 2 configures it.
 4. **Runtime state.** Check whether the coordinator scaffold already exists under
    `coordinationRoot` (`AGENTS.md`, `skills/`, `tasks/`, `memory-repos/`,
    `system/` as applicable). If it is missing or stale, Stage 1 will run
@@ -118,7 +122,61 @@ Do not run `skills_install()` as part of first-run setup. The harness starter
 package already carries the skills. `skills_install()` remains available for
 manual maintenance or non-package setups, but it is not the default path.
 
-## Stage 2 - Memory Repo: Ask Scaffold Vs Existing
+## Stage 2 - Agentic Settings: Interview The Developer
+
+`runtime_install()` seeds the GLOBAL agentic settings file at
+`<coordinationRoot>/system/settings.json` copy-if-missing, with every knob at
+its documented default: all-human gate delegation, the standard three-party-loop
+defaults, no concurrency caps, no spawn harness preference. This stage turns
+those defaults into the developer's actual posture so the intended workflows
+run on ANY harness. The schema reference is `docs/reference/settings-json.md`
+(Agentic Settings); unknown `orchestration.*` keys fail loud, so write only
+documented keys.
+
+Walk the developer through the four knob families and edit the global file with
+their answers (leave a family at its seeded default when they have no
+preference):
+
+1. **Gate delegation posture** (`orchestration.gateDelegation`; GLOBAL file only - the
+   loader refuses it repo-locally and the boot snapshot reads the coordinator file) - keep every
+   gate human (`all-human`, the default), or delegate leaf gates with the
+   `manager-decides-leaf-gates` policy, optional per-kind `kinds` overrides,
+   and `requireReviewerVerdictAtSeams`. Say explicitly that this one key is
+   boot-snapshot: a change needs an MCP/harness restart.
+2. **Loop defaults** (`orchestration.loops`) - the review-round cap
+   (`defaults.maxRounds`), reviewer reuse (`defaults.reviewerReuse`),
+   complexity thresholds (`defaults.complexity`), and per-level loop postures
+   (`perLevel`). Read per-use; edits apply on the next use, no restart.
+3. **Concurrency caps** (`orchestration.concurrency`) - `maxParallelMasters`,
+   `maxParallelLeaves`, `maxSubAgents`. Default: uncapped.
+4. **Harness preference + role knobs** (`orchestration.spawn.harness`,
+   per-role `orchestration.roles.<role>`, per-level
+   `orchestration.rolesPerLevel.<level>.<role>`) - which installed harness
+   `spawn_agent_session` uses when the spawning seat passes none, per-role
+   harness/model/effort overrides, and per-LEVEL overrides
+   (leaf|master|portfolio) for tiered economics (e.g. a cheap leaf reviewer,
+   a smarter master-seam reviewer). Harness values must be known ids: the
+   builtin registry (`claude`, `codex`, `pi`) or an `orchestration.harnesses`
+   entry the developer defines (new TUIs, or a pre-customized launch argv for
+   a builtin). `effort` is validated per-harness at dispatch (claude:
+   `low|medium|high|xhigh|max` on the `--effort` flag plus the session-level
+   `ultracode`); mention the FREE-FORM escape hatch for anything outside the
+   vocabularies - `launchArgs` (verbatim argv), `sessionCommands` (pasted
+   before the brief), `promptKeywords` (prepended to the brief) - never
+   validated, recorded in spawn provenance. Default: detection-gated (the
+   first detected harness). The full spawn-surface manual is
+   `docs/reference/harnesses.md`.
+
+If the developer wants to skip the interview, confirm the seeded defaults
+apply and continue; tell them the file can be edited any time (picked up
+per-use, except the gateDelegation restart note above).
+
+Per-repo overrides: a code repo may carry its own `<repo>/system/settings.json`
+with the same `orchestration.*` shape; repo-local leaf values override the
+global file (arrays replace). Offer this only when the developer asks for
+repo-specific behavior; do not create the file unprompted.
+
+## Stage 3 - Memory Repo: Ask Scaffold Vs Existing
 
 Do not assume the developer wants a fresh memory repo. Ask which case applies,
 unless a memory repo is already present and resolvable:
@@ -126,10 +184,10 @@ unless a memory repo is already present and resolvable:
 1. **Scaffold a new memory repo** - they have no existing memory for this code
    repo. Run `c-00-initialize-memory-repo` (internal by default; external only if
    the developer asks or the configured topology requires it). Continue to Stage
-   3.
+   4.
 2. **Use an existing memory repo** - they already have one. Clone or checkout it
    to the resolved memory location, then adopt it as the ledgered baseline with
-   `c-10-adopt-memory-baseline`. Skip Stage 3 because its onboarding already
+   `c-10-adopt-memory-baseline`. Skip Stage 4 because its onboarding already
    exists.
 
 Internal-memory note: pre-existing internal memory lives inside the code repo
@@ -137,9 +195,9 @@ Internal-memory note: pre-existing internal memory lives inside the code repo
 `c-08-ar-coordination-context-resolver` and skip the question when the memory
 layer is already there.
 
-## Stage 3 - Bootstrap
+## Stage 4 - Bootstrap
 
-Run this stage only when Stage 2 scaffolded a new memory repo.
+Run this stage only when Stage 3 scaffolded a new memory repo.
 
 Hand off to `c-03-repo-bootstrap` to generate initial onboarding. A thin
 `overview.md` is enough to start; deeper route-local overviews and file-level
@@ -147,7 +205,7 @@ onboarding should grow as work touches new areas.
 
 Skip this stage when an existing memory repo was adopted.
 
-## Stage 4 - Configure Providers To Index
+## Stage 5 - Configure Providers To Index
 
 If providers are enabled, make them index the configured code and memory:
 
@@ -177,10 +235,12 @@ Summarize:
    step the developer must perform;
 2. runtime scaffold: `runtime_install()` run or already current, with the
    resolved coordination root;
-3. memory repo: scaffolded, existing-adopted, or already present, with the
+3. agentic settings: interviewed and written, or left at the seeded defaults,
+   with the global file path;
+4. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
-4. bootstrap: run via `c-03-repo-bootstrap` or skipped;
-5. providers: indexing status and any deferred/degraded state.
+5. bootstrap: run via `c-03-repo-bootstrap` or skipped;
+6. providers: indexing status and any deferred/degraded state.
 
 End by telling the developer whether the project is ready for normal work. Do
 not tell them to restart for hooks installed by this skill, because this skill no

@@ -1240,7 +1240,7 @@ The orchestrator remains thin throughout.
 | `c-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to the `c-03-repo-bootstrap` skill. The `c-03-repo-bootstrap` skill creates cards/waves and delegates file output rules to the `c-05-create-or-update-onboarding-files` skill. |
 | `c-04-retrieval-strategy-router`                  | Consumes bootstrapped overviews and file maps as the Intent substrate and can route to semantic/relationship providers first. |
 | `c-02-memory-quality-control`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
-| `l-01-session-job-lifecycle`                      | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
+| `l-01-agent-lifecycles`                           | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |
 
 ---

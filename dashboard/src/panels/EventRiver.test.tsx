@@ -78,6 +78,8 @@ function enclosure(partial: Partial<EnclosureNode> & { enclosure: string }): Enc
     actions: [],
     cleanup: "pending",
     closeoutStatus: "not-started",
+    codeWorktreeExists: true,
+    memoryWorktreeExists: true,
     enclosure: enclosurePath,
     enclosureId: enclosurePath,
     humanReviewStatus: "pending-review",

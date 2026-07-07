@@ -140,6 +140,11 @@ class TaskDocument(_Doc):
     # render plan AND, since R4, freeform extra sections on a leaf doc (appended after the template).
     subTasks: list[SubTaskRef] = Field(default_factory=list)
     sections: list[Section] = Field(default_factory=list)
+    # The orchestration-command relation (260703-L14): a ``master`` doc that carries a non-empty
+    # ``orchestrates`` list IS an orchestration task -- each entry names a master task it commands
+    # (its task folder / doc id / title; the dashboard matches forgivingly). Additive: there is no
+    # new task kind, docs without the field are untouched, and masters named nowhere stay top-level.
+    orchestrates: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_kind_fields(self) -> Self:
@@ -156,6 +161,8 @@ class TaskDocument(_Doc):
         else:
             if self.subTasks:
                 raise ValueError(f"a {self.kind} document has no subTasks (master-only)")
+            if self.orchestrates:
+                raise ValueError(f"a {self.kind} document has no orchestrates (master-only)")
             if any(section.kind != "freeform" for section in self.sections):
                 raise ValueError(f"a {self.kind} document allows only freeform sections")
             if self.codeExamplesNote is not None and self.codeExamples:

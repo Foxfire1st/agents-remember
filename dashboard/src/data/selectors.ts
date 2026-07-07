@@ -7,11 +7,25 @@
 import type {
   AttentionItem,
   DriftSnapshotNode,
+  EnclosureNode,
   LifecycleProjection,
   Phase,
   ProviderNode,
 } from "../types/projection";
 import type { DashboardState } from "./store";
+
+// ── The tasks-surface visibility rule (L11) ─────────────────────────────────────
+// A leaf renders as a task entry ONLY while a worktree physically exists (an active worktree =
+// something is being built). The projection stats this server-side (codeWorktreeExists /
+// memoryWorktreeExists), so the client filters on truth — never on a cleanup-state proxy. A
+// completed/abandoned enclosure's worktrees are gone (hidden, as before); a reopened contract
+// (cleanup=reopened: contract-reset-awaiting-restart) stays hidden until worktree_start
+// recreates its worktrees. Identity is the complementary rule: one row per enclosureId.
+export function hasLiveWorktree(
+  enclosure: Pick<EnclosureNode, "codeWorktreeExists" | "memoryWorktreeExists">,
+): boolean {
+  return enclosure.codeWorktreeExists || enclosure.memoryWorktreeExists;
+}
 
 // Stable empty reference: a fresh `[]` each call would make useSyncExternalStore (Zustand's
 // useStore) see a new snapshot every render and loop ("getSnapshot should be cached").

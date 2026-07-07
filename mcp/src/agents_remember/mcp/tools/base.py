@@ -17,6 +17,7 @@ PUBLIC_TOOLS = (
     "context_packet",
     "read_ar_files",
     "attach_terminal_session_to_leaf",
+    "spawn_agent_session",
     "runtime_install",
     "resolve_context",
     "drift_check",
@@ -65,6 +66,7 @@ PUBLIC_TOOLS = (
     "operator_inbox_post",
     "operator_inbox_poll",
     "operator_inbox_consume",
+    "orchestration_nudge_manager",
 )
 RESERVED_TOOLS: tuple[str, ...] = ()
 

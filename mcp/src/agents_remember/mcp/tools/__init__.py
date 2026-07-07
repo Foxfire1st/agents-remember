@@ -51,6 +51,7 @@ from .operator_inbox import (
     operator_inbox_poll_payload,
     operator_inbox_post_payload,
 )
+from .orchestration import orchestration_nudge_manager_payload
 from .providers import (
     cgc_callees_payload,
     cgc_callers_payload,
@@ -66,7 +67,7 @@ from .providers import (
 )
 from .read_files import read_ar_files_payload
 from .task_doc import task_doc_payload, task_reopen_payload
-from .terminal import attach_terminal_session_to_leaf_payload
+from .terminal import attach_terminal_session_to_leaf_payload, spawn_agent_session_payload
 from .worktree import (
     worktree_abandon_payload,
     worktree_attach_payload,
@@ -122,6 +123,7 @@ __all__ = [
     "operator_inbox_consume_payload",
     "operator_inbox_poll_payload",
     "operator_inbox_post_payload",
+    "orchestration_nudge_manager_payload",
     "ping_payload",
     "provider_diagnostics_payload",
     "provider_status_payload",
@@ -132,6 +134,7 @@ __all__ = [
     "runtime_install_payload",
     "server_info_payload",
     "skills_install_payload",
+    "spawn_agent_session_payload",
     "switch_lifecycle_payload",
     "task_doc_payload",
     "task_reopen_payload",
