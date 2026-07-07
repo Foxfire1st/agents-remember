@@ -76,6 +76,15 @@ class ArtifactHelperTests(unittest.TestCase):
         )
         self.assertEqual(packet.toRole, "manager")
 
+    def test_system_specialist_escalates_to_orchestrator(self) -> None:
+        packet = escalation_packet(
+            from_role="system-specialist",
+            reason="blocked",
+            subject="provider degradation report",
+            summary="The provider issue is not fixable in-session.",
+        )
+        self.assertEqual(packet.toRole, "orchestrator")
+
     def test_orchestrator_escalates_to_architect(self) -> None:
         packet = escalation_packet(
             from_role="orchestrator",

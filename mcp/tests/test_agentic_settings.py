@@ -385,6 +385,7 @@ class TypedModelTests(unittest.TestCase):
                     "curator": {"harness": "codex", "effort": "medium"},
                     "worker": {"harness": "codex", "model": "gpt-5", "effort": "medium"},
                     "orchestrator": {"effort": "high"},
+                    "system-specialist": {"harness": "claude", "model": "fable"},
                 }
             }
         )
@@ -399,6 +400,9 @@ class TypedModelTests(unittest.TestCase):
         )
         self.assertEqual(
             settings.roles["curator"], RoleKnobs(harness="codex", effort="medium")
+        )
+        self.assertEqual(
+            settings.roles["system-specialist"], RoleKnobs(harness="claude", model="fable")
         )
         # Unconfigured roles resolve to empty knobs (role-file defaults apply).
         self.assertEqual(settings.role_knobs("manager"), RoleKnobs())

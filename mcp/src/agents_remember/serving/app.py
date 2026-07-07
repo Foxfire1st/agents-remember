@@ -71,6 +71,7 @@ from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
+from agents_remember.providers.degradation import evaluate_provider_degradation
 from agents_remember.providers.metrics import (
     DEFAULT_SAMPLE_INTERVAL_SECONDS,
     ProviderMetricsStore,
@@ -454,6 +455,7 @@ def create_app(
                     sample_provider_containers, cwd=config.coordination_root
                 )
                 await asyncio.to_thread(metrics_store.record, snapshot)
+                await asyncio.to_thread(evaluate_provider_degradation, config)
             except Exception:
                 logger.exception("provider metrics sample failed; retrying next interval")
             await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)

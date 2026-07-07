@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise architect), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. A developer-facing session IS the architect; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
+description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise architect), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, system-specialist, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. A developer-facing session IS the architect; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
 ---
 
 # l-01-agent-lifecycles — The Agent Lifecycles
@@ -47,6 +47,7 @@ or build hats (the hat-collapse rule). A spawned role seat never wears another r
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
 | **curator** | fresh per leaf after builder/reviewer; writes onboarding only from task docs, notes, and code diff | `roles/curator.md` |
+| **system-specialist** | backend provider-degradation investigator; report first, fixes only after explicit orchestrator order; spawn value `system-specialist` | `roles/system-specialist.md` |
 | **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) and as any three-party loop's reviewer seat (criteria catalogs bound per review type); spawn value `reviewer` | `roles/reviewer.md` |
 
 The **lenses** (bug · feature · triage · research — `lenses.md`) are how the scoping seats
@@ -108,7 +109,8 @@ at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifec
 
 - **Continuity lives in the `task_doc` + durable artifacts, never in transcripts** — which is why
   short-lived workers and reviewers are safe, and why every seat writes its artifact of record.
-- **Escalation ladder: worker → manager → orchestrator → architect → developer.** No rung is skipped, ever.
+- **Escalation ladder:** worker → manager → orchestrator → architect → developer; system-specialist
+  → orchestrator. No rung is skipped, ever.
   Each role file states only its own rung.
 - **Observability:** coordination seats are `task_doc` leaves with attached chats; the developer
   can walk into any seat at any level.
@@ -203,6 +205,7 @@ defaults < global settings < repo-local settings.
       "orchestrator": { "harness": "claude", "effort": "high" },
       "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
       "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
+      "system-specialist": { "harness": "claude", "model": "fable", "effort": "high" },
       "curator":      { "harness": "codex",  "effort": "medium" },
       "worker":       { "harness": "codex",  "effort": "medium" }
     },
@@ -250,7 +253,7 @@ reuse, complexity thresholds) lives in the same block — meaning in
 ## Companion Files
 
 - `lenses.md` — the four job lenses for the scoping seats.
-- `roles/…` — the eight self-contained role lifecycles (the registry above).
+- `roles/…` — the nine self-contained role lifecycles (the registry above).
 - `templates/…` — turn-report · worker-brief · manager-brief (`ROLE BRIEF — manager`; the
   orchestrator compiles a manager's session start from it) · master-handover-packet ·
   conversation-handover-packet · verdict · impact-analysis · onboarding-coherency ·

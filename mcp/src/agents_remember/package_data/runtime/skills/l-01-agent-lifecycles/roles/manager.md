@@ -64,6 +64,16 @@ letter. The manager fills small, unambiguous blanks a competent implementer woul
 Take the master's own coordination leaf (`task_doc`, no enclosure); the chat is attached so the
 developer can walk in any time. Read the master + leaf docs; order the leaves.
 
+### Provider Degradation Alert
+
+When a `degradation-alert` lands in your inbox, immediately stop **starting** providers until an
+all-clear/healthy degradation event arrives. This means: no worktree provider setup, no
+`provider_watchers start`, no watcher restart, and no `retry_provider_setup`. Continue any
+providerless/native-read work that remains valid, and report provider-dependent blockers to the
+orchestrator. You have **no provider kill authority**: do not docker-kill, do not stop containers,
+and do not call provider teardown paths. Provider investigation, remediation orders, and provider
+stops belong to the orchestrator via the system-specialist protocol.
+
 ### 2 — Leaf dispatch loop (per leaf)
 
 - **Score the leaf's loop tier at dispatch** (loop doctrine: `../SKILL.md`, The Three-Party Loop):

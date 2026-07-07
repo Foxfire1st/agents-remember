@@ -87,6 +87,27 @@ task doc (approved)  →  branch (intent)  →  worktree (only where something i
 When this seat spawns a role it compiles the trust facts into the brief — a spawned role does not
 repeat this checkpoint.
 
+## Provider Degradation Alert
+
+When a `degradation-alert` lands in your inbox, keep portfolio attention on observation and
+delegation. Do not become the fixer.
+
+1. Dispatch the **system-specialist** with `spawn_agent_session`,
+   `env={"AR_SPAWN_ROLE": "system-specialist"}`, the degradation event id/payload, current metrics
+   and provider log paths, and a report path under the active master's `notes/reports/` folder (or
+   an orchestrator-designated reports folder when no master owns the incident).
+2. Require the specialist to investigate first and write the report before any remediation.
+3. Read the report. If the issue is fixable in session, send the specialist one explicit fix order.
+4. If the report says the issue is not fixable in session, or if critical pressure continues, stop
+   providers through the always-legal teardown path (`provider_watchers stop` / provider teardown)
+   before they can take the system down. A critical detector event may already have executed the
+   failsafe stop; verify and record what happened.
+
+Managers receiving the same alert stop **starting** providers only. They have no kill authority.
+The system-specialist seat never mutates task docs, lifecycle state, or memory beyond its report.
+This iteration is providers-only; Sentry/system monitoring integration remains a future detection
+source, not part of this role response protocol.
+
 ## Decision-Item Relay To The Architect
 
 The orchestrator does not hand questions to the developer. Every developer-worthy item goes to the

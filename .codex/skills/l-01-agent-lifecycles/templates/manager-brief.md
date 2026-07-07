@@ -36,6 +36,10 @@ master's leaf loop to the master-exit seam, then hand over.
 - Curator spawns: `roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per leaf after the
   builder code and reviewer verdict are available; curator writes onboarding only.
 - Concurrency: <max parallel leaves or "sequential">.
+- Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
+  provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
+  no provider kill authority; provider stops and fixes route through the orchestrator and
+  system-specialist.
 
 ## The exit
 - When all leaves have landed on your branch: spawn the master-exit reviewer

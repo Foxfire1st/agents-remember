@@ -17,6 +17,7 @@ OrchestrationRole = Literal[
     "worker",
     "curator",
     "reviewer",
+    "system-specialist",
 ]
 EscalationReason = Literal["blocked", "plan-delta", "quality-failure", "missing-artifact"]
 
@@ -29,6 +30,7 @@ _ROLE_ESCALATION: dict[OrchestrationRole, OrchestrationRole | Literal["developer
     "strategist": "orchestrator",
     "curator": "manager",
     "reviewer": "orchestrator",
+    "system-specialist": "orchestrator",
 }
 _SAFE_STEM = re.compile(r"[^A-Za-z0-9_.-]+")
 

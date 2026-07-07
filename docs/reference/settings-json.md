@@ -132,6 +132,12 @@ watch settings internally.
   "dashboard": {
     "autoStart": false,
     "port": 8765
+  },
+  "providerDegradation": {
+    "enabled": true,
+    "failSafeEnabled": true,
+    "memoryDegradedRatio": 0.8,
+    "memoryCriticalRatio": 0.92
   }
 }
 ```
@@ -211,6 +217,22 @@ next session's boot. Daemon state and logs live under
 `--stop` manage the same daemon from the CLI. Unknown `dashboard` keys are
 rejected.
 
+`providerDegradation` (optional) configures the provider-only degradation
+detector that runs over the central provider metrics log. Defaults enable the
+detector and the critical fail-safe. The detector evaluates memory pressure,
+restart-loop signals, watcher/index lag, probe latency when a metrics row
+carries it, and setup-failure streak rows when present. State transitions write
+durable degradation state/events under `<coordinationRoot>/logs/observer/providers/`
+and post `degradation-alert` inbox rows to the orchestrator and active managers.
+At `critical`, `failSafeEnabled: true` runs the always-legal `provider_watchers
+stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
+`degradedSamples`, `criticalSamples`, `healthySamples`,
+`watcherLagDegradedCommits`, `watcherLagCriticalCommits`,
+`watcherLagDegradedMinutes`, `watcherLagCriticalMinutes`, `probeDegradedMs`,
+`probeCriticalMs`, `setupFailureDegradedStreak`,
+`setupFailureCriticalStreak`, and `recentSampleLimit`. Unknown
+`providerDegradation` keys are rejected.
+
 `orchestration` in the authority file is LEGACY territory (260703-L13): the
 agentic family moved to the global agentic settings file documented below. For
 one migration cycle the authority file may still carry
@@ -287,7 +309,8 @@ Read cadence above).
 ### orchestration.roles, orchestration.rolesPerLevel
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
-(`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`, `reviewer`).
+(`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
+`system-specialist`, `reviewer`).
 Precedence: role-file defaults < global settings < repo-local settings. The
 knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
 with every parameter, vocabulary, and refusal is
@@ -367,6 +390,7 @@ argv is definable only in the explicit `orchestration.harnesses` family.
     "orchestrator": { "harness": "claude", "effort": "high" },
     "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
     "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
+    "system-specialist": { "harness": "claude", "model": "fable", "effort": "high" },
     "curator":      { "harness": "codex",  "effort": "medium" },
     "worker":       { "harness": "codex",  "effort": "medium" }
   },

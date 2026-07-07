@@ -95,7 +95,7 @@ KNOWN_LOOP_LEVEL_FIELDS = frozenset({"loop"})
 # The dispatch-time complexity scale (blast radius x novelty x size) the loop
 # thresholds are expressed on (l-01 The Three-Party Loop).
 COMPLEXITY_SCALE = ("low", "medium", "high")
-# The eight portable role lifecycles the l-01 registry defines.
+# The nine portable role lifecycles the l-01 registry defines.
 KNOWN_ROLES = frozenset(
     {
         "architect",
@@ -106,6 +106,7 @@ KNOWN_ROLES = frozenset(
         "worker",
         "curator",
         "reviewer",
+        "system-specialist",
     }
 )
 KNOWN_ROLE_KNOB_FIELDS = frozenset(

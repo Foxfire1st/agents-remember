@@ -16,6 +16,11 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     parse_gate_delegation,
 )
+from agents_remember.mcp.provider_degradation_settings import (
+    ProviderDegradationSettings,
+    ProviderDegradationSettingsError,
+    parse_provider_degradation_settings,
+)
 from agents_remember.providers.identity import (
     explicit_provider_instance_id,
     provider_instance_id,
@@ -95,6 +100,9 @@ class McpRuntimeConfig:
     benchmarks_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
+    provider_degradation: ProviderDegradationSettings = field(
+        default_factory=ProviderDegradationSettings
+    )
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -228,6 +236,10 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
     dashboard = parse_dashboard_settings(data.get("dashboard"))
+    try:
+        provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
+    except ProviderDegradationSettingsError as error:
+        raise ConfigError(str(error)) from error
     orchestration = parse_orchestration_settings(
         data.get("orchestration"),
         coordination_root=coordination_root,
@@ -246,6 +258,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         benchmarks_enabled=benchmarks_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
+        provider_degradation=provider_degradation,
     )
 
 
