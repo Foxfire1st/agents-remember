@@ -419,9 +419,21 @@ def _require_positive_int(raw: object, owner: str, source: str) -> int:
 
 
 def _require_string_list(raw: object, owner: str, source: str) -> tuple[str, ...]:
-    """A free-form list of non-empty strings (shape-checked only; content never validated)."""
+    """A free-form list of non-empty strings (shape-checked only; content never validated).
+
+    An EMPTY list is refused (PR #100 review, Codex P2): ``RoleKnobs`` cannot distinguish
+    "absent" from "explicitly cleared" (empty tuple = not configured), so a per-level ``[]``
+    meant to clear a flat default would silently INHERIT it instead — the same silent-degrade
+    shape as a ``null`` family key (260703-L18 finding 6). Omit the key to inherit; list
+    values to override.
+    """
     if not isinstance(raw, list):
         raise AgenticSettingsError(f"{owner} must be a list of non-empty strings: {source}")
+    if not raw:
+        raise AgenticSettingsError(
+            f"{owner} must not be an empty list (omit the key to inherit, or list the values "
+            f"to override): {source}"
+        )
     values: list[str] = []
     for item in raw:
         if not isinstance(item, str) or not item:

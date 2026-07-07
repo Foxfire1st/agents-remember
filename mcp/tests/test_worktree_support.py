@@ -1082,6 +1082,25 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertTrue(contract.memory_worktree.exists())
             self.assertNotEqual(result["worktree"], "would-create")
 
+    def test_reconciliation_refuses_when_memory_repo_is_on_another_branch(self) -> None:
+        # PR #100 review (Codex P1): the mapping commit must land on the memory SOURCE branch —
+        # the worktree is created FROM that branch. With the official memory repo checked out
+        # elsewhere, reconciliation refuses loudly (naming both branches) instead of committing
+        # the mapping to the wrong branch, which would leave the source branch unmapped while
+        # start reports compatible.
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, memory_repo, _unmapped, _content = self._unmapped_external_contract(Path(tmp))
+            git(memory_repo, "checkout", "-b", "some-other-branch")
+            with self.assertRaises(LedgerError) as raised:
+                worktree_manager.prepare_memory_for_start(
+                    contract,
+                    worktree_manager.WorktreeArgs(memory_choice="reconciliation", dry_run=False),
+                )
+            self.assertIn("'main'", str(raised.exception))
+            self.assertIn("'some-other-branch'", str(raised.exception))
+            # Nothing was committed to the wrong branch.
+            self.assertNotIn("Ledger sync", git(memory_repo, "log", "-1", "--format=%s"))
+
     def test_worktree_contract_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

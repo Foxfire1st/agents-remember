@@ -1175,6 +1175,17 @@ def _reconcile_missing_mapping(
     if args.memory_choice != "reconciliation":
         return None
     assert contract.memory_repo_path is not None
+    # PR #100 review (Codex P1): the mapping commit must land on the memory SOURCE branch —
+    # the worktree is created FROM that branch, so committing to whatever happens to be
+    # checked out would leave the source branch unmapped while start reports compatible.
+    # Refuse loudly instead of writing to the wrong branch.
+    current_branch = require_git(contract.memory_repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if current_branch != contract.memory_source_branch:
+        raise LedgerError(
+            "reconciliation writes the ledger mapping to the memory source branch "
+            f"'{contract.memory_source_branch}', but the official memory repo is checked out "
+            f"on '{current_branch}'; checkout the source branch and re-run worktree_start"
+        )
     code_commit = contract.code_base_commit
     memory_commit = ledger.last_memory_content_commit
     updated = prepend_mapping(ledger, code_commit, memory_commit)

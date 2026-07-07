@@ -502,6 +502,27 @@ class FreeFormRoleKnobTests(unittest.TestCase):
         self.assertEqual(knobs.prompt_keywords, ())
         self.assertEqual(knobs.session_commands, ())
 
+    def test_empty_free_form_list_is_refused(self) -> None:
+        # PR #100 review (Codex P2): RoleKnobs cannot distinguish absent from cleared (empty
+        # tuple = not configured), so "launchArgs": [] would silently INHERIT a flat default
+        # instead of clearing it — refused with inherit guidance, the null-family ruling's shape.
+        with self.assertRaises(AgenticSettingsError) as raised:
+            self._load({"roles": {"worker": {"launchArgs": []}}})
+        self.assertIn("must not be an empty list", str(raised.exception))
+        self.assertIn("omit the key to inherit", str(raised.exception))
+
+    def test_empty_per_level_list_override_is_refused(self) -> None:
+        # The per-level variant of the same trap: [] at a level meant to clear the flat default
+        # would inherit it through the field-wise `or` merge in resolved_role_knobs.
+        with self.assertRaises(AgenticSettingsError) as raised:
+            self._load(
+                {
+                    "roles": {"worker": {"launchArgs": ["--x"]}},
+                    "rolesPerLevel": {"leaf": {"worker": {"sessionCommands": []}}},
+                }
+            )
+        self.assertIn("must not be an empty list", str(raised.exception))
+
     def test_effort_is_a_free_string_at_load_time(self) -> None:
         # The per-harness vocabulary refusal happens at DISPATCH (the harness is only known then);
         # the loader accepts any non-empty string -- the developer's ultracode file boots.
