@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -70,6 +71,11 @@ from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
+from agents_remember.providers.metrics import (
+    DEFAULT_SAMPLE_INTERVAL_SECONDS,
+    ProviderMetricsStore,
+    sample_provider_containers,
+)
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
 from agents_remember.serving.changeset import register_changeset_routes
@@ -93,6 +99,8 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from agents_remember.mcp.config import McpRuntimeConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _encode(data: BaseModel | dict[str, Any]) -> Any:
@@ -413,14 +421,35 @@ def create_app(
     # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
     build = resolve_serving_build()
 
+    # Containment R4 (260707-HFX-L1): the serving daemon samples labeled provider
+    # containers on its own cadence (decoupled from the 1s projection tick) into
+    # the central metrics store — the feed for provider_status, the statistics
+    # board, and the degradation protocol (260707-HFX-L7). Read-only + dockerless-safe.
+    metrics_store = ProviderMetricsStore(config.coordination_root)
+
+    async def metrics_loop() -> None:
+        while True:
+            try:
+                snapshot = await asyncio.to_thread(
+                    sample_provider_containers, cwd=config.coordination_root
+                )
+                await asyncio.to_thread(metrics_store.record, snapshot)
+            except Exception:
+                logger.exception("provider metrics sample failed; retrying next interval")
+            await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await projector.prime()
         task = asyncio.create_task(projector.run())
+        metrics_task = asyncio.create_task(metrics_loop())
         try:
             yield
         finally:
+            metrics_task.cancel()
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await metrics_task
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             host.shutdown()

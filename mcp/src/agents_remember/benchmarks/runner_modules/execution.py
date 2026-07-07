@@ -288,6 +288,7 @@ def maybe_prepare_case(
     skill_exposure_mode: str,
     force_clone: bool,
     provider_timeout: int,
+    allowed_provider_ids: tuple[str, ...] | None = None,
 ) -> None:
     if skip_prepare:
         return
@@ -299,6 +300,7 @@ def maybe_prepare_case(
         force_clone=force_clone,
         provider_timeout=provider_timeout,
         provider_ids=selected_provider_ids(case, prompt_id=prompt_id, variant_id=variant_id),
+        allowed_provider_ids=allowed_provider_ids,
     )
 
 
@@ -443,6 +445,7 @@ def run_case(
     force_clone: bool,
     provider_timeout: int,
     codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
+    allowed_provider_ids: tuple[str, ...] | None = None,
 ) -> Path:
     maybe_prepare_case(
         benchmarks_root,
@@ -454,6 +457,7 @@ def run_case(
         skill_exposure_mode=skill_exposure_mode,
         force_clone=force_clone,
         provider_timeout=provider_timeout,
+        allowed_provider_ids=allowed_provider_ids,
     )
     output_root = create_output_root(benchmarks_root, case, dry_run)
     task_batches, default_jobs = benchmark_task_batches(

@@ -36,6 +36,51 @@ def benchmark_agents_config_path(workspace_root: Path) -> Path:
     return workspace_root / CODEX_HARNESS_DIR / "config.toml"
 
 
+def disarm_stale_benchmark_registrations(
+    benchmarks_root: Path, allowed_provider_ids: tuple[str, ...] | None
+) -> list[str]:
+    """Narrow persisted benchmark MCP settings to the live authority set (R1, review B3).
+
+    The registration written at prepare time persists in the workspace and acts
+    as the AUTHORITY file for every session later booted there — the one place
+    the fleet kill-switch cannot reach, because those servers re-read *this*
+    file. Any prepare/run pass therefore sweeps ALL workspace registrations and
+    strips providers the live authority no longer enables. ``None`` (no
+    authority context, direct script use) leaves files untouched. Returns the
+    rewritten paths.
+    """
+    if allowed_provider_ids is None:
+        return []
+    allowed = set(allowed_provider_ids)
+    base = benchmarks_root / "workspaces"
+    candidates = sorted(
+        set(base.glob(f"*/{CODEX_HARNESS_DIR}/mcp/{BENCHMARK_MCP_SETTINGS_NAME}"))
+        | set(base.glob(f"*/*/{CODEX_HARNESS_DIR}/mcp/{BENCHMARK_MCP_SETTINGS_NAME}"))
+    )
+    rewritten: list[str] = []
+    for settings_path in candidates:
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        providers = data.get("providers")
+        if not isinstance(providers, dict):
+            continue
+        kept = {pid: cfg for pid, cfg in providers.items() if pid in allowed}
+        if set(kept) == set(providers):
+            continue
+        data["providers"] = kept
+        settings_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        rewritten.append(settings_path.as_posix())
+        print(
+            f"Disarmed stale benchmark registration {settings_path}: providers narrowed "
+            f"to {sorted(kept) or '(none)'} per the live MCP authority (containment R1)"
+        )
+    return rewritten
+
+
 def benchmark_mcp_source_path() -> Path | None:
     value = os.environ.get(BENCHMARK_MCP_SOURCE_ENV)
     if not value:

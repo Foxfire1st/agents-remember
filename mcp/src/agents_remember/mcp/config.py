@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +114,77 @@ def load_config(config_path: str | Path) -> McpRuntimeConfig:
     if not isinstance(data, dict):
         raise ConfigError(f"MCP settings must be a JSON object: {path}")
     return config_from_mapping(data, path)
+
+
+@dataclass(frozen=True)
+class ProviderAuthority:
+    """The providers map re-read from the on-disk authority settings.
+
+    Containment R1 (260707-HFX-L1): the boot-snapshot config is NOT launch
+    authority. A server process loads its config once and closes over it, so
+    editing the authority file to ``"providers": {}`` — the operator's only
+    fleet-wide kill-switch — previously changed nothing until every running
+    server restarted. Launch-capable operations re-read the file through this
+    type instead. ``error`` carries the fail-closed reason when the file could
+    not be read or parsed: callers must treat that as "no launch authority",
+    never fall back to the snapshot. Stopping and cleanup are never gated.
+    """
+
+    providers: dict[str, ProviderScope]
+    source_path: Path
+    error: str | None = None
+
+    def apply(self, config: McpRuntimeConfig) -> McpRuntimeConfig:
+        """The boot config with the live providers map swapped in."""
+        return replace(config, providers=dict(self.providers))
+
+
+def reload_provider_authority(config: McpRuntimeConfig) -> ProviderAuthority:
+    """Re-read only the providers map from the authority settings file."""
+    path = config.config_path
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return ProviderAuthority(
+            providers={},
+            source_path=path,
+            error=f"cannot re-read MCP authority settings: {path}: {error}",
+        )
+    if not isinstance(data, dict):
+        return ProviderAuthority(
+            providers={},
+            source_path=path,
+            error=f"MCP authority settings must be a JSON object: {path}",
+        )
+    try:
+        providers = parse_providers(
+            data.get("providers", {}),
+            config.coordination_root,
+            config.workspace_root,
+        )
+    except ConfigError as error:
+        return ProviderAuthority(providers={}, source_path=path, error=str(error))
+    return ProviderAuthority(providers=providers, source_path=path)
+
+
+def require_provider_launch_authority(config: McpRuntimeConfig, *, operation: str) -> McpRuntimeConfig:
+    """Gate a provider-launching operation on the on-disk authority (fail-closed).
+
+    Returns the boot config with the live providers map applied; raises
+    ``ConfigError`` when the authority file disables providers or cannot be
+    read. Stop/status/cleanup paths must not call this — stopping is always
+    legal.
+    """
+    authority = reload_provider_authority(config)
+    if authority.error is not None:
+        raise ConfigError(f"{operation} refused (containment R1, fail-closed): {authority.error}")
+    if not authority.providers:
+        raise ConfigError(
+            f"{operation} refused: providers are disabled in the on-disk authority settings "
+            f"({authority.source_path}); the boot snapshot ({sorted(config.providers)}) is not "
+            "launch authority (containment R1). stop/status/cleanup remain available."
+        )
+    return authority.apply(config)
 
 
 def require_config_path(config_path: str | Path) -> Path:

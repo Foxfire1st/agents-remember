@@ -9,6 +9,7 @@ from agents_remember.mcp.config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
     RepositoryScope,
+    reload_provider_authority,
 )
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.save_gate import coerce_save_decision
@@ -40,7 +41,16 @@ def worktree_start_tool(
     # worktree_start promotes the active lifecycle to persistent (design §1.3); with
     # no active lifecycle, mint a fresh anchor so the contract always carries one.
     lifecycle_id = amb.current.id if amb is not None and amb.current is not None else new_ulid()
-    settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
+    # Containment R1 (260707-HFX-L1): the on-disk authority file — not the boot
+    # snapshot — decides whether provider setup may launch. An empty (or
+    # unreadable: fail-closed) live providers map skips setup outright; the
+    # worktree itself is still created. Launch runs on the LIVE providers map.
+    authority = None if skip_provider_setup else reload_provider_authority(config)
+    settings_path = (
+        write_lifecycle_settings(authority.apply(config))
+        if authority is not None and authority.providers and authority.error is None
+        else None
+    )
     provider_setup_config = (
         None
         if settings_path is None
@@ -82,6 +92,18 @@ def worktree_start_tool(
     result: dict[str, Any] | None = None
     try:
         result = _worktree_result("worktree_start", git_worktree_manager.start_result(args))
+        if authority is not None and (
+            authority.error is not None or (config.providers and not authority.providers)
+        ):
+            # Surface the veto so a stale-snapshot session sees WHY setup was
+            # skipped instead of silently diverging from its boot config.
+            veto: dict[str, Any] = {
+                "source": str(authority.source_path),
+                "bootSnapshotProviders": sorted(config.providers),
+            }
+            if authority.error is not None:
+                veto["error"] = authority.error
+            result["providersAuthority"] = veto
         _attribute_start(amb, result, repo_id)
         return result
     finally:

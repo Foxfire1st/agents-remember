@@ -24,7 +24,11 @@ from agents_remember.kernel.agentic_settings import (
     agentic_settings_path,
     default_agentic_settings_seed_text,
 )
-from agents_remember.mcp.config import DEFAULT_PROVIDER_SETUP_SECONDS, McpRuntimeConfig
+from agents_remember.mcp.config import (
+    DEFAULT_PROVIDER_SETUP_SECONDS,
+    McpRuntimeConfig,
+    reload_provider_authority,
+)
 from agents_remember.providers import lifecycle
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
@@ -570,7 +574,13 @@ def install_runtime_from_config(
     timeout = provider_deps_timeout or config.timeout_caps.get(
         "providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS
     )
-    provider_settings = lifecycle_settings_from_config(config)
+    # Containment R1 (260707-HFX-L1): the watcher rebind's stop→start cycle is a
+    # launch path — derive its settings from the LIVE on-disk authority, never the
+    # boot snapshot. An empty (or unreadable: fail-closed) live map disables the
+    # rebind while the runtime install itself proceeds.
+    provider_settings = lifecycle_settings_from_config(
+        reload_provider_authority(config).apply(config)
+    )
     if source_root is not None:
         summary = install_runtime(
             source_root.resolve(),

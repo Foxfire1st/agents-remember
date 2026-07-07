@@ -4,11 +4,22 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
+import tempfile
+import time
 import zipfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+try:  # POSIX-only; the docker-backed provider stack is POSIX-hosted anyway.
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback: lock becomes a no-op
+    fcntl = None  # type: ignore[assignment]
 
 from agents_remember.providers import setup_common, setup_reporting
 from agents_remember.providers.cgc import bundle as cgc_bundle
@@ -247,6 +258,59 @@ def _watchers_needed(args: argparse.Namespace, settings: dict[str, Any]) -> bool
     ) or selected_provider_enabled(args, settings, cgc_setup.CGC_PROVIDER_ID)
 
 
+def fleet_setup_lock_path() -> Path:
+    """HOST-scoped setup lock path (containment R2, 260707-HFX-L1).
+
+    The guarded resource is the host's memory/docker daemon, shared by every
+    coordination root AND every benchmark workspace, so the lock must not live
+    under any one of them: `runtime_install` prunes `providers/` (review
+    finding B1 — a coordination-root lock file was deleted mid-hold), and
+    benchmark prepares run against workspace-local roots that would otherwise
+    never serialize with fleet setups (finding B2).
+    """
+    uid = os.getuid() if hasattr(os, "getuid") else "shared"  # pragma: no branch
+    return Path(tempfile.gettempdir()) / f"agents-remember-provider-setup-{uid}.lock"
+
+
+@contextlib.contextmanager
+def _fleet_setup_lock(lock_path: Path, timeout: int) -> Iterator[None]:
+    """Serialize provider setup host-wide (containment R2, 260707-HFX-L1).
+
+    The 2026-07-07 OOM was an aggregate storm: several sessions launched
+    provider stacks concurrently, each inside its per-container caps (L12) but
+    summing past the host. One setup at a time bounds the aggregate; a waiter
+    blocks up to the setup timeout, then fails loudly instead of piling on.
+    """
+    if fcntl is None:  # pragma: no cover - non-POSIX
+        yield
+        return
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        deadline = time.monotonic() + max(timeout, 1)
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"provider setup lock busy after {timeout}s: {lock_path} — another "
+                        "session's provider setup is running; one setup at a time bounds "
+                        "aggregate container load (containment R2, 260707-HFX-L1)"
+                    ) from None
+                time.sleep(2)
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{os.getpid()} {datetime.now(UTC).isoformat()}\n")
+        handle.flush()
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
+
+
 def run_provider_setup(
     request: ProviderSetupRequest,
     progress: SetupProgress | None = None,
@@ -269,7 +333,11 @@ def _action_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
     enabled = _enabled_provider_summary(args, settings)
     isolated = write_isolated_provider_settings(args, settings)
-    results = _action_results(args, settings)
+    if args.action == "prepare" and not args.dry_run:
+        with _fleet_setup_lock(fleet_setup_lock_path(), args.timeout):
+            results = _action_results(args, settings)
+    else:
+        results = _action_results(args, settings)
 
     payload = {
         "action": args.action,
