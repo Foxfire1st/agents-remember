@@ -9,7 +9,10 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
+
+_CAPTURE_EVIDENCE_LIMIT = 2000
+"""Durable-row bound for an attached pane capture: keep the TAIL (the freshest pane output)."""
 
 
 @dataclass(frozen=True)
@@ -53,7 +56,21 @@ def deliver_inbox_entry(
         now=now_iso(),
         delivery_state="delivered" if outcome.delivered else "unconfirmed",
         delivered_to_session=target.id,
-        delivery_detail="echo-confirmed" if outcome.delivered else "paste was not echoed",
+        delivery_detail="echo-confirmed" if outcome.delivered else _unconfirmed_detail(outcome),
+    )
+
+
+def _unconfirmed_detail(outcome: PasteResult) -> str:
+    """The 260707-HFX-L3 loud-failure detail: an unverified push carries its pane capture.
+
+    Never a bare "not echoed" -- the durable row is the forensic record a re-briefing operator
+    reads, so the evidence (what the pane actually showed) rides along, tail-bounded.
+    """
+    if not outcome.capture:
+        return "paste was not capture-verified (empty pane capture)"
+    return (
+        "paste was not capture-verified; pane capture (tail):\n"
+        + outcome.capture[-_CAPTURE_EVIDENCE_LIMIT:]
     )
 
 

@@ -316,35 +316,67 @@ def _brief_packet(context: str | None, prompt_keywords: list[str] | None) -> str
     return f"{keyword_line}\n\n{context}" if context else keyword_line
 
 
+_EMPTY_PANE_CAPTURE = "(empty pane capture)"
+"""Explicit stand-in when a failed delivery's pane capture is empty (a vanished/unreadable pane):
+review N3 alignment with ``inbox_delivery`` -- a False outcome NEVER ships evidence-less, so the
+``deliveryCapture`` field is present (with this marker) rather than silently omitted."""
+
+
+@dataclass(frozen=True)
+class _SpawnDelivery:
+    """Delivery outcomes for one spawn's session layer (``None`` = that piece was not sent).
+
+    ``failure_capture`` is the pane capture attached by the paster to the latest failed paste --
+    the 260707-HFX-L3 loud-failure evidence (SF-1: a bare ``contextDelivered:true`` once masked a
+    codex seat that booted clean with no payload). ``None`` when every sent piece verified.
+    """
+
+    session_commands_delivered: bool | None = None
+    context_delivered: bool | None = None
+    submitted: bool | None = None
+    failure_capture: str | None = None
+
+
 def _deliver_spawn_pastes(
     paster: TerminalPaster,
     tmux_name: str,
     session_commands: list[str],
     packet: str | None,
     submit: bool,
-) -> tuple[bool | None, bool | None, bool | None]:
-    """Deliver the session layer: session commands FIRST (each its own echo-confirmed paste, always
+) -> _SpawnDelivery:
+    """Deliver the session layer: session commands FIRST (each its own capture-verified paste, always
     submitted -- an unexecuted ``/effort ultracode`` would be a silent downgrade), THEN the brief.
 
-    Returns ``(session_commands_delivered, context_delivered, submitted)`` (``None`` = not sent).
+    Every ``True`` here is capture-verified by the paster (260707-HFX-L3): a ``False`` means the
+    pane provably shows no trace of the paste, and the failing capture rides the result.
     """
     session_commands_delivered: bool | None = None
     context_delivered: bool | None = None
     submitted: bool | None = None
+    failure_capture: str | None = None
+    failed = False
     if session_commands:
         session_commands_delivered = True
         for command_line in session_commands:
             outcome = paster.paste(tmux_name, command_line, submit=True)
-            session_commands_delivered = (
-                session_commands_delivered and outcome.delivered and outcome.submitted
-            )
+            if not (outcome.delivered and outcome.submitted):
+                session_commands_delivered = False
+                failed = True
+                failure_capture = outcome.capture or failure_capture
     if packet:
         # Workers auto-start (paste + submit); a human draft-only flow leaves submit=False so the
-        # draft stays editable. Echo-confirmed server-side (the frontend pasteAndConfirm mirror).
+        # draft stays editable. Capture-verified server-side (the frontend pasteAndConfirm mirror).
         outcome = paster.paste(tmux_name, packet, submit=submit)
         context_delivered = outcome.delivered
         submitted = outcome.submitted if submit else None
-    return session_commands_delivered, context_delivered, submitted
+        if not outcome.delivered or (submit and not outcome.submitted):
+            failed = True
+            failure_capture = outcome.capture or failure_capture
+    if failed and failure_capture is None:
+        failure_capture = _EMPTY_PANE_CAPTURE
+    return _SpawnDelivery(
+        session_commands_delivered, context_delivered, submitted, failure_capture
+    )
 
 
 def spawn_agent_session_payload(
@@ -373,12 +405,14 @@ def spawn_agent_session_payload(
     """Spawn one role-configured, leaf-attached, context-primed hosted session (L2 dispatch).
 
     Composes the EXISTING session primitives -- the shared serving opener (create + leaf claim +
-    detached tmux ensure with env-seeded knobs), then an echo-confirmed context-packet paste with an
-    optional submit -- so orchestrators spawn managers and managers spawn workers without dashboard
-    clicks. ``harness`` is optional (260703-L13): omitted, it resolves per-use through the agentic
-    settings (repo-local over global ``orchestration.spawn.harness``), else the detection-gated
-    default. Leaf uniqueness stays server-arbitrated: a taken leaf returns ``leaf-taken`` (never
-    overridden). ``host``/``paster``/``which``/``session_id`` are injectable seams for tests.
+    detached tmux ensure with env-seeded knobs), then a capture-verified context-packet paste with an
+    optional submit (260707-HFX-L3: ``contextDelivered:true`` only after the pane provably shows the
+    payload; an unverifiable delivery reports false WITH the pane capture) -- so orchestrators spawn
+    managers and managers spawn workers without dashboard clicks. ``harness`` is optional
+    (260703-L13): omitted, it resolves per-use through the agentic settings (repo-local over global
+    ``orchestration.spawn.harness``), else the detection-gated default. Leaf uniqueness stays
+    server-arbitrated: a taken leaf returns ``leaf-taken`` (never overridden).
+    ``host``/``paster``/``which``/``session_id`` are injectable seams for tests.
 
     Per-level knob resolution (ruling 2026-07-07T08:15): the settings rungs come from
     ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` -- the ``orchestration.rolesPerLevel[level]``
@@ -480,27 +514,17 @@ def spawn_agent_session_payload(
     assert entry is not None  # opened => an upserted row
 
     packet = _brief_packet(context, prompt_keywords)
-    session_commands_delivered: bool | None = None
-    context_delivered: bool | None = None
-    submitted: bool | None = None
+    delivery = _SpawnDelivery()
     if resolved_session_commands or packet:
         spawn_paster = paster if paster is not None else TerminalPaster()
-        session_commands_delivered, context_delivered, submitted = _deliver_spawn_pastes(
+        delivery = _deliver_spawn_pastes(
             spawn_paster, entry.tmux_name, resolved_session_commands, packet, submit
         )
 
-    return _tool_payload(
-        "spawn_agent_session",
-        _spawned_payload(entry, session_commands_delivered, context_delivered, submitted),
-    )
+    return _tool_payload("spawn_agent_session", _spawned_payload(entry, delivery))
 
 
-def _spawned_payload(
-    entry: TerminalCatalogEntry,
-    session_commands_delivered: bool | None,
-    context_delivered: bool | None,
-    submitted: bool | None,
-) -> dict[str, Any]:
+def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> dict[str, Any]:
     """The ``spawned`` payload: the upserted row (incl. the L16 provenance) + delivery outcomes."""
     return {
         "ok": True,
@@ -523,9 +547,12 @@ def _spawned_payload(
         "launchArgs": list(entry.launch_args) if entry.launch_args else None,
         "promptKeywords": list(entry.prompt_keywords) if entry.prompt_keywords else None,
         "sessionCommands": list(entry.session_commands) if entry.session_commands else None,
-        "sessionCommandsDelivered": session_commands_delivered,
-        "contextDelivered": context_delivered,
-        "submitted": submitted,
+        "sessionCommandsDelivered": delivery.session_commands_delivered,
+        "contextDelivered": delivery.context_delivered,
+        "submitted": delivery.submitted,
+        # 260707-HFX-L3 loud failure: on any False outcome above the pane capture is the attached
+        # evidence -- the caller must treat the seat as blind, never assume the brief landed.
+        "deliveryCapture": delivery.failure_capture,
     }
 
 

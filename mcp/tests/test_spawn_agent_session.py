@@ -87,15 +87,20 @@ class _FakeHost:
 
 
 class _FakePaster:
-    def __init__(self, *, delivered: bool = True, submitted: bool = True) -> None:
+    def __init__(
+        self, *, delivered: bool = True, submitted: bool = True, capture: str = ""
+    ) -> None:
         self.calls: list[dict[str, object]] = []
         self._delivered = delivered
         self._submitted = submitted
+        self._capture = capture
 
     def paste(self, tmux_name: str, text: str, *, submit: bool = False, **_kwargs: object) -> PasteResult:
         self.calls.append({"tmux": tmux_name, "text": text, "submit": submit})
         return PasteResult(
-            delivered=self._delivered, submitted=self._submitted if submit else False
+            delivered=self._delivered,
+            submitted=self._submitted if submit else False,
+            capture=self._capture,
         )
 
 
@@ -194,6 +199,43 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(payload["status"], "spawned")
         self.assertNotIn("contextDelivered", payload)
         self.assertEqual(paster.calls, [])
+
+    def test_verified_delivery_omits_the_failure_capture(self) -> None:
+        paster = _FakePaster(delivered=True, submitted=True, capture="worker> [Pasted text #1]")
+        payload = self._spawn(context="brief", submit=True, paster=paster)
+        self.assertTrue(payload["contextDelivered"])
+        # 260707-HFX-L3: the capture is failure evidence -- a verified delivery ships none.
+        self.assertNotIn("deliveryCapture", payload)
+
+    def test_unverified_delivery_reports_false_with_the_pane_capture_attached(self) -> None:
+        # 260707-HFX-L3 / SF-1: reviewer 46b2e267 got contextDelivered:true over a codex pane that
+        # booted clean with no payload. The loud-failure contract: delivered false + the capture.
+        paster = _FakePaster(delivered=False, submitted=False, capture="codex> \n(clean boot)")
+        payload = self._spawn(
+            leaf_key="repo/master/leaf-1", context="the brief", submit=True, paster=paster
+        )
+        self.assertEqual(payload["status"], "spawned")
+        self.assertFalse(payload["contextDelivered"])
+        self.assertFalse(payload["submitted"])
+        self.assertEqual(payload["deliveryCapture"], "codex> \n(clean boot)")
+
+    def test_unconfirmed_submit_attaches_the_capture_even_when_delivered(self) -> None:
+        # Review N3: a delivered draft whose requested submit did NOT advance the pane is still a
+        # failed outcome -- the capture rides along so the caller can see the stuck draft.
+        paster = _FakePaster(delivered=True, submitted=False, capture="claude> draft sitting")
+        payload = self._spawn(context="brief", submit=True, paster=paster)
+        self.assertTrue(payload["contextDelivered"])
+        self.assertFalse(payload["submitted"])
+        self.assertEqual(payload["deliveryCapture"], "claude> draft sitting")
+
+    def test_failed_delivery_with_empty_capture_ships_an_explicit_marker(self) -> None:
+        # Review N3 alignment with inbox_delivery: a False outcome never goes evidence-less. A
+        # vanished pane yields an empty capture -- the payload carries the explicit marker instead
+        # of silently omitting deliveryCapture.
+        paster = _FakePaster(delivered=False, submitted=False, capture="")
+        payload = self._spawn(context="brief", submit=True, paster=paster)
+        self.assertFalse(payload["contextDelivered"])
+        self.assertEqual(payload["deliveryCapture"], "(empty pane capture)")
 
     def test_leaf_taken_is_surfaced_never_overridden(self) -> None:
         self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))
@@ -365,11 +407,13 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(row.session_commands, ("/effort ultracode", "/statusline off"))
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
-    def test_undelivered_session_command_is_reported(self) -> None:
-        paster = _FakePaster(delivered=False, submitted=False)
+    def test_undelivered_session_command_is_reported_with_capture(self) -> None:
+        paster = _FakePaster(delivered=False, submitted=False, capture="claude> (booting)")
         payload = self._spawn(effort="ultracode", paster=paster)
         self.assertEqual(payload["status"], "spawned")
         self.assertFalse(payload["sessionCommandsDelivered"])
+        # 260707-HFX-L3: the failing paste's pane capture rides the payload as evidence.
+        self.assertEqual(payload["deliveryCapture"], "claude> (booting)")
 
 
 class SettingsDefinedHarnessTests(unittest.TestCase):
@@ -833,7 +877,41 @@ class TerminalPasteEndpointTests(unittest.TestCase):
         self.assertEqual(body["status"], "delivered")
         self.assertTrue(body["delivered"])
         self.assertTrue(body["submitted"])
+        self.assertNotIn("capture", body)  # full success ships no failure evidence
         self.assertEqual(paster.calls[0]["tmux"], "ar-live")
+
+    def test_paste_endpoint_unconfirmed_submit_ships_the_pane_capture(self) -> None:
+        # Review N3: delivered but the REQUESTED submit did not advance the pane -- still a failed
+        # outcome, so the capture rides the response (parity with the spawn seam).
+        paster = _FakePaster(delivered=True, submitted=False, capture="claude> draft sitting")
+        with self._client(paster) as client:
+            response = client.post(
+                "/api/terminal/live/paste", json={"text": "hello", "submit": True}
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["delivered"])
+        self.assertFalse(body["submitted"])
+        self.assertEqual(body["capture"], "claude> draft sitting")
+
+    def test_paste_endpoint_unconfirmed_ships_the_pane_capture(self) -> None:
+        # 260707-HFX-L3 loud failure at the HTTP seam too: an unconfirmed paste carries the pane
+        # capture so the caller can see what the target composer actually showed.
+        paster = _FakePaster(delivered=False, submitted=False, capture="claude> (still booting)")
+        with self._client(paster) as client:
+            response = client.post("/api/terminal/live/paste", json={"text": "hello"})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "unconfirmed")
+        self.assertFalse(body["delivered"])
+        self.assertEqual(body["capture"], "claude> (still booting)")
+
+    def test_paste_endpoint_delivered_omits_the_capture(self) -> None:
+        paster = _FakePaster(delivered=True, submitted=False, capture="claude> [Pasted text #1]")
+        with self._client(paster) as client:
+            response = client.post("/api/terminal/live/paste", json={"text": "hello"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("capture", response.json())
 
     def test_paste_endpoint_unknown_session_is_404(self) -> None:
         paster = _FakePaster()

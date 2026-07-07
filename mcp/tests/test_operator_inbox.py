@@ -357,9 +357,10 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
 
         class _UnechoedPaster:
             def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
-                # A booting harness accepts the keystrokes but never echoes them back.
+                # A booting harness accepts the keystrokes but never echoes them back. The paster
+                # attaches its final pane capture (260707-HFX-L3 loud-failure contract).
                 attempts.append((tmux_name, text))
-                return PasteResult(delivered=False, submitted=submit)
+                return PasteResult(delivered=False, submitted=submit, capture="claude> (booting)")
 
         recorded = deliver_inbox_entry(
             store=self.store,
@@ -368,9 +369,45 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
             paster=_UnechoedPaster(),  # type: ignore[arg-type]
             entry=entry,
         )
-        # The paste WAS attempted into the reachable session -- delivery just was not echo-confirmed.
+        # The paste WAS attempted into the reachable session -- delivery just was not verified.
         self.assertEqual(attempts[0][0], "ar-agent-a")
         self.assertEqual(recorded.deliveryState, "unconfirmed")
         self.assertNotEqual(recorded.deliveryState, "delivered")
         self.assertEqual(recorded.deliveredToSession, "agent-a")
-        self.assertEqual(recorded.deliveryDetail, "paste was not echoed")
+        # 260707-HFX-L3: the durable row carries the pane capture as forensic evidence, never a
+        # bare "not echoed" -- the re-briefing operator reads what the pane actually showed.
+        assert recorded.deliveryDetail is not None
+        self.assertIn("paste was not capture-verified", recorded.deliveryDetail)
+        self.assertIn("claude> (booting)", recorded.deliveryDetail)
+
+    def test_unverified_delivery_with_empty_capture_still_records_a_loud_detail(self) -> None:
+        entry = create_operator_inbox_entry(
+            entry_id="B",
+            now=T1,
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            sender_role="manager",
+            recipient_role="worker",
+            ask="Please continue.",
+            response="Review the report.",
+            created_by="manager-1",
+            created_via="cli",
+        )
+        self.store.append(entry)
+
+        class _GonePaster:
+            def paste(self, _tmux_name: str, _text: str, *, submit: bool = False) -> PasteResult:
+                # capture-pane against a vanished session yields an empty capture.
+                return PasteResult(delivered=False, submitted=submit, capture="")
+
+        recorded = deliver_inbox_entry(
+            store=self.store,
+            catalog=self.catalog,
+            host=self.host,
+            paster=_GonePaster(),  # type: ignore[arg-type]
+            entry=entry,
+        )
+        self.assertEqual(recorded.deliveryState, "unconfirmed")
+        self.assertEqual(
+            recorded.deliveryDetail, "paste was not capture-verified (empty pane capture)"
+        )

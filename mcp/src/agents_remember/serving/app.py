@@ -764,23 +764,25 @@ def create_app(
         # L2 paste seam: deliver a context packet to a hosted session server-side (the mirror of the
         # frontend WebSocket pasteAndConfirm/submitAndConfirm), so a packet can be pushed to a durable
         # tmux session that has no attached browser client. 404 if the session is unknown/terminated or
-        # its tmux session is gone; otherwise echo-confirm the paste (and submit when asked) and report
-        # delivered/submitted. Same localhost posture as the rest of serving/.
+        # its tmux session is gone; otherwise capture-verify the paste (and submit when asked) and
+        # report delivered/submitted. Same localhost posture as the rest of serving/.
         entry = catalog.get(session)
         if entry is None or entry.status != "running" or not host.has_session(entry.tmux_name):
             if entry is not None and entry.status == "running":
                 catalog.mark_exited(session)
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
         outcome = paster.paste(entry.tmux_name, request.text, submit=request.submit)
-        return JSONResponse(
-            content={
-                "session": session,
-                "status": "delivered" if outcome.delivered else "unconfirmed",
-                "delivered": outcome.delivered,
-                "submitted": outcome.submitted,
-            },
-            status_code=200,
-        )
+        content: dict[str, object] = {
+            "session": session,
+            "status": "delivered" if outcome.delivered else "unconfirmed",
+            "delivered": outcome.delivered,
+            "submitted": outcome.submitted,
+        }
+        if not outcome.delivered or (request.submit and not outcome.submitted):
+            # 260707-HFX-L3 loud failure: an unconfirmed paste OR an unconfirmed requested submit
+            # ships its pane capture as evidence (review N3 parity with the spawn seam).
+            content["capture"] = outcome.capture
+        return JSONResponse(content=content, status_code=200)
 
     @app.post("/api/terminal/{session}/terminate")
     def api_terminal_terminate(session: str) -> Response:
