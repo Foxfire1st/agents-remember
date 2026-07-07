@@ -91,7 +91,8 @@ describe("groupSessions (L14 G1 command tree)", () => {
   it("groups command-role provenance onto the deck together with the orchestration-claiming chat", () => {
     const grouped = groupSessions({
       sessions: [
-        session({ id: "dev", leafKey: "agents-remember/sprint-02/SPRINT-02" }),
+        session({ id: "architect", leafKey: "agents-remember/sprint-02/SPRINT-02" }),
+        session({ id: "orch", spawnRole: "orchestrator" }),
         session({ id: "strat", spawnRole: "strategist" }),
         session({ id: "mgr", spawnRole: "manager", leafKey: "agents-remember/260706_management-repo/260706" }),
         session({ id: "worker", spawnRole: "worker", leafKey: "agents-remember/260706_management-repo/260706-L1" }),
@@ -104,10 +105,10 @@ describe("groupSessions (L14 G1 command tree)", () => {
     expect(deck).toBeTruthy();
     expect(deck?.label).toBe("SPRINT 02 · management-repo rollout · command deck");
     expect(deck?.tier).toBe("orchestration");
-    // The developer-facing orchestrator chat (the orchestration task's own leaf claim) sits on the
-    // deck with the spawned command seats; the worker does NOT (role provenance is the gate).
-    expect(deck?.sessions.map((member) => member.id)).toEqual(["dev", "strat", "mgr"]);
-    expect(deck?.countLabel).toBe("3 chats · 3 live");
+    // The developer-facing architect chat (the orchestration task's own leaf claim) sits on the
+    // deck with the spawned backend command seats; the worker does NOT (role provenance is the gate).
+    expect(deck?.sessions.map((member) => member.id)).toEqual(["architect", "orch", "strat", "mgr"]);
+    expect(deck?.countLabel).toBe("4 chats · 4 live");
 
     const master = grouped.groups.find((group) => group.key === "master:260706_management-repo");
     expect(master?.sessions.map((member) => member.id)).toEqual(["worker"]);
@@ -181,7 +182,7 @@ describe("groupSessions (L14 G1 command tree)", () => {
 
   it("reads at a glance at 30-chat scale: deck + per-master groups + one archive", () => {
     const sessions: OpenSession[] = [
-      session({ id: "orch", spawnRole: "orchestrator" }),
+      session({ id: "architect", spawnRole: "architect" }),
       session({ id: "strategist", spawnRole: "strategist", status: "exited" }),
       session({ id: "m1", spawnRole: "manager" }),
       session({ id: "m2", spawnRole: "manager", status: "exited" }),

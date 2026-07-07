@@ -21,7 +21,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     const { getByTestId, getByText } = render(<FlowTab />);
     fireEvent.click(getByTestId("flow-nav-orchestrator"));
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("orchestrator");
-    expect(getByText(/the event loop, drawn on its biggest run/)).not.toBeNull();
+    expect(getByText(/backend event loop, drawn on its biggest run/)).not.toBeNull();
     expect(getByTestId("flow-nav-orchestrator").getAttribute("aria-checked")).toBe("true");
     expect(getByTestId("flow-nav-router").getAttribute("aria-checked")).toBe("false");
     fireEvent.click(getByTestId("flow-nav-comms"));
@@ -61,6 +61,15 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
       getByText(/task doc \(approved\) → branch \(intent\) → worktree \(only where something is built\)/),
     ).not.toBeNull();
     expect(getByText(/⟁ chat is never a build route — small code work takes the minimal w-02 artifact/)).not.toBeNull();
+    expect(getByText(/developer-facing session → roles\/architect.md/)).not.toBeNull();
+  });
+
+  it("draws the architect as the developer-facing owner and decision relay", () => {
+    const { getByTestId, getByText } = render(<FlowTab initialModel="architect" />);
+    expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("architect");
+    expect(getByText(/developer-facing owner, drawing board, decision relay/)).not.toBeNull();
+    expect(getByText(/backend decision-item → present ONE item, record the durable ruling/)).not.toBeNull();
+    expect(getByText(/roles expand horizontally into new chats/)).not.toBeNull();
   });
 
   it("encodes the agreed orchestration invariants on the drawn models", () => {
@@ -69,12 +78,12 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     expect(getByText(/reshape master boundaries — NEVER interleave dispatch/)).not.toBeNull();
     expect(getByText(/creates a BRANCH off main, nothing more/)).not.toBeNull();
     expect(
-      getByText(/the ORCHESTRATOR decides by the packet-carried gateId \(own ambient identity/),
+      getByText(/the BACKEND ORCHESTRATOR decides by the packet-carried gateId \(own ambient identity/),
     ).not.toBeNull();
-    // The escalation ladder lives on the comms drawing; the spirit test is ORCHESTRATOR-ONLY.
+    // The escalation ladder lives on the comms drawing; the spirit test is limited to bird's-eye seats.
     fireEvent.click(getByTestId("flow-nav-comms"));
-    expect(getByText(/escalation · worker → manager → orchestrator → developer/)).not.toBeNull();
-    expect(getByText(/spirit test — ORCHESTRATOR-ONLY/)).not.toBeNull();
+    expect(getByText(/escalation · worker → manager → orchestrator → architect → developer/)).not.toBeNull();
+    expect(getByText(/spirit test — BIRD'S-EYE SEAT ONLY: backend orchestrator or architect/)).not.toBeNull();
     // Managers escalate plan deltas instead of judging them, and reopen wrong deliverables.
     fireEvent.click(getByTestId("flow-nav-manager"));
     expect(getByText(/managers don't reshape plans \(no bird's-eye\)/)).not.toBeNull();
@@ -84,7 +93,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
       getByText(/enclosure="<master task name>" — the exact address integration enforcement matches the gate by/),
     ).not.toBeNull();
     expect(
-      getByText(/the returned gateId rides the packet via inbox \+ push · the ORCHESTRATOR decides the gate by that id/),
+      getByText(/the returned gateId rides the packet via inbox \+ push · the BACKEND ORCHESTRATOR decides the gate by that id/),
     ).not.toBeNull();
   });
 
@@ -111,7 +120,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
       getByText(/⟁ a leaf naming neither existing surfaces nor a parent anchor → finding: unplannable as scoped — never a silent guess/),
     ).not.toBeNull();
     expect(
-      getByText(/reader-not-mutator: the strategist drafts; the ORCHESTRATOR adopts it into durable task form \(decision-log entry\)/),
+      getByText(/reader-not-mutator: the strategist drafts; the BACKEND ORCHESTRATOR adopts it into durable task form \(decision-log entry\)/),
     ).not.toBeNull();
   });
 
@@ -125,7 +134,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     ).not.toBeNull();
     fireEvent.click(getByTestId("flow-nav-comms"));
     expect(
-      getByText(/⟁ quo-vadis — a high-blast-radius TRUTH \(answered wrong = big rewrites later\) goes to the developer IMMEDIATELY; presentation-grade \(2px vs 3px\) never does/),
+      getByText(/⟁ quo-vadis — a high-blast-radius TRUTH \(answered wrong = big rewrites later\) goes to the architect relay IMMEDIATELY; presentation-grade \(2px vs 3px\) never does/),
     ).not.toBeNull();
     fireEvent.click(getByTestId("flow-nav-reviewer"));
     expect(
@@ -147,11 +156,11 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     ).not.toBeNull();
   });
 
-  it("draws the designer as the hat the orchestrator pulls", () => {
+  it("draws the designer as the hat the architect pulls", () => {
     const { getByTestId, getByText } = render(<FlowTab initialModel="designer" />);
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("designer");
-    expect(getByText(/the hat the orchestrator pulls/)).not.toBeNull();
-    expect(getByText(/ORCHESTRATOR adversarially reviews the design/)).not.toBeNull();
+    expect(getByText(/the hat the architect pulls/)).not.toBeNull();
+    expect(getByText(/BACKEND ORCHESTRATOR adversarially reviews the design/)).not.toBeNull();
     expect(getByText(/ask — never fill silently/)).not.toBeNull();
   });
 
@@ -161,7 +170,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     expect(
       getByText(/verdicts are evidence, not decisions — requireReviewerVerdictAtSeams binds delegated seam decisions/),
     ).not.toBeNull();
-    expect(getByText(/the ORCHESTRATOR at master-exit \(master-handover-approval\)/)).not.toBeNull();
+    expect(getByText(/the BACKEND ORCHESTRATOR at master-exit \(master-handover-approval\)/)).not.toBeNull();
     expect(getByText(/⟁ block\? → decomposable fix leaves/)).not.toBeNull();
   });
 });

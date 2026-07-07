@@ -6,17 +6,17 @@ Sessions route by role through the `l-01-agent-lifecycles` skill. A **spawned
 agent** (the `AR_SPAWN_ROLE` env var is set, or the first message is a role
 brief) follows its brief — the brief is its session start, and the rest of this
 section is not addressed to it. A **developer-facing session** is the
-**orchestrator**: it enters `skills/l-01-agent-lifecycles/roles/orchestrator.md`
+**architect**: it enters `skills/l-01-agent-lifecycles/roles/architect.md`
 before working in any managed repository.
 
 During an already-running session, the agent must stay aware of managed-repo
 boundaries. If a new turn or tool target may cross from outside Agents Remember
-scope into a managed repository, enter the orchestrator lifecycle first.
+scope into a managed repository, enter the architect lifecycle first.
 
 ---
 
 **IMPORTANT:**
-Do not change code without entering the orchestrator lifecycle and clearing its plan gate.
+Do not change code without entering the architect lifecycle and clearing its plan gate.
 Do not change task plan items without approval.
 Do not randomly commit. Use the `c-12-closeout` skill instead!
 
@@ -31,7 +31,7 @@ This workspace uses a layered memory system. Make sure to read the below rules b
 This coordinator file is the workspace entrypoint. Read these installed
 `AGENTS.md` files when their scope becomes relevant:
 
-- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in the `l-01-agent-lifecycles` orchestrator lifecycle's
+- `tasks/AGENTS.md` — task collaboration doctrine (applied up front in the `l-01-agent-lifecycles` architect lifecycle's
   reframe-research phase; see _Start Here — Route By Role_ above).
 
 ### Onboarding Documentation

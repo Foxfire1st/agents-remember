@@ -284,4 +284,40 @@ describe("SessionList command tree (L14)", () => {
     expect(getByTestId("chats-session-role-a").textContent).toBe("manager");
     expect(queryByTestId("chats-session-role-b")).toBeNull();
   });
+
+  it("renders architect spawn-role as a known owner-tier chip", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[
+          { id: "architect", label: "Architect", spawnRole: "architect" },
+          { id: "custom", label: "Custom", spawnRole: "custom-role" },
+        ]}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    const architect = getByTestId("chats-session-role-architect");
+    expect(architect.textContent).toBe("architect");
+    expect(architect.getAttribute("data-known-role")).toBe("true");
+    expect(getByTestId("chats-session-role-custom").getAttribute("data-known-role")).toBe("false");
+  });
+
+  it("renders curator spawn-role as a known role chip", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[
+          { id: "curator", label: "Curator", spawnRole: "curator" },
+          { id: "custom", label: "Custom", spawnRole: "custom-role" },
+        ]}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    const curator = getByTestId("chats-session-role-curator");
+    expect(curator.textContent).toBe("curator");
+    expect(curator.getAttribute("data-known-role")).toBe("true");
+    expect(getByTestId("chats-session-role-custom").getAttribute("data-known-role")).toBe("false");
+  });
 });

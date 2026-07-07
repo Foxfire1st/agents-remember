@@ -12,9 +12,9 @@ import { qualifiedLeafKey } from "./taskIdentity";
 // The G1 COMMAND TREE for the Chats pane (L14): the chats sidebar mirrors operations. Membership,
 // in precedence order, per session:
 //   1. COMMAND DECK (gold, top; exists ONLY when an orchestration task exists — D3): sessions with
-//      command-role spawn provenance (AR_SPAWN_ROLE orchestrator/strategist/manager recorded on the
+//      command-role spawn provenance (AR_SPAWN_ROLE architect/orchestrator/strategist/manager recorded on the
 //      catalog row) plus any session whose leaf claim resolves INTO the orchestration task itself
-//      (its own qualified leaf, or a leaf in its folder) — the developer-facing orchestrator chat.
+//      (its own qualified leaf, or a leaf in its folder) — the developer-facing architect chat.
 //   2. MASTER GROUPS (one per claimed master folder): sessions whose qualified leaf key
 //      (`repo/master/leaf-id`) resolves to a live enclosure of that master; the group takes the
 //      purple management badge + one 22px indent step only when that master is commanded by an
@@ -25,7 +25,7 @@ import { qualifiedLeafKey } from "./taskIdentity";
 // Pure derivation — no persistence; collapse state is UI-local in the SessionList.
 
 /** The l-01 seats whose chats belong on the command deck. */
-const COMMAND_ROLES = new Set(["orchestrator", "strategist", "manager"]);
+const COMMAND_ROLES = new Set(["architect", "orchestrator", "strategist", "manager"]);
 
 export interface SessionGroup {
   key: string; // "command" | `master:${folder}` | "landed"

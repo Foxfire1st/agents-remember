@@ -19,8 +19,8 @@ Sessions route by role through the `l-01-agent-lifecycles` skill — the lifecyc
 roof this checkout routes into. A **spawned agent** (the `AR_SPAWN_ROLE` env var
 is set, or the first message is a role brief) follows its brief — the brief is
 its session start, and the rest of this section is not addressed to it. A
-**developer-facing session** is the **orchestrator**: it runs
-`skills/l-01-agent-lifecycles/roles/orchestrator.md`, whose phase axis is
+**developer-facing session** is the **architect**: it runs
+`skills/l-01-agent-lifecycles/roles/architect.md`, whose phase axis is
 request → trust-checkpoint → reframe-research → decide → build → close.
 Classify the job (bug / feature / triage / research) as a *lens* during
 reframe-research — a hint, re-pickable, never a gate.
@@ -36,13 +36,13 @@ code change lives under an approved task doc:
    master + light sub-task series when it outgrows a single-page plan.
 
 The task-collaboration doctrine in `tasks/AGENTS.md` applies inside the
-orchestrator lifecycle's reframe-research phase, in plain chat, before any task
+architect lifecycle's reframe-research phase, in plain chat, before any task
 file or format is chosen.
 
 ---
 
 **IMPORTANT:**
-Do not change code or documentation without entering the orchestrator lifecycle and clearing its plan gate.
+Do not change code or documentation without entering the architect lifecycle and clearing its plan gate.
 Do not change task plan items without approval. Think before acting.
 Do not randomly commit. Use the `c-12-closeout` skill instead!
 

@@ -381,6 +381,8 @@ class TypedModelTests(unittest.TestCase):
         settings = self._load(
             {
                 "roles": {
+                    "architect": {"harness": "claude", "effort": "high"},
+                    "curator": {"harness": "codex", "effort": "medium"},
                     "worker": {"harness": "codex", "model": "gpt-5", "effort": "medium"},
                     "orchestrator": {"effort": "high"},
                 }
@@ -392,6 +394,12 @@ class TypedModelTests(unittest.TestCase):
             RoleKnobs(harness="codex", model="gpt-5", effort="medium"),
         )
         self.assertEqual(settings.roles["orchestrator"], RoleKnobs(effort="high"))
+        self.assertEqual(
+            settings.roles["architect"], RoleKnobs(harness="claude", effort="high")
+        )
+        self.assertEqual(
+            settings.roles["curator"], RoleKnobs(harness="codex", effort="medium")
+        )
         # Unconfigured roles resolve to empty knobs (role-file defaults apply).
         self.assertEqual(settings.role_knobs("manager"), RoleKnobs())
 
@@ -608,6 +616,32 @@ class RolesPerLevelTests(unittest.TestCase):
     def test_unknown_role_inside_a_level_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "wroker"):
             self._load({"rolesPerLevel": {"master": {"wroker": {"model": "opus"}}}})
+
+    def test_architect_is_allowed_inside_a_level(self) -> None:
+        settings = self._load(
+            {
+                "roles": {"architect": {"harness": "claude", "effort": "high"}},
+                "rolesPerLevel": {"portfolio": {"architect": {"model": "opus"}}},
+            }
+        )
+
+        self.assertEqual(
+            settings.resolved_role_knobs("architect", "portfolio"),
+            RoleKnobs(harness="claude", model="opus", effort="high"),
+        )
+
+    def test_curator_is_allowed_inside_a_level(self) -> None:
+        settings = self._load(
+            {
+                "roles": {"curator": {"harness": "codex", "effort": "medium"}},
+                "rolesPerLevel": {"leaf": {"curator": {"model": "gpt-5"}}},
+            }
+        )
+
+        self.assertEqual(
+            settings.resolved_role_knobs("curator", "leaf"),
+            RoleKnobs(harness="codex", model="gpt-5", effort="medium"),
+        )
 
     def test_level_override_free_form_lists_replace(self) -> None:
         settings = self._load(

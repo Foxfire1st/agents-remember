@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> role brief -> otherwise orchestrator), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (orchestrator, designer, strategist, manager, worker, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. A developer-facing session IS the orchestrator; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
+description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise architect), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. A developer-facing session IS the architect; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
 ---
 
 # l-01-agent-lifecycles — The Agent Lifecycles
@@ -15,41 +15,70 @@ lifecycle, and no role reads another role's file.
 1. **`AR_SPAWN_ROLE` is set** (spawn env, injected by `spawn_agent_session`) → run
    `roles/<value>.md`. Nothing else in this file's "developer session" material applies to you.
    (`designer` here means the same design hat in a separate chair — see `roles/designer.md`.)
-2. **Else: the first user message is a role brief** — a `templates/*-brief.md`-shaped dispatch or
+2. **Else: the first user message is a role brief in a fresh session** — a `templates/*-brief.md`-shaped dispatch or
    a first line of the form `ROLE BRIEF — <role>` from an orchestrating agent → run that role's
    lifecycle. The brief is your session start; a workspace session-start notice is not addressed
    to you.
-3. **Else** (a developer opened this session) → you are the **orchestrator**: run
-   `roles/orchestrator.md`. Solo work is the degenerate portfolio — the same three jobs with hats
-   collapsed (the orchestrator wears the manager hat in flat runs and builds hands-on at session
-   scale); the task doc still comes first.
+3. **Else** (a developer opened this session) → you are the **architect**: run
+   `roles/architect.md`. Solo work is the degenerate portfolio — the architect is the owner seat
+   that may wear backend hats when nothing has been spawned; the task doc still comes first.
 
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
 value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
 session **whose brief never arrives** announces itself on the inbox and waits — it never
-improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a takeover chair (the Profile
-check (takeover) in `roles/orchestrator.md`, The Event Loop) — the developer still talks to **one** orchestrator. Orchestrated
-fan-out (spawning managers/workers at scale) begins only on an explicit developer request (e.g.
-*"orchestrate these masters"*) — no agent promotes itself into a spawning seat.
+improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
+backend takeover chair — the developer still talks to the **architect**, not the orchestrator.
+Orchestrated fan-out (spawning backend orchestrators/managers/workers at scale) begins only on an
+explicit developer request (e.g. *"orchestrate these masters"*) — no agent promotes itself into a
+spawning seat.
 
 One exception to the no-cross-reading rule above: **a seat that WEARS a hat runs that hat's file
-as its own** — the orchestrator always for `roles/designer.md`, and in flat runs for
-`roles/manager.md` (the hat-collapse rule).
+as its own** — the architect may wear `roles/designer.md`, and in solo/flat runs may wear backend
+or build hats (the hat-collapse rule). A spawned role seat never wears another role's hat.
 
 ## The Role Registry
 
 | Role | Seat | Lifecycle file |
 | --- | --- | --- |
-| **orchestrator** | the developer-facing session; first coordination leaf of an orchestrated series | `roles/orchestrator.md` |
-| **designer** | a HAT the orchestrator pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
+| **architect** | the developer-facing owner seat; design conversation, decision-item relay, and drawing board | `roles/architect.md` |
+| **orchestrator** | spawned backend portfolio/orchestration seat; never developer-facing | `roles/orchestrator.md` |
+| **designer** | a HAT the architect pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
 | **strategist** | the sprint planner, SPAWN-FIRST; a strategist run is a **mandatory precondition for any orchestrated run** — its deliverable is the orchestration task (sprint plan + scope); spawn value `strategist` | `roles/strategist.md` |
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
+| **curator** | fresh per leaf after builder/reviewer; writes onboarding only from task docs, notes, and code diff | `roles/curator.md` |
 | **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) and as any three-party loop's reviewer seat (criteria catalogs bound per review type); spawn value `reviewer` | `roles/reviewer.md` |
 
 The **lenses** (bug · feature · triage · research — `lenses.md`) are how the scoping seats
-(orchestrator, designer) read a piece of work; a dispatched role never picks a lens — its brief
+(architect, designer, backend orchestrator) read a piece of work; a dispatched role never picks a lens — its brief
 already carries the flavor.
+
+## Role-Seat Immutability (dashboard-owned sessions)
+
+When the dashboard owns a session, its role is fixed for the session lifetime. Roles expand
+**horizontally** by spawning new, individually addressable chats; sub-agents drill **vertically**
+inside one seat's context for deeper analysis. A dashboard-owned session that already has a role
+refuses a pasted role brief instead of silently rerouting itself; it escalates the mismatch to its
+owner via the inbox. Router condition 2 applies only to fresh sessions. Sessions not owned by the
+dashboard follow the host harness's ordinary rules.
+
+Hat-collapse is sanctioned only for the owner/developer-facing architect seat in solo or flat
+runs. Spawned role seats never absorb another role brief and never become a different role in
+place.
+
+## Minimal Decision-Item Relay
+
+The ARCHITECT/ORCHESTRATOR split uses the existing operator inbox now. No full queue schema or
+dashboard reform is introduced here.
+
+- Backend seats post one `messageKind: decision-item` inbox row at a time to the architect. The row
+  states what is being decided, the options, the consequences, and the durable evidence refs.
+- The architect presents one item at the developer's pace, records the ruling in the durable task
+  surface (`openQuestions` / decision logs, with notes for analysis), and returns one
+  `messageKind: decision-ruling` inbox row to the backend seat.
+- If the item is underspecified, the architect sends a single clarification row back instead of
+  guessing. The backend does not open a second item until the active item has a durable ruling or
+  clarification state.
 
 ## The Minimal Frame (the only machinery every session shares)
 
@@ -79,7 +108,7 @@ at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifec
 
 - **Continuity lives in the `task_doc` + durable artifacts, never in transcripts** — which is why
   short-lived workers and reviewers are safe, and why every seat writes its artifact of record.
-- **Escalation ladder: worker → manager → orchestrator → developer.** No rung is skipped, ever.
+- **Escalation ladder: worker → manager → orchestrator → architect → developer.** No rung is skipped, ever.
   Each role file states only its own rung.
 - **Observability:** coordination seats are `task_doc` leaves with attached chats; the developer
   can walk into any seat at any level.
@@ -95,9 +124,9 @@ section; they do not restate it.
 
 | Level | Owner (holds the deliverable, rules, lands) | Builder | Reviewer |
 | --- | --- | --- | --- |
-| Leaf | the leaf's owning seat (manager; orchestrator in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
+| Leaf | the leaf's owning seat (manager; architect in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
-| Portfolio | the orchestrator | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
+| Portfolio | the backend orchestrator (developer-facing decisions relayed through the architect) | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
 
 **Complexity-scored tiers (per leaf, at dispatch).** The owning seat scores three axes — blast
 radius (doctrine/enforcement/public surface vs leaf-local) · novelty (new subsystem vs
@@ -123,13 +152,14 @@ they do not open them.
 open finding set. A round that does not shrink it escalates immediately, regardless of the count;
 a monotonically converging loop may never hit the cap at all. At the cap, or on non-convergence,
 the owner does not spin another round — it **escalates one seat up the ladder (worker → manager →
-orchestrator → developer) with the full round history attached**; the escalation packet IS the
+orchestrator → architect → developer) with the full round history attached**; the escalation packet IS the
 upper seat's visibility.
 
 **Quo-vadis (the written developer-escalation criterion).** A question is developer-worthy when it
 is a **high-blast-radius truth** — answered wrong it means big rewrites later (architecture
 direction, security posture, doctrine contradictions, irreversible data/branch operations, where
-agent settings live). Quo-vadis questions escalate IMMEDIATELY, regardless of round count.
+agent settings live). Quo-vadis questions escalate IMMEDIATELY to the architect relay,
+regardless of round count.
 Presentation-grade choices (2px vs 3px) never do — the owner rules and logs.
 
 **Criteria catalogs (the reviewer as test bench).** Criteria are never made up on the spot: every
@@ -169,9 +199,11 @@ defaults < global settings < repo-local settings.
 {
   "orchestration": {
     "roles": {  // role → knob override; validated: harness/model/effort · free-form: launchArgs/promptKeywords/sessionCommands
+      "architect":    { "harness": "claude", "effort": "high" },
       "orchestrator": { "harness": "claude", "effort": "high" },
       "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
       "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
+      "curator":      { "harness": "codex",  "effort": "medium" },
       "worker":       { "harness": "codex",  "effort": "medium" }
     },
     "rolesPerLevel": {  // per-LEVEL agent sets (leaf|master|portfolio), deep-merged over roles
@@ -218,7 +250,7 @@ reuse, complexity thresholds) lives in the same block — meaning in
 ## Companion Files
 
 - `lenses.md` — the four job lenses for the scoping seats.
-- `roles/…` — the six self-contained role lifecycles (the registry above).
+- `roles/…` — the eight self-contained role lifecycles (the registry above).
 - `templates/…` — turn-report · worker-brief · manager-brief (`ROLE BRIEF — manager`; the
   orchestrator compiles a manager's session start from it) · master-handover-packet ·
   conversation-handover-packet · verdict · impact-analysis · onboarding-coherency ·
@@ -249,7 +281,7 @@ This skill absorbs and supersedes `l-01-session-job-lifecycle` and `l-02-agent-o
 orchestration vocabulary adopts the parked `260619_agentic-control-plane` spec — jobs as
 model-interpreted markdown (D6), the knob block (D7), role + lens in one file (D10), the
 ambient-singleton rule (D11), per-harness variants (D12), the judge rung, short-lived workers with
-structured handoff, dev-talks-to-one-orchestrator (D15) — which in turn credits **Archon** and the
+structured handoff, dev-talks-to-one-architect (D15) — which in turn credits **Archon** and the
 **agent-control-plane** project (D14); that credit carries forward.
 
 ## Relationship To Other Instructions

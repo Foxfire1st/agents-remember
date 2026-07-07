@@ -7,7 +7,7 @@ built to grow as the work unfolds.
 
 ## When to escalate to a series
 
-The `l-01-agent-lifecycles` orchestrator lifecycle's `decide` step escalates a single task to a series once its size is apparent — the
+The `l-01-agent-lifecycles` architect lifecycle's `decide` step escalates a single task to a series once its size is apparent — the
 implementation plan no longer fits on a single page, or the work splits into distinct slices that each
 deserve their own checklist and commit. You can also start single and escalate later: drop in the
 master `task.md` and move the existing plan into the first `NN_<name>.md`.

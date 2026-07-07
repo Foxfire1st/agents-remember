@@ -11,21 +11,31 @@
 
 **One per master task.** Spawned by the orchestrator with the master's context packet. It owns its own
 coordination leaf + chat (**no worktree**) and drives exactly one master series: spawns/respawns a fresh
-worker per leaf, reviews turn-report artifacts, decides **delegated** leaf gates, integrates leaves into
-the master integration branch via the `c-11-memory-carryover-from-branch` skill, and hands the completed
-master to the orchestrator through the master-exit adversarial seam.
+worker per leaf, runs the manager -> builder -> reviewer -> curator closeout chain, decides
+**delegated** leaf gates, integrates leaves into the master integration branch via the
+`c-11-memory-carryover-from-branch` skill, and hands the completed master to the orchestrator
+through the master-exit adversarial seam.
 
-The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → (the worker
-builds) → closeout preview/apply (deciding the delegated gates per the gate policy) →
-`worktree_integrate` → finalize — task-doc statuses via the finalizer, **steps checked by this
-seat by hand** (the tool does not reconcile checkboxes). The worker's terminal
+The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → builder code →
+reviewer verdict → curator memory pass → closeout preview/apply (deciding the delegated gates per
+the gate policy) → `worktree_integrate` → finalize — task-doc statuses via the finalizer, **steps
+checked by this seat by hand** (the tool does not reconcile checkboxes). The worker's terminal
 state is checks-green + turn report; everything after that is this seat's.
 
-**Flat-run note:** in a flat series (no managers spawned) the **orchestrator wears this hat** —
-same duties, same artifacts, one chair.
+**Flat-run note:** in a flat series (no managers spawned) the **architect may wear this hat** —
+same duties, same artifacts, one owner chair. A spawned orchestrator does not absorb the manager
+role in place.
 
 A manager has **no bird's-eye view** — it sees one master, not the portfolio. That boundary shapes
 everything below.
+
+## Role-Seat Immutability
+
+In dashboard-owned sessions, this seat stays manager for its lifetime. A pasted brief for another
+role is refused and escalated to the backend orchestrator via inbox instead of rerouting this chat.
+Roles expand horizontally into new chats; sub-agents drill vertically inside this manager seat for
+bounded analysis or report checks. A spawned manager never absorbs architect, orchestrator,
+strategist, reviewer, curator, or worker briefs.
 
 ## Lens
 
@@ -79,10 +89,15 @@ developer can walk in any time. Read the master + leaf docs; order the leaves.
   missing artifact → a **rate-limited stdin nudge** (logged as an event, never spammy). Escalation
   intake via the inbox.
 - **Review artifact vs `task_doc`** — completion vs requirements/steps · checks green ·
-  onboarding refreshed in the same pass (the manager's own leaf-level review; **this is not an
-  adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
+  builder changed-path/code evidence sufficient for the curator pass (the manager's own
+  leaf-level review; **this is not an adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
   (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
   genuinely new changes.
+- **Curator memory pass** — after builder code is ready and the reviewer verdict is available,
+  spawn a **fresh curator** (`roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`) for the leaf's
+  onboarding-only pass. The curator receives the leaf task doc, notes/reports, builder changed
+  paths/code diff, and reviewer verdict; it writes onboarding only and returns a memory-pass report.
+  Leaf closeout inputs are exactly: **builder code + reviewer verdict + curator memory pass**.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
@@ -124,7 +139,7 @@ truth, as-built: the gate pins to your ambient lifecycle when you raise it; the 
 orchestrator resolves the gate **by the packet-carried gate id** (gate ids are model-visible —
 only LIFECYCLE ids stay server-side) and its own ambient identity becomes `decidedBy`;
 owner-never-self-approves holds by construction. A handover carrying serious issues the
-orchestrator cannot answer on its own escalates up the ladder (orchestrator → developer).
+orchestrator cannot answer on its own escalates up the ladder (orchestrator → architect).
 
 ### 4 — Handover to the orchestrator
 
@@ -150,7 +165,7 @@ own lifecycle if you need its state).
   master's view first. A loop that hits the 3-round cap or stops converging escalates **with the
   full round history attached**. **Quo-vadis test:** a question that is a **high-blast-radius
   truth** — answered wrong it means big rewrites later, not a cosmetic choice — is flagged as
-  quo-vadis when raised, so the orchestrator relays it to the developer immediately instead of
+  quo-vadis when raised, so the orchestrator relays it to the architect immediately instead of
   absorbing it; presentation-grade choices are never escalated — decide and log.
 
 ## Knobs

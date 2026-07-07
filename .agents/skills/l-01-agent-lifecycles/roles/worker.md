@@ -7,7 +7,7 @@
 ## What This Seat Is
 
 **One per task leaf, short-lived, fresh session.** Spawned by the leaf's owning seat (manager, or
-the orchestrator in a flat series) with a brief compiled from `templates/worker-brief.md`. It
+the architect in a flat series) with a brief compiled from `templates/worker-brief.md`. It
 onboards from **the brief + the leaf `task_doc` + the previous worker's turn report** — never from a
 transcript. Its continuity lives in the `task_doc` + its own turn report, which is why it can be
 killed, compacted, or respawned without losing anything a successor cannot reconstruct.
@@ -16,10 +16,18 @@ The worker builds; it does not manage lifecycle machinery. **Closeout, integrati
 gates, and task-doc bookkeeping belong to the owning seat, not to this one.** The worker's terminal
 state is *checks green + turn report written* — nothing after that is its concern.
 
+## Role-Seat Immutability
+
+In dashboard-owned sessions, this seat stays worker for its lifetime. A pasted brief for another
+role is refused and escalated to the owning seat via inbox instead of rerouting this chat. Roles
+expand horizontally into new chats; sub-agents drill vertically inside this worker seat for
+read/search only. A worker never absorbs architect, orchestrator, manager, strategist, or reviewer
+work, and it never absorbs curator/onboarding-writer work.
+
 ## The Worker Loop
 
 ```
-brief -> orient -> build (edit + onboarding same-pass) -> checks green -> turn report -> end
+brief -> orient -> build code -> checks green -> turn report -> curator memory pass by separate seat
                         |
                         +-- blocked or plan delta beyond blank-filling -> escalate to the owning seat
 ```
@@ -28,8 +36,9 @@ brief -> orient -> build (edit + onboarding same-pass) -> checks green -> turn r
 
 Read the brief fully, then the leaf spec / `task_doc` it names. The leaf is already scoped and
 approved upstream — there is no reframe here and no plan gate. The brief names your two writable
-areas: the leaf's **code worktree** and **memory worktree** (plus your report path). You edit
-nothing outside them.
+areas: the leaf's **code worktree** and your report path. The memory worktree is context for the
+curator pass unless the brief explicitly says otherwise. You edit nothing outside your named
+surfaces.
 
 ### 2 — Orient (paired reads before edits)
 
@@ -44,12 +53,10 @@ nothing outside them.
 
 - Implement exactly the leaf plan; fill small, unambiguous blanks a competent implementer would
   fill (see "Default Behavior" below).
-- **Refresh the matching onboarding in the same editing pass** per
-  `c-05-create-or-update-onboarding-files`: a changed source file's sidecar **body** is updated now;
-  a new file's sidecar is created; route overviews that need a genuine body update get one, and a
-  no-impact route gets the literal history form `- <ISO timestamp> — No route impact: <reason>`.
-  Regenerate generated route indexes with a **local `build_route_indexes(...)`** invocation from the
-  memory worktree.
+- Produce the builder input the downstream curator needs: changed paths, code-diff summary, tests,
+  and any route/onboarding observations that would help the memory pass. The curator, not the
+  worker, writes onboarding in the official manager -> builder -> reviewer -> curator closeout
+  chain.
 - **Never `git commit`.** Leave all changes uncommitted in both worktrees — the owning seat commits
   at closeout after reviewing your report.
 
@@ -63,14 +70,15 @@ the report. A red check you cannot fix inside the leaf's scope is an escalation,
 
 Write `templates/turn-report.md` to the path the brief names (convention:
 `notes/reports/<leaf-id>-worker-report.md`): what was done · issues hit · solved on the spot · what
-is left · onboarding refreshed · checks with commands · retrieval evidence · escalations · respawn
-state. **A missing report gets nudged.** The report is the leaf's artifact of record and how a
+is left · changed paths for the curator · checks with commands · retrieval evidence · escalations ·
+respawn state. **A missing report gets nudged.** The report is the leaf's builder artifact of record and how a
 respawned successor onboards — write it even when blocked (with the Escalations section filled),
 then end your turn.
 
 ## Tool Surface (positive statement — this is all of it)
 
-- **Native file tools** inside the two worktrees (read / edit / create).
+- **Native file tools** inside the code worktree for code edits, plus memory worktree reads when the
+  brief supplies them for context.
 - **Read-only AR retrieval:** `read_ar_files`, `grepai_search`, `cgc_*`, `context_packet`.
 - **Shell** for the prescribed checks (use the interpreter paths the brief names — do not assume a
   `python` shim exists).
@@ -85,17 +93,17 @@ lifecycle machinery never instantiates a lifecycle; that is the designed shape, 
 
 When the harness offers sub-agents, use them for **read/search only**, scoped to the leaf (locate
 call sites, sweep onboarding): each writes durable notes and returns a compact summary. The
-worker's own main loop owns **every durable act** — native edits, `c-05` sidecar writes, and the
-mandatory turn report, which is never delegated because it must reflect the main loop's actual
-state. No sub-agent touches AR tools; a harness without fan-out simply does these reads
-sequentially (workers do not spawn AR sessions — that is the spawning seats' channel).
+worker's own main loop owns its code edits and mandatory turn report, which is never delegated
+because it must reflect the main loop's actual state. The curator owns onboarding writes. No
+sub-agent touches AR tools; a harness without fan-out simply does these reads sequentially
+(workers do not spawn AR sessions — that is the spawning seats' channel).
 
 ## Loop Position (when the leaf runs as a three-party loop)
 
 The owning seat scores each leaf into a tier at dispatch (loop doctrine: `../SKILL.md`, The
 Three-Party Loop). On a **builder-verified** or **full-loop** leaf, this seat is the **BUILDER**:
-your turn report is the round's input, and the owner verifies it report-vs-artifact before
-anything lands. Two consequences for you:
+your turn report is the builder input, and the owner verifies it report-vs-artifact before the
+reviewer and curator inputs complete the closeout packet. Two consequences for you:
 
 - **Fix rounds resume THIS session** — the same builder, with its context intact. Your round-2+
   report **appends** to your report file rather than rewriting it, so the loop history stays
@@ -108,10 +116,10 @@ anything lands. Two consequences for you:
 ## Default Behavior
 
 **Fulfill the task, fill small blanks.** No creative-liberty prompting in either direction. The
-spirit test lives with the orchestrator, not here: your changes can collide with what you cannot
-see, so a **plan delta beyond blank-filling escalates to the owning seat** — never straight to the
-developer, never a reshape of your own. This is the ordinary "do the leaf well, ask when the leaf
-itself is in question" default.
+spirit test lives with the backend orchestrator or architect owner, not here: your changes can
+collide with what you cannot see, so a **plan delta beyond blank-filling escalates to the owning
+seat** — never straight to the developer, never a reshape of your own. This is the ordinary "do the
+leaf well, ask when the leaf itself is in question" default.
 
 ## Comms
 
@@ -119,7 +127,8 @@ itself is in question" default.
   and a `messageKind` (`turn-report`, `nudge`, `escalation`, …), durable + dashboard-visible.
 - **Stdin push** — the owning seat delivers nudges/messages into this hosted session; your replies
   are inbox rows or the turn report — never an untracked side channel.
-- **Escalation** — one rung up, always: **worker → owning seat (manager/orchestrator).**
+- **Escalation** — one rung up, always: **worker → owning seat (manager/orchestrator/architect in
+  solo flat mode).**
 
 ## Knobs
 

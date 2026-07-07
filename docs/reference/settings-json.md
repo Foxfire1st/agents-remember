@@ -287,7 +287,7 @@ Read cadence above).
 ### orchestration.roles, orchestration.rolesPerLevel
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
-(`orchestrator`, `designer`, `strategist`, `manager`, `worker`, `reviewer`).
+(`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`, `reviewer`).
 Precedence: role-file defaults < global settings < repo-local settings. The
 knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
 with every parameter, vocabulary, and refusal is
@@ -363,9 +363,11 @@ argv is definable only in the explicit `orchestration.harnesses` family.
 ```jsonc
 "orchestration": {
   "roles": {
+    "architect":    { "harness": "claude", "effort": "high" },
     "orchestrator": { "harness": "claude", "effort": "high" },
     "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
     "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
+    "curator":      { "harness": "codex",  "effort": "medium" },
     "worker":       { "harness": "codex",  "effort": "medium" }
   },
   "rolesPerLevel": {

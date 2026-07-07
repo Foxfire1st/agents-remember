@@ -1,22 +1,31 @@
 # Lifecycle — Orchestrator
 
-> The developer-facing lifecycle: an **event loop over durable portfolio state**, not a
-> request-to-close pipeline. Each turn routes the incoming event — a developer message, a worker
-> report, a verdict, the orchestrator's own finding — into one of **three jobs** (Design ·
-> Portfolio · Orchestrate) under one roof, with solo work as the same jobs run with hats collapsed.
+> The spawned backend lifecycle: an **event loop over durable portfolio state**, not a
+> developer-facing conversation. Each turn routes backend events — architect dispatch, manager
+> handover, worker report, verdict, or the orchestrator's own finding — into portfolio and
+> orchestration work. Developer decisions are emitted to the architect as decision items.
 
 ## What This Seat Is
 
-The developer's single point of contact and the only seat with a standing developer relay
-(managers/workers stay reachable via their attached chats). It owns the design conversation, the
-portfolio bird's-eye, dependency-ordered dispatch, the super integration branch, the **spirit
-test**, and the **integrity bulwark** against "fixed one thing, broke two others."
+The orchestrator is a backend seat spawned by the architect or by an approved orchestration plan.
+It never converses with the developer directly. It owns the portfolio bird's-eye,
+dependency-ordered dispatch, the super integration branch, the **spirit test**, and the
+**integrity bulwark** against "fixed one thing, broke two others." The architect owns the design
+conversation and developer relay.
 
 Its real state is the **task tree** — masters, leaves, statuses, decision logs, `openQuestions`,
-contracts — never the transcript. That is why sessions can die, compact, and resume without losing
-the run. Its analysis substrate is the **memory system** (route indexes, onboarding,
+contracts, inbox rows — never the transcript. That is why sessions can die, compact, and resume
+without losing the run. Its analysis substrate is the **memory system** (route indexes, onboarding,
 `grepai_search`, `cgc_*`); **orchestrator quality ∝ memory-repo quality**. Its durable notes and
 reports are the most important artifacts in the system: only this seat sees the whole picture.
+
+## Role-Seat Immutability
+
+In dashboard-owned sessions, this seat stays an orchestrator for its lifetime. A pasted brief for
+architect, strategist, manager, worker, reviewer, or designer is refused and escalated to the
+architect or owning seat via the inbox. Roles expand horizontally into new chats; sub-agents drill
+vertically inside this seat for bounded analysis. A spawned orchestrator never absorbs another
+role brief and never performs architect/developer-facing hat-collapse.
 
 ## The Event Loop
 
@@ -25,12 +34,12 @@ exception):
 
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
-   blocked on whom, what awaits the developer — and **say it back**.
+   blocked on whom, what awaits the architect/developer relay — and **say it back**.
 3. **Route the event** by what exists and what is asked:
 
 | Condition | Job |
 | --- | --- |
-| No task doc exists for the ask (or a planning-status doc needs reshaping before work) | **D — Design** |
+| No task doc exists for a backend request, or a planning-status doc needs developer reshaping | Emit a **decision/design item** to the architect |
 | Designed masters exist; coherence/conflicts/order in question, or "orchestrate these" | **P — Portfolio** |
 | An approved task/series is ready for implementation | **O — Orchestrate** |
 | The ask changes no code (a question, an investigation) | **research-only exit** — deliver the answer; chat is the right medium; no worktree, no task artifact |
@@ -38,8 +47,8 @@ exception):
 **Profile check (takeover).** Before heavy work in any job: if this session's harness/model/
 effort is wrong for the run (resolved: role file < settings), spawn the right chair —
 `spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator` + a conversation-handover packet
-(`../templates/conversation-handover-packet.md`) — and hand over; the developer still talks to
-ONE orchestrator at a time.
+(`../templates/conversation-handover-packet.md`) — and hand over; the architect still talks to the
+developer, and backend orchestrator seats stay behind the relay.
 
 Several jobs can be active across a day; the loop routes per event. The frame's phase axis stays
 the observable `lifecycle_phase` vocabulary (`reframe-research` ≈ D, `decide` ≈ P, `build`/`close`
@@ -68,8 +77,9 @@ task doc (approved)  →  branch (intent)  →  worktree (only where something i
    memory + onboarding roots; provider state; drift status and actionable count; branch freshness
    (`behind`/`diverged` → fast-forward the local official line first;
    `ledgerMapsCodeHead=false` → carryover or the right memory branch first).
-3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **ask the developer** before
-   refreshing via `c-05-create-or-update-onboarding-files` — drift handling is approval-gated.
+3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **emit a decision item to
+   the architect** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling
+   is approval-gated.
    Drift tied to dirty source is active work-in-progress, not maintenance.
 4. Providers stopped/degraded: run the matching provider/runtime operations, re-check, report;
    `indexing` means healthy-but-busy (partial results).
@@ -77,57 +87,55 @@ task doc (approved)  →  branch (intent)  →  worktree (only where something i
 When this seat spawns a role it compiles the trust facts into the brief — a spawned role does not
 repeat this checkpoint.
 
-## Hand-Off Protocol — Dry-Run → Notify-And-Stop → Report
+## Decision-Item Relay To The Architect
 
-Every developer hand-off (design acceptance, portfolio plan, worktree intent, commit, push,
-integration, cleanup/finalization, any dev-wait) is three actions, never one. Carve-out (ruled
-2026-07-06): in an orchestrated run, leaf→master and master→super integrations ride the series'
-**standing approval** — no per-edge developer hand-off; the developer hand-off concentrates at the
-super PR/carry-over gate (see Super exit & landing tail). The table's integration row governs when
-a hand-off DOES happen (solo runs; a raised durable gate):
+The orchestrator does not hand questions to the developer. Every developer-worthy item goes to the
+architect through the existing operator inbox, one item at a time.
 
-1. **Dry-run** the pending mutation and self-fix failures before reporting.
-2. **Notify:** `lifecycle_turn_end_notification(summary=…)` as the **last tool call**.
-3. **Report:** the complete packet as final prose, the decision handed over as the last line —
-   then STOP. The next turn's first AR call auto-resumes.
+Post one `messageKind: decision-item` row with:
+
+1. **Decision** — what is being decided.
+2. **Options** — the live choices and any backend recommendation.
+3. **Consequences** — what each option changes, risks, or blocks.
+4. **Evidence refs** — task docs, notes, reports, diffs, or gate ids the architect can verify.
+
+Then stop acting on that item until the architect returns a `messageKind: decision-ruling` row (or
+a clarification request). Do not open a second developer item while the first is unresolved.
+
+Operational hand-offs that stay inside the backend still use the existing durable gate and inbox
+surfaces. Carve-out (ruled 2026-07-06): in an orchestrated run, leaf→master and master→super
+integrations ride the series' **standing approval** — no per-edge architect/developer hand-off; the
+developer review concentrates at the super PR/carry-over gate through the architect. The table's
+integration row governs when a hand-off DOES happen (solo runs; a raised durable gate):
 
 | Junction | Parked durable gate `kind` | Hands off via |
 | --- | --- | --- |
-| design acceptance / plan gate | `plan-approval` | this lifecycle |
+| design acceptance / plan gate | `plan-approval` | architect decision item |
 | worktree intent | `worktree-intent` | `c-09-git-worktree-manager` |
 | commit / closeout | `closeout-approval` | `c-12-closeout` |
-| push | `push-approval` | this lifecycle / `c-09` |
+| push | `push-approval` | architect decision item / `c-09` |
 | integration | `integration-approval` | `c-09` / `c-12` |
 | cleanup / finalization | `cleanup-approval` | `c-09` / `c-12` |
-| any other dev-wait | `agent-question` | this lifecycle |
+| any other developer-worthy wait | `agent-question` | architect decision item |
 
 `closeout-approval` **is** the commit hand-off. The block-and-wait `lifecycle_gate` +
 `lifecycle_resume` pair remains the parked fallback for a durable, mutation-blocking approval
-record; it renders a prompt over your prose, which is exactly why notify-and-stop is the path.
+record; when developer attention is needed, the architect is the relay that presents it.
 
-## Job D — Design (pull the designer hat)
+## Design Boundary — Ask The Architect
 
-**Entry:** an intent/problem with no task doc — or a planning-status doc that needs reshaping
-before work starts. Fires at the front of the pipeline AND mid-flight; most leaves of a live
-series are designed mid-flight.
+The orchestrator does not own the developer drawing board and does not pull the designer hat.
+When an intent/problem has no task doc, or a planning-status doc needs developer-visible
+reshaping, emit a decision/design item to the architect with the missing decision, options,
+consequences, and evidence refs. The architect wears `roles/designer.md`, discusses with the
+developer, and returns a durable ruling or updated task surface.
 
-Run `roles/designer.md` **inline — the designer is a hat, not a seat**: it cannot sit in a
-coordination leaf because the task is what it exists to create. No worktree, no branch, no spawn
-required; a heavy design may run the same hat in a separate session (chair logistics, not a role
-distinction — spawn with `AR_SPAWN_ROLE=designer`).
-
-- The co-think loop, evidence model, blast-radius-within-the-master, and designer-limits
-  declaration are the hat's own file. The orchestrator remains accountable for what the hat
-  produces: **bulwark-check the design against the portfolio and the past before acceptance**
-  (planned-vs-planned AND planned-vs-past — a designed change that collides with another master's
-  standing order is caught here or shipped broken).
-- **Output:** master/leaf task docs (requirements · steps · code examples), `openQuestions` for
-  the developer (the rendered decision surface; `notes/` carries the analysis), the limits note.
-- **Gate:** the developer accepts the design — or parks it. **No git surface.**
+The orchestrator remains accountable for backend portfolio integrity after the architect returns
+the design: run the bulwark check against the portfolio and the past before dispatch.
 
 ## Job P — Portfolio (streamline + plan)
 
-**Entry:** designed masters exist and coherence/order is the question, or the developer says
+**Entry:** designed masters exist and coherence/order is the question, or the architect dispatches
 "orchestrate these."
 
 - **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); fan-out
@@ -151,9 +159,10 @@ distinction — spawn with `AR_SPAWN_ROLE=designer`).
   sprint scope (`../templates/orchestration-task.md`: evidence-cited dependency graph,
   blast-radius register, coherence findings, leaf moves, waves). This is the portfolio
   three-party loop (owner = this seat · builder = strategist · reviewer with
-  `../criteria/plan-review.md`), followed by **drawing-board rounds with the developer** — this
-  seat relays, multi-round convergence is expected and normal, and quo-vadis items (e.g. two
-  masters heavily disagreeing) go straight to the developer. On acceptance **this seat adopts the
+  `../criteria/plan-review.md`), followed by **drawing-board rounds through the architect** — this
+  seat relays by decision item, multi-round convergence is expected and normal, and quo-vadis
+  items (e.g. two masters heavily disagreeing) go straight to the architect relay. On acceptance
+  **this seat adopts the
   draft into durable task form** (the strategist is a reader, not a mutator) with a decision-log
   entry.
 - **Re-evaluation rules:** a master added **in-sprint before implementation starts** → the
@@ -167,13 +176,13 @@ distinction — spawn with `AR_SPAWN_ROLE=designer`).
   task doc carrying a top-level `orchestrates` list naming the master tasks it commands — the
   dashboard derives the orchestration > master > leaf hierarchy (and the rank insignia) from that
   field, so setting it is part of adoption.
-- **Gate:** the portfolio plan gate — one wholesale developer review of the reshaped portfolio +
-  the orchestration task (sprint scope + DAG + dispatch order). **No git surface** — not even the
-  super branch exists yet.
+- **Gate:** the portfolio plan gate — one wholesale architect/developer review of the reshaped
+  portfolio + the orchestration task (sprint scope + DAG + dispatch order). **No git surface** —
+  not even the super branch exists yet.
 
 ## Job O — Orchestrate (execute the plan)
 
-**Entry:** an approved planner master — or a single approved master for a flat run. Either way,
+**Entry:** an approved planner master — or a single approved master dispatched for backend execution. Either way,
 **the adopted orchestration task must exist**: the strategist pre-run (Job P) is the
 unconditional precondition for any orchestrated run — even one master. It is doctrine, not a
 knob.
@@ -192,8 +201,8 @@ monitor turn-report artifacts, nudges, escalation intake; apply the **spirit tes
 deltas. A manager escalation may carry a **loop's full round history** (3-round cap hit, or a
 round that failed to shrink the finding set — the convergence rule, `../SKILL.md` The Three-Party
 Loop): this seat either re-runs the loop at ITS level (the orchestrator-level agent set — the
-strongest models) or, when the blocker is a quo-vadis truth, takes it to the developer. In a
-**flat run, wear the manager hat yourself** (see The Hat-Collapse Rule).
+strongest models) or, when the blocker is a quo-vadis truth, emits a decision item to the
+architect. This spawned backend seat does not run flat hat-collapse (see The Hat-Collapse Rule).
 
 **Failed-deliverable rule (reopen-and-reshape):** a leaf whose deliverable came out wrong is
 **REOPENED under its own id** (`task_reopen`) and its doc reshaped to the intended form — the
@@ -212,7 +221,7 @@ policy may require the attached reviewer verdict (`requireReviewerVerdictAtSeams
 enforces it: `worktree_integrate` refuses while a `master-handover-approval` gate addressed to
 this master (its `enclosure`) is undecided or policy-invalid. A blocking verdict decomposes into
 fix leaves dispatched before integration; a
-handover you cannot honestly decide escalates to the developer.
+handover you cannot honestly decide escalates to the architect as a decision item.
 
 **Integration duty (master → super) — the worktree moment.** Per completed master:
 
@@ -243,7 +252,8 @@ Strict stack: super off main; master branches off the **current super** (never o
 branches off their master. **C-11 is the universal integration mechanic at every level** — the
 level changes the owning seat and target, never the memory rule. The final super → main landing
 follows `system/git-workflow.md`: PR to gated main, remote merge, memory carry-over so the ledger
-maps the actual merge commit, then push — **push only after the developer approves**.
+maps the actual merge commit, then push — **push only after the architect returns the developer's
+approval**.
 
 **Conflict resolution — exactly two modes:** *Up-front (preferred):* an overlap found during
 streamlining → extract shared logic into a foundation master implemented first (leaf moves +
@@ -255,47 +265,38 @@ owns the final truth; ledger edge mapped once).
 parallel-master reconcile (T9), the series-branch-without-worktree primitive, and atomic
 move/renumber — run manually with existing primitives, each manual edge recorded in durable notes.
 
-**Super exit & landing tail — the developer's SINGLE review point (ruled 2026-07-06, resolves
+**Super exit & landing tail — the architect-mediated SINGLE review point (ruled 2026-07-06, resolves
 L8-Q9):** all leaf→master and master→super integrations are **orchestrator-delegated** — on the
 happy path they proceed under the series' standing approval (the developer's portfolio-gate
 approval, recorded in the planner master's decision log); a durable `integration-approval` gate,
 when one is raised, still awaits the developer — the kind stays human-pinned as-built. The
-developer reviews ONCE, at the **fully integrated super branch on the PR/carry-over gate**. When
+architect presents the developer review ONCE, at the **fully integrated super branch on the
+PR/carry-over gate**. When
 the DAG drains, spawn the super-exit adversarial reviewer (`roles/reviewer.md`, spawned with
 `env={"AR_SPAWN_ROLE": "reviewer"}`) over the whole super branch; attach its verdict as judge
 evidence (`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"…"}]`).
-The handover to the developer **MUST offer a REVIEWABLE ENVIRONMENT** — for agents-remember: the
-dashboard running on the super branch — because the review is **visible-behavior-first** (a
+The handover to the architect **MUST offer a REVIEWABLE ENVIRONMENT** — for agents-remember: the
+dashboard running on the super branch — because the developer review is **visible-behavior-first** (a
 broken visual pass fails the handover fast, before anyone reads a diff), code review second. The
 handover carries **demo notes — "what changed visibly"**: per master, the user-visible behavior
-to walk (panels, flows, outputs, how to reach them), so the developer drives the environment
+to walk (panels, flows, outputs, how to reach them), so the developer can drive the environment
 without archaeology. Rejections decompose into fix leaves. On approval: PR + memory carry-over +
-push (developer-gated), then finalization
+push (architect-mediated developer gate), then finalization
 (`lifecycle_finalize_task` per edge — statuses via the tool, steps checked by hand), then the **self-improvement close**:
 proposals for future runs grounded in the run's own ledger ("did x/y/z; hit a/b/c; a and b solved
 on the spot; c needs this change") — proposals only, never automated self-modification.
 `lifecycle_end` records the terminal state.
 
-## The Hat-Collapse Rule (solo and flat runs)
+## The Hat-Collapse Rule (spawned backend)
 
-Solo work is **not a fourth route** — it is the same three jobs collapsed:
+Hat-collapse is reserved for the owner/developer-facing architect. This spawned backend
+orchestrator never wears the architect, designer, manager, worker, strategist, or reviewer hat in
+place.
 
-- **Design** still happens (however briefly): the task doc exists before anything else.
-- **Delegated gates collapse back to the developer when one chair owns both sides** — a gate you
-  raised from this session's lifecycle cannot be decided by it (owner-never-self-approves).
-- **Portfolio** collapses but does not vanish: an ORCHESTRATED run — anything that dispatches
-  seats, even for a single master — still requires the strategist pre-run (even one master gets
-  the pass). Only session-scale hands-on work (nothing dispatched; not an orchestrated run) skips
-  the strategist; the owner's own bulwark check remains.
-- **Orchestrate** runs with hats collapsed: in a **flat series** the orchestrator wears the
-  **manager hat** (`roles/manager.md` duties — dispatch, review, delegated gates, leaf closeout →
-  integrate → finalize — same duties, same artifacts, one chair). At **session scale** it builds
-  **hands-on** instead of spawning (when spawn economics don't pay): the build discipline is the
-  worker's (edit + same-pass `c-05` onboarding + `system/tools.md` checks green + freshness watch
-  / early `worktree_sync`), the closeout tail is the owner's (see `c-12-closeout`), and
-  the ladder holds identically: task doc → intent → worktree → build → close.
-- Fan-out sub-agents may read/search and **write durable reports**; **every AR state mutation
-  stays in this seat's main loop** (see Sub-Agent Fan-Out below).
+If a run is small enough for one owner seat, the architect may perform these backend duties under
+`roles/architect.md`. If this orchestrator needs another role, it spawns a new role chat
+horizontally. Fan-out sub-agents may read/search and **write durable reports**; **every AR state
+mutation stays in this seat's main loop** (see Sub-Agent Fan-Out below).
 
 ## Sub-Agent Fan-Out (capability doctrine — any harness that has it)
 
@@ -322,7 +323,7 @@ regardless of the engine underneath.
 
 ## The Spirit Test — This Seat Only
 
-**Within the spirit** of what the developer accepted → act alone + a decision-log entry (leaf
+**Within the spirit** of what the architect/developer accepted → act alone + a decision-log entry (leaf
 moves and renumbers on planning-status masters, inserted fix leaves, reopened-and-reshaped leaves,
 mid-series convergence — the integration branch is the safety net). **Against the spirit** →
 raise it for a joint decision. Only this seat holds the global view to judge a collision; the
@@ -342,7 +343,7 @@ task, fill small blanks, escalate real deltas).
 - **The adopted orchestration task** (the strategist drafts; this seat adopts — with the adoption
   decision-log entry) before any orchestrated run.
 - **The super-exit demo notes** ("what changed visibly", per master) + the reviewable environment
-  offer — the developer handover is visible-behavior-first.
+  offer — the architect-mediated developer handover is visible-behavior-first.
 - **The self-improvement report** at close.
 
 ## Comms Protocol
@@ -351,16 +352,16 @@ task, fill small blanks, escalate real deltas).
   intake up; durable + dashboard-visible.
 - **Stdin push** — delivery into hosted sessions (echo-confirmed paste); poll is the non-hosted
   fallback.
-- **Escalation** — this seat is the last resolver before the developer: resolve within the
+- **Escalation** — this seat is the last backend resolver before the architect: resolve within the
   bird's-eye view first; what goes up is decided by the **quo-vadis test**, not by being stumped —
   a **high-blast-radius truth** question (answered wrong it means big rewrites later: architecture
   direction, security posture, doctrine contradictions, irreversible data/branch operations, where
-  agent settings live) goes to the developer IMMEDIATELY via task-doc `openQuestions`, regardless
-  of any loop's round count; presentation-grade choices (2px vs 3px) never go up — rule and log.
+  agent settings live) goes to the architect IMMEDIATELY as a decision item, regardless of any
+  loop's round count; presentation-grade choices (2px vs 3px) never go up — rule and log.
   A loop that hits its 3-round cap or stops converging arrives here with its full round history;
-  re-run it at this level's agent set or take the quo-vadis part to the developer. Developer
-  rejections arrive here and decompose into fix leaves (or reopens — see the failed-deliverable
-  rule).
+  re-run it at this level's agent set or take the quo-vadis part to the architect. Architect or
+  developer rejections arrive here and decompose into fix leaves (or reopens — see the
+  failed-deliverable rule).
 
 ## Knobs
 

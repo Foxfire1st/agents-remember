@@ -281,7 +281,7 @@ export interface TerminalSessionInfo {
   /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat claims. */
   leafKey?: string;
   /** The AR_SPAWN_ROLE recorded at spawn (L14): the l-01 role this session was dispatched AS
-   *  (orchestrator/strategist/manager/worker/reviewer/designer). Absent on hand-opened sessions. */
+   *  (architect/orchestrator/strategist/manager/worker/curator/reviewer/designer). Absent on hand-opened sessions. */
   spawnRole?: string;
   cwd: string;
   tmuxName: string;

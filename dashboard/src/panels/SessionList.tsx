@@ -98,6 +98,10 @@ const roleChip = cva({
   },
   variants: {
     role: {
+      architect: {
+        color: "gold",
+        borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)",
+      },
       orchestrator: {
         color: "gold",
         borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)",
@@ -108,11 +112,22 @@ const roleChip = cva({
         borderColor: "color-mix(in oklch, token(colors.purple) 45%, transparent)",
       },
       worker: { color: "cyan" },
+      curator: { color: "cyan" },
       reviewer: { color: "amber" },
     },
   },
 });
-const KNOWN_ROLES = new Set(["orchestrator", "strategist", "manager", "worker", "reviewer"]);
+const ROLE_VALUES = [
+  "architect",
+  "orchestrator",
+  "strategist",
+  "manager",
+  "worker",
+  "curator",
+  "reviewer",
+] as const;
+type KnownRole = (typeof ROLE_VALUES)[number];
+const KNOWN_ROLES: ReadonlySet<string> = new Set(ROLE_VALUES);
 const actions = css({
   display: "flex",
   alignItems: "stretch",
@@ -222,6 +237,9 @@ export function SessionList({
     // The full, untruncated name for the hover title (the label, plus its bound leaf) — the row
     // text-overflow-ellipses, so the title is how a long name stays readable (fix 4).
     const fullName = leafName ? `${session.label} · ${leafName}` : session.label;
+    const knownRole = session.spawnRole && KNOWN_ROLES.has(session.spawnRole)
+      ? (session.spawnRole as KnownRole)
+      : undefined;
     return (
       <GridListItem
         id={session.id}
@@ -231,11 +249,8 @@ export function SessionList({
       >
         {session.spawnRole ? (
           <span
-            className={roleChip({
-              role: KNOWN_ROLES.has(session.spawnRole)
-                ? (session.spawnRole as "worker")
-                : undefined,
-            })}
+            className={roleChip({ role: knownRole })}
+            data-known-role={knownRole ? "true" : "false"}
             data-testid={`chats-session-role-${session.id}`}
           >
             {session.spawnRole}

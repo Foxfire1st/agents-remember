@@ -31,6 +31,10 @@ master's leaf loop to the master-exit seam, then hand over.
 ## Dispatch defaults
 - Worker spawns: `templates/worker-brief.md`, `env={"AR_SPAWN_ROLE": "worker"}`, qualified leaf
   keys; knob overrides: <settings/orchestration notes or none>.
+- Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
+  builder code + reviewer verdict + curator memory pass.
+- Curator spawns: `roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per leaf after the
+  builder code and reviewer verdict are available; curator writes onboarding only.
 - Concurrency: <max parallel leaves or "sequential">.
 
 ## The exit
