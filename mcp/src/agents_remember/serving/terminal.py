@@ -35,6 +35,7 @@ import termios
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 _READ_CHUNK = 65536
 """Max bytes drained from a PTY per non-blocking read (one WebSocket frame's worth)."""
@@ -91,6 +92,18 @@ Spawner = Callable[[Sequence[str], Path], PtyProcess]
 TmuxProbe = Callable[[str], bool]
 """Return whether a tmux session name currently exists."""
 
+
+TmuxProbeEvidence = Literal["alive", "pane-gone", "tmux-command-failed"]
+
+
+@dataclass(frozen=True)
+class TmuxProbeResult:
+    """Evidence-bearing tmux session probe result."""
+
+    exists: bool
+    evidence: TmuxProbeEvidence
+
+
 TmuxKiller = Callable[[str], None]
 """Kill a tmux session name if it still exists."""
 
@@ -110,18 +123,38 @@ def _tmux_has_session(name: str) -> bool:
     This separate probe is required for durable rehydrate: ``tmux new-session -A`` would create a fresh
     session when ``name`` is gone, which would falsely report a stale catalog row as resumed.
     """
+    return _tmux_probe_session(name).exists
+
+
+def _tmux_probe_session(name: str) -> TmuxProbeResult:
+    """Whether tmux knows ``name``, preserving why a negative probe happened."""
     try:
         result = subprocess.run(
             ["tmux", "has-session", "-t", name],
             check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
             timeout=_TERMINATE_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+        return TmuxProbeResult(exists=False, evidence="tmux-command-failed")
+    if result.returncode == 0:
+        return TmuxProbeResult(exists=True, evidence="alive")
+    if _tmux_missing_session_stderr(result.stderr if isinstance(result.stderr, str) else ""):
+        return TmuxProbeResult(exists=False, evidence="pane-gone")
+    return TmuxProbeResult(exists=False, evidence="tmux-command-failed")
+
+
+def _tmux_missing_session_stderr(stderr: str) -> bool:
+    text = stderr.lower()
+    return "can't find session" in text or "session not found" in text
+
+
+def _tmux_probe_result_from_bool(exists: bool) -> TmuxProbeResult:
+    evidence: TmuxProbeEvidence = "alive" if exists else "pane-gone"
+    return TmuxProbeResult(exists=exists, evidence=evidence)
 
 
 def _tmux_kill_session(name: str) -> None:
@@ -155,8 +188,16 @@ def _tmux_create_detached(
     """Create tmux session ``name`` without attaching a local PTY client, seeding ``env`` at spawn."""
     subprocess.run(
         [
-            "tmux", "new-session", "-d", "-s", name, "-c", str(cwd),
-            *_env_flags(env or {}), "--", *harness,
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-c",
+            str(cwd),
+            *_env_flags(env or {}),
+            "--",
+            *harness,
         ],
         check=True,
         stdin=subprocess.DEVNULL,
@@ -269,8 +310,16 @@ def _build_tmux_command(
     argv is never reinterpreted as tmux flags.
     """
     return [
-        "tmux", "new-session", "-A", "-s", name, "-c", str(cwd),
-        *_env_flags(env or {}), "--", *harness,
+        "tmux",
+        "new-session",
+        "-A",
+        "-s",
+        name,
+        "-c",
+        str(cwd),
+        *_env_flags(env or {}),
+        "--",
+        *harness,
     ]
 
 
@@ -320,9 +369,7 @@ def _spawn_pty(argv: Sequence[str], cwd: Path) -> PtyProcess:
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=_TERMINATE_TIMEOUT)
 
-    return PtyProcess(
-        master_fd=master_fd, pid=proc.pid, terminate=_terminate, poll=proc.poll
-    )
+    return PtyProcess(master_fd=master_fd, pid=proc.pid, terminate=_terminate, poll=proc.poll)
 
 
 class TerminalHost:
@@ -345,7 +392,11 @@ class TerminalHost:
         tmux_mode_canceller: TmuxModeCanceller | None = None,
     ) -> None:
         self._spawn: Spawner = spawn or _spawn_pty
-        self._tmux_probe: TmuxProbe = tmux_probe or _tmux_has_session
+        self._tmux_probe: Callable[[str], TmuxProbeResult] = (
+            _tmux_probe_session
+            if tmux_probe is None
+            else lambda name: _tmux_probe_result_from_bool(tmux_probe(name))
+        )
         self._tmux_killer: TmuxKiller = tmux_killer or _tmux_kill_session
         self._tmux_creator: TmuxCreator = tmux_creator or _tmux_create_detached
         self._tmux_configurer: TmuxConfigurer = tmux_configurer or _tmux_enable_mouse
@@ -460,6 +511,10 @@ class TerminalHost:
 
     def has_session(self, tmux_name: str) -> bool:
         """Whether the persistent tmux session exists outside the in-process registry."""
+        return self.probe_session(tmux_name).exists
+
+    def probe_session(self, tmux_name: str) -> TmuxProbeResult:
+        """Probe the persistent tmux session and keep the evidence kind."""
         return self._tmux_probe(tmux_name)
 
     def for_lifecycle(self, lifecycle_id: str) -> list[TerminalSession]:
@@ -508,9 +563,7 @@ class TerminalHost:
         """
         return self.read_session(self._require(sid), max_bytes=max_bytes)
 
-    def read_session(
-        self, session: TerminalSession, max_bytes: int = _READ_CHUNK
-    ) -> bytes:
+    def read_session(self, session: TerminalSession, max_bytes: int = _READ_CHUNK) -> bytes:
         """Drain one concrete PTY client without blocking."""
         fd = session.master_fd
         try:

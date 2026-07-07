@@ -7,12 +7,14 @@ import json
 import os
 import threading
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 TerminalSessionKind = Literal["terminal", "harness"]
 TerminalSessionStatus = Literal["running", "exited", "terminated"]
+TerminalLivenessEvidence = Literal["tmux-command-failed", "pane-gone"]
 # The leaf-uniqueness role: a plain shell (``kind == "terminal"``) is a TERMINAL; any agent harness
 # is a CHAT. Uniqueness is per (leaf, role) -- at most one running chat AND one running terminal per
 # leaf -- so an agent chat and a scratch terminal can share a leaf without colliding (L5 fix 2).
@@ -69,6 +71,13 @@ class TerminalCatalogEntry:
     # resolution input (260703-L16, ruling 2026-07-07T08:15). Written-only-when-set.
     spawn_level: str | None = None
     spawn_level_source: str | None = None
+    # Liveness probe state (260707-HFX-L5): consecutive failed probes are persisted so a daemon
+    # restart cannot erase hysteresis, while a later successful probe can clear a false exit mark.
+    liveness_failures: int = 0
+    liveness_first_failed_at: str | None = None
+    liveness_last_failed_at: str | None = None
+    liveness_evidence: TerminalLivenessEvidence | None = None
+    exit_evidence: TerminalLivenessEvidence | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -108,6 +117,19 @@ class TerminalCatalogEntry:
             spawn_level_source=(
                 str(data["spawnLevelSource"]) if data.get("spawnLevelSource") is not None else None
             ),
+            liveness_failures=_non_negative_int(data.get("livenessFailures")),
+            liveness_first_failed_at=(
+                str(data["livenessFirstFailedAt"])
+                if data.get("livenessFirstFailedAt") is not None
+                else None
+            ),
+            liveness_last_failed_at=(
+                str(data["livenessLastFailedAt"])
+                if data.get("livenessLastFailedAt") is not None
+                else None
+            ),
+            liveness_evidence=_liveness_evidence(data.get("livenessEvidence")),
+            exit_evidence=_liveness_evidence(data.get("exitEvidence")),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -146,6 +168,16 @@ class TerminalCatalogEntry:
             data["spawnLevel"] = self.spawn_level
         if self.spawn_level_source is not None:
             data["spawnLevelSource"] = self.spawn_level_source
+        if self.liveness_failures:
+            data["livenessFailures"] = self.liveness_failures
+        if self.liveness_first_failed_at is not None:
+            data["livenessFirstFailedAt"] = self.liveness_first_failed_at
+        if self.liveness_last_failed_at is not None:
+            data["livenessLastFailedAt"] = self.liveness_last_failed_at
+        if self.liveness_evidence is not None:
+            data["livenessEvidence"] = self.liveness_evidence
+        if self.status == "exited" and self.exit_evidence is not None:
+            data["exitEvidence"] = self.exit_evidence
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
@@ -156,6 +188,11 @@ class TerminalCatalogEntry:
             last_attached_at=attached_at,
             status="running",
             terminated_at=None,
+            liveness_failures=0,
+            liveness_first_failed_at=None,
+            liveness_last_failed_at=None,
+            liveness_evidence=None,
+            exit_evidence=None,
         )
 
     def with_status(
@@ -170,6 +207,63 @@ class TerminalCatalogEntry:
     def with_leaf_key(self, leaf_key: str | None) -> TerminalCatalogEntry:
         """A copy bound to ``leaf_key`` (or unbound when ``None``); the leaf-attach write point."""
         return replace(self, leaf_key=leaf_key)
+
+    def with_liveness_success(self) -> TerminalCatalogEntry:
+        """Clear liveness failures and restore an exited row when the tmux session probes alive."""
+        if (
+            self.status == "running"
+            and self.liveness_failures == 0
+            and self.liveness_first_failed_at is None
+            and self.liveness_last_failed_at is None
+            and self.liveness_evidence is None
+            and self.exit_evidence is None
+        ):
+            return self
+        if self.status == "terminated":
+            return self
+        return replace(
+            self,
+            status="running",
+            liveness_failures=0,
+            liveness_first_failed_at=None,
+            liveness_last_failed_at=None,
+            liveness_evidence=None,
+            exit_evidence=None,
+        )
+
+    def with_liveness_failure(
+        self,
+        *,
+        evidence: TerminalLivenessEvidence,
+        checked_at: datetime,
+        failure_threshold: int,
+        minimum_failure_window_seconds: float,
+        pane_gone_failure_threshold: int,
+    ) -> TerminalCatalogEntry:
+        """Record one failed liveness probe and mark exited only after the evidence threshold."""
+        if self.status != "running":
+            return self
+        checked_at_text = checked_at.isoformat()
+        first_failed_at = self.liveness_first_failed_at or checked_at_text
+        failures = self.liveness_failures + 1
+        threshold = (
+            max(1, pane_gone_failure_threshold)
+            if evidence == "pane-gone"
+            else max(1, failure_threshold)
+        )
+        minimum_window = 0.0 if evidence == "pane-gone" else minimum_failure_window_seconds
+        should_exit = failures >= threshold and _elapsed_seconds(first_failed_at, checked_at) >= (
+            max(0.0, minimum_window)
+        )
+        return replace(
+            self,
+            status="exited" if should_exit else self.status,
+            liveness_failures=failures,
+            liveness_first_failed_at=first_failed_at,
+            liveness_last_failed_at=checked_at_text,
+            liveness_evidence=evidence,
+            exit_evidence=evidence if should_exit else self.exit_evidence,
+        )
 
     @property
     def role(self) -> TerminalSessionRole:
@@ -213,9 +307,10 @@ class TerminalCatalog:
         Uniqueness is per (leaf, role): a leaf may hold at most one running chat AND one running
         terminal, so the probe is role-scoped (the default ``"chat"`` is the agent slot). ``list()``
         already excludes terminated rows; gating on ``status == "running"`` means an exited/terminated
-        session frees its leaf (a stale ``running`` row is downgraded by ``_refresh_catalog_entries``
-        when the tmux session is gone). This is the server-authoritative uniqueness probe the opener +
-        attach-leaf routes call immediately before an upsert.
+        session frees its leaf. The liveness sweeper and direct liveness observations keep persisted
+        catalog status honest without letting transient tmux command failures immediately free a live
+        session's leaf claim. This is the server-authoritative uniqueness probe the opener + attach-leaf
+        routes call immediately before an upsert.
         """
         return next(
             (
@@ -255,6 +350,41 @@ class TerminalCatalog:
             updated = entry.with_status("exited")
             entries[index] = updated
             self._write(entries)
+            return updated
+
+    def record_liveness_probe(
+        self,
+        session_id: str,
+        *,
+        alive: bool,
+        checked_at: datetime,
+        evidence: TerminalLivenessEvidence | None = None,
+        failure_threshold: int = 3,
+        minimum_failure_window_seconds: float = 5.0,
+        pane_gone_failure_threshold: int = 1,
+    ) -> TerminalCatalogEntry | None:
+        """Persist one liveness observation with hysteresis and success-side self-healing."""
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            entry = entries[index]
+            if alive:
+                updated = entry.with_liveness_success()
+            elif evidence is None:
+                updated = entry
+            else:
+                updated = entry.with_liveness_failure(
+                    evidence=evidence,
+                    checked_at=checked_at,
+                    failure_threshold=failure_threshold,
+                    minimum_failure_window_seconds=minimum_failure_window_seconds,
+                    pane_gone_failure_threshold=pane_gone_failure_threshold,
+                )
+            if updated != entry:
+                entries[index] = updated
+                self._write(entries)
             return updated
 
     def mark_terminated(self, session_id: str, terminated_at: str) -> TerminalCatalogEntry | None:
@@ -304,6 +434,25 @@ def _string_tuple(raw: object) -> tuple[str, ...] | None:
     if not isinstance(raw, list):
         return None
     return tuple(str(item) for item in raw)
+
+
+def _liveness_evidence(raw: object) -> TerminalLivenessEvidence | None:
+    if raw == "tmux-command-failed":
+        return "tmux-command-failed"
+    if raw == "pane-gone":
+        return "pane-gone"
+    return None
+
+
+def _non_negative_int(raw: object) -> int:
+    if isinstance(raw, int) and raw > 0:
+        return raw
+    return 0
+
+
+def _elapsed_seconds(first_failed_at: str, checked_at: datetime) -> float:
+    first = datetime.fromisoformat(first_failed_at)
+    return (checked_at - first).total_seconds()
 
 
 def _index_of(entries: list[TerminalCatalogEntry], session_id: str) -> int | None:

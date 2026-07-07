@@ -93,6 +93,12 @@ from agents_remember.serving.terminal_catalog import (
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
+from agents_remember.serving.terminal_liveness import (
+    TerminalCatalogLivenessConfig,
+    TerminalCatalogLivenessSweeper,
+    observe_terminal_liveness,
+    utc_now,
+)
 from agents_remember.serving.terminal_opener import open_terminal_session
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
@@ -361,37 +367,28 @@ def _leaf_ref_response(error: LeafRefResolutionError, leaf_key: str) -> JSONResp
     )
 
 
-def _refresh_catalog_entries(
-    catalog: TerminalCatalog, host: TerminalHost
-) -> list[TerminalCatalogEntry]:
-    refreshed: list[TerminalCatalogEntry] = []
-    for entry in catalog.list():
-        session = host.get(entry.id)
-        stale_running = entry.status == "running" and (
-            (session is not None and not session.is_alive)
-            or (session is None and not host.has_session(entry.tmux_name))
-        )
-        if stale_running:
-            updated = catalog.mark_exited(entry.id) or entry.with_status("exited")
-            refreshed.append(updated)
-        else:
-            refreshed.append(entry)
-    return refreshed
-
-
 def _attach_terminal_session(
     *,
     catalog: TerminalCatalog,
     host: TerminalHost,
     session_id: str,
     attached_at: str,
+    checked_at: datetime,
+    liveness_config: TerminalCatalogLivenessConfig,
 ) -> TerminalSession | None:
     entry = catalog.get(session_id)
     if entry is None or entry.status != "running":
         return None
-    if not host.has_session(entry.tmux_name):
-        catalog.mark_exited(session_id)
+    observation = observe_terminal_liveness(
+        catalog,
+        host,
+        entry,
+        checked_at=checked_at,
+        config=liveness_config,
+    )
+    if not observation.alive or observation.entry.status != "running":
         return None
+    entry = observation.entry
     session = host.attach(
         session_id,
         cwd=entry.cwd,
@@ -433,6 +430,14 @@ def create_app(
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
     paster = terminal_paster if terminal_paster is not None else TerminalPaster()
+    liveness_clock = now or utc_now
+    liveness_config = TerminalCatalogLivenessConfig()
+    liveness_sweeper = TerminalCatalogLivenessSweeper(
+        catalog,
+        host,
+        now=now,
+        config=liveness_config,
+    )
     # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
     build = resolve_serving_build()
 
@@ -651,6 +656,8 @@ def create_app(
             host=host,
             session_id=session,
             attached_at=now_iso(),
+            checked_at=liveness_clock(),
+            liveness_config=liveness_config,
         )
         if session_obj is None:
             await websocket.close(code=4404)
@@ -667,11 +674,7 @@ def create_app(
 
     @app.get("/api/terminal/sessions")
     def api_terminal_sessions() -> dict[str, Any]:
-        return {
-            "sessions": [
-                _catalog_payload(entry) for entry in _refresh_catalog_entries(catalog, host)
-            ]
-        }
+        return {"sessions": [_catalog_payload(entry) for entry in liveness_sweeper.refresh()]}
 
     @app.get("/api/harnesses")
     def api_harnesses() -> dict[str, Any]:
@@ -791,10 +794,18 @@ def create_app(
         # its tmux session is gone; otherwise capture-verify the paste (and submit when asked) and
         # report delivered/submitted. Same localhost posture as the rest of serving/.
         entry = catalog.get(session)
-        if entry is None or entry.status != "running" or not host.has_session(entry.tmux_name):
-            if entry is not None and entry.status == "running":
-                catalog.mark_exited(session)
+        if entry is None or entry.status != "running":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        observation = observe_terminal_liveness(
+            catalog,
+            host,
+            entry,
+            checked_at=liveness_clock(),
+            config=liveness_config,
+        )
+        if not observation.alive or observation.entry.status != "running":
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        entry = observation.entry
         outcome = paster.paste(entry.tmux_name, request.text, submit=request.submit)
         content: dict[str, object] = {
             "session": session,
