@@ -71,9 +71,16 @@ def provider_status_packet(
     # the status packet even when providers are disabled — leftover stacks from a
     # dead session are exactly what must stay observable. Read-only; None until
     # the serving daemon's first sample lands.
-    metrics = ProviderMetricsStore(config.coordination_root).read_current()
+    store = ProviderMetricsStore(config.coordination_root)
+    metrics = store.read_current()
     if metrics is not None:
         packet["metrics"] = metrics
+    # 260707-HFX-L2: index staleness is a reportable STATE — the newest
+    # index-lifecycle rows (seed catch-up, staleIndex, watcher readiness)
+    # surface here so an operator sees behind-ness without reading logs.
+    index_states = store.read_recent_index_states(limit=10)
+    if index_states:
+        packet["indexState"] = index_states
     return packet
 
 

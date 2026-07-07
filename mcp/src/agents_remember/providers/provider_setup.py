@@ -27,17 +27,23 @@ from agents_remember.providers.cgc import seed as cgc_seed
 from agents_remember.providers.cgc import setup as cgc_setup
 from agents_remember.providers.cgc.seed import CgcSeedOptions
 from agents_remember.providers.cgc.setup import IsolatedCgcOptions
+from agents_remember.providers.context import ContextProviderError
+from agents_remember.providers.context_common import expand_template
 from agents_remember.providers.grepai import setup as grepai_setup
 from agents_remember.providers.grepai.setup import GrepaiSeedOptions, IsolatedGrepaiOptions
+from agents_remember.providers.lifecycle.docker_runtime import docker_command
+from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.providers.setup_progress import SetupProgress
 
 load_settings = setup_common.load_settings
 provider_enabled = setup_common.provider_enabled
+provider_settings = setup_common.provider_settings
 require_settings_path = setup_common.require_settings_path
 run_command = setup_common.run_command
 run_lifecycle = setup_common.run_lifecycle
 selected_provider_enabled = setup_common.selected_provider_enabled
 settings_path = setup_common.settings_path
+stable_provider_id = setup_common.stable_provider_id
 subprocess = setup_common.subprocess
 
 cgc_extra_args = cgc_seed.cgc_extra_args
@@ -56,7 +62,11 @@ class ProviderSetupRequest:
     dry_run: bool = False
     skip_watchers: bool = False
     skip_grepai: bool = False
-    cgc_refresh_fallback: bool = True
+    # 260707-HFX-L2: the implicit refresh-all fallback is OFF by default — a
+    # refused seed must never cost a from-zero reindex on its own; the seed's
+    # diff-scoped catch-up handles the normal worktree case and `cgc refresh`
+    # stays the explicit rebuild.
+    cgc_refresh_fallback: bool = False
     cgc_seed: CgcSeedOptions = field(default_factory=CgcSeedOptions)
     cgc_isolated: IsolatedCgcOptions = field(default_factory=IsolatedCgcOptions)
     grepai_seed: GrepaiSeedOptions = field(default_factory=GrepaiSeedOptions)
@@ -84,6 +94,7 @@ class ProviderSetupRequest:
                 bundle_dir=_resolve_optional_path(self.cgc_seed.bundle_dir),
                 allow_commit_mismatch=self.cgc_seed.allow_commit_mismatch,
                 allow_same_coordination_root=self.cgc_seed.allow_same_coordination_root,
+                delta_max_files=self.cgc_seed.delta_max_files,
             ),
             cgc_isolated=IsolatedCgcOptions(
                 runtime_root=_resolve_optional_path(self.cgc_isolated.runtime_root),
@@ -136,6 +147,7 @@ def request_from_args(args: argparse.Namespace) -> ProviderSetupRequest:
             bundle_dir=args.cgc_seed_bundle_dir,
             allow_commit_mismatch=args.cgc_seed_allow_commit_mismatch,
             allow_same_coordination_root=args.cgc_seed_allow_same_coordination_root,
+            delta_max_files=getattr(args, "cgc_seed_delta_max_files", 0),
         ),
         cgc_isolated=IsolatedCgcOptions(
             runtime_root=args.cgc_isolated_runtime_root,
@@ -178,6 +190,7 @@ def args_from_request(request: ProviderSetupRequest) -> argparse.Namespace:
         cgc_seed_bundle_dir=normalized.cgc_seed.bundle_dir,
         cgc_seed_allow_commit_mismatch=normalized.cgc_seed.allow_commit_mismatch,
         cgc_seed_allow_same_coordination_root=normalized.cgc_seed.allow_same_coordination_root,
+        cgc_seed_delta_max_files=normalized.cgc_seed.delta_max_files,
         cgc_isolated_runtime_root=normalized.cgc_isolated.runtime_root,
         cgc_isolated_settings_path=normalized.cgc_isolated.settings_path,
         cgc_isolated_container_name=normalized.cgc_isolated.container_name,
@@ -219,7 +232,191 @@ def prepare_enabled_providers(
     results.extend(grepai_setup.prepare_enabled_provider(args, settings))
     results.extend(cgc_setup.prepare_enabled_provider(args, settings))
     results.extend(_watcher_results(args, settings))
+    results.extend(_seed_catchup_results(args, settings))
     return results
+
+
+# Watcher readiness bound for the catch-up touch (review L2/B1): the cgc
+# container subscribes to inotify only after guard PONG wait + python boot +
+# graph checks; inotify has no replay and seeded graphs skip the initial scan,
+# so a touch before subscription is silently lost. The markers cover cgc's
+# post-subscribe log line; no marker within the bound means NO touch and an
+# honest staleIndex instead of a silent lie.
+CGC_WATCHER_READY_TIMEOUT_SECONDS = 90
+# Only the marker VERIFIED against the pinned codegraphcontext wheel (review
+# L2 round 2): speculative extra markers risk a false-positive on some future
+# pre-subscribe line, which would silently re-open the B1 race. Re-verify this
+# marker on every cgc version bump.
+_CGC_WATCH_READY_MARKERS = ("monitoring",)
+
+
+def _seed_catchup_results(
+    args: argparse.Namespace, settings: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Diff-scoped index catch-up after the watchers attach (260707-HFX-L2).
+
+    The cgc seed clones the source graph even when the target checkout's HEAD
+    differs (relatable divergence, recorded by `_seed_commit_mismatch`). The
+    watcher is event-driven, so touching exactly the changed files makes it
+    re-index just the delta — a small diff becomes an index UPDATE, never a
+    teardown. Honesty rules (review L2/B1+B2): the touch waits for the
+    watcher's post-subscribe marker, deletions/rename-sources/missing files
+    are RESIDUAL staleness a touch cannot deliver, and ``caughtUp`` is claimed
+    only when every touchable path reached a ready watcher with zero
+    residuals. Anything less reports ``staleIndex`` (served; a from-zero
+    rebuild stays an explicit ``cgc refresh``).
+    """
+    divergence = getattr(args, "_cgc_seed_divergence", None)
+    if not divergence or args.dry_run:
+        return []
+    target_root = getattr(args, "cgc_seed_target_repo_root", None)
+    count = int(divergence.get("count", 0))
+    if count == 0 or target_root is None:
+        return []
+    payload: dict[str, Any] = {
+        "ok": True,
+        "provider": "codegraphcontext",
+        "action": "seed-catch-up",
+        "divergence": {
+            "count": count,
+            "sourceHead": divergence.get("sourceHead"),
+            "targetHead": divergence.get("targetHead"),
+        },
+    }
+    limit = getattr(args, "cgc_seed_delta_max_files", 0) or cgc_seed.DEFAULT_SEED_DELTA_MAX_FILES
+    if count > limit:
+        payload["skipped"] = True
+        payload["staleIndex"] = {
+            "served": True,
+            "behindFiles": count,
+            "deltaMaxFiles": limit,
+            "reindex": "explicit 'cgc refresh' only",
+        }
+        _record_index_state(args, settings, payload)
+        return [payload]
+    root = Path(target_root)
+    touch_paths: list[Path] = []
+    residuals: list[dict[str, str]] = []
+    for entry in divergence.get("entries", []):
+        status = str(entry.get("status", ""))
+        path = str(entry.get("path", ""))
+        if status == "R" and entry.get("from"):
+            residuals.append({"kind": "rename-source-phantom", "path": str(entry["from"])})
+        if status == "D":
+            residuals.append({"kind": "deleted-phantom", "path": path})
+            continue
+        candidate = root / path
+        if candidate.is_file():
+            touch_paths.append(candidate)
+        else:
+            residuals.append({"kind": "missing-on-disk", "path": path})
+    watcher = _wait_for_cgc_watcher_ready(args, settings)
+    payload["watcherReady"] = watcher
+    if not watcher.get("ready"):
+        payload["skipped"] = True
+        payload["staleIndex"] = {
+            "served": True,
+            "behindFiles": count,
+            "reason": "watcher not ready before the touch window; delta not delivered",
+            "reindex": "explicit 'cgc refresh' only",
+        }
+        _record_index_state(args, settings, payload)
+        return [payload]
+    for candidate in touch_paths:
+        os.utime(candidate)
+    payload["touched"] = len(touch_paths)
+    payload["mechanism"] = "watcher-event catch-up (utime on the diff files)"
+    if residuals:
+        payload["caughtUp"] = False
+        payload["staleIndex"] = {
+            "served": True,
+            "residuals": residuals,
+            "reindex": "explicit 'cgc refresh' only",
+        }
+    else:
+        payload["caughtUp"] = True
+    _record_index_state(args, settings, payload)
+    return [payload]
+
+
+def _cgc_watcher_container_name(
+    args: argparse.Namespace, settings: dict[str, Any]
+) -> str | None:
+    provider = provider_settings(settings, cgc_setup.CGC_PROVIDER_ID)
+    repo_id = getattr(args, "cgc_seed_repo_id", None)
+    if not isinstance(provider, dict) or not repo_id:
+        return None
+    runtime = provider.get("runtime")
+    runner = runtime.get("runner") if isinstance(runtime, dict) else None
+    template = str((runner or {}).get("containerNameTemplate") or "")
+    if not template:
+        return None
+    return expand_template(template, {"repoId": stable_provider_id(repo_id)})
+
+
+def _wait_for_cgc_watcher_ready(
+    args: argparse.Namespace,
+    settings: dict[str, Any],
+    *,
+    timeout_seconds: int = CGC_WATCHER_READY_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Poll the watcher container's logs for cgc's post-subscribe marker."""
+    container = _cgc_watcher_container_name(args, settings)
+    if container is None:
+        return {"ready": False, "reason": "watcher container name unresolved"}
+    try:
+        docker = docker_command()
+    except ContextProviderError as error:
+        return {"ready": False, "container": container, "reason": str(error)}
+    deadline = time.monotonic() + max(timeout_seconds, 1)
+    waited = 0.0
+    while True:
+        # --since bounds the window to THIS boot's output: a marker left in the
+        # logs by a previous watcher boot must not satisfy a fresh one.
+        logs = run_command(
+            [docker, "logs", "--since", "15m", "--tail", "200", container],
+            cwd=args.coordination_root,
+            timeout=20,
+            dry_run=False,
+        )
+        if logs["returncode"] == 0:
+            text = (str(logs.get("stdout") or "") + str(logs.get("stderr") or "")).lower()
+            if any(marker in text for marker in _CGC_WATCH_READY_MARKERS):
+                return {
+                    "ready": True,
+                    "container": container,
+                    "waitedSeconds": round(waited, 1),
+                }
+        if time.monotonic() >= deadline:
+            return {
+                "ready": False,
+                "container": container,
+                "reason": f"no watch-ready marker within {timeout_seconds}s",
+            }
+        time.sleep(2)
+        waited += 2
+
+
+def _record_index_state(
+    args: argparse.Namespace, settings: dict[str, Any], payload: dict[str, Any]
+) -> None:
+    """Best-effort index-lifecycle metrics row (L7's feed); never fails the setup."""
+    with contextlib.suppress(Exception):  # observability must not break setup
+        provider = provider_settings(settings, cgc_setup.CGC_PROVIDER_ID)
+        instance = (provider or {}).get("instance") or {}
+        ProviderMetricsStore(args.coordination_root).record_index_state(
+            {
+                "provider": payload.get("provider"),
+                "action": payload.get("action"),
+                "repoId": getattr(args, "cgc_seed_repo_id", None),
+                "instance": instance.get("id"),
+                "divergence": payload.get("divergence"),
+                "touched": payload.get("touched"),
+                "caughtUp": payload.get("caughtUp"),
+                "watcherReady": payload.get("watcherReady"),
+                "staleIndex": payload.get("staleIndex"),
+            }
+        )
 
 
 def _watcher_results(args: argparse.Namespace, settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -463,6 +660,13 @@ def _action_results(args: argparse.Namespace, settings: dict[str, Any]) -> list[
 def result_ok_for_prepare(result: dict[str, Any], args: argparse.Namespace) -> bool:
     if result.get("ok"):
         return True
+    # 260707-HFX-L2: a benign seed skip — no seed was intended or possible
+    # (hermetic benchmark, source not configured) — never fails a prepare: the
+    # watcher builds the index from scratch, which is that path's designed
+    # behavior. A REFUSED seed carries sourceHead/targetHead (unrelated heads)
+    # and is forgiven only under the explicit refresh-all opt-in.
+    if result.get("skipped") and "sourceHead" not in result:
+        return True
     return bool(
         args.action == "prepare"
         and args.cgc_refresh_fallback
@@ -484,7 +688,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-cgc-refresh-fallback", dest="cgc_refresh_fallback", action="store_false"
     )
-    parser.set_defaults(cgc_refresh_fallback=True)
+    parser.add_argument(
+        "--cgc-refresh-fallback",
+        dest="cgc_refresh_fallback",
+        action="store_true",
+        help="Opt IN to the full-reindex fallback after a refused seed (260707-HFX-L2: off by default).",
+    )
+    parser.set_defaults(cgc_refresh_fallback=False)
+    parser.add_argument(
+        "--cgc-seed-delta-max-files",
+        dest="cgc_seed_delta_max_files",
+        type=int,
+        default=0,
+        help="Diff-scoped catch-up bound; 0 uses the built-in default.",
+    )
     parser.add_argument("--cgc-seed-source-coordination-root", type=Path)
     parser.add_argument("--cgc-seed-source-from-settings", type=Path)
     parser.add_argument("--cgc-seed-repo-id")

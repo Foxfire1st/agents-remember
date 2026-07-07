@@ -111,6 +111,8 @@ class ProviderSetupTests(unittest.TestCase):
                         coordination_root=root,
                         settings_path=settings_path,
                         dry_run=True,
+                        # 260707-HFX-L2: the refresh fallback is explicit opt-in now.
+                        cgc_refresh_fallback=True,
                         grepai_seed=provider_setup.GrepaiSeedOptions(
                             source_coordination_root=root,
                             project_id="repo-a",
@@ -308,6 +310,8 @@ class ProviderSetupTests(unittest.TestCase):
                     coordination_root=root,
                     settings_path=settings_path,
                     dry_run=True,
+                    # 260707-HFX-L2: opt IN — the fallback no longer fires by default.
+                    cgc_refresh_fallback=True,
                 )
             )
 
@@ -317,6 +321,52 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertTrue(
                 any(result["action"] == "refresh-all" for result in payload["results"])
             )
+
+    def test_cgc_refresh_fallback_is_off_by_default(self) -> None:
+        # 260707-HFX-L2: a refused seed must never cost a from-zero reindex on
+        # its own — the fallback fires only on explicit opt-in.
+        self.assertFalse(provider_setup.ProviderSetupRequest(
+            action="prepare",
+            coordination_root=Path("/tmp"),
+            settings_path=Path("/tmp/settings.json"),
+        ).cgc_refresh_fallback)
+        parser = provider_setup.build_parser()
+        args = parser.parse_args(
+            ["prepare", "--coordination-root", "/tmp", "--from-settings", "/tmp/s.json"]
+        )
+        self.assertFalse(args.cgc_refresh_fallback)
+        opt_in = parser.parse_args(
+            [
+                "prepare",
+                "--coordination-root",
+                "/tmp",
+                "--from-settings",
+                "/tmp/s.json",
+                "--cgc-refresh-fallback",
+            ]
+        )
+        self.assertTrue(opt_in.cgc_refresh_fallback)
+
+    def test_benign_seed_skips_never_fail_a_prepare(self) -> None:
+        # 260707-HFX-L2 (review note): a skip where no seed was intended
+        # (hermetic benchmark, no source configured — no sourceHead) is fine;
+        # a REFUSAL (unrelatable heads — carries sourceHead) fails without the
+        # explicit fallback opt-in.
+        args = argparse.Namespace(action="prepare", cgc_refresh_fallback=False)
+        benign = {"ok": False, "skipped": True, "reason": "no seed source configured"}
+        self.assertTrue(provider_setup.result_ok_for_prepare(benign, args))
+        refusal = {
+            "ok": False,
+            "skipped": True,
+            "reason": "heads are unrelated",
+            "sourceHead": "a" * 40,
+            "targetHead": "b" * 40,
+            "provider": "codegraphcontext",
+            "action": "seed",
+        }
+        self.assertFalse(provider_setup.result_ok_for_prepare(refusal, args))
+        args_opt_in = argparse.Namespace(action="prepare", cgc_refresh_fallback=True)
+        self.assertTrue(provider_setup.result_ok_for_prepare(refusal, args_opt_in))
 
     def test_rewrite_cgc_bundle_paths_rewrites_json_jsonl_and_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

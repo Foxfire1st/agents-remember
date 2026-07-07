@@ -32,6 +32,7 @@ class CgcSeedOptions:
     bundle_dir: Path | None = None
     allow_commit_mismatch: bool = False
     allow_same_coordination_root: bool = False
+    delta_max_files: int = 0  # 0 = DEFAULT_SEED_DELTA_MAX_FILES (260707-HFX-L2)
 
 
 @dataclass(frozen=True)
@@ -384,6 +385,59 @@ def _seed_validation_failure(
     )
 
 
+# Diff-scoped catch-up bound (260707-HFX-L2): at or below this many changed
+# files the seeded near-perfect graph catches up through the watcher's own
+# per-file indexing (the post-watcher touch pass in provider_setup); above it
+# the clone still serves — stale, surfaced — and a from-zero rebuild stays an
+# explicit `cgc refresh` only.
+DEFAULT_SEED_DELTA_MAX_FILES = 200
+
+
+def seed_commit_divergence(
+    source_repo_root: Path, source_head: str, target_head: str
+) -> dict[str, Any] | None:
+    """Classified changes between the seeded graph state and the target checkout.
+
+    Runs in the SOURCE repo: a target that is a worktree of the source shares
+    its object database, so both commits resolve there. ``None`` means git
+    cannot relate the heads (unrelated repositories) — the one case where
+    refusing the seed is still right.
+
+    ``--name-status`` because the catch-up must be HONEST about what a touch
+    can deliver (review L2/B2): additions/modifications on disk are touchable;
+    deletions and rename-sources leave phantom graph nodes no touch can fix —
+    those are reported as residual staleness, never blessed as caught up.
+    """
+    result = subprocess.run(
+        ["git", "diff", "--name-status", source_head, target_head],
+        cwd=source_repo_root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    entries: list[dict[str, str]] = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        status = parts[0].strip()
+        if status.startswith("R") and len(parts) >= 3:
+            # Rename: the new path is touchable; the old path is a phantom node.
+            entries.append({"status": "R", "path": parts[2].strip(), "from": parts[1].strip()})
+        elif len(parts) >= 2:
+            entries.append({"status": status[:1], "path": parts[1].strip()})
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "sourceHead": source_head,
+        "targetHead": target_head,
+    }
+
+
 def _seed_commit_mismatch(
     args: Any,
     source_repo_root: Path,
@@ -395,10 +449,23 @@ def _seed_commit_mismatch(
         return None
     if source_head == target_head:
         return None
+    # 260707-HFX-L2: a HEAD difference is a state to CATCH UP from, not a reason
+    # to throw away a near-perfect graph — the old exact-equality refusal fed the
+    # refresh-all fallback, i.e. a full reindex on every normal worktree start
+    # (the OOM amplifier). A relatable divergence seeds anyway and hands the
+    # delta to the post-watcher catch-up stage; only unrelatable heads refuse,
+    # which protects against cloning a different repository's graph.
+    divergence = seed_commit_divergence(source_repo_root, source_head, target_head)
+    if divergence is not None:
+        args._cgc_seed_divergence = divergence
+        return None
     return {
         "ok": False,
         "skipped": True,
-        "reason": "source and target repository HEAD commits differ",
+        "reason": (
+            "source and target repository heads are unrelated "
+            "(divergence not computable); refusing to seed a foreign graph"
+        ),
         "sourceHead": source_head,
         "targetHead": target_head,
         "sourceRepoRoot": source_repo_root.as_posix(),

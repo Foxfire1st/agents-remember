@@ -1089,6 +1089,15 @@ def _sync_worktree_memory_mtimes(contract: WorktreeContract, dry_run: bool) -> d
     every file look modified and force a full re-embed — defeating the DB clone. Copying
     each file's mtime from the source memory repo lets the watcher reuse the cloned index
     (files genuinely newer than the index still re-embed, exactly as on the source).
+
+    260707-HFX-L2: files whose content diverges between the worktree HEAD and the
+    source HEAD are deliberately left with their fresh checkout mtimes — stamping
+    the source's old mtime onto different content would make the watcher skip exactly
+    the delta and serve a silently wrong index. The fresh mtimes make the watcher's
+    incremental scan re-embed precisely the divergence. The comparison is HEAD vs
+    HEAD: uncommitted changes in the SOURCE checkout are outside this guard (the
+    mtime copied from such a file is at least as new as its content, so the watcher
+    still re-embeds it — over-embedding, never silent staleness).
     """
     if dry_run:
         return {"state": "skipped", "reason": "dry-run"}
@@ -1096,12 +1105,18 @@ def _sync_worktree_memory_mtimes(contract: WorktreeContract, dry_run: bool) -> d
         return {"state": "skipped", "reason": "no external memory worktree"}
     source = contract.memory_repo_path
     target = contract.memory_worktree
+    divergent = _memory_divergence_paths(source, target)
     synced = 0
     missing = 0
+    left_fresh = 0
     for path in target.rglob("*"):
         if ".git" in path.parts or not path.is_file():
             continue
-        source_file = source / path.relative_to(target)
+        relative = path.relative_to(target).as_posix()
+        if divergent is not None and relative in divergent:
+            left_fresh += 1
+            continue
+        source_file = source / relative
         try:
             stat = source_file.stat()
         except OSError:
@@ -1109,7 +1124,35 @@ def _sync_worktree_memory_mtimes(contract: WorktreeContract, dry_run: bool) -> d
             continue
         os.utime(path, (stat.st_atime, stat.st_mtime))
         synced += 1
-    return {"state": "synced", "filesSynced": synced, "filesMissingInSource": missing}
+    result: dict[str, object] = {
+        "state": "synced",
+        "filesSynced": synced,
+        "filesMissingInSource": missing,
+        "divergentLeftFresh": left_fresh,
+    }
+    if divergent is None:
+        result["divergenceState"] = "uncomputable; synced all (pre-L2 behavior)"
+    return result
+
+
+def _memory_divergence_paths(source: Path, target: Path) -> set[str] | None:
+    """Paths whose content differs between the worktree HEAD and the source HEAD.
+
+    Computed in the source repo (shared object database for worktrees); ``None``
+    when git cannot relate the heads, in which case the caller falls back to
+    syncing everything (the pre-L2 behavior) rather than guessing.
+    """
+    try:
+        source_head = head_commit(source)
+        target_head = head_commit(target)
+    except Exception:
+        return None
+    if source_head == target_head:
+        return set()
+    diff = run_git(source, ["diff", "--name-only", source_head, target_head])
+    if diff.returncode != 0:
+        return None
+    return {line.strip() for line in diff.stdout.splitlines() if line.strip()}
 
 
 def _disabled_memory_choice(args: WorktreeArgs) -> dict[str, object] | None:

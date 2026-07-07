@@ -26,6 +26,7 @@ from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.docker_runtime import docker_command
 
 PROVIDER_METRICS_SCHEMA = "ar-provider-metrics-sample/v1"
+PROVIDER_INDEX_STATE_SCHEMA = "ar-provider-index-state/v1"
 
 # Ownership labels every provider container carries (identity.provider_ownership_labels);
 # the sampler discovers stacks by label so it needs no settings at all — a
@@ -100,11 +101,33 @@ class ProviderMetricsStore:
         tmp.write_text(line + "\n", encoding="utf-8")
         os.replace(tmp, self.current_path)
 
+    def record_index_state(self, payload: dict[str, Any]) -> None:
+        """Append one index-lifecycle row (seed catch-up, staleness) to the log.
+
+        260707-HFX-L2: rides the same JSONL as the container samples — the
+        schema field tells consumers (degradation detector, statistics board)
+        apart; the rolling current-state file stays container-only.
+        """
+        self._root.mkdir(parents=True, exist_ok=True)
+        row = {"schema": PROVIDER_INDEX_STATE_SCHEMA, **payload}
+        row.setdefault("sampledAt", datetime.now(UTC).isoformat())
+        with self.log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+
     def read_current(self) -> dict[str, Any] | None:
         try:
             return json.loads(self.current_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
+
+    def read_recent_index_states(self, limit: int = 20) -> list[dict[str, Any]]:
+        """The newest index-lifecycle rows (260707-HFX-L2), oldest first."""
+        rows = [
+            row
+            for row in self.read_recent(limit=500)
+            if row.get("schema") == PROVIDER_INDEX_STATE_SCHEMA
+        ]
+        return rows[-limit:]
 
     def read_recent(self, limit: int = 120) -> list[dict[str, Any]]:
         """The newest ``limit`` samples, oldest first; invalid lines skipped."""

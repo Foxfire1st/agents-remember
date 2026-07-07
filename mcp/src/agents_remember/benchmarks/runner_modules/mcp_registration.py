@@ -317,6 +317,11 @@ def prepare_configured_providers(
                 settings_path=settings_path,
                 timeout=provider_timeout,
                 dry_run=dry_run,
+                # Hermetic-cold benchmarks NEED the synchronous timeout-bounded
+                # graph build: with the fallback default off (260707-HFX-L2),
+                # `cgc watch` would self-index asynchronously and agents would
+                # query a half-built graph errorlessly (review L2/B4).
+                cgc_refresh_fallback=True,
             )
         )
     finally:
