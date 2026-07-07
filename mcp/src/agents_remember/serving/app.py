@@ -82,6 +82,7 @@ from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harnesses import detect_harnesses
+from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projector import Projector
 from agents_remember.serving.static import mount_static
@@ -94,6 +95,7 @@ from agents_remember.serving.terminal_catalog import (
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.serving.terminal_opener import open_terminal_session
 from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -344,6 +346,19 @@ class OperatorInboxPostRequest(BaseModel):
 
 def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
     return entry.to_json()
+
+
+def _resolve_request_leaf_key(config: McpRuntimeConfig, leaf_key: str | None) -> str | None:
+    if leaf_key is None:
+        return None
+    return resolve_catalog_leaf_key(config, leaf_key)
+
+
+def _leaf_ref_response(error: LeafRefResolutionError, leaf_key: str) -> JSONResponse:
+    return JSONResponse(
+        content={"status": error.status, "leafKey": leaf_key, "detail": str(error)},
+        status_code=400,
+    )
 
 
 def _refresh_catalog_entries(
@@ -679,6 +694,10 @@ def create_app(
         # session, then the WebSocket above attaches to it. L2 moves the leaf-claim + ensure + upsert
         # composition into the shared `open_terminal_session` so this route and the agent-facing
         # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
+        try:
+            leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
+        except LeafRefResolutionError as exc:
+            return _leaf_ref_response(exc, request.leaf_key or "")
         shell = os.environ.get("SHELL") or DEFAULT_SHELL
         result = open_terminal_session(
             catalog=catalog,
@@ -690,7 +709,7 @@ def create_app(
             harness=request.harness,
             label=request.label,
             lifecycle_id=request.lifecycle_id,
-            leaf_key=request.leaf_key,
+            leaf_key=leaf_key,
             # 260703-L16: resolve harness ids against the effective GLOBAL registry (builtin merged
             # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
             # Loaded only for harness-kind opens (review L16R-1): a malformed settings file must
@@ -711,7 +730,7 @@ def create_app(
             return JSONResponse(
                 content={
                     "status": "leaf-taken",
-                    "leafKey": request.leaf_key,
+                    "leafKey": leaf_key,
                     "session": result.owner_session_id,
                 },
                 status_code=409,
@@ -738,10 +757,15 @@ def create_app(
         # L5: claim a leaf for an EXISTING session from the Chats page (enclosure-free, no respawn).
         # 404 if the session is unknown or terminated (a terminated chat cannot hold a leaf); 409 if a
         # different running chat already owns the leaf; else persist the leaf_key and report it.
+        try:
+            leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
+        except LeafRefResolutionError as exc:
+            return _leaf_ref_response(exc, request.leaf_key)
+        assert leaf_key is not None
         result = assign_terminal_session_to_leaf(
             catalog,
             session_id=session,
-            leaf_key=request.leaf_key,
+            leaf_key=leaf_key,
         )
         if result.status == "unknown-session":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -750,12 +774,12 @@ def create_app(
                 content={
                     "session": result.owner_session_id,
                     "status": "leaf-taken",
-                    "leafKey": request.leaf_key,
+                    "leafKey": leaf_key,
                 },
                 status_code=409,
             )
         return JSONResponse(
-            content={"session": session, "status": "attached", "leafKey": request.leaf_key},
+            content={"session": session, "status": "attached", "leafKey": leaf_key},
             status_code=200,
         )
 

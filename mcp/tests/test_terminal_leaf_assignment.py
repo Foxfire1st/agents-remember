@@ -16,6 +16,7 @@ from agents_remember.serving.terminal_catalog import (
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
+from agents_remember.tasks import TaskDocument, write_task_doc
 
 
 def _config(root: Path) -> McpRuntimeConfig:
@@ -25,6 +26,46 @@ def _config(root: Path) -> McpRuntimeConfig:
         workspace_root=root,
         transcript_root=root / "logs" / "mcp",
     )
+
+
+def _write_leaf(root: Path) -> str:
+    task_root = root / "tasks" / "repo" / "master"
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "MASTER",
+                "slug": "task",
+                "title": "Master",
+                "kind": "master",
+                "repo": "repo",
+                "createdAt": "2026-07-07T10:00",
+                "subTasks": [
+                    {
+                        "number": "leaf-1",
+                        "name": "Leaf 1",
+                        "file": "legacy-leaf.md",
+                        "status": "inProgress",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "leaf-1",
+                "slug": "legacy-leaf",
+                "title": "Leaf 1",
+                "kind": "subTask",
+                "repo": "repo",
+                "createdAt": "2026-07-07T10:01",
+                "master": "task.md",
+            }
+        ),
+    )
+    return "repo/master/leaf-1"
 
 
 def _entry(session_id: str, *, leaf_key: str | None = None) -> TerminalCatalogEntry:
@@ -89,13 +130,14 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = _config(root)
+            canonical = _write_leaf(root)
             catalog = TerminalCatalog(terminal_catalog_path(root))
             catalog.upsert(_entry("chat-1", leaf_key="repo/master/old"))
 
             payload = attach_terminal_session_to_leaf_payload(
                 config,
                 session_id="chat-1",
-                leaf_key="repo/master/new",
+                leaf_key="legacy-leaf",
             )
 
             self.assertTrue(payload["ok"])
@@ -105,7 +147,27 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
             self.assertEqual(payload["previousLeafKey"], "repo/master/old")
             self.assertEqual(payload["role"], "chat")
             updated = _require_entry(catalog, "chat-1")
-            self.assertEqual(updated.leaf_key, "repo/master/new")
+            self.assertEqual(payload["leafKey"], canonical)
+            self.assertEqual(updated.leaf_key, canonical)
+
+    def test_attach_payload_rejects_unmatchable_leaf_ref_without_mutating(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _config(root)
+            _write_leaf(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("chat-1", leaf_key="repo/master/old"))
+
+            payload = attach_terminal_session_to_leaf_payload(
+                config,
+                session_id="chat-1",
+                leaf_key="missing-leaf",
+            )
+
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["status"], "leaf-ref-not-found")
+            self.assertIn("<repo>/<master-folder>/<doc-id>", payload["detail"])
+            self.assertEqual(_require_entry(catalog, "chat-1").leaf_key, "repo/master/old")
 
 
 if __name__ == "__main__":

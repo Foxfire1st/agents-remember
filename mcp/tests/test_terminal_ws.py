@@ -44,6 +44,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalSessionStatus,
 )
 from agents_remember.serving.terminal_opener import resolve_terminal_launch
+from agents_remember.tasks import TaskDocument, write_task_doc
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -63,6 +64,53 @@ def _which(*installed: str) -> Callable[[str], str | None]:
         return f"/usr/bin/{command}" if command in present else None
 
     return which
+
+
+def _write_leaf_task(
+    coordination_root: Path,
+    *,
+    repo: str,
+    master: str,
+    doc_id: str,
+    slug: str | None = None,
+) -> None:
+    slug = slug or doc_id
+    task_root = coordination_root / "tasks" / repo / master
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": master.upper(),
+                "slug": "task",
+                "title": "Master",
+                "kind": "master",
+                "repo": repo,
+                "createdAt": "2026-07-07T10:00",
+                "subTasks": [
+                    {
+                        "number": doc_id,
+                        "name": "Leaf",
+                        "file": f"{slug}.md",
+                        "status": "inProgress",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": doc_id,
+                "slug": slug,
+                "title": "Leaf",
+                "kind": "subTask",
+                "repo": repo,
+                "createdAt": "2026-07-07T10:01",
+                "master": "task.md",
+            }
+        ),
+    )
 
 
 def _catalog_entry(
@@ -416,6 +464,13 @@ class TerminalWebSocketTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
+        _write_leaf_task(self.tmp, repo="repo", master="master", doc_id="leaf-1")
+        _write_leaf_task(
+            self.tmp,
+            repo="agents-remember",
+            master="260628_operations-integration",
+            doc_id="260628-L5",
+        )
         self.host = _FakeTerminalHost(cwd=self.tmp)
         self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
         self.app = create_app(
@@ -638,6 +693,18 @@ class TerminalWebSocketTests(unittest.TestCase):
         assert entry is not None
         self.assertEqual(entry.leaf_key, leaf)
 
+    def test_post_open_rejects_unmatchable_leaf_ref(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/term-1",
+                json={"kind": "terminal", "leafKey": "repo/master/missing-leaf"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "leaf-ref-not-found")
+        self.assertIn("<repo>/<master-folder>/<doc-id>", response.json()["detail"])
+        self.assertEqual(self.host.ensured, [])
+        self.assertIsNone(self.catalog.get("term-1"))
+
     def test_post_open_null_leaf_still_works(self) -> None:
         with TestClient(self.app) as client:
             response = client.post("/api/terminal/term-1", json={"kind": "terminal"})
@@ -685,6 +752,19 @@ class TerminalWebSocketTests(unittest.TestCase):
         entry = self.catalog.get("live")
         assert entry is not None
         self.assertEqual(entry.leaf_key, leaf)
+
+    def test_attach_leaf_rejects_unmatchable_ref_without_mutating(self) -> None:
+        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/attach-leaf",
+                json={"leafKey": "repo/master/missing-leaf"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "leaf-ref-not-found")
+        entry = self.catalog.get("live")
+        assert entry is not None
+        self.assertIsNone(entry.leaf_key)
 
     def test_attach_leaf_409_when_taken_by_other_running_session(self) -> None:
         leaf = "repo/master/leaf-1"

@@ -24,6 +24,7 @@ from agents_remember.serving.harnesses import (
     is_detected,
     unknown_harness_detail,
 )
+from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -33,8 +34,10 @@ from agents_remember.serving.terminal_catalog import (
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.serving.terminal_opener import open_terminal_session
 from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
 from .base import _tool_payload
+from .leaf_ref import leaf_ref_refusal_payload
 
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
@@ -56,6 +59,10 @@ def attach_terminal_session_to_leaf_payload(
 ) -> dict[str, Any]:
     """Move an existing hosted terminal/chat session to a durable leaf key."""
 
+    try:
+        leaf_key = resolve_catalog_leaf_key(config, leaf_key)
+    except LeafRefResolutionError as exc:
+        return leaf_ref_refusal_payload("attach_terminal_session_to_leaf", leaf_key, exc)
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     result = assign_terminal_session_to_leaf(
         catalog,
@@ -437,6 +444,11 @@ def spawn_agent_session_payload(
     vehicle first, then the caller's -- is what gets recorded), ``prompt_keywords`` (prepended as
     the first line of the brief paste).
     """
+    if leaf_key is not None:
+        try:
+            leaf_key = resolve_catalog_leaf_key(config, leaf_key)
+        except LeafRefResolutionError as exc:
+            return leaf_ref_refusal_payload("spawn_agent_session", leaf_key, exc, kind=kind)
     dispatch: _HarnessDispatch | None = None
     if kind == "harness":
         dispatch, refusal = _resolve_harness_dispatch(

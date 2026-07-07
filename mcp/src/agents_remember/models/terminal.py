@@ -6,7 +6,13 @@ from typing import Literal
 
 from agents_remember.models.base import ToolResponse
 
-LeafAssignmentStatus = Literal["attached", "leaf-taken", "unknown-session"]
+LeafAssignmentStatus = Literal[
+    "attached",
+    "leaf-taken",
+    "unknown-session",
+    "leaf-ref-not-found",
+    "leaf-ref-ambiguous",
+]
 
 
 class AttachTerminalSessionToLeafResponse(ToolResponse):
@@ -19,6 +25,7 @@ class AttachTerminalSessionToLeafResponse(ToolResponse):
     previousLeafKey: str | None = None
     ownerSession: str | None = None
     role: Literal["chat", "terminal"] | None = None
+    detail: str | None = None
 
 
 SpawnAgentSessionStatus = Literal[
@@ -35,6 +42,8 @@ SpawnAgentSessionStatus = Literal[
     "model-invalid",
     # 260703-L16 (ruling 2026-07-07T08:15): the dispatch level is outside leaf|master|portfolio.
     "level-invalid",
+    "leaf-ref-not-found",
+    "leaf-ref-ambiguous",
     "bad-kind",
 ]
 

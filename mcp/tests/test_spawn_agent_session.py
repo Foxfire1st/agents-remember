@@ -35,6 +35,7 @@ from agents_remember.serving.app import create_app
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult
+from agents_remember.tasks import TaskDocument, write_task_doc
 
 
 def _config(root: Path) -> McpRuntimeConfig:
@@ -48,6 +49,52 @@ def _config(root: Path) -> McpRuntimeConfig:
 
 def _detected(_command: str) -> str | None:
     return "/usr/bin/harness"
+
+
+def _write_leaf_task(
+    coordination_root: Path,
+    *,
+    repo: str = "repo",
+    master: str = "master",
+    doc_id: str = "leaf-1",
+    slug: str = "leaf-1",
+) -> None:
+    task_root = coordination_root / "tasks" / repo / master
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": master.upper(),
+                "slug": "task",
+                "title": "Master",
+                "kind": "master",
+                "repo": repo,
+                "createdAt": "2026-07-07T10:00",
+                "subTasks": [
+                    {
+                        "number": doc_id,
+                        "name": "Leaf",
+                        "file": f"{slug}.md",
+                        "status": "inProgress",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": doc_id,
+                "slug": slug,
+                "title": "Leaf",
+                "kind": "subTask",
+                "repo": repo,
+                "createdAt": "2026-07-07T10:01",
+                "master": "task.md",
+            }
+        ),
+    )
 
 
 class _FakeHost:
@@ -125,6 +172,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.config = _config(self.tmp)
+        _write_leaf_task(self.tmp)
         self.catalog = TerminalCatalog(self.tmp / "logs" / "dashboard" / "terminal-sessions.json")
         self.host = _FakeHost()
         reset_ambient()
@@ -184,6 +232,22 @@ class SpawnAgentSessionTests(unittest.TestCase):
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertEqual(row.spawn_role, "manager")
+
+    def test_spawn_normalizes_legacy_leaf_slug_before_persisting(self) -> None:
+        payload = self._spawn(leaf_key="leaf-1")
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["leafKey"], "repo/master/leaf-1")
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertEqual(row.leaf_key, "repo/master/leaf-1")
+
+    def test_spawn_rejects_unmatchable_leaf_ref_before_spawning(self) -> None:
+        payload = self._spawn(leaf_key="missing-leaf", paster=_FakePaster())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "leaf-ref-not-found")
+        self.assertIn("<repo>/<master-folder>/<doc-id>", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+        self.assertIsNone(self.catalog.get("worker-1"))
 
     def test_draft_paste_does_not_submit(self) -> None:
         paster = _FakePaster(delivered=True, submitted=True)
@@ -281,6 +345,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.config = _config(self.tmp)
+        _write_leaf_task(self.tmp)
         self.catalog = TerminalCatalog(self.tmp / "logs" / "dashboard" / "terminal-sessions.json")
         self.host = _FakeHost()
         reset_ambient()
@@ -426,6 +491,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
         self.coordination_root = self.tmp / "ar-coordination"
         self.repo_root = self.tmp / "workspace" / "repo-a"
         self.repo_root.mkdir(parents=True)
+        _write_leaf_task(self.coordination_root, repo="repo-a")
         self.config = McpRuntimeConfig(
             config_path=self.tmp / "settings.json",
             coordination_root=self.coordination_root,
@@ -573,6 +639,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.coordination_root = self.tmp / "ar-coordination"
         self.repo_root = self.tmp / "workspace" / "repo-a"
         self.repo_root.mkdir(parents=True)
+        _write_leaf_task(self.coordination_root, repo="repo-a")
         self.config = McpRuntimeConfig(
             config_path=self.tmp / "settings.json",
             coordination_root=self.coordination_root,
@@ -745,6 +812,8 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
         self.coordination_root = self.tmp / "ar-coordination"
         self.repo_root = self.tmp / "workspace" / "repo-a"
         self.repo_root.mkdir(parents=True)
+        _write_leaf_task(self.coordination_root, repo="repo-a")
+        _write_leaf_task(self.coordination_root, repo="not-a-repo", doc_id="leaf-9", slug="leaf-9")
         self.config = McpRuntimeConfig(
             config_path=self.tmp / "settings.json",
             coordination_root=self.coordination_root,
