@@ -88,6 +88,12 @@ class OperatorInboxEntry(BaseModel):
     # Set only when the ladder (HFX2-L4) escalates an unacked row past redelivery; this leaf only
     # reserves the field so the row stays escalatable -- it never sets it itself.
     escalatedAt: str | None = None
+    # P-15 tier 3 (260707-HFX2-L4): the ladder's own rung marker. 0 = not yet escalated;
+    # 1 = renudged to the original addressee; 2 = skip-level re-addressed to the owner's owner;
+    # 3 = surfaced to the developer attention queue. ``escalatedAt`` is re-stamped on every rung
+    # transition (the anchor the next SLA check reads from), so it always names "since when has
+    # this row sat at its CURRENT rung", not merely "was this row ever escalated".
+    rung: int = 0
     # R4 hierarchical routing: the owner address derived from catalog spawn provenance
     # (spawned_by_session chain) at post time, so redelivery/escalation never has to
     # re-derive it later. ``ownerRole`` mirrors ``recipientRole`` semantics but is the

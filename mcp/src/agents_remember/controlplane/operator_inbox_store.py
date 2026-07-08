@@ -158,6 +158,19 @@ class OperatorInboxStore:
         self.append(escalated)
         return escalated
 
+    def advance_rung(self, entry_id: str, *, rung: int, now: str) -> OperatorInboxEntry:
+        """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
+        ``now`` so the NEXT rung's SLA is measured from this transition, not the row's original
+        creation. Distinct from :meth:`mark_escalated` (HFX2-L2's reserved "this row is now
+        escalatable" stamp, rung-agnostic) -- the ladder is the only caller of this method.
+        """
+        current = self.current().get(entry_id)
+        if current is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        advanced = current.model_copy(update={"ts": now, "rung": rung, "escalatedAt": now})
+        self.append(advanced)
+        return advanced
+
     def consume(
         self,
         entry_id: str,

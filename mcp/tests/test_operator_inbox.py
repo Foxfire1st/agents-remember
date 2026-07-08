@@ -263,6 +263,20 @@ class OperatorInboxStoreTests(unittest.TestCase):
         escalated = self.store.mark_escalated("A", now=T2)
         self.assertEqual(escalated.escalatedAt, T2)
 
+    def test_advance_rung_stamps_rung_and_reanchors_escalated_at(self) -> None:
+        self.store.append(self._entry("A"))
+        advanced = self.store.advance_rung("A", rung=1, now=T2)
+        self.assertEqual(advanced.rung, 1)
+        self.assertEqual(advanced.escalatedAt, T2)
+        T3 = "2026-06-23T10:20:00+00:00"
+        advanced_again = self.store.advance_rung("A", rung=2, now=T3)
+        self.assertEqual(advanced_again.rung, 2)
+        self.assertEqual(advanced_again.escalatedAt, T3)
+
+    def test_advance_rung_unknown_entry_raises(self) -> None:
+        with self.assertRaises(KeyError):
+            self.store.advance_rung("missing", rung=1, now=T2)
+
     def test_compaction_never_removes_a_pending_unacked_row_regardless_of_age(self) -> None:
         # R1: an unacked row outlives any cleanup until acked or ladder-resolved. Exercised
         # against the exact post-time compaction path (operator_inbox_post_payload calls

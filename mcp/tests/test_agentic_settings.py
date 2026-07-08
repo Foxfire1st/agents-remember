@@ -504,6 +504,72 @@ class TypedModelTests(unittest.TestCase):
             )
 
 
+class EscalationSettingsTests(unittest.TestCase):
+    """R1 (260707-HFX2-L4): the escalation ladder's ``orchestration.escalation`` knobs."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.coordination_root = Path(self.tmp.name) / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _load(self, orchestration: dict):
+        write_settings(self.coordination_root, {"orchestration": orchestration})
+        return load_agentic_settings(self.coordination_root)
+
+    def test_defaults_when_absent(self) -> None:
+        settings = self._load({})
+
+        self.assertEqual(settings.escalation.sla_for("nudge"), 300.0)
+        self.assertEqual(settings.escalation.rung_dwell(1), 300.0)
+        self.assertEqual(settings.escalation.rung_dwell(2), 900.0)
+        self.assertEqual(settings.escalation.nudge_rate_limit_seconds, 900)
+        self.assertEqual(settings.escalation.respawn_after_rung, 2)
+
+    def test_sla_and_rung_seconds_parse(self) -> None:
+        settings = self._load(
+            {
+                "escalation": {
+                    "slaSeconds": {"escalation": 120, "turn-report": 3600},
+                    "rungSeconds": {"1": 60, "2": 240, "3": 600},
+                    "nudgeRateLimitSeconds": 30,
+                    "respawnAfterRung": 2,
+                }
+            }
+        )
+
+        self.assertEqual(settings.escalation.sla_for("escalation"), 120.0)
+        self.assertEqual(settings.escalation.sla_for("turn-report"), 3600.0)
+        # An unconfigured kind keeps its documented default.
+        self.assertEqual(settings.escalation.sla_for("nudge"), 300.0)
+        self.assertEqual(settings.escalation.rung_dwell(1), 60.0)
+        self.assertEqual(settings.escalation.rung_dwell(2), 240.0)
+        self.assertEqual(settings.escalation.rung_dwell(3), 600.0)
+        self.assertEqual(settings.escalation.nudge_rate_limit_seconds, 30)
+
+    def test_unknown_message_kind_in_sla_seconds_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "not a known"):
+            self._load({"escalation": {"slaSeconds": {"bogus-kind": 60}}})
+
+    def test_sla_seconds_value_must_be_positive(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "slaSeconds.nudge"):
+            self._load({"escalation": {"slaSeconds": {"nudge": 0}}})
+
+    def test_rung_seconds_key_must_be_a_known_rung(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "rungSeconds"):
+            self._load({"escalation": {"rungSeconds": {"4": 60}}})
+
+    def test_respawn_after_rung_must_be_a_known_rung(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "respawnAfterRung"):
+            self._load({"escalation": {"respawnAfterRung": 5}})
+
+    def test_unknown_escalation_key_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "wobble"):
+            self._load({"escalation": {"wobble": True}})
+
+
 class FreeFormRoleKnobTests(unittest.TestCase):
     """260703-L16: the free-form escape hatch on role knobs -- launchArgs / promptKeywords /
     sessionCommands parse ADDITIVELY (old files unchanged), shape-checked only, never

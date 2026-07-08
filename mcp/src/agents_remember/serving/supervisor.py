@@ -21,10 +21,16 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.controlplane.escalation_ladder import (
+    next_step,
+    rung_due,
+    seat_is_suspect,
+)
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
     InboxMessageKind,
@@ -39,12 +45,19 @@ from agents_remember.controlplane.orchestration_nudges import (
     missing_artifact,
     nudge_message,
 )
-from agents_remember.controlplane.signal_routing import RoutedOwner, derive_signal_owner
+from agents_remember.controlplane.orphan_policy import find_orphaned_workers
+from agents_remember.controlplane.signal_routing import (
+    RoutedOwner,
+    derive_signal_owner,
+    derive_skip_level_owner,
+    is_seat_dead,
+)
 from agents_remember.observer.events import Event, now_iso
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.inbox_delivery import deliver_inbox_entry
 from agents_remember.serving.pane_signals import classify_pane_signal
+from agents_remember.serving.retire import retire_entry
 from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
@@ -57,8 +70,20 @@ FindingKind = Literal[
     "turn-report-stale",
     "inbox-redeliverable",
     "seat-liveness",
+    "escalation-due",
+    "dead-upstream",
 ]
-ActionKind = Literal["redeliver", "auto-nudge", "signal-emit", "none"]
+ActionKind = Literal["redeliver", "auto-nudge", "signal-emit", "escalate-rung", "signal-grandparent", "none"]
+
+# R1 (260707-HFX2-L4): conservative built-in fallbacks when a caller (a test, or a context built
+# before settings are read) supplies no per-kind/per-rung knobs. ``serving/app.py`` always wires
+# the settings-driven ``EscalationSettings`` values in (mirroring how it already resolves
+# ``supervisor``/``expectations`` knobs into this module's plain-primitive fields) -- this module
+# stays decoupled from the kernel settings loader, R3's "every predicate reads its store directly"
+# extended to knobs: no settings TYPE crosses into this file, only resolved numbers.
+DEFAULT_ESCALATION_SLA_SECONDS = 300.0
+DEFAULT_ESCALATION_RUNG_SECONDS = 900.0
+DEFAULT_RESPAWN_AFTER_RUNG = 2
 
 PERSISTENT_FAILURE_ATTEMPTS = 5
 """Attempt count past which an unacked inbox row is handed to the escalation ladder (R4d): this
@@ -112,6 +137,13 @@ class SupervisorContext:
     stale_seat_seconds: float = 120.0
     redeliver_rate_limit_seconds: float | None = None
     nudge_rate_limit_seconds: int = 900
+    # R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-``message_kind`` ack SLA
+    # (rung 0 -> 1), per-rung dwell time thereafter (keyed 1/2), and the rung a silent seat is
+    # marked suspect-for-respawn at (R3). ``None`` entries in the dicts fall back to the module
+    # defaults above.
+    escalation_sla_seconds: dict[str, float] = dataclass_field(default_factory=dict)
+    escalation_rung_seconds: dict[int, float] = dataclass_field(default_factory=dict)
+    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
 
 
 # --- R2: predicates ----------------------------------------------------------------------------
@@ -260,6 +292,56 @@ def evaluate_seat_liveness_findings(
     return findings
 
 
+def evaluate_escalation_findings(
+    store: OperatorInboxStore,
+    *,
+    now: datetime,
+    sla_seconds: dict[str, float],
+    rung_seconds: dict[int, float],
+) -> list[SupervisorFinding]:
+    """R2: every pending, unacked row due for its NEXT ladder rung (escalation_ladder.rung_due)."""
+    findings: list[SupervisorFinding] = []
+    for entry in store.current().values():
+        sla = sla_seconds.get(entry.messageKind, DEFAULT_ESCALATION_SLA_SECONDS)
+        dwell = rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)
+        if rung_due(entry, now=now, sla_seconds=sla, rung_seconds=dwell):
+            findings.append(
+                SupervisorFinding(
+                    kind="escalation-due",
+                    detail=entry.messageKind,
+                    session_id=entry.agentId,
+                    leaf_key=None,
+                    source_id=entry.id,
+                )
+            )
+    return findings
+
+
+def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[SupervisorFinding]:
+    """R4 (P-6 made mechanical): every live spawned worker/manager seat whose OWN direct owner is
+    dead, per catalog spawn provenance. Doctrine: the seat never absorbs its dead owner's role --
+    it continues its own brief; this predicate is what tells its grandparent to look."""
+    findings: list[SupervisorFinding] = []
+    for entry in catalog.list():
+        if entry.kind != "harness" or entry.status != "running":
+            continue
+        if entry.spawn_role not in ("worker", "manager"):
+            continue
+        if entry.spawned_by_session is None:
+            continue  # no recorded provenance at all is a legacy/unrouted row, not a dead owner
+        if not is_seat_dead(catalog, entry.spawned_by_session):
+            continue
+        findings.append(
+            SupervisorFinding(
+                kind="dead-upstream",
+                detail="owner-dead",
+                session_id=entry.id,
+                leaf_key=entry.leaf_key,
+            )
+        )
+    return findings
+
+
 def evaluate_predicates(ctx: SupervisorContext, *, now: datetime) -> list[SupervisorFinding]:
     """R2: run every predicate over its store, directly (R3) -- the sweep's full finding set."""
     findings: list[SupervisorFinding] = []
@@ -274,6 +356,13 @@ def evaluate_predicates(ctx: SupervisorContext, *, now: datetime) -> list[Superv
     findings += evaluate_seat_liveness_findings(
         ctx.catalog, now=now, stale_seconds=ctx.stale_seat_seconds
     )
+    findings += evaluate_escalation_findings(
+        ctx.inbox_store,
+        now=now,
+        sla_seconds=ctx.escalation_sla_seconds,
+        rung_seconds=ctx.escalation_rung_seconds,
+    )
+    findings += evaluate_dead_upstream_findings(ctx.catalog)
     return findings
 
 
@@ -442,11 +531,137 @@ def _signal_emit(ctx: SupervisorContext, finding: SupervisorFinding, *, now: dat
     return SupervisorActionResult("signal-emit", finding, delivery_state)
 
 
+def _escalate_rung(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
+    """R2: advance one pending, unacked row to its next ladder rung -- renudge (1), skip-level
+    (2), or the developer attention queue (3, terminal) -- and durably stamp the transition."""
+    if finding.source_id is None:
+        return SupervisorActionResult("escalate-rung", finding, "skipped", "no source entry id")
+    entry = ctx.inbox_store.current().get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return SupervisorActionResult("escalate-rung", finding, "skipped", "entry not pending")
+    step = next_step(ctx.catalog, entry)
+    if step.owner.agent_id is None and step.owner.role is None:
+        return SupervisorActionResult("escalate-rung", finding, "skipped", "no routable owner")
+    ask = (
+        f"Escalation rung {step.rung} ({step.action}): {entry.messageKind} unacked "
+        f"since {entry.createdAt} (original entry {entry.id})"
+    )
+    response = f"Original ask: {entry.ask}\nOriginal response: {entry.response}"
+    message_kind: InboxMessageKind = "nudge" if step.action == "renudge" else "escalation"
+    delivery_state = _post_owner_signal(
+        ctx, step.owner, message_kind=message_kind, ask=ask, response=response, now=now
+    )
+    ctx.inbox_store.advance_rung(entry.id, rung=step.rung, now=now.isoformat())
+    _log_event(
+        ctx,
+        "orchestration.escalation.rung",
+        {
+            "entryId": entry.id,
+            "rung": step.rung,
+            "action": step.action,
+            "ownerRole": step.owner.role,
+            "ownerAgentId": step.owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    # R3: past the respawn threshold, a still-silent addressee seat is marked suspect and
+    # respawned rather than waited on further -- a side effect of the transition, not a distinct
+    # finding of its own (the seat's silence IS this row's silence).
+    if step.rung >= ctx.respawn_after_rung and seat_is_suspect(
+        ctx.catalog, entry.agentId, now=now, stale_seconds=ctx.stale_seat_seconds
+    ):
+        _respawn_suspect(ctx, entry.agentId, now=now)
+    return SupervisorActionResult("escalate-rung", finding, delivery_state, step.action)
+
+
+def _respawn_suspect(ctx: SupervisorContext, agent_id: str | None, *, now: datetime) -> None:
+    """R3: retire the suspect seat's husk (HFX-L8 primitives), signal its owner (or the
+    orchestrator, when the owner mapping already resolves there for a manager) with a respawn
+    directive carrying the pending queue to re-deliver to the successor, and -- if the retired
+    seat was itself a manager -- surface its now-orphaned live workers (R3 orphan policy: held,
+    never auto re-parented, never absorbing the dead manager's role)."""
+    if agent_id is None:
+        return
+    entry = ctx.catalog.get(agent_id)
+    if entry is None or entry.status != "running":
+        return
+    owner = derive_signal_owner(ctx.catalog, sender_agent_id=agent_id, message_kind="escalation")
+    pending_queue = [row.id for row in ctx.inbox_store.list_pending(lifecycle_id=None, agent_id=agent_id)]
+    retire_entry(
+        ctx.catalog,
+        ctx.host,
+        entry,
+        at=now.isoformat(),
+        by_session=None,
+        reason="escalation-ladder-suspect",
+        edge="supervisor-respawn",
+    )
+    orphaned: list[str] = []
+    if entry.spawn_role == "manager":
+        orphaned = [worker.id for worker in find_orphaned_workers(ctx.catalog, manager_agent_id=agent_id)]
+    delivery_state = "skipped"
+    if owner.agent_id is not None or owner.role is not None:
+        ask = f"Respawn directive: seat {agent_id} ({entry.spawn_role}) retired as suspect (R3)"
+        response = f"Pending queue for the successor: {pending_queue}. Orphaned workers: {orphaned}."
+        delivery_state = _post_owner_signal(
+            ctx, owner, message_kind="escalation", ask=ask, response=response, now=now
+        )
+    _log_event(
+        ctx,
+        "orchestration.supervisor.respawn",
+        {
+            "agentId": agent_id,
+            "spawnRole": entry.spawn_role,
+            "pendingQueue": pending_queue,
+            "orphanedWorkers": orphaned,
+            "ownerRole": owner.role,
+            "ownerAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+
+
+def _signal_dead_upstream(
+    ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime
+) -> SupervisorActionResult:
+    """R4: signal the seat's grandparent (the same 2-hop, dead-node-skipping walk rung 2 uses) --
+    doctrine: the seat never absorbs its dead owner's role, it continues its own brief."""
+    owner = derive_skip_level_owner(
+        ctx.catalog, sender_agent_id=finding.session_id, message_kind="escalation"
+    )
+    if owner.agent_id is None and owner.role is None:
+        return SupervisorActionResult("signal-grandparent", finding, "skipped", "no routable grandparent")
+    ask = (
+        f"Dead-upstream (R4/P-6): seat {finding.session_id or 'unknown'} lost its owner; "
+        "it continues its own brief and escalates -- it never absorbs the dead owner's role."
+    )
+    response = f"leaf {finding.leaf_key or 'unknown'}"
+    delivery_state = _post_owner_signal(
+        ctx, owner, message_kind="escalation", ask=ask, response=response, now=now
+    )
+    _log_event(
+        ctx,
+        "orchestration.supervisor.dead-upstream",
+        {
+            "sessionId": finding.session_id,
+            "leafKey": finding.leaf_key,
+            "grandparentRole": owner.role,
+            "grandparentAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    return SupervisorActionResult("signal-grandparent", finding, delivery_state)
+
+
 def act_on_finding(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
     if finding.kind == "inbox-redeliverable":
         return _redeliver(ctx, finding, now=now)
     if finding.kind in ("expectation-overdue", "turn-report-stale"):
         return _auto_nudge(ctx, finding, now=now)
+    if finding.kind == "escalation-due":
+        return _escalate_rung(ctx, finding, now=now)
+    if finding.kind == "dead-upstream":
+        return _signal_dead_upstream(ctx, finding, now=now)
     if finding.kind in ("pane-signal", "seat-liveness"):
         return _signal_emit(ctx, finding, now=now)
     return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")

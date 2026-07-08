@@ -528,6 +528,9 @@ def create_app(
             coordination_root=config.coordination_root,
             stale_seat_seconds=max(settings.supervisor.interval_seconds * 4, 60.0),
             redeliver_rate_limit_seconds=settings.supervisor.redeliver_rate_limit_seconds,
+            escalation_sla_seconds=settings.escalation.sla_seconds,
+            escalation_rung_seconds=settings.escalation.rung_seconds,
+            respawn_after_rung=settings.escalation.respawn_after_rung,
         )
 
     async def supervisor_loop() -> None:

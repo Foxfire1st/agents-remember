@@ -71,6 +71,7 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "harnesses",
         "expectations",
         "supervisor",
+        "escalation",
     }
 )
 # One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
@@ -122,6 +123,12 @@ KNOWN_SPAWN_FIELDS = frozenset({"harness"})
 KNOWN_SUPERVISOR_FIELDS = frozenset(
     {"enabled", "intervalSeconds", "staleCutoffSeconds", "redeliverRateLimitSeconds"}
 )
+# R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-kind ack SLA, per-rung timings,
+# the renudge rate limit (reusing the OrchestrationNudgeStore rate-limit pattern), and the rung a
+# silent seat is marked suspect-for-respawn at (R3).
+KNOWN_ESCALATION_FIELDS = frozenset(
+    {"slaSeconds", "rungSeconds", "nudgeRateLimitSeconds", "respawnAfterRung"}
+)
 DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
 DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
@@ -139,6 +146,45 @@ DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
     # pickup-staleness convention for an unacked signal.
     "ack-by": 300.0,
 }
+
+# R1 (260707-HFX2-L4): the escalation ladder's own per-``message_kind`` ack SLA -- how long a
+# PENDING operator-inbox row sits unacked, past HFX2-L2's own redelivery attempts, before the
+# ladder walker (``controlplane/escalation_ladder.py``) fires rung 1. Kept as a plain string set
+# (not imported from operator_inbox_records) for the same kernel<->controlplane cycle reason as
+# ``KNOWN_EXPECTATION_KINDS``; the two must be kept in sync with ``InboxMessageKind``.
+KNOWN_ESCALATION_MESSAGE_KINDS = frozenset(
+    {
+        "message",
+        "gate-response",
+        "turn-report",
+        "master-handover",
+        "nudge",
+        "escalation",
+        "degradation-alert",
+        "decision-item",
+        "decision-ruling",
+    }
+)
+DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
+    "message": 600.0,
+    "gate-response": 600.0,
+    "turn-report": 1800.0,
+    "master-handover": 1800.0,
+    "nudge": 300.0,
+    "escalation": 300.0,
+    "degradation-alert": 300.0,
+    "decision-item": 900.0,
+    "decision-ruling": 900.0,
+}
+# Conservative-by-default rung timings (R1): seconds a row may sit at its CURRENT rung, past its
+# ``escalatedAt`` anchor, before the walker advances it to the next one. Rung 1 = renudge; rung 2 =
+# skip-level; rung 3 = developer attention (terminal -- the walker re-surfaces at this cadence but
+# never advances past it, R5).
+DEFAULT_ESCALATION_RUNG_SECONDS: dict[int, float] = {1: 300.0, 2: 900.0, 3: 1800.0}
+KNOWN_ESCALATION_RUNGS = (1, 2, 3)
+# R3: a seat addressed by a row that reaches this rung with no ack and no catalog turn-state
+# change is marked suspect for respawn -- rung 2 (skip-level failed to raise it) per the leaf spec.
+DEFAULT_RESPAWN_AFTER_RUNG = 2
 
 # The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
 # spawn.harness) are validated against the EFFECTIVE id set -- these plus any
@@ -251,6 +297,33 @@ class SupervisorSettings:
 
 
 @dataclass(frozen=True)
+class EscalationSettings:
+    """``orchestration.escalation`` -- the P-15 tier-3 ladder's own knobs (R1, 260707-HFX2-L4).
+
+    ``sla_seconds`` gates rung 1 (how long a pending row sits unacked, past ``escalatedAt``,
+    before the first renudge); ``rung_seconds`` gates every rung's OWN dwell time thereafter
+    (keyed 1/2/3, re-anchored at every transition -- see ``OperatorInboxStore.advance_rung``).
+    """
+
+    sla_seconds: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_ESCALATION_SLA_SECONDS)
+    )
+    rung_seconds: dict[int, float] = field(
+        default_factory=lambda: dict(DEFAULT_ESCALATION_RUNG_SECONDS)
+    )
+    nudge_rate_limit_seconds: int = 900
+    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
+
+    def sla_for(self, message_kind: str) -> float:
+        return self.sla_seconds.get(
+            message_kind, DEFAULT_ESCALATION_SLA_SECONDS.get(message_kind, 300.0)
+        )
+
+    def rung_dwell(self, rung: int) -> float:
+        return self.rung_seconds.get(rung, DEFAULT_ESCALATION_RUNG_SECONDS.get(rung, 900.0))
+
+
+@dataclass(frozen=True)
 class AgenticSettings:
     """The merged, typed agentic settings for one read (global <- local)."""
 
@@ -269,6 +342,7 @@ class AgenticSettings:
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
     supervisor: SupervisorSettings = field(default_factory=SupervisorSettings)
+    escalation: EscalationSettings = field(default_factory=EscalationSettings)
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
     # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
@@ -576,6 +650,7 @@ def _parse_orchestration(
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
         expectations=_parse_expectations(raw.get("expectations"), source=source),
         supervisor=_parse_supervisor(raw.get("supervisor"), source=source),
+        escalation=_parse_escalation(raw.get("escalation"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,
@@ -1134,6 +1209,69 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
         interval_seconds=interval_seconds,
         stale_cutoff_seconds=stale_cutoff_seconds,
         redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
+    )
+
+
+def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
+    """``orchestration.escalation`` (R1, 260707-HFX2-L4): per-``message_kind`` ack SLAs, per-rung
+    dwell timings, the renudge rate limit, and the respawn-after-rung threshold. Absent -> the
+    documented conservative defaults."""
+    if raw is None:
+        return EscalationSettings()
+    block = _require_object(raw, "orchestration.escalation", source)
+    _refuse_unknown(block, KNOWN_ESCALATION_FIELDS, "orchestration.escalation", source)
+    sla_seconds = dict(DEFAULT_ESCALATION_SLA_SECONDS)
+    raw_sla = block.get("slaSeconds")
+    if raw_sla is not None:
+        sla_block = _require_object(raw_sla, "orchestration.escalation.slaSeconds", source)
+        for kind, value in sla_block.items():
+            if kind not in KNOWN_ESCALATION_MESSAGE_KINDS:
+                allowed = ", ".join(sorted(KNOWN_ESCALATION_MESSAGE_KINDS))
+                raise AgenticSettingsError(
+                    f"orchestration.escalation.slaSeconds key {kind!r} is not a known "
+                    f"message kind; allowed: {allowed}: {source}"
+                )
+            owner = f"orchestration.escalation.slaSeconds.{kind}"
+            sla_seconds[kind] = _require_positive_number(value, owner, source)
+    rung_seconds = dict(DEFAULT_ESCALATION_RUNG_SECONDS)
+    raw_rungs = block.get("rungSeconds")
+    if raw_rungs is not None:
+        rung_block = _require_object(raw_rungs, "orchestration.escalation.rungSeconds", source)
+        for raw_rung, value in rung_block.items():
+            try:
+                rung = int(raw_rung)
+            except (TypeError, ValueError):
+                rung = -1
+            if rung not in KNOWN_ESCALATION_RUNGS:
+                allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
+                raise AgenticSettingsError(
+                    f"orchestration.escalation.rungSeconds key {raw_rung!r} must be one of: "
+                    f"{allowed}: {source}"
+                )
+            owner = f"orchestration.escalation.rungSeconds.{rung}"
+            rung_seconds[rung] = _require_positive_number(value, owner, source)
+    nudge_rate_limit_seconds = 900
+    if "nudgeRateLimitSeconds" in block:
+        nudge_rate_limit_seconds = _require_positive_int(
+            block["nudgeRateLimitSeconds"],
+            "orchestration.escalation.nudgeRateLimitSeconds",
+            source,
+        )
+    respawn_after_rung = DEFAULT_RESPAWN_AFTER_RUNG
+    if "respawnAfterRung" in block:
+        respawn_after_rung = _require_positive_int(
+            block["respawnAfterRung"], "orchestration.escalation.respawnAfterRung", source
+        )
+        if respawn_after_rung not in KNOWN_ESCALATION_RUNGS:
+            allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
+            raise AgenticSettingsError(
+                f"orchestration.escalation.respawnAfterRung must be one of: {allowed}: {source}"
+            )
+    return EscalationSettings(
+        sla_seconds=sla_seconds,
+        rung_seconds=rung_seconds,
+        nudge_rate_limit_seconds=nudge_rate_limit_seconds,
+        respawn_after_rung=respawn_after_rung,
     )
 
 

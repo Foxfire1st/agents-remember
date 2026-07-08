@@ -28,6 +28,8 @@ from agents_remember.controlplane.orchestration_nudges import OrchestrationNudge
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.supervisor import (
     SupervisorContext,
+    evaluate_dead_upstream_findings,
+    evaluate_escalation_findings,
     evaluate_expectation_findings,
     evaluate_inbox_findings,
     evaluate_pane_findings,
@@ -84,6 +86,9 @@ class _FakeHost:
 
     def has_session(self, _tmux_name: str) -> bool:
         return True
+
+    def terminate(self, _sid: str, *, tmux_name: str | None = None) -> None:
+        pass
 
 
 def _fake_paster() -> TerminalPaster:
@@ -443,6 +448,280 @@ class SweepIntegrationTests(unittest.TestCase):
         heartbeat = self.heartbeat_store.read()
         assert heartbeat is not None
         self.assertEqual(heartbeat.sweepCount, 2)
+
+
+class EscalationPredicateTests(unittest.TestCase):
+    def test_pending_row_past_sla_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OperatorInboxStore(Path(tmp))
+            entry = create_operator_inbox_entry(
+                entry_id="e1",
+                now=(NOW - timedelta(minutes=10)).isoformat(),
+                lifecycle_id=None,
+                agent_id="worker-1",
+                ask="ask",
+                response="resp",
+                created_by="system",
+                created_via="cli",
+                message_kind="escalation",
+            )
+            store.append(entry)
+            findings = evaluate_escalation_findings(
+                store, now=NOW, sla_seconds={"escalation": 60.0}, rung_seconds={}
+            )
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0].kind, "escalation-due")
+            self.assertEqual(findings[0].source_id, "e1")
+
+    def test_not_yet_due_row_is_silent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OperatorInboxStore(Path(tmp))
+            entry = create_operator_inbox_entry(
+                entry_id="e1",
+                now=NOW.isoformat(),
+                lifecycle_id=None,
+                agent_id="worker-1",
+                ask="ask",
+                response="resp",
+                created_by="system",
+                created_via="cli",
+                message_kind="escalation",
+            )
+            store.append(entry)
+            findings = evaluate_escalation_findings(
+                store, now=NOW, sla_seconds={"escalation": 3600.0}, rung_seconds={}
+            )
+            self.assertEqual(findings, [])
+
+
+class DeadUpstreamPredicateTests(unittest.TestCase):
+    def test_worker_with_dead_manager_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            catalog.upsert(replace(_entry("manager-1"), status="terminated", spawn_role="manager"))
+            catalog.upsert(
+                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+            )
+            findings = evaluate_dead_upstream_findings(catalog)
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0].kind, "dead-upstream")
+            self.assertEqual(findings[0].session_id, "worker-1")
+
+    def test_live_owner_does_not_fire(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+            catalog.upsert(
+                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+            )
+            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
+
+    def test_no_provenance_at_all_does_not_fire(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            catalog.upsert(replace(_entry("worker-1"), spawn_role="worker"))
+            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
+
+
+class LadderWalkIntegrationTests(unittest.TestCase):
+    """R6 fixtures: silent seat, dead intermediate, dead manager with live workers."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        observer_root = self.coordination_root / "logs" / "observer"
+        self.catalog = TerminalCatalog(root / "catalog.json")
+        self.inbox_store = OperatorInboxStore(observer_root)
+        self.expectation_store = ExpectationRowStore(observer_root)
+        self.nudge_store = OrchestrationNudgeStore(observer_root)
+        self.event_store = EventStore(observer_root)
+        self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
+
+    def _ctx(self, **overrides: object) -> SupervisorContext:
+        base: dict[str, object] = dict(
+            catalog=self.catalog,
+            host=cast(TerminalHost, _FakeHost()),
+            paster=_fake_paster(),
+            inbox_store=self.inbox_store,
+            expectation_store=self.expectation_store,
+            nudge_store=self.nudge_store,
+            event_store=self.event_store,
+            heartbeat_store=self.heartbeat_store,
+            coordination_root=self.coordination_root,
+            stale_seat_seconds=60.0,
+            escalation_sla_seconds={"escalation": 60.0},
+            escalation_rung_seconds={1: 60.0, 2: 60.0},
+            respawn_after_rung=2,
+        )
+        base.update(overrides)
+        return SupervisorContext(**base)  # type: ignore[arg-type]
+
+    def _events(self) -> set[str]:
+        return {event.kind for event in self.event_store.read(None)}
+
+    def test_silent_seat_climbs_rung_one_then_two_then_three(self) -> None:
+        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(_entry("manager-1"), spawn_role="manager", spawned_by_session="orchestrator-1")
+        )
+        self.catalog.upsert(
+            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        entry = create_operator_inbox_entry(
+            entry_id="e1",
+            now=(NOW - timedelta(minutes=5)).isoformat(),
+            lifecycle_id=None,
+            agent_id="worker-1",
+            ask="ask",
+            response="resp",
+            created_by="system",
+            created_via="cli",
+            message_kind="escalation",
+            recipient_role="worker",
+        )
+        self.inbox_store.append(entry)
+
+        ctx = self._ctx()
+        run_supervisor_sweep(ctx, now=NOW)
+        rung1 = self.inbox_store.current()["e1"]
+        self.assertEqual(rung1.rung, 1)
+        self.assertIn("orchestration.escalation.rung", self._events())
+
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=2))
+        rung2 = self.inbox_store.current()["e1"]
+        self.assertEqual(rung2.rung, 2)
+
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=4))
+        rung3 = self.inbox_store.current()["e1"]
+        self.assertEqual(rung3.rung, 3)
+
+        # Rung 3 is terminal -- a further sweep never advances it past the developer.
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=10))
+        still_rung3 = self.inbox_store.current()["e1"]
+        self.assertEqual(still_rung3.rung, 3)
+
+    def test_dead_intermediate_manager_is_skipped_at_rung_two(self) -> None:
+        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(
+                _entry("manager-1"),
+                status="terminated",
+                spawn_role="manager",
+                spawned_by_session="orchestrator-1",
+            )
+        )
+        self.catalog.upsert(
+            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        entry = create_operator_inbox_entry(
+            entry_id="e1",
+            now=(NOW - timedelta(minutes=5)).isoformat(),
+            lifecycle_id=None,
+            agent_id="worker-1",
+            ask="ask",
+            response="resp",
+            created_by="system",
+            created_via="cli",
+            message_kind="escalation",
+            recipient_role="worker",
+        ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
+        self.inbox_store.append(entry)
+
+        ctx = self._ctx()
+        run_supervisor_sweep(ctx, now=NOW)
+        advanced = self.inbox_store.current()["e1"]
+        self.assertEqual(advanced.rung, 2)
+        # The dead manager is skipped -- the row lands on the orchestrator instead.
+        events = [
+            event
+            for event in self.event_store.read(None)
+            if event.kind == "orchestration.escalation.rung"
+        ]
+        self.assertEqual(events[-1].data["ownerAgentId"], "orchestrator-1")
+
+    def test_dead_manager_with_live_workers_respawns_and_surfaces_orphans(self) -> None:
+        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(
+                _entry("manager-1"),
+                spawn_role="manager",
+                spawned_by_session="orchestrator-1",
+                turn_state="stale",
+                turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+            )
+        )
+        self.catalog.upsert(
+            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        self.catalog.upsert(
+            replace(_entry("worker-2"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        entry = create_operator_inbox_entry(
+            entry_id="e1",
+            now=(NOW - timedelta(minutes=5)).isoformat(),
+            lifecycle_id=None,
+            agent_id="manager-1",
+            ask="ask",
+            response="resp",
+            created_by="system",
+            created_via="cli",
+            message_kind="escalation",
+            recipient_role="manager",
+        ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
+        self.inbox_store.append(entry)
+
+        ctx = self._ctx()
+        run_supervisor_sweep(ctx, now=NOW)
+
+        # The suspect manager's husk is retired (catalog status flips to terminated)...
+        retired = self.catalog.get("manager-1")
+        assert retired is not None
+        self.assertEqual(retired.status, "terminated")
+
+        # ...and its live workers are surfaced as orphans in the respawn event, never re-parented
+        # automatically and never absorbing the dead manager's role themselves.
+        respawn_events = [
+            event for event in self.event_store.read(None) if event.kind == "orchestration.supervisor.respawn"
+        ]
+        self.assertEqual(len(respawn_events), 1)
+        self.assertEqual(sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"])
+        self.assertEqual(respawn_events[0].data["ownerRole"], "orchestrator")
+        self.assertEqual(respawn_events[0].data["ownerAgentId"], "orchestrator-1")
+
+        # The workers themselves are untouched -- still running, still their own seats.
+        worker1 = self.catalog.get("worker-1")
+        worker2 = self.catalog.get("worker-2")
+        assert worker1 is not None and worker2 is not None
+        self.assertEqual(worker1.status, "running")
+        self.assertEqual(worker2.status, "running")
+
+    def test_dead_upstream_signals_the_grandparent(self) -> None:
+        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(
+                _entry("manager-1"),
+                status="terminated",
+                spawn_role="manager",
+                spawned_by_session="orchestrator-1",
+            )
+        )
+        self.catalog.upsert(
+            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        ctx = self._ctx()
+        result = run_supervisor_sweep(ctx, now=NOW)
+        dead_upstream_findings = [f for f in result.findings if f.kind == "dead-upstream"]
+        self.assertEqual(len(dead_upstream_findings), 1)
+        self.assertEqual(dead_upstream_findings[0].session_id, "worker-1")
+        events = [
+            event
+            for event in self.event_store.read(None)
+            if event.kind == "orchestration.supervisor.dead-upstream"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].data["grandparentAgentId"], "orchestrator-1")
 
 
 if __name__ == "__main__":
