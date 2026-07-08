@@ -6,6 +6,11 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from agents_remember.controlplane.inbox_backoff import (
+    DEFAULT_RATE_LIMIT_SECONDS,
+    next_attempt_at,
+    redeliverable,
+)
 from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
@@ -89,10 +94,18 @@ class OperatorInboxStore:
         delivered_to_session: str | None = None,
         delivery_detail: str | None = None,
     ) -> OperatorInboxEntry:
-        """Append a delivery-status snapshot for one pending entry."""
+        """Append a delivery-status snapshot for one pending entry.
+
+        R1/R3: every attempt -- including a confirmed ``delivered`` paste -- bumps
+        ``attemptCount``, stamps ``lastAttemptAt``, and schedules ``nextAttemptAt`` from the
+        backoff ladder. 'delivered' is never terminal (pasted != perceived), so only ``consume``
+        clears the redelivery schedule; a still-pending entry always carries a durable next-attempt
+        row L2 can sweep, restart-proof.
+        """
         current = self.current().get(entry_id)
         if current is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
+        attempt_count = current.attemptCount + 1
         delivered = current.model_copy(
             update={
                 "ts": now,
@@ -100,10 +113,50 @@ class OperatorInboxStore:
                 "deliveredAt": now if delivery_state == "delivered" else current.deliveredAt,
                 "deliveredToSession": delivered_to_session,
                 "deliveryDetail": delivery_detail,
+                "attemptCount": attempt_count,
+                "lastAttemptAt": now,
+                "nextAttemptAt": (
+                    next_attempt_at(now=datetime.fromisoformat(now), attempt_count=attempt_count)
+                    if current.state == "pending"
+                    else current.nextAttemptAt
+                ),
             }
         )
         self.append(delivered)
         return delivered
+
+    def list_redeliverable(
+        self,
+        *,
+        now: datetime,
+        rate_limit_seconds: float | None = None,
+    ) -> list[OperatorInboxEntry]:
+        """Pending rows past their backoff window and clear of the per-target rate limit (R3).
+
+        The pure selection L2's sweep drives redelivery from; this store never redelivers on its
+        own (no in-memory timer -- the sweep is the only caller of ``deliver_inbox_entry`` again).
+        """
+        pending = [entry for entry in self.current().values() if entry.state == "pending"]
+        return redeliverable(
+            pending,
+            now=now,
+            rate_limit_seconds=(
+                rate_limit_seconds if rate_limit_seconds is not None else DEFAULT_RATE_LIMIT_SECONDS
+            ),
+        )
+
+    def mark_escalated(self, entry_id: str, *, now: str) -> OperatorInboxEntry:
+        """Stamp ``escalatedAt`` once the ladder (HFX2-L4) escalates an unacked row.
+
+        This leaf only reserves the field -- it never calls this itself; redelivery keeps running
+        until either ack or this mark, per R3.
+        """
+        current = self.current().get(entry_id)
+        if current is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        escalated = current.model_copy(update={"ts": now, "escalatedAt": now})
+        self.append(escalated)
+        return escalated
 
     def consume(
         self,

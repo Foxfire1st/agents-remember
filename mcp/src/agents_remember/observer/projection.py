@@ -278,7 +278,13 @@ class SetupProgressNode(BaseModel):
 
 
 class AgentPickupNode(BaseModel):
-    """A pending dashboard response waiting for an agent to consume it."""
+    """A pending dashboard response waiting for an agent to consume it.
+
+    R5 (260707-HFX2-L1): every pending row here IS an unacked signal -- consume=ack is the only
+    terminal outcome, so this list already surfaces "pending/unacked" for the dashboard. The
+    attempt/backoff/escalation fields ride along so the panel can show redelivery state without a
+    second surface; an L2 predicate reads the stores directly and never this projection.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -289,14 +295,40 @@ class AgentPickupNode(BaseModel):
     senderAgentId: str | None = None
     senderRole: str | None = None
     recipientRole: str | None = None
+    ownerRole: str | None = None
+    ownerAgentId: str | None = None
+    ownerLifecycleId: str | None = None
     gateId: str | None = None
     messageKind: str = "message"
     artifactPath: str | None = None
     deliveryState: str = "queued"
     deliveredToSession: str | None = None
+    attemptCount: int = 0
+    lastAttemptAt: str | None = None
+    nextAttemptAt: str | None = None
+    escalatedAt: str | None = None
     state: str
     ageSeconds: float | None = None
     ttlSeconds: float
+
+
+class ExpectationRowNode(BaseModel):
+    """A durable what-must-happen-by-when row (R2/R5, 260707-HFX2-L1): projected for dashboard/
+    architect observability. An L2 predicate reads ``ExpectationRowStore`` directly, never this
+    node -- surfacing only, never the correctness path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: str
+    state: str
+    sourceId: str
+    subjectAgentId: str | None = None
+    subjectLifecycleId: str | None = None
+    leafKey: str | None = None
+    dueAt: str
+    overdue: bool = False
+    note: str | None = None
 
 
 class RouteCoverageNode(BaseModel):
@@ -786,6 +818,7 @@ class Analytics(BaseModel):
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
     agentPickups: list[AgentPickupNode] = Field(default_factory=list)
+    expectationRows: list[ExpectationRowNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
     taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)

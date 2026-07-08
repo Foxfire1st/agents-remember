@@ -25,6 +25,7 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
+from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.interaction_retention import (
     AGENT_PICKUP_TTL_SECONDS,
     pickup_age_seconds,
@@ -50,6 +51,7 @@ from agents_remember.observer.projection import (
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
+    ExpectationRowNode,
     LedgerNode,
     LedgerRefNode,
     ProviderNode,
@@ -494,17 +496,56 @@ def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentP
                     senderAgentId=entry.senderAgentId,
                     senderRole=entry.senderRole,
                     recipientRole=entry.recipientRole,
+                    ownerRole=entry.ownerRole,
+                    ownerAgentId=entry.ownerAgentId,
+                    ownerLifecycleId=entry.ownerLifecycleId,
                     gateId=entry.gateId,
                     messageKind=entry.messageKind,
                     artifactPath=entry.artifactPath,
                     deliveryState=entry.deliveryState,
                     deliveredToSession=entry.deliveredToSession,
+                    attemptCount=entry.attemptCount,
+                    lastAttemptAt=entry.lastAttemptAt,
+                    nextAttemptAt=entry.nextAttemptAt,
+                    escalatedAt=entry.escalatedAt,
                     state=pickup_state(entry, now=now),
                     ageSeconds=pickup_age_seconds(entry, now=now),
                     ttlSeconds=AGENT_PICKUP_TTL_SECONDS,
                 )
             )
     return sorted(pickups, key=lambda item: item.ageSeconds or 0.0, reverse=True)
+
+
+def read_expectation_rows(coordination_root: Path, *, now: datetime) -> list[ExpectationRowNode]:
+    """Pending expectation (deadline) rows, for dashboard/architect observability (R5).
+
+    Surfacing only: an L2 predicate reads ``ExpectationRowStore`` directly and never this
+    projection (the #22 correctness half stays L2's rule; this is the visibility half).
+    """
+    store = ExpectationRowStore(observer_logs_root(coordination_root))
+    rows: list[ExpectationRowNode] = []
+    with contextlib.suppress(OSError, ValueError):
+        for row in store.pending():
+            try:
+                due_at = datetime.fromisoformat(row.dueAt)
+                overdue = now >= due_at
+            except ValueError:
+                overdue = False
+            rows.append(
+                ExpectationRowNode(
+                    id=row.id,
+                    kind=row.kind,
+                    state=row.state,
+                    sourceId=row.sourceId,
+                    subjectAgentId=row.subjectAgentId,
+                    subjectLifecycleId=row.subjectLifecycleId,
+                    leafKey=row.leafKey,
+                    dueAt=row.dueAt,
+                    overdue=overdue,
+                    note=row.note,
+                )
+            )
+    return sorted(rows, key=lambda item: item.dueAt)
 
 
 def read_engine_process_facts(

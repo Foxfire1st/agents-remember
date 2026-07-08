@@ -79,6 +79,24 @@ class OperatorInboxEntry(BaseModel):
     consumedAt: str | None = None
     consumedBy: str | None = None
     consumedVia: OperatorInboxVia | None = None
+    # R1 (260707-HFX2-L1): ack semantics -- consume=ack is the ONLY terminal outcome. 'delivered'
+    # is never terminal (F-A/F-V proved pasted != perceived), so every delivery attempt -- including
+    # a confirmed paste -- stamps a redelivery schedule until the row is actually consumed.
+    attemptCount: int = 0
+    lastAttemptAt: str | None = None
+    nextAttemptAt: str | None = None
+    # Set only when the ladder (HFX2-L4) escalates an unacked row past redelivery; this leaf only
+    # reserves the field so the row stays escalatable -- it never sets it itself.
+    escalatedAt: str | None = None
+    # R4 hierarchical routing: the owner address derived from catalog spawn provenance
+    # (spawned_by_session chain) at post time, so redelivery/escalation never has to
+    # re-derive it later. ``ownerRole`` mirrors ``recipientRole`` semantics but is the
+    # ROUTED address (worker -> its manager, manager -> its orchestrator, decision-item ->
+    # architect) rather than the caller-supplied one; ``None`` when routing had nothing to derive
+    # (e.g. a role-only mailbox with no catalog provenance).
+    ownerRole: AgentRole | None = None
+    ownerAgentId: str | None = None
+    ownerLifecycleId: str | None = None
 
 
 def create_operator_inbox_entry(
@@ -97,8 +115,17 @@ def create_operator_inbox_entry(
     recipient_role: AgentRole | None = None,
     message_kind: InboxMessageKind = "message",
     artifact_path: str | None = None,
+    owner_role: AgentRole | None = None,
+    owner_agent_id: str | None = None,
+    owner_lifecycle_id: str | None = None,
 ) -> OperatorInboxEntry:
-    """Create a pending inbox entry. Pure: the caller mints ``entry_id`` and ``now``."""
+    """Create a pending inbox entry. Pure: the caller mints ``entry_id`` and ``now``.
+
+    ``owner_*`` (R4) is the routed address the caller derived from catalog spawn provenance
+    (or a reserved role like ``architect`` for a ``decision-item``) BEFORE posting -- stamped once,
+    at creation, so redelivery never has to re-derive it from a catalog snapshot that may have
+    since moved on.
+    """
     require_inbox_address(
         lifecycle_id=lifecycle_id,
         agent_id=agent_id,
@@ -121,6 +148,9 @@ def create_operator_inbox_entry(
         createdAt=now,
         createdBy=created_by,
         createdVia=created_via,
+        ownerRole=owner_role,
+        ownerAgentId=owner_agent_id,
+        ownerLifecycleId=owner_lifecycle_id,
     )
 
 

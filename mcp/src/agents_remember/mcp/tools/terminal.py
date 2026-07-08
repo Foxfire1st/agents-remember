@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from agents_remember.controlplane.expectation_rows import ExpectationRowStore, write_expectation_row
 from agents_remember.kernel.agentic_settings import (
     AgenticSettings,
     RoleKnobs,
     load_agentic_settings,
 )
+from agents_remember.observer import observer_root
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harnesses import (
@@ -533,6 +536,7 @@ def spawn_agent_session_payload(
 
     entry = result.entry
     assert entry is not None  # opened => an upserted row
+    _write_spawn_expectation_rows(config, entry)
 
     packet = _brief_packet(context, prompt_keywords)
     delivery = _SpawnDelivery()
@@ -543,6 +547,41 @@ def spawn_agent_session_payload(
         )
 
     return _tool_payload("spawn_agent_session", _spawned_payload(entry, delivery))
+
+
+def _write_spawn_expectation_rows(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> None:
+    """R2: every spawn atomically writes its ``briefed-by`` row (the composer must show the
+    brief within T_boot), plus a ``turn-report-by`` row when the spawn claims a LEAF (a bare
+    scratch/command chat with no ``leaf_key`` owes no turn report). Written in the SAME call as
+    the catalog upsert -- never a forgettable follow-up step."""
+    settings = load_agentic_settings(config.coordination_root)
+    store = ExpectationRowStore(observer_root(config))
+    now = datetime.now(UTC)
+    write_expectation_row(
+        store,
+        row_id=uuid4().hex,
+        now=now,
+        kind="briefed-by",
+        sla_seconds=settings.expectations.sla_for("briefed-by"),
+        source_id=entry.id,
+        subject_agent_id=entry.id,
+        subject_lifecycle_id=entry.lifecycle_id,
+        leaf_key=entry.leaf_key,
+        note=f"briefed-by: {entry.label} ({entry.spawn_role or entry.kind})",
+    )
+    if entry.leaf_key is not None:
+        write_expectation_row(
+            store,
+            row_id=uuid4().hex,
+            now=now,
+            kind="turn-report-by",
+            sla_seconds=settings.expectations.sla_for("turn-report-by"),
+            source_id=entry.id,
+            subject_agent_id=entry.id,
+            subject_lifecycle_id=entry.lifecycle_id,
+            leaf_key=entry.leaf_key,
+            note=f"turn-report-by: {entry.leaf_key}",
+        )
 
 
 def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> dict[str, Any]:

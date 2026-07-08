@@ -86,7 +86,11 @@ def _keep_gate(gate: GateRecord, *, now: datetime, ttl_seconds: float) -> bool:
 def _keep_inbox_entry(
     entry: OperatorInboxEntry, *, now: datetime, ttl_seconds: float
 ) -> bool:
-    if entry.state == "consumed":
-        return False
+    """R1 (260707-HFX2-L1): compaction NEVER removes a pending/unacked row, regardless of age --
+    an unacked row outlives any cleanup until it is acked (consumed) or ladder-resolved. Only a
+    consumed row is subject to the age-bounded retention window (kept as an audit grace period;
+    the ordinary consume path already deletes its row explicitly and never reaches compaction)."""
+    if entry.state == "pending":
+        return True
     age = age_seconds(entry.createdAt, now)
     return age is None or age <= ttl_seconds

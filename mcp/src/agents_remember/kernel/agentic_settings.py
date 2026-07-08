@@ -69,6 +69,7 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "concurrency",
         "spawn",
         "harnesses",
+        "expectations",
     }
 )
 # One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
@@ -114,6 +115,21 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
 )
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
+# R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
+# what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
+# Orchestration Expectations). Kept as a plain string set here (not imported from
+# controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle; the two must be kept
+# in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition.
+KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "turn-report-by", "verdict-by", "ack-by"})
+KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
+DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
+    "briefed-by": 120.0,
+    "turn-report-by": 3600.0,
+    "verdict-by": 1800.0,
+    # Mirrors AGENT_PICKUP_TTL_SECONDS (interaction_retention.py) -- the existing dashboard
+    # pickup-staleness convention for an unacked signal.
+    "ack-by": 300.0,
+}
 
 # The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
 # spawn.harness) are validated against the EFFECTIVE id set -- these plus any
@@ -194,6 +210,23 @@ class ConcurrencySettings:
 
 
 @dataclass(frozen=True)
+class ExpectationSettings:
+    """``orchestration.expectations`` -- per-kind default SLA seconds (R2, 260707-HFX2-L1).
+
+    Every dispatch surface (spawn, leaf dispatch, gate open, signal post) writes a durable
+    expectation row at write time; the SLA (seconds until ``dueAt``) is configurable per kind
+    here, defaulting to :data:`DEFAULT_EXPECTATION_SLA_SECONDS`.
+    """
+
+    sla_seconds: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_EXPECTATION_SLA_SECONDS)
+    )
+
+    def sla_for(self, kind: str) -> float:
+        return self.sla_seconds.get(kind, DEFAULT_EXPECTATION_SLA_SECONDS[kind])
+
+
+@dataclass(frozen=True)
 class AgenticSettings:
     """The merged, typed agentic settings for one read (global <- local)."""
 
@@ -210,6 +243,7 @@ class AgenticSettings:
     # (see :meth:`resolved_role_knobs`). Level vocabulary matches ``loops.perLevel``.
     roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
+    expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
     # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
@@ -503,6 +537,7 @@ def _parse_orchestration(
             raw.get("rolesPerLevel"), source=source, harness_ids=harness_ids
         ),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
+        expectations=_parse_expectations(raw.get("expectations"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,
@@ -988,6 +1023,34 @@ def _parse_concurrency(raw: object, *, source: str) -> ConcurrencySettings:
                 concurrency[json_key], f"orchestration.concurrency.{json_key}", source
             )
     return ConcurrencySettings(**parsed)
+
+
+def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:
+    """``orchestration.expectations.defaults``: per-kind SLA seconds, hyphenated kind keys
+    (matching the expectation-row kind vocabulary), overriding :data:`DEFAULT_EXPECTATION_SLA_SECONDS`
+    entry-by-entry -- an omitted kind keeps its documented default."""
+    if raw is None:
+        return ExpectationSettings()
+    block = _require_object(raw, "orchestration.expectations", source)
+    _refuse_unknown(block, KNOWN_EXPECTATIONS_FIELDS, "orchestration.expectations", source)
+    sla_seconds = dict(DEFAULT_EXPECTATION_SLA_SECONDS)
+    raw_defaults = block.get("defaults")
+    if raw_defaults is not None:
+        defaults = _require_object(
+            raw_defaults, "orchestration.expectations.defaults", source
+        )
+        for kind, value in defaults.items():
+            if kind not in KNOWN_EXPECTATION_KINDS:
+                allowed = ", ".join(sorted(KNOWN_EXPECTATION_KINDS))
+                raise AgenticSettingsError(
+                    f"orchestration.expectations.defaults key {kind!r} is not a known "
+                    f"expectation kind; allowed: {allowed}: {source}"
+                )
+            owner = f"orchestration.expectations.defaults.{kind}"
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise AgenticSettingsError(f"{owner} must be a positive number of seconds: {source}")
+            sla_seconds[kind] = float(value)
+    return ExpectationSettings(sla_seconds=sla_seconds)
 
 
 def _parse_spawn(raw: object, *, source: str, harness_ids: tuple[str, ...] | None) -> str | None:

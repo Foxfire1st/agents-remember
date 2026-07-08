@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -215,6 +216,78 @@ class OperatorInboxStoreTests(unittest.TestCase):
     def test_poll_requires_mailbox_address(self) -> None:
         with self.assertRaises(ValueError):
             self.store.list_pending(lifecycle_id=None, agent_id=None)
+
+    def test_record_delivery_bumps_attempt_and_schedules_next_attempt(self) -> None:
+        # R1/R3: every attempt -- including a confirmed 'delivered' paste -- bumps attemptCount
+        # and schedules a durable nextAttemptAt, because consume=ack is the only terminal outcome.
+        self.store.append(self._entry("A"))
+        delivered = self.store.record_delivery(
+            "A", now=T2, delivery_state="delivered", delivered_to_session="agent-a"
+        )
+        self.assertEqual(delivered.attemptCount, 1)
+        self.assertEqual(delivered.lastAttemptAt, T2)
+        self.assertIsNotNone(delivered.nextAttemptAt)
+        # A second delivery attempt (e.g. a redelivery pass) bumps again and re-schedules further out.
+        second = self.store.record_delivery(
+            "A", now="2026-06-23T10:10:00+00:00", delivery_state="unconfirmed"
+        )
+        self.assertEqual(second.attemptCount, 2)
+        assert second.nextAttemptAt is not None
+        assert delivered.nextAttemptAt is not None
+        self.assertGreater(second.nextAttemptAt, delivered.nextAttemptAt)
+
+    def test_record_delivery_clears_schedule_only_via_consume(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.record_delivery("A", now=T2, delivery_state="delivered")
+        consumed, _ = self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
+        self.assertEqual(consumed.state, "consumed")
+
+    def test_list_redeliverable_returns_pending_rows_past_backoff(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.record_delivery(
+            "A", now="2026-06-23T09:00:00+00:00", delivery_state="no-hosted-session"
+        )
+        now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
+        redeliverable = self.store.list_redeliverable(now=now)
+        self.assertEqual([entry.id for entry in redeliverable], ["A"])
+
+    def test_list_redeliverable_excludes_consumed_rows(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.record_delivery("A", now=T1, delivery_state="delivered")
+        self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
+        now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
+        self.assertEqual(self.store.list_redeliverable(now=now), [])
+
+    def test_mark_escalated_stamps_the_reserved_field(self) -> None:
+        self.store.append(self._entry("A"))
+        escalated = self.store.mark_escalated("A", now=T2)
+        self.assertEqual(escalated.escalatedAt, T2)
+
+    def test_compaction_never_removes_a_pending_unacked_row_regardless_of_age(self) -> None:
+        # R1: an unacked row outlives any cleanup until acked or ladder-resolved. Exercised
+        # against the exact post-time compaction path (operator_inbox_post_payload calls
+        # store.compact() right after append) via a row far past the retention TTL.
+        ancient = create_operator_inbox_entry(
+            entry_id="OLD",
+            now="2020-01-01T00:00:00+00:00",
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            ask="Ancient ask",
+            response="Ancient response",
+            created_by="developer",
+            created_via="dashboard",
+        )
+        self.store.append(ancient)
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertEqual(removed, 0)
+        self.assertEqual([entry.id for entry in self.store.read()], ["OLD"])
+
+    def test_compaction_still_prunes_a_stale_consumed_row(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.consume("A", now="2020-01-01T00:00:00+00:00", consumed_by="model", consumed_via="cli")
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertGreater(removed, 0)
+        self.assertEqual(self.store.read(), [])
 
 
 class OperatorInboxToolTests(unittest.TestCase):
