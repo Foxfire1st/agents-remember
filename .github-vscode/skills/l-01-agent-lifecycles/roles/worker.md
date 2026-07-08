@@ -71,9 +71,11 @@ the report. A red check you cannot fix inside the leaf's scope is an escalation,
 Write `templates/turn-report.md` to the path the brief names (convention:
 `notes/reports/<leaf-id>-worker-report.md`): what was done · issues hit · solved on the spot · what
 is left · changed paths for the curator · checks with commands · retrieval evidence · escalations ·
-respawn state. **A missing report gets nudged.** The report is the leaf's builder artifact of record and how a
+respawn state. The report is the leaf's builder artifact of record and how a
 respawned successor onboards — write it even when blocked (with the Escalations section filled),
-then end your turn.
+then end your turn. **A missing report gets nudged by the supervisor sweep (HFX2-L2), never by a
+seat-local watcher** — no owning seat, and no worker, hand-rolls its own polling loop over this
+artifact; ending your turn once the report is written is safe, not a risk you have to cover for.
 
 ## Tool Surface (positive statement — this is all of it)
 
@@ -125,8 +127,14 @@ leaf well, ask when the leaf itself is in question" default.
 
 - **Inbox** — receive dispatch/context; post escalations; agent-to-agent rows carry role metadata
   and a `messageKind` (`turn-report`, `nudge`, `escalation`, …), durable + dashboard-visible.
-- **Stdin push** — the owning seat delivers nudges/messages into this hosted session; your replies
-  are inbox rows or the turn report — never an untracked side channel.
+- **Stdin push** — the L2 supervisor sweep's injector (HFX2-L3) delivers nudges/messages into this
+  hosted session on its own mechanical tick, in the owning seat's name — never the owning seat (or
+  you) watching/polling by hand. Your replies are inbox rows or the turn report — never an untracked
+  side channel.
+- **Idle is safe** — once your turn report is written, ending your turn is correct; silence is
+  supervised (HFX2-L2 sweep + HFX2-L4 escalation ladder), not a gap you must cover by lingering or
+  self-nudging. **Watcher ban (uniform-mechanism ruling 2026-07-07):** never hand-roll your own
+  watcher — one mechanism, no per-seat variance.
 - **Escalation** — one rung up, always: **worker → owning seat (manager/orchestrator/architect in
   solo flat mode).**
 

@@ -95,9 +95,15 @@ stops belong to the orchestrator via the system-specialist protocol.
   `../templates/worker-brief.md`) is pasted + submitted, with `env={"AR_SPAWN_ROLE": "worker"}` and
   the **qualified** leaf key `<repository>/<master>/<docId>`; the worker edits inside the leaf
   worktrees the brief names.
-- **Monitor the worker** — a turn-report artifact is expected at **every** hand-off. Inactivity or a
-  missing artifact → a **rate-limited stdin nudge** (logged as an event, never spammy). Escalation
-  intake via the inbox.
+- **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
+  **every** hand-off; you do not watch for it. The HFX2-L2 supervisor sweep evaluates each expected
+  artifact (`evaluate_turn_report_findings`/`missing_artifact()`) on its own mechanical tick and, on
+  inactivity or a missing artifact, injects the nudge and — on continued silence — walks the HFX2-L4
+  escalation ladder (renudge → skip-level → developer attention) and respawns per the dead-man
+  policy. Your job is to **be woken with your pending signals and process + ack every item before
+  ending your turn** — never to poll, timer-loop, or hand-roll your own watch over the worker.
+  **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
+  supervisor sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.
 - **Review artifact vs `task_doc`** — completion vs requirements/steps · checks green ·
   builder changed-path/code evidence sufficient for the curator pass (the manager's own
   leaf-level review; **this is not an adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
@@ -186,7 +192,9 @@ own lifecycle if you need its state).
 
 - **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down to workers, escalation
   intake up from workers, handover up to the orchestrator; all durable + dashboard-visible.
-- **Stdin push** — nudges and messages delivered into hosted worker sessions; poll is the fallback.
+- **Stdin push** — the L2 supervisor's injector (HFX2-L3, the one standard wake mechanism) delivers
+  nudges and messages into hosted worker sessions on the sweep's own tick, never on this seat's
+  initiative; a non-hosted seat gets the equivalent signal via the inbox instead.
 - **Escalation** — **up to the orchestrator, never straight to the developer.** A stumped manager, and
   any plan delta beyond blank-filling, raises to the orchestrator. The manager resolves within its own
   master's view first. A loop that hits the 3-round cap or stops converging escalates **with the

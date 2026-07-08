@@ -218,7 +218,11 @@ super): `spawn_agent_session(manager)` with a brief compiled from
 `../templates/manager-brief.md` (`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key
 `<repository>/<master>/<docId>`; the brief carries the load-bearing base fact: master branches
 off the **current super**, never off main);
-monitor turn-report artifacts, nudges, escalation intake; apply the **spirit test** to escalated
+process and ack the pending signals the L2 supervisor sweep wakes you with — turn-report
+artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
+(**watcher ban, uniform-mechanism ruling 2026-07-07:** the supervisor sweep is the one mechanism,
+no seat-local polling/monitoring, own duty inverts to processing what lands, not hunting for it).
+Then apply the **spirit test** — a model-judgment duty, not a watching one — to escalated
 deltas. A manager escalation may carry a **loop's full round history** (3-round cap hit, or a
 round that failed to shrink the finding set — the convergence rule, `../SKILL.md` The Three-Party
 Loop): this seat either re-runs the loop at ITS level (the orchestrator-level agent set — the
@@ -379,8 +383,13 @@ task, fill small blanks, escalate real deltas).
 
 - **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down, escalation
   intake up; durable + dashboard-visible.
-- **Stdin push** — delivery into hosted sessions (echo-confirmed paste); poll is the non-hosted
-  fallback.
+- **Stdin push** — the L2 supervisor's injector (HFX2-L3, the one standard wake mechanism) delivers
+  into hosted sessions (echo-confirmed paste) on the sweep's own tick; the inbox is the non-hosted
+  equivalent, never a hand-rolled poll of this seat's own.
+- **Idle is safe** — silence is supervised (the L2 sweep + L4 escalation ladder), so
+  `lifecycle_turn_end_notification` / ending a turn with nothing pending is the correct move, not a
+  risk to be covered by watching. **Watcher ban (uniform-mechanism ruling 2026-07-07):** never
+  build a seat-local watcher of any kind.
 - **Escalation** — this seat is the last backend resolver before the architect: resolve within the
   bird's-eye view first; what goes up is decided by the **quo-vadis test**, not by being stumped —
   a **high-blast-radius truth** question (answered wrong it means big rewrites later: architecture

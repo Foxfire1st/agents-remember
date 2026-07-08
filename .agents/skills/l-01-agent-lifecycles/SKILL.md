@@ -105,6 +105,15 @@ lifecycle — that is correct, not a violation.** A spawned role runs its **own*
 runs one; it never adopts its spawner's. The session↔leaf association is the catalog binding made
 at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifecycle adoption.
 
+**Notify-and-stop is safe by design (HFX2-L1..L4, landed):** ending a turn on
+`lifecycle_turn_end_notification` — or simply stopping once your artifact is written and nothing is
+pending — is never a liveness gap. Silence is supervised: the HFX2-L2 supervisor sweep evaluates
+every expected artifact/signal on its own mechanical tick and the HFX2-L4 escalation ladder
+(renudge → skip-level → developer attention, then respawn) handles inactivity. **No role watches,
+polls, or nudges on its own initiative — that is a banned seat-local watcher (uniform-mechanism
+ruling 2026-07-07).** Every role's own liveness duty inverts to *passive*: you will be woken with
+your pending signals; process and ack every item before ending your turn again.
+
 ## Shared Invariants (every role can count on these)
 
 - **Continuity lives in the `task_doc` + durable artifacts, never in transcripts** — which is why
