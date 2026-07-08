@@ -444,6 +444,9 @@ export interface SupervisorHeartbeat {
   ageSeconds: number | null;
   staleCutoffSeconds: number;
   stale: boolean;
+  pendingInboxCount: number;
+  redeliverableInboxCount: number;
+  lastSweepDurationSeconds: number | null;
 }
 
 export interface WorkspaceProjection {

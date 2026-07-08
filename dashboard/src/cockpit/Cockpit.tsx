@@ -602,14 +602,19 @@ function SupervisorHeartbeatBadge() {
     ageMinutes !== null
       ? `supervisor ${heartbeat.stale ? "stale" : "ok"} ${ageMinutes.toFixed(1)}m`
       : "supervisor stale";
+  const duration =
+    heartbeat.lastSweepDurationSeconds !== null
+      ? `${heartbeat.lastSweepDurationSeconds.toFixed(2)}s`
+      : "n/a";
+  const backlog = `${heartbeat.redeliverableInboxCount}/${heartbeat.pendingInboxCount}`;
   return (
     <span
       className={heartbeat.stale ? caution({ sev: "alarm" }) : dim}
       data-testid="supervisor-heartbeat"
-      title={`Supervisor last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s`}
+      title={`Supervisor last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s; redeliverable/pending inbox ${backlog}; last sweep ${duration}`}
     >
       {heartbeat.stale ? "⚠ " : ""}
-      {label}
+      {label} · inbox {backlog} · sweep {duration}
     </span>
   );
 }

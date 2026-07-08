@@ -121,7 +121,15 @@ describe("dashboard store change gate (260703-L15)", () => {
   it("applies an idle re-snapshot with a genuinely changed supervisorHeartbeat", () => {
     const withHeartbeat = {
       ...projection,
-      supervisorHeartbeat: { lastTickAt: "2026-07-08T00:00:00+00:00", ageSeconds: 1, staleCutoffSeconds: 30, stale: false },
+      supervisorHeartbeat: {
+        lastTickAt: "2026-07-08T00:00:00+00:00",
+        ageSeconds: 1,
+        staleCutoffSeconds: 30,
+        stale: false,
+        pendingInboxCount: 2,
+        redeliverableInboxCount: 1,
+        lastSweepDurationSeconds: 0.2,
+      },
     } as WorkspaceProjection;
     dashboardStore.getState().applySnapshot(withHeartbeat);
     const before = dashboardStore.getState();

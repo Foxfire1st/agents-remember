@@ -79,6 +79,10 @@ class DueAndRateLimitTests(unittest.TestCase):
         entry = _entry().model_copy(update={"state": "consumed"})
         self.assertFalse(is_due(entry, now=datetime.fromisoformat(T1)))
 
+    def test_ladder_resolved_rows_are_never_due(self) -> None:
+        entry = _entry().model_copy(update={"state": "ladder-resolved"})
+        self.assertFalse(is_due(entry, now=datetime.fromisoformat(T1)))
+
     def test_a_recent_attempt_is_rate_limited(self) -> None:
         entry = _entry().model_copy(update={"lastAttemptAt": T1})
         now = datetime.fromisoformat("2026-06-23T10:00:10+00:00")

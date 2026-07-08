@@ -20,6 +20,9 @@ from pathlib import Path
 class SupervisorHeartbeat:
     lastTickAt: str
     sweepCount: int
+    pendingInboxCount: int = 0
+    redeliverableInboxCount: int = 0
+    lastSweepDurationSeconds: float | None = None
 
 
 def supervisor_heartbeat_path(observer_root: Path) -> Path:
@@ -48,19 +51,45 @@ class SupervisorHeartbeatStore:
             return SupervisorHeartbeat(
                 lastTickAt=str(data["lastTickAt"]),
                 sweepCount=int(data["sweepCount"]),
+                pendingInboxCount=int(data.get("pendingInboxCount", 0)),
+                redeliverableInboxCount=int(data.get("redeliverableInboxCount", 0)),
+                lastSweepDurationSeconds=(
+                    float(data["lastSweepDurationSeconds"])
+                    if data.get("lastSweepDurationSeconds") is not None
+                    else None
+                ),
             )
         except (KeyError, TypeError, ValueError):
             return None
 
-    def tick(self, *, now: datetime) -> SupervisorHeartbeat:
+    def tick(
+        self,
+        *,
+        now: datetime,
+        pending_inbox_count: int = 0,
+        redeliverable_inbox_count: int = 0,
+        last_sweep_duration_seconds: float | None = None,
+    ) -> SupervisorHeartbeat:
         previous = self.read()
         heartbeat = SupervisorHeartbeat(
-            lastTickAt=now.isoformat(), sweepCount=(previous.sweepCount if previous else 0) + 1
+            lastTickAt=now.isoformat(),
+            sweepCount=(previous.sweepCount if previous else 0) + 1,
+            pendingInboxCount=pending_inbox_count,
+            redeliverableInboxCount=redeliverable_inbox_count,
+            lastSweepDurationSeconds=last_sweep_duration_seconds,
         )
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_name(f"{self._path.name}.{os.getpid()}.tmp")
         tmp.write_text(
-            json.dumps({"lastTickAt": heartbeat.lastTickAt, "sweepCount": heartbeat.sweepCount})
+            json.dumps(
+                {
+                    "lastTickAt": heartbeat.lastTickAt,
+                    "sweepCount": heartbeat.sweepCount,
+                    "pendingInboxCount": heartbeat.pendingInboxCount,
+                    "redeliverableInboxCount": heartbeat.redeliverableInboxCount,
+                    "lastSweepDurationSeconds": heartbeat.lastSweepDurationSeconds,
+                }
+            )
             + "\n",
             encoding="utf-8",
         )

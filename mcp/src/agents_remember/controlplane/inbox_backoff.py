@@ -48,6 +48,8 @@ def next_attempt_at(*, now: datetime, attempt_count: int) -> str:
 
 def is_due(entry: OperatorInboxEntry, *, now: datetime) -> bool:
     """Whether ``entry`` is a pending row whose backoff window has elapsed."""
+    if is_ladder_resolved(entry):
+        return False
     if entry.state != "pending":
         return False
     if entry.deliveryState not in _REDELIVERABLE_DELIVERY_STATES:
@@ -87,5 +89,12 @@ def redeliverable(
     return [
         entry
         for entry in entries
-        if is_due(entry, now=now) and not is_rate_limited(entry, now=now, rate_limit_seconds=rate_limit_seconds)
+        if not is_ladder_resolved(entry)
+        and is_due(entry, now=now)
+        and not is_rate_limited(entry, now=now, rate_limit_seconds=rate_limit_seconds)
     ]
+
+
+def is_ladder_resolved(entry: OperatorInboxEntry) -> bool:
+    """Whether the escalation ladder has terminally resolved this row without an ack."""
+    return entry.state == "ladder-resolved"

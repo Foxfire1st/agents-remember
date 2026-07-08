@@ -171,6 +171,20 @@ class LeafRefResolutionTests(unittest.TestCase):
 
             self.assertEqual(resolved.qualified_id, "repo-a/260700_master/260700-L1")
 
+    def test_malformed_sibling_artifact_json_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_leaf(root)
+            task_root = root / "tasks" / "repo-a" / "260700_master"
+            (task_root / "lint-inventory-baseline.json").write_text(
+                '{"summary":',
+                encoding="utf-8",
+            )
+
+            resolved = resolve_leaf_ref(root, "repo-a", "01_legacy-leaf")
+
+            self.assertEqual(resolved.qualified_id, "repo-a/260700_master/260700-L1")
+
     def test_load_contract_ignores_sibling_artifact_json_while_normalizing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -277,6 +277,23 @@ class OperatorInboxStoreTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.advance_rung("missing", rung=1, now=T2)
 
+    def test_ladder_resolved_is_terminal_without_ack(self) -> None:
+        self.store.append(self._entry("A"))
+        resolved, resolved_now = self.store.mark_ladder_resolved(
+            "A",
+            now=T2,
+            reason="terminal ladder rung reached for non-live target seat",
+        )
+        self.assertTrue(resolved_now)
+        self.assertEqual(resolved.state, "ladder-resolved")
+        self.assertEqual(resolved.ladderResolvedAt, T2)
+        self.assertIsNone(resolved.nextAttemptAt)
+        consumed, consumed_now = self.store.consume(
+            "A", now="2026-06-23T10:10:00+00:00", consumed_by="model", consumed_via="cli"
+        )
+        self.assertFalse(consumed_now)
+        self.assertEqual(consumed.state, "ladder-resolved")
+
     def test_compaction_never_removes_a_pending_unacked_row_regardless_of_age(self) -> None:
         # R1: an unacked row outlives any cleanup until acked or ladder-resolved. Exercised
         # against the exact post-time compaction path (operator_inbox_post_payload calls
@@ -295,6 +312,17 @@ class OperatorInboxStoreTests(unittest.TestCase):
         removed = self.store.compact(now=datetime.now(UTC))
         self.assertEqual(removed, 0)
         self.assertEqual([entry.id for entry in self.store.read()], ["OLD"])
+
+    def test_compaction_prunes_ladder_resolved_rows(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.mark_ladder_resolved(
+            "A",
+            now=T2,
+            reason="terminal ladder rung reached for non-live target seat",
+        )
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertEqual(removed, 2)
+        self.assertEqual(self.store.read(), [])
 
     def test_compaction_still_prunes_a_stale_consumed_row(self) -> None:
         self.store.append(self._entry("A"))

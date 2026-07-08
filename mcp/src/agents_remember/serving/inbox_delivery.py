@@ -47,6 +47,7 @@ def deliver_inbox_entry(
     paster: TerminalPaster,
     entry: OperatorInboxEntry,
     submit: bool = True,
+    current: dict[str, OperatorInboxEntry] | None = None,
 ) -> OperatorInboxEntry:
     """Push an inbox message into the target hosted session and record the delivery state."""
     target = _target_session(catalog, entry)
@@ -56,6 +57,7 @@ def deliver_inbox_entry(
             now=now_iso(),
             delivery_state="no-hosted-session",
             delivery_detail="no running hosted session matched the inbox address",
+            current=current,
         )
     if not host.has_session(target.tmux_name):
         return store.record_delivery(
@@ -64,6 +66,7 @@ def deliver_inbox_entry(
             delivery_state="no-hosted-session",
             delivered_to_session=target.id,
             delivery_detail="catalog row exists but tmux session is not running",
+            current=current,
         )
     row = DeliveryRow(
         kind=entry.messageKind,
@@ -79,6 +82,7 @@ def deliver_inbox_entry(
         delivery_state=_delivery_state(result),
         delivered_to_session=target.id,
         delivery_detail=_delivery_detail(result),
+        current=current,
     )
 
 

@@ -90,6 +90,8 @@ def _keep_inbox_entry(
     an unacked row outlives any cleanup until it is acked (consumed) or ladder-resolved. Only a
     consumed row is subject to the age-bounded retention window (kept as an audit grace period;
     the ordinary consume path already deletes its row explicitly and never reaches compaction)."""
+    if entry.state == "ladder-resolved":
+        return False
     if entry.state == "pending":
         return True
     age = age_seconds(entry.createdAt, now)

@@ -24,9 +24,11 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Literal
 
 from agents_remember.controlplane.escalation_ladder import (
+    MAX_RUNG,
     next_step,
     rung_due,
     seat_is_suspect,
@@ -34,6 +36,7 @@ from agents_remember.controlplane.escalation_ladder import (
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
     InboxMessageKind,
+    OperatorInboxEntry,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
@@ -69,11 +72,20 @@ FindingKind = Literal[
     "expectation-overdue",
     "turn-report-stale",
     "inbox-redeliverable",
+    "inbox-ladder-terminal",
     "seat-liveness",
     "escalation-due",
     "dead-upstream",
 ]
-ActionKind = Literal["redeliver", "auto-nudge", "signal-emit", "escalate-rung", "signal-grandparent", "none"]
+ActionKind = Literal[
+    "redeliver",
+    "ladder-resolve",
+    "auto-nudge",
+    "signal-emit",
+    "escalate-rung",
+    "signal-grandparent",
+    "none",
+]
 
 # R1 (260707-HFX2-L4): conservative built-in fallbacks when a caller (a test, or a context built
 # before settings are read) supplies no per-kind/per-rung knobs. ``serving/app.py`` always wires
@@ -119,6 +131,9 @@ class SupervisorSweepResult:
     findings: tuple[SupervisorFinding, ...]
     actions: tuple[SupervisorActionResult, ...]
     swept_at: str
+    pending_inbox_count: int = 0
+    redeliverable_inbox_count: int = 0
+    duration_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +159,22 @@ class SupervisorContext:
     escalation_sla_seconds: dict[str, float] = dataclass_field(default_factory=dict)
     escalation_rung_seconds: dict[int, float] = dataclass_field(default_factory=dict)
     respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
+    redeliver_budget: int = 250
+
+
+@dataclass
+class _SweepState:
+    inbox_current: dict[str, OperatorInboxEntry]
+    redeliver_budget: int
+    pending_inbox_count: int = 0
+    redeliverable_entries: list[OperatorInboxEntry] = dataclass_field(default_factory=list)
+
+    @property
+    def redeliverable_inbox_count(self) -> int:
+        return len(self.redeliverable_entries)
+
+    def remember(self, entry: OperatorInboxEntry) -> None:
+        self.inbox_current[entry.id] = entry
 
 
 # --- R2: predicates ----------------------------------------------------------------------------
@@ -229,9 +260,21 @@ def evaluate_turn_report_findings(
 
 
 def evaluate_inbox_findings(
-    store: OperatorInboxStore, *, now: datetime, rate_limit_seconds: float | None = None
+    store: OperatorInboxStore,
+    *,
+    now: datetime,
+    rate_limit_seconds: float | None = None,
+    current: dict[str, OperatorInboxEntry] | None = None,
+    limit: int | None = None,
 ) -> list[SupervisorFinding]:
     """R2d: unacked-row redelivery due (past backoff, clear of the per-target rate limit)."""
+    entries = store.list_redeliverable(
+        now=now,
+        rate_limit_seconds=rate_limit_seconds,
+        current=current,
+    )
+    if limit is not None:
+        entries = entries[:limit]
     return [
         SupervisorFinding(
             kind="inbox-redeliverable",
@@ -240,7 +283,38 @@ def evaluate_inbox_findings(
             leaf_key=None,
             source_id=entry.id,
         )
-        for entry in store.list_redeliverable(now=now, rate_limit_seconds=rate_limit_seconds)
+        for entry in entries
+    ]
+
+
+def _ladder_terminal_and_dead(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
+    """True only for a pending row whose terminal rung cannot land on a live target seat."""
+    return (
+        entry.state == "pending"
+        and entry.rung >= MAX_RUNG
+        and entry.agentId is not None
+        and is_seat_dead(catalog, entry.agentId)
+    )
+
+
+def evaluate_ladder_terminal_findings(
+    store: OperatorInboxStore,
+    catalog: TerminalCatalog,
+    *,
+    current: dict[str, OperatorInboxEntry] | None = None,
+) -> list[SupervisorFinding]:
+    """R1: ladder-complete rows for dead seats become terminal, distinct from ack."""
+    entries = store.current() if current is None else current
+    return [
+        SupervisorFinding(
+            kind="inbox-ladder-terminal",
+            detail="ladder-resolved",
+            session_id=entry.agentId,
+            leaf_key=None,
+            source_id=entry.id,
+        )
+        for entry in entries.values()
+        if _ladder_terminal_and_dead(catalog, entry)
     ]
 
 
@@ -298,10 +372,12 @@ def evaluate_escalation_findings(
     now: datetime,
     sla_seconds: dict[str, float],
     rung_seconds: dict[int, float],
+    current: dict[str, OperatorInboxEntry] | None = None,
 ) -> list[SupervisorFinding]:
     """R2: every pending, unacked row due for its NEXT ladder rung (escalation_ladder.rung_due)."""
     findings: list[SupervisorFinding] = []
-    for entry in store.current().values():
+    entries = store.current() if current is None else current
+    for entry in entries.values():
         sla = sla_seconds.get(entry.messageKind, DEFAULT_ESCALATION_SLA_SECONDS)
         dwell = rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)
         if rung_due(entry, now=now, sla_seconds=sla, rung_seconds=dwell):
@@ -342,17 +418,44 @@ def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[Supervisor
     return findings
 
 
-def evaluate_predicates(ctx: SupervisorContext, *, now: datetime) -> list[SupervisorFinding]:
+def evaluate_predicates(
+    ctx: SupervisorContext, *, now: datetime, sweep: _SweepState | None = None
+) -> list[SupervisorFinding]:
     """R2: run every predicate over its store, directly (R3) -- the sweep's full finding set."""
     findings: list[SupervisorFinding] = []
+    inbox_current = sweep.inbox_current if sweep is not None else None
     findings += evaluate_pane_findings(ctx.catalog)
     findings += evaluate_expectation_findings(ctx.expectation_store, now=now)
     findings += evaluate_turn_report_findings(
         ctx.expectation_store, coordination_root=ctx.coordination_root, now=now
     )
-    findings += evaluate_inbox_findings(
-        ctx.inbox_store, now=now, rate_limit_seconds=ctx.redeliver_rate_limit_seconds
+    findings += evaluate_ladder_terminal_findings(
+        ctx.inbox_store, ctx.catalog, current=inbox_current
     )
+    if sweep is None:
+        findings += evaluate_inbox_findings(
+            ctx.inbox_store,
+            now=now,
+            rate_limit_seconds=ctx.redeliver_rate_limit_seconds,
+            current=inbox_current,
+            limit=ctx.redeliver_budget,
+        )
+    else:
+        budgeted = [
+            entry
+            for entry in sweep.redeliverable_entries
+            if not _ladder_terminal_and_dead(ctx.catalog, entry)
+        ][: sweep.redeliver_budget]
+        findings += [
+            SupervisorFinding(
+                kind="inbox-redeliverable",
+                detail=entry.messageKind,
+                session_id=entry.agentId,
+                leaf_key=None,
+                source_id=entry.id,
+            )
+            for entry in budgeted
+        ]
     findings += evaluate_seat_liveness_findings(
         ctx.catalog, now=now, stale_seconds=ctx.stale_seat_seconds
     )
@@ -361,6 +464,7 @@ def evaluate_predicates(ctx: SupervisorContext, *, now: datetime) -> list[Superv
         now=now,
         sla_seconds=ctx.escalation_sla_seconds,
         rung_seconds=ctx.escalation_rung_seconds,
+        current=inbox_current,
     )
     findings += evaluate_dead_upstream_findings(ctx.catalog)
     return findings
@@ -375,15 +479,30 @@ def _log_event(ctx: SupervisorContext, kind: str, data: dict[str, object]) -> No
     )
 
 
-def _redeliver(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
+def _redeliver(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
     if finding.source_id is None:
         return SupervisorActionResult("redeliver", finding, "skipped", "no source entry id")
-    entry = ctx.inbox_store.current().get(finding.source_id)
+    entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
         return SupervisorActionResult("redeliver", finding, "skipped", "entry not pending")
+    if _ladder_terminal_and_dead(ctx.catalog, entry):
+        return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
     updated = deliver_inbox_entry(
-        store=ctx.inbox_store, catalog=ctx.catalog, host=ctx.host, paster=ctx.paster, entry=entry, submit=True
+        store=ctx.inbox_store,
+        catalog=ctx.catalog,
+        host=ctx.host,
+        paster=ctx.paster,
+        entry=entry,
+        submit=True,
+        current=sweep.inbox_current,
     )
+    sweep.remember(updated)
     _log_event(
         ctx,
         "orchestration.supervisor.redeliver",
@@ -395,17 +514,56 @@ def _redeliver(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datet
         },
     )
     if updated.deliveryState != "delivered" and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS:
-        _escalate_inbox_entry(ctx, updated.id, now=now)
+        _escalate_inbox_entry(ctx, updated.id, now=now, sweep=sweep)
     return SupervisorActionResult("redeliver", finding, updated.deliveryState, updated.deliveryDetail)
 
 
-def _escalate_inbox_entry(ctx: SupervisorContext, entry_id: str, *, now: datetime) -> None:
+def _resolve_ladder_terminal(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    if finding.source_id is None:
+        return SupervisorActionResult("ladder-resolve", finding, "skipped", "no source entry id")
+    try:
+        resolved, resolved_now = ctx.inbox_store.mark_ladder_resolved(
+            finding.source_id,
+            now=now.isoformat(),
+            reason="terminal ladder rung reached for non-live target seat",
+            current=sweep.inbox_current,
+        )
+    except KeyError:
+        return SupervisorActionResult("ladder-resolve", finding, "skipped", "entry missing")
+    sweep.remember(resolved)
+    if resolved_now:
+        _log_event(
+            ctx,
+            "orchestration.supervisor.ladder-resolved",
+            {
+                "entryId": resolved.id,
+                "agentId": resolved.agentId,
+                "rung": resolved.rung,
+                "state": resolved.state,
+                "ladderResolvedAt": resolved.ladderResolvedAt,
+            },
+        )
+    return SupervisorActionResult("ladder-resolve", finding, resolved.state, resolved.ladderResolvedReason)
+
+
+def _escalate_inbox_entry(
+    ctx: SupervisorContext, entry_id: str, *, now: datetime, sweep: _SweepState
+) -> None:
     """R4d: hand a persistently-failing row to the escalation ladder -- this leaf only stamps the
     reserved ``escalatedAt`` hook HFX2-L4's ladder will read; it builds no ladder itself."""
     try:
-        escalated = ctx.inbox_store.mark_escalated(entry_id, now=now.isoformat())
+        escalated = ctx.inbox_store.mark_escalated(
+            entry_id, now=now.isoformat(), current=sweep.inbox_current
+        )
     except KeyError:
         return
+    sweep.remember(escalated)
     _log_event(
         ctx,
         "orchestration.supervisor.escalate",
@@ -417,7 +575,13 @@ def _nudge_reason(finding: SupervisorFinding) -> NudgeReason:
     return "missing-turn-report" if finding.kind == "turn-report-stale" else "inactive"
 
 
-def _auto_nudge(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
+def _auto_nudge(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
     owner = derive_signal_owner(ctx.catalog, sender_agent_id=finding.session_id, message_kind="nudge")
     if owner.agent_id is None and owner.lifecycle_id is None:
         return SupervisorActionResult("auto-nudge", finding, "skipped", "no routable owner")
@@ -458,7 +622,13 @@ def _auto_nudge(ctx: SupervisorContext, finding: SupervisorFinding, *, now: date
         _mark_expectation_missed(ctx, finding, now=now)
         return SupervisorActionResult("auto-nudge", finding, "rate-limited", message)
     delivered = _post_owner_signal(
-        ctx, owner, message_kind="nudge", ask=f"Nudge: {subject}", response=message, now=now
+        ctx,
+        owner,
+        message_kind="nudge",
+        ask=f"Nudge: {subject}",
+        response=message,
+        now=now,
+        sweep=sweep,
     )
     _mark_expectation_missed(ctx, finding, now=now)
     return SupervisorActionResult("auto-nudge", finding, "sent", delivered)
@@ -481,6 +651,7 @@ def _post_owner_signal(
     ask: str,
     response: str,
     now: datetime,
+    sweep: _SweepState | None = None,
 ) -> str:
     """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
     its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses."""
@@ -501,20 +672,42 @@ def _post_owner_signal(
         owner_lifecycle_id=owner.lifecycle_id,
     )
     ctx.inbox_store.append(entry)
+    if sweep is not None:
+        sweep.remember(entry)
     delivered = deliver_inbox_entry(
-        store=ctx.inbox_store, catalog=ctx.catalog, host=ctx.host, paster=ctx.paster, entry=entry, submit=True
+        store=ctx.inbox_store,
+        catalog=ctx.catalog,
+        host=ctx.host,
+        paster=ctx.paster,
+        entry=entry,
+        submit=True,
+        current=sweep.inbox_current if sweep is not None else None,
     )
+    if sweep is not None:
+        sweep.remember(delivered)
     return delivered.deliveryState
 
 
-def _signal_emit(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
+def _signal_emit(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
     owner = derive_signal_owner(ctx.catalog, sender_agent_id=finding.session_id, message_kind="escalation")
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return SupervisorActionResult("signal-emit", finding, "skipped", "no routable owner")
     ask = f"Supervisor observed {finding.kind}: {finding.detail}"
     response = f"session {finding.session_id or 'unknown'} (leaf {finding.leaf_key or 'unknown'})"
     delivery_state = _post_owner_signal(
-        ctx, owner, message_kind="escalation", ask=ask, response=response, now=now
+        ctx,
+        owner,
+        message_kind="escalation",
+        ask=ask,
+        response=response,
+        now=now,
+        sweep=sweep,
     )
     _log_event(
         ctx,
@@ -531,12 +724,18 @@ def _signal_emit(ctx: SupervisorContext, finding: SupervisorFinding, *, now: dat
     return SupervisorActionResult("signal-emit", finding, delivery_state)
 
 
-def _escalate_rung(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
+def _escalate_rung(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
     """R2: advance one pending, unacked row to its next ladder rung -- renudge (1), skip-level
     (2), or the developer attention queue (3, terminal) -- and durably stamp the transition."""
     if finding.source_id is None:
         return SupervisorActionResult("escalate-rung", finding, "skipped", "no source entry id")
-    entry = ctx.inbox_store.current().get(finding.source_id)
+    entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
         return SupervisorActionResult("escalate-rung", finding, "skipped", "entry not pending")
     step = next_step(ctx.catalog, entry)
@@ -549,9 +748,18 @@ def _escalate_rung(ctx: SupervisorContext, finding: SupervisorFinding, *, now: d
     response = f"Original ask: {entry.ask}\nOriginal response: {entry.response}"
     message_kind: InboxMessageKind = "nudge" if step.action == "renudge" else "escalation"
     delivery_state = _post_owner_signal(
-        ctx, step.owner, message_kind=message_kind, ask=ask, response=response, now=now
+        ctx,
+        step.owner,
+        message_kind=message_kind,
+        ask=ask,
+        response=response,
+        now=now,
+        sweep=sweep,
     )
-    ctx.inbox_store.advance_rung(entry.id, rung=step.rung, now=now.isoformat())
+    advanced = ctx.inbox_store.advance_rung(
+        entry.id, rung=step.rung, now=now.isoformat(), current=sweep.inbox_current
+    )
+    sweep.remember(advanced)
     _log_event(
         ctx,
         "orchestration.escalation.rung",
@@ -570,11 +778,26 @@ def _escalate_rung(ctx: SupervisorContext, finding: SupervisorFinding, *, now: d
     if step.rung >= ctx.respawn_after_rung and seat_is_suspect(
         ctx.catalog, entry.agentId, now=now, stale_seconds=ctx.stale_seat_seconds
     ):
-        _respawn_suspect(ctx, entry.agentId, now=now)
+        _respawn_suspect(ctx, entry.agentId, now=now, sweep=sweep)
+    if _ladder_terminal_and_dead(ctx.catalog, advanced):
+        terminal_finding = SupervisorFinding(
+            kind="inbox-ladder-terminal",
+            detail="ladder-resolved",
+            session_id=advanced.agentId,
+            leaf_key=finding.leaf_key,
+            source_id=advanced.id,
+        )
+        _resolve_ladder_terminal(ctx, terminal_finding, now=now, sweep=sweep)
     return SupervisorActionResult("escalate-rung", finding, delivery_state, step.action)
 
 
-def _respawn_suspect(ctx: SupervisorContext, agent_id: str | None, *, now: datetime) -> None:
+def _respawn_suspect(
+    ctx: SupervisorContext,
+    agent_id: str | None,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> None:
     """R3: retire the suspect seat's husk (HFX-L8 primitives), signal its owner (or the
     orchestrator, when the owner mapping already resolves there for a manager) with a respawn
     directive carrying the pending queue to re-deliver to the successor, and -- if the retired
@@ -586,7 +809,11 @@ def _respawn_suspect(ctx: SupervisorContext, agent_id: str | None, *, now: datet
     if entry is None or entry.status != "running":
         return
     owner = derive_signal_owner(ctx.catalog, sender_agent_id=agent_id, message_kind="escalation")
-    pending_queue = [row.id for row in ctx.inbox_store.list_pending(lifecycle_id=None, agent_id=agent_id)]
+    pending_queue = [
+        row.id
+        for row in sweep.inbox_current.values()
+        if row.state == "pending" and row.agentId == agent_id
+    ]
     retire_entry(
         ctx.catalog,
         ctx.host,
@@ -604,7 +831,13 @@ def _respawn_suspect(ctx: SupervisorContext, agent_id: str | None, *, now: datet
         ask = f"Respawn directive: seat {agent_id} ({entry.spawn_role}) retired as suspect (R3)"
         response = f"Pending queue for the successor: {pending_queue}. Orphaned workers: {orphaned}."
         delivery_state = _post_owner_signal(
-            ctx, owner, message_kind="escalation", ask=ask, response=response, now=now
+            ctx,
+            owner,
+            message_kind="escalation",
+            ask=ask,
+            response=response,
+            now=now,
+            sweep=sweep,
         )
     _log_event(
         ctx,
@@ -622,7 +855,11 @@ def _respawn_suspect(ctx: SupervisorContext, agent_id: str | None, *, now: datet
 
 
 def _signal_dead_upstream(
-    ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
 ) -> SupervisorActionResult:
     """R4: signal the seat's grandparent (the same 2-hop, dead-node-skipping walk rung 2 uses) --
     doctrine: the seat never absorbs its dead owner's role, it continues its own brief."""
@@ -637,7 +874,13 @@ def _signal_dead_upstream(
     )
     response = f"leaf {finding.leaf_key or 'unknown'}"
     delivery_state = _post_owner_signal(
-        ctx, owner, message_kind="escalation", ask=ask, response=response, now=now
+        ctx,
+        owner,
+        message_kind="escalation",
+        ask=ask,
+        response=response,
+        now=now,
+        sweep=sweep,
     )
     _log_event(
         ctx,
@@ -653,17 +896,28 @@ def _signal_dead_upstream(
     return SupervisorActionResult("signal-grandparent", finding, delivery_state)
 
 
-def act_on_finding(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> SupervisorActionResult:
+def act_on_finding(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState | None = None,
+) -> SupervisorActionResult:
+    if sweep is None:
+        current = ctx.inbox_store.current()
+        sweep = _SweepState(inbox_current=current, redeliver_budget=ctx.redeliver_budget)
     if finding.kind == "inbox-redeliverable":
-        return _redeliver(ctx, finding, now=now)
+        return _redeliver(ctx, finding, now=now, sweep=sweep)
+    if finding.kind == "inbox-ladder-terminal":
+        return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
     if finding.kind in ("expectation-overdue", "turn-report-stale"):
-        return _auto_nudge(ctx, finding, now=now)
+        return _auto_nudge(ctx, finding, now=now, sweep=sweep)
     if finding.kind == "escalation-due":
-        return _escalate_rung(ctx, finding, now=now)
+        return _escalate_rung(ctx, finding, now=now, sweep=sweep)
     if finding.kind == "dead-upstream":
-        return _signal_dead_upstream(ctx, finding, now=now)
+        return _signal_dead_upstream(ctx, finding, now=now, sweep=sweep)
     if finding.kind in ("pane-signal", "seat-liveness"):
-        return _signal_emit(ctx, finding, now=now)
+        return _signal_emit(ctx, finding, now=now, sweep=sweep)
     return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")
 
 
@@ -678,7 +932,32 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     heartbeat ticks LAST, unconditionally -- even a sweep with zero findings proves supervisor
     liveness (R5).
     """
-    findings = evaluate_predicates(ctx, now=now)
-    actions = tuple(act_on_finding(ctx, finding, now=now) for finding in findings)
-    ctx.heartbeat_store.tick(now=now)
-    return SupervisorSweepResult(findings=tuple(findings), actions=actions, swept_at=now.isoformat())
+    started = perf_counter()
+    current = ctx.inbox_store.current()
+    sweep = _SweepState(
+        inbox_current=current,
+        redeliver_budget=max(1, ctx.redeliver_budget),
+        pending_inbox_count=sum(1 for entry in current.values() if entry.state == "pending"),
+        redeliverable_entries=ctx.inbox_store.list_redeliverable(
+            now=now,
+            rate_limit_seconds=ctx.redeliver_rate_limit_seconds,
+            current=current,
+        ),
+    )
+    findings = evaluate_predicates(ctx, now=now, sweep=sweep)
+    actions = tuple(act_on_finding(ctx, finding, now=now, sweep=sweep) for finding in findings)
+    duration_seconds = perf_counter() - started
+    ctx.heartbeat_store.tick(
+        now=now,
+        pending_inbox_count=sweep.pending_inbox_count,
+        redeliverable_inbox_count=sweep.redeliverable_inbox_count,
+        last_sweep_duration_seconds=duration_seconds,
+    )
+    return SupervisorSweepResult(
+        findings=tuple(findings),
+        actions=actions,
+        swept_at=now.isoformat(),
+        pending_inbox_count=sweep.pending_inbox_count,
+        redeliverable_inbox_count=sweep.redeliverable_inbox_count,
+        duration_seconds=duration_seconds,
+    )

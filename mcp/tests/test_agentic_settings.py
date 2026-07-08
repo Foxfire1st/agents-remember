@@ -443,6 +443,7 @@ class TypedModelTests(unittest.TestCase):
         self.assertEqual(settings.supervisor.interval_seconds, 10.0)
         self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
         self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
+        self.assertEqual(settings.supervisor.redeliver_budget, 250)
 
     def test_supervisor_knobs_parse(self) -> None:
         settings = self._load(
@@ -452,6 +453,7 @@ class TypedModelTests(unittest.TestCase):
                     "intervalSeconds": 5,
                     "staleCutoffSeconds": 30,
                     "redeliverRateLimitSeconds": 45,
+                    "redeliverBudget": 75,
                 }
             }
         )
@@ -460,6 +462,7 @@ class TypedModelTests(unittest.TestCase):
         self.assertEqual(settings.supervisor.interval_seconds, 5.0)
         self.assertEqual(settings.supervisor.stale_cutoff_seconds, 30.0)
         self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 45.0)
+        self.assertEqual(settings.supervisor.redeliver_budget, 75)
 
     def test_supervisor_enabled_must_be_a_boolean(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "supervisor.enabled"):
@@ -468,6 +471,10 @@ class TypedModelTests(unittest.TestCase):
     def test_supervisor_interval_must_be_positive(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "intervalSeconds"):
             self._load({"supervisor": {"intervalSeconds": 0}})
+
+    def test_supervisor_redeliver_budget_must_be_positive(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "redeliverBudget"):
+            self._load({"supervisor": {"redeliverBudget": 0}})
 
     def test_unknown_supervisor_key_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "sweepSeconds"):

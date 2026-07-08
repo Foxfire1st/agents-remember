@@ -531,6 +531,7 @@ def create_app(
             escalation_sla_seconds=settings.escalation.sla_seconds,
             escalation_rung_seconds=settings.escalation.rung_seconds,
             respawn_after_rung=settings.escalation.respawn_after_rung,
+            redeliver_budget=settings.supervisor.redeliver_budget,
         )
 
     async def supervisor_loop() -> None:
@@ -582,6 +583,13 @@ def create_app(
             "ageSeconds": age,
             "staleCutoffSeconds": stale_cutoff,
             "stale": age is None or age >= stale_cutoff,
+            "pendingInboxCount": heartbeat.pendingInboxCount if heartbeat is not None else 0,
+            "redeliverableInboxCount": (
+                heartbeat.redeliverableInboxCount if heartbeat is not None else 0
+            ),
+            "lastSweepDurationSeconds": (
+                heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
+            ),
         }
 
     @app.get("/api/state")

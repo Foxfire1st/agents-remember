@@ -34,6 +34,7 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -331,7 +332,10 @@ class NoHostedSessionTests(_LivenessSimulationCase):
             message_kind="message",
         )
         self.inbox_store.append(entry)
-        ctx = self._ctx(host=cast(TerminalHost, _FakeHost(reachable=False)))
+        ctx = self._ctx(
+            host=cast(TerminalHost, _FakeHost(reachable=False)),
+            escalation_sla_seconds={"message": 1_000_000_000.0, "nudge": 60.0, "escalation": 60.0},
+        )
 
         now = NOW
         for _ in range(PERSISTENT_FAILURE_ATTEMPTS):
@@ -347,6 +351,75 @@ class NoHostedSessionTests(_LivenessSimulationCase):
         self.assertEqual(final.attemptCount, PERSISTENT_FAILURE_ATTEMPTS)
         self.assertIsNotNone(final.escalatedAt)
         self.assertIn("orchestration.supervisor.escalate", self._events())
+
+
+class DeadSeatStormTests(_LivenessSimulationCase):
+    """HFX2-L8: fleet-scale rung-terminal no-hosted-session rows terminate in bounded time."""
+
+    def test_dead_seat_storm_terminates_and_compacts_without_stale_heartbeat(self) -> None:
+        row_count = 2000
+        for index in range(row_count):
+            entry = create_operator_inbox_entry(
+                entry_id=f"storm-{index}",
+                now=NOW.isoformat(),
+                lifecycle_id=None,
+                agent_id=f"dead-seat-{index}",
+                ask="dispatch",
+                response="you are the worker",
+                created_by="manager",
+                created_via="cli",
+                message_kind="message",
+            ).model_copy(
+                update={
+                    "deliveryState": "no-hosted-session",
+                    "attemptCount": PERSISTENT_FAILURE_ATTEMPTS,
+                    "lastAttemptAt": (NOW - timedelta(hours=12)).isoformat(),
+                    "nextAttemptAt": (NOW - timedelta(hours=1)).isoformat(),
+                    "rung": 3,
+                    "escalatedAt": (NOW - timedelta(hours=1)).isoformat(),
+                }
+            )
+            self.inbox_store.append(entry)
+
+        ctx = self._ctx(redeliver_budget=25)
+        started = perf_counter()
+        result = run_supervisor_sweep(ctx, now=NOW)
+        elapsed = perf_counter() - started
+
+        self.assertLess(elapsed, 20.0)
+        self.assertEqual(result.pending_inbox_count, row_count)
+        self.assertEqual(result.redeliverable_inbox_count, row_count)
+        self.assertEqual(result.findings[0].kind, "inbox-ladder-terminal")
+        self.assertEqual(
+            len([action for action in result.actions if action.action == "ladder-resolve"]),
+            row_count,
+        )
+        self.assertEqual([action for action in result.actions if action.action == "redeliver"], [])
+
+        current = self.inbox_store.current()
+        self.assertTrue(all(entry.state == "ladder-resolved" for entry in current.values()))
+        self.assertEqual(
+            self.inbox_store.list_redeliverable(now=NOW + timedelta(seconds=1)),
+            [],
+        )
+
+        heartbeat = self.heartbeat_store.read()
+        assert heartbeat is not None
+        self.assertEqual(heartbeat.sweepCount, 1)
+        self.assertEqual(heartbeat.pendingInboxCount, row_count)
+        self.assertEqual(heartbeat.redeliverableInboxCount, row_count)
+        self.assertIsNotNone(heartbeat.lastSweepDurationSeconds)
+        self.assertIsNone(
+            supervisor_staleness_banner(
+                self.observer_root,
+                now=NOW + timedelta(seconds=30),
+                stale_cutoff_seconds=60.0,
+            )
+        )
+
+        removed = self.inbox_store.compact(now=NOW + timedelta(seconds=1))
+        self.assertGreaterEqual(removed, row_count)
+        self.assertEqual(self.inbox_store.read(), [])
 
 
 class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
@@ -526,7 +599,10 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
                 )
             ),
         )
-        ctx = self._ctx(paster=quota_paster)
+        ctx = self._ctx(
+            paster=quota_paster,
+            escalation_sla_seconds={"message": 1_000_000_000.0, "nudge": 60.0, "escalation": 60.0},
+        )
 
         now = NOW
         for _ in range(PERSISTENT_FAILURE_ATTEMPTS):

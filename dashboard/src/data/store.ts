@@ -77,7 +77,10 @@ const heartbeatEquals = (a: SupervisorHeartbeat | null, b: SupervisorHeartbeat |
     a.lastTickAt === b.lastTickAt &&
     a.ageSeconds === b.ageSeconds &&
     a.staleCutoffSeconds === b.staleCutoffSeconds &&
-    a.stale === b.stale
+    a.stale === b.stale &&
+    a.pendingInboxCount === b.pendingInboxCount &&
+    a.redeliverableInboxCount === b.redeliverableInboxCount &&
+    a.lastSweepDurationSeconds === b.lastSweepDurationSeconds
   );
 };
 

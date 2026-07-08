@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v1"
 
-OperatorInboxState = Literal["pending", "consumed"]
+OperatorInboxState = Literal["pending", "consumed", "ladder-resolved"]
 OperatorInboxVia = Literal["chat", "dashboard", "cli"]
 AgentRole = Literal[
     "developer",
@@ -79,6 +79,8 @@ class OperatorInboxEntry(BaseModel):
     consumedAt: str | None = None
     consumedBy: str | None = None
     consumedVia: OperatorInboxVia | None = None
+    ladderResolvedAt: str | None = None
+    ladderResolvedReason: str | None = None
     # R1 (260707-HFX2-L1): ack semantics -- consume=ack is the ONLY terminal outcome. 'delivered'
     # is never terminal (F-A/F-V proved pasted != perceived), so every delivery attempt -- including
     # a confirmed paste -- stamps a redelivery schedule until the row is actually consumed.
@@ -168,7 +170,7 @@ def consume_operator_inbox_entry(
     consumed_via: OperatorInboxVia,
 ) -> OperatorInboxEntry:
     """Return a consumed snapshot, preserving the original post attribution."""
-    if entry.state == "consumed":
+    if entry.state != "pending":
         return entry
     return entry.model_copy(
         update={

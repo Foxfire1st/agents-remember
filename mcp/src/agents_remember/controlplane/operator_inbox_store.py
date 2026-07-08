@@ -8,6 +8,7 @@ from pathlib import Path
 
 from agents_remember.controlplane.inbox_backoff import (
     DEFAULT_RATE_LIMIT_SECONDS,
+    is_ladder_resolved,
     next_attempt_at,
     redeliverable,
 )
@@ -93,6 +94,7 @@ class OperatorInboxStore:
         delivery_state: InboxDeliveryState,
         delivered_to_session: str | None = None,
         delivery_detail: str | None = None,
+        current: dict[str, OperatorInboxEntry] | None = None,
     ) -> OperatorInboxEntry:
         """Append a delivery-status snapshot for one pending entry.
 
@@ -102,23 +104,23 @@ class OperatorInboxStore:
         clears the redelivery schedule; a still-pending entry always carries a durable next-attempt
         row L2 can sweep, restart-proof.
         """
-        current = self.current().get(entry_id)
-        if current is None:
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        attempt_count = current.attemptCount + 1
-        delivered = current.model_copy(
+        attempt_count = entry.attemptCount + 1
+        delivered = entry.model_copy(
             update={
                 "ts": now,
                 "deliveryState": delivery_state,
-                "deliveredAt": now if delivery_state == "delivered" else current.deliveredAt,
+                "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
                 "deliveredToSession": delivered_to_session,
                 "deliveryDetail": delivery_detail,
                 "attemptCount": attempt_count,
                 "lastAttemptAt": now,
                 "nextAttemptAt": (
                     next_attempt_at(now=datetime.fromisoformat(now), attempt_count=attempt_count)
-                    if current.state == "pending"
-                    else current.nextAttemptAt
+                    if entry.state == "pending"
+                    else entry.nextAttemptAt
                 ),
             }
         )
@@ -130,13 +132,15 @@ class OperatorInboxStore:
         *,
         now: datetime,
         rate_limit_seconds: float | None = None,
+        current: dict[str, OperatorInboxEntry] | None = None,
     ) -> list[OperatorInboxEntry]:
         """Pending rows past their backoff window and clear of the per-target rate limit (R3).
 
         The pure selection L2's sweep drives redelivery from; this store never redelivers on its
         own (no in-memory timer -- the sweep is the only caller of ``deliver_inbox_entry`` again).
         """
-        pending = [entry for entry in self.current().values() if entry.state == "pending"]
+        entries = self.current() if current is None else current
+        pending = [entry for entry in entries.values() if entry.state == "pending"]
         return redeliverable(
             pending,
             now=now,
@@ -145,31 +149,70 @@ class OperatorInboxStore:
             ),
         )
 
-    def mark_escalated(self, entry_id: str, *, now: str) -> OperatorInboxEntry:
+    def mark_escalated(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
         """Stamp ``escalatedAt`` once the ladder (HFX2-L4) escalates an unacked row.
 
         This leaf only reserves the field -- it never calls this itself; redelivery keeps running
         until either ack or this mark, per R3.
         """
-        current = self.current().get(entry_id)
-        if current is None:
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        escalated = current.model_copy(update={"ts": now, "escalatedAt": now})
+        escalated = entry.model_copy(update={"ts": now, "escalatedAt": now})
         self.append(escalated)
         return escalated
 
-    def advance_rung(self, entry_id: str, *, rung: int, now: str) -> OperatorInboxEntry:
+    def advance_rung(
+        self,
+        entry_id: str,
+        *,
+        rung: int,
+        now: str,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
         """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
         ``now`` so the NEXT rung's SLA is measured from this transition, not the row's original
         creation. Distinct from :meth:`mark_escalated` (HFX2-L2's reserved "this row is now
         escalatable" stamp, rung-agnostic) -- the ladder is the only caller of this method.
         """
-        current = self.current().get(entry_id)
-        if current is None:
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        advanced = current.model_copy(update={"ts": now, "rung": rung, "escalatedAt": now})
+        advanced = entry.model_copy(update={"ts": now, "rung": rung, "escalatedAt": now})
         self.append(advanced)
         return advanced
+
+    def mark_ladder_resolved(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        reason: str,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> tuple[OperatorInboxEntry, bool]:
+        """Terminally resolve a ladder-complete row without treating it as an ack."""
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        if is_ladder_resolved(entry):
+            return entry, False
+        resolved = entry.model_copy(
+            update={
+                "ts": now,
+                "state": "ladder-resolved",
+                "ladderResolvedAt": now,
+                "ladderResolvedReason": reason,
+                "nextAttemptAt": None,
+            }
+        )
+        self.append(resolved)
+        return resolved, True
 
     def consume(
         self,
@@ -183,7 +226,7 @@ class OperatorInboxStore:
         current = self.current().get(entry_id)
         if current is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        if current.state == "consumed":
+        if current.state != "pending":
             return current, False
         consumed = consume_operator_inbox_entry(
             current,
@@ -240,3 +283,11 @@ class OperatorInboxStore:
             encoding="utf-8",
         )
         os.replace(tmp, path)
+
+    def _entry_from_current(
+        self,
+        entry_id: str,
+        current: dict[str, OperatorInboxEntry] | None,
+    ) -> OperatorInboxEntry | None:
+        entries = self.current() if current is None else current
+        return entries.get(entry_id)

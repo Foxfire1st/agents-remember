@@ -32,6 +32,7 @@ from agents_remember.serving.supervisor import (
     evaluate_escalation_findings,
     evaluate_expectation_findings,
     evaluate_inbox_findings,
+    evaluate_ladder_terminal_findings,
     evaluate_pane_findings,
     evaluate_seat_liveness_findings,
     evaluate_turn_report_findings,
@@ -250,6 +251,27 @@ class InboxPredicateTests(unittest.TestCase):
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].source_id, "e1")
 
+    def test_terminal_ladder_row_for_dead_seat_fires_ladder_terminal_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = OperatorInboxStore(root / "observer")
+            catalog = TerminalCatalog(root / "catalog.json")
+            entry = create_operator_inbox_entry(
+                entry_id="e1",
+                now=NOW.isoformat(),
+                lifecycle_id=None,
+                agent_id="dead-seat",
+                ask="ask",
+                response="resp",
+                created_by="system",
+                created_via="cli",
+            ).model_copy(update={"rung": 3})
+            store.append(entry)
+            findings = evaluate_ladder_terminal_findings(store, catalog)
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0].kind, "inbox-ladder-terminal")
+            self.assertEqual(findings[0].source_id, "e1")
+
 
 class SeatLivenessPredicateTests(unittest.TestCase):
     def test_stale_turn_state_past_cutoff_fires(self) -> None:
@@ -301,8 +323,8 @@ class SweepIntegrationTests(unittest.TestCase):
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
 
-    def _ctx(self) -> SupervisorContext:
-        return SupervisorContext(
+    def _ctx(self, **overrides: object) -> SupervisorContext:
+        base: dict[str, object] = dict(
             catalog=self.catalog,
             host=cast(TerminalHost, _FakeHost()),
             paster=_fake_paster(),
@@ -314,6 +336,8 @@ class SweepIntegrationTests(unittest.TestCase):
             coordination_root=self.coordination_root,
             stale_seat_seconds=60.0,
         )
+        base.update(overrides)
+        return SupervisorContext(**base)  # type: ignore[arg-type]
 
     def test_seeded_drift_produces_expected_actions_and_ticks_heartbeat(self) -> None:
         # A worker seat spawned by a manager seat -- the routing edge signal-emit/auto-nudge walk.
@@ -448,6 +472,56 @@ class SweepIntegrationTests(unittest.TestCase):
         heartbeat = self.heartbeat_store.read()
         assert heartbeat is not None
         self.assertEqual(heartbeat.sweepCount, 2)
+
+    def test_terminal_dead_seat_row_becomes_ladder_resolved_not_redelivered(self) -> None:
+        entry = create_operator_inbox_entry(
+            entry_id="dead-row",
+            now=NOW.isoformat(),
+            lifecycle_id=None,
+            agent_id="missing-seat",
+            ask="ask",
+            response="resp",
+            created_by="system",
+            created_via="cli",
+        ).model_copy(update={"rung": 3})
+        self.inbox_store.append(entry)
+
+        result = run_supervisor_sweep(self._ctx(), now=NOW)
+
+        actions = {action.action: action for action in result.actions}
+        self.assertIn("ladder-resolve", actions)
+        self.assertNotIn("redeliver", actions)
+        resolved = self.inbox_store.current()["dead-row"]
+        self.assertEqual(resolved.state, "ladder-resolved")
+        event_kinds = {event.kind for event in self.event_store.read(None)}
+        self.assertIn("orchestration.supervisor.ladder-resolved", event_kinds)
+
+    def test_redeliver_budget_limits_attempts_and_heartbeat_reports_backlog(self) -> None:
+        for index in range(3):
+            self.inbox_store.append(
+                create_operator_inbox_entry(
+                    entry_id=f"row-{index}",
+                    now=NOW.isoformat(),
+                    lifecycle_id=None,
+                    agent_id=f"missing-seat-{index}",
+                    ask="ask",
+                    response="resp",
+                    created_by="system",
+                    created_via="cli",
+                )
+            )
+
+        result = run_supervisor_sweep(self._ctx(redeliver_budget=1), now=NOW)
+
+        redeliver_actions = [action for action in result.actions if action.action == "redeliver"]
+        self.assertEqual(len(redeliver_actions), 1)
+        self.assertEqual(result.pending_inbox_count, 3)
+        self.assertEqual(result.redeliverable_inbox_count, 3)
+        heartbeat = self.heartbeat_store.read()
+        assert heartbeat is not None
+        self.assertEqual(heartbeat.pendingInboxCount, 3)
+        self.assertEqual(heartbeat.redeliverableInboxCount, 3)
+        self.assertIsNotNone(heartbeat.lastSweepDurationSeconds)
 
 
 class EscalationPredicateTests(unittest.TestCase):

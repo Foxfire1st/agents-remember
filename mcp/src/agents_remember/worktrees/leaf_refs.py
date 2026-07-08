@@ -276,7 +276,10 @@ def _read_optional_task_document(path: Path) -> TaskDocument | None:
 
 
 def _has_task_doc_schema_marker(path: Path) -> bool:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
     return isinstance(data, dict) and data.get("schema") == TASK_DOCUMENT_SCHEMA
 
 

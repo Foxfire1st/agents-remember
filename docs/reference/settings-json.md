@@ -377,6 +377,19 @@ Detection still gates dispatch; an id known nowhere refuses loudly pointing
 at the manual. Schema, semantics, and a worked add-`hermes` example:
 `docs/reference/harnesses.md`.
 
+### orchestration.supervisor
+
+`orchestration.supervisor` configures the deterministic supervisor sweep. All
+fields are optional; an empty block keeps the safe defaults.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `enabled` | `true` | Turns the sweep loop on or off. |
+| `intervalSeconds` | `10` | Sweep cadence. |
+| `staleCutoffSeconds` | `60` | Age after which the supervisor heartbeat is reported stale. |
+| `redeliverRateLimitSeconds` | store default | Per-row floor between redelivery attempts; omitted inherits the inbox-store default. |
+| `redeliverBudget` | `250` | Maximum inbox redelivery attempts per sweep. Large backlogs are spread across sweeps while the heartbeat keeps ticking. |
+
 ### orchestration.concurrency, orchestration.spawn
 
 `orchestration.concurrency` caps parallel orchestration fan-out:

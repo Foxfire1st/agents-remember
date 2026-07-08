@@ -121,7 +121,13 @@ KNOWN_SPAWN_FIELDS = frozenset({"harness"})
 # flag, self-liveness staleness cutoff, and the inbox redelivery rate limit (the sweep's own
 # reuse of OperatorInboxStore.list_redeliverable's rate_limit_seconds, R3/R4a).
 KNOWN_SUPERVISOR_FIELDS = frozenset(
-    {"enabled", "intervalSeconds", "staleCutoffSeconds", "redeliverRateLimitSeconds"}
+    {
+        "enabled",
+        "intervalSeconds",
+        "staleCutoffSeconds",
+        "redeliverRateLimitSeconds",
+        "redeliverBudget",
+    }
 )
 # R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-kind ack SLA, per-rung timings,
 # the renudge rate limit (reusing the OrchestrationNudgeStore rate-limit pattern), and the rung a
@@ -131,6 +137,7 @@ KNOWN_ESCALATION_FIELDS = frozenset(
 )
 DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
 DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
+DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 250
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
@@ -294,6 +301,7 @@ class SupervisorSettings:
     interval_seconds: float = DEFAULT_SUPERVISOR_INTERVAL_SECONDS
     stale_cutoff_seconds: float = DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
     redeliver_rate_limit_seconds: float | None = None
+    redeliver_budget: int = DEFAULT_SUPERVISOR_REDELIVER_BUDGET
 
 
 @dataclass(frozen=True)
@@ -1204,11 +1212,19 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
         if "redeliverRateLimitSeconds" in block
         else None
     )
+    redeliver_budget = (
+        _require_positive_int(
+            block["redeliverBudget"], "orchestration.supervisor.redeliverBudget", source
+        )
+        if "redeliverBudget" in block
+        else DEFAULT_SUPERVISOR_REDELIVER_BUDGET
+    )
     return SupervisorSettings(
         enabled=enabled,
         interval_seconds=interval_seconds,
         stale_cutoff_seconds=stale_cutoff_seconds,
         redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
+        redeliver_budget=redeliver_budget,
     )
 
 
