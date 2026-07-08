@@ -103,11 +103,18 @@ stops belong to the orchestrator via the system-specialist protocol.
   leaf-level review; **this is not an adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
   (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
   genuinely new changes.
-- **Curator memory pass** — after builder code is ready and the reviewer verdict is available,
-  spawn a **fresh curator** (`roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`) for the leaf's
-  onboarding-only pass. The curator receives the leaf task doc, notes/reports, builder changed
-  paths/code diff, and reviewer verdict; it writes onboarding only and returns a memory-pass report.
-  Leaf closeout inputs are exactly: **builder code + reviewer verdict + curator memory pass**.
+- **Curator memory pass — mandatory, not skippable.** After builder code is ready and the reviewer
+  verdict is available (when the leaf tier ran one), compile a brief from
+  `../templates/curator-brief.md` carrying the leaf's **landed change set** (code diff over the
+  leaf contract's recorded base-to-head range, with paths/counters — pulled from the leaf contract,
+  never guessed), the **leaf task doc**, and **notes/** (builder turn report + reviewer verdict),
+  then spawn a **fresh curator** (`roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`) with it.
+  The curator routes each fed piece to the right onboarding home (specific sidecar or governing
+  overview; the L3 Operational-Notes target is last-resort only) and writes onboarding only,
+  returning a memory-pass report. **Do not run the closeout preview before this pass exists** — the
+  `c-12-closeout` skill's missing-onboarding and changed-sidecar checks are this pass's output, not
+  something this seat patches inline. Leaf closeout inputs are exactly: **builder code + reviewer
+  verdict + curator memory pass**.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the

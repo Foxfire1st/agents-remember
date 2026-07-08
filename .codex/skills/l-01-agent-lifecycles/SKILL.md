@@ -255,10 +255,13 @@ reuse, complexity thresholds) lives in the same block — meaning in
 - `lenses.md` — the four job lenses for the scoping seats.
 - `roles/…` — the nine self-contained role lifecycles (the registry above).
 - `templates/…` — turn-report · worker-brief · manager-brief (`ROLE BRIEF — manager`; the
-  orchestrator compiles a manager's session start from it) · master-handover-packet ·
-  conversation-handover-packet · verdict · impact-analysis · onboarding-coherency ·
-  deep-research-report · orchestration-task (the strategist's sprint plan). Spawning seats compile
-  briefs FROM these; sub-agents fan out and fill them, so analysis survives compaction.
+  orchestrator compiles a manager's session start from it) · curator-brief (`ROLE BRIEF — curator`;
+  the manager compiles a curator's session start from it, feeding the leaf's landed change set +
+  task doc + notes/ — never spawned before builder code and the reviewer verdict exist) ·
+  master-handover-packet · conversation-handover-packet · verdict · impact-analysis ·
+  onboarding-coherency · deep-research-report · orchestration-task (the strategist's sprint plan).
+  Spawning seats compile briefs FROM these; sub-agents fan out and fill them, so analysis survives
+  compaction.
 - `criteria/…` — the reviewer criteria catalogs (code-seam · doctrine · onboarding-memory ·
   report-verification · plan-review), the review test bench the three-party loop binds; maintained
   through the promotion ratchet, never made up on the spot.

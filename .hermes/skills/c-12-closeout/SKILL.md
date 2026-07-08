@@ -15,6 +15,18 @@ direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
 worktree start, attach, status, integration, lifecycle finalization, and cleanup;
 use this skill for the closeout gate and code-memory-ledger commit order.
 
+**Seat note (manager -> builder -> reviewer -> curator chain):** in that chain, the builder produces
+code and a turn report only — it does not author onboarding. The dedicated curator seat
+(`l-01-agent-lifecycles` `roles/curator.md`) runs the `c-05-create-or-update-onboarding-files` skill
+as its own fresh pass, fed the leaf's landed change set, task doc, and notes/, BEFORE the owning
+seat (the manager) runs this skill's closeout preview. Everywhere below that says "create" or
+"refresh" onboarding, that authoring already happened in the curator's pass; the seat running
+closeout **verifies** the curator's output against the checks in this skill, it does not author
+onboarding inline to make a failing check pass. A check that still fails after the curator pass is a
+closeout failure — respawn/rerun the curator, do not patch onboarding from the closeout seat. This
+distinction does not apply outside that chain (e.g. a solo flat session with no separate curator
+seat still runs `c-05-create-or-update-onboarding-files` itself before closing out).
+
 ## MCP Tools
 
 Use the worktree closeout tools against the task contract:
@@ -130,17 +142,22 @@ python -m agents_remember.memory_quality.integrity.check_missing_onboarding --co
 ```
 
 The check only evaluates files that are new in the current checkout or
-worktree, not the whole historical repository. If it reports missing
-onboarding, create those sidecars through the `c-05-create-or-update-onboarding-files` skill before committing code. After
-the code commit exists, refresh the new sidecars' verification metadata to that
-commit during the normal post-code-commit memory refresh.
+worktree, not the whole historical repository. In the manager -> builder ->
+reviewer -> curator chain, this check is expected to already pass by the time the owning seat runs
+it, because the curator's memory pass created those sidecars through the
+`c-05-create-or-update-onboarding-files` skill before this precondition is checked; running the
+check here confirms that pass, it is not the trigger to author onboarding from the closing seat. If
+it still reports missing onboarding, do not create the sidecars inline — escalate to run (or rerun)
+the curator's memory pass, then rerun this check. After the code commit exists, refresh the new
+sidecars' verification metadata to that commit during the normal post-code-commit memory refresh.
 
 Changed (already-onboarded) source files have a parallel requirement: their
 sidecar content must be updated to approved current state before closeout. The
 closeout gate rejects any changed source file whose existing sidecar body was
 not modified in the current task, because advancing verification metadata over
-stale content defeats the commit-hash-based drift check. Update changed sidecars
-during implementation, not at the metadata-refresh step.
+stale content defeats the commit-hash-based drift check. In the curator chain, changed sidecars are
+updated during the curator's memory pass, not at the metadata-refresh step, and not by the builder
+during implementation.
 
 The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
@@ -159,11 +176,15 @@ deliberately through the `c-05-create-or-update-onboarding-files` skill.
 
 External-memory closeout order is:
 
-1. run `check_missing_onboarding` against current additions
-2. create missing onboarding for newly added eligible source files before committing code
+1. run `check_missing_onboarding` against current additions (in the curator chain, this confirms the
+   curator's pass already covered them — it is not the cue to author onboarding here)
+2. if onboarding is still missing, escalate to run/rerun the curator's memory pass through the
+   `c-05-create-or-update-onboarding-files` skill before committing code (solo flat sessions with no
+   separate curator seat create it directly)
 3. commit code changes and capture `C2` plus its commit date
 4. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
-5. verify each changed source file's sidecar content was updated in this task, then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
+5. verify each changed source file's sidecar content was updated in this task (by the curator's pass
+   in the chain above), then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
 6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
 7. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
 8. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
@@ -214,9 +235,11 @@ preview and apply payloads for the commit-approval relay.
 Worktree closeout also fails when the recorded code or external-memory source
 branch moved since task start.
 
-Missing onboarding is the expected hard failure when the implementation/update
-pass did not produce a required onboarding file. The next step is to run the `c-05-create-or-update-onboarding-files` skill
-for that source file, then rerun the closeout preview.
+Missing onboarding is the expected hard failure when the required onboarding file was not produced —
+in the manager -> builder -> reviewer -> curator chain that means the curator's memory pass did not
+cover it. The next step is to run (or rerun) the curator's `c-05-create-or-update-onboarding-files`
+pass for that source file, then rerun the closeout preview; a solo flat session with no separate
+curator seat runs that skill itself.
 
 ## Boundaries
 

@@ -32,9 +32,12 @@ master's leaf loop to the master-exit seam, then hand over.
 - Worker spawns: `templates/worker-brief.md`, `env={"AR_SPAWN_ROLE": "worker"}`, qualified leaf
   keys; knob overrides: <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
-  builder code + reviewer verdict + curator memory pass.
-- Curator spawns: `roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per leaf after the
-  builder code and reviewer verdict are available; curator writes onboarding only.
+  builder code + reviewer verdict + curator memory pass — never before the curator pass exists.
+- Curator spawns: `../templates/curator-brief.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per
+  leaf after builder code and the reviewer verdict are available; the brief FEEDS the landed
+  change set (leaf contract's base-to-head range) + the leaf task doc + notes/ — the curator routes
+  each to the right onboarding home (specific sidecar or governing overview; L3 Operational-Notes
+  last-resort only) and writes onboarding only.
 - Concurrency: <max parallel leaves or "sequential">.
 - Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have

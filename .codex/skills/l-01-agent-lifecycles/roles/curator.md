@@ -7,17 +7,27 @@
 ## What This Seat Is
 
 **One fresh seat per leaf memory pass.** Spawned after the builder has produced code and the
-reviewer has produced the verdict for the leaf. The curator receives the leaf task doc, relevant
-notes/reports, the builder's changed-path/code-diff evidence, and the reviewer verdict. It writes
-onboarding only: file sidecars, route overviews when genuinely affected, route indexes, and the
-repo entity catalog when a real entity changed.
+reviewer has produced the verdict for the leaf, from `../templates/curator-brief.md`. The brief
+FEEDS the curator three inputs — it never infers them from transcript memory: the leaf's **landed
+change set** (code diff over the leaf's base-to-head range, with counters/paths — the manager pulls
+this from the leaf contract's recorded range, not a guess), the **leaf task doc**, and **notes/**
+(the builder turn report and, when the leaf ran a loop, the reviewer verdict). It writes onboarding
+only: file sidecars, route overviews when genuinely affected, route indexes, and the repo entity
+catalog when a real entity changed.
+
+During leaf work, onboarding create/update duty belongs to this seat, not the builder: the builder
+produces code + a turn report only (`../roles/worker.md`), and this seat is where the
+`c-05-create-or-update-onboarding-files` skill runs. The strict 1-to-1 source mapping,
+governing-overview links, and metadata rules that skill enforces are unchanged — only the writing
+seat moved here.
 
 The curator never writes code, never decides gates, never mutates task-doc state, and never performs
 closeout/integration/finalization. Those remain the owning seat's machinery. The manager closes a
-leaf from three inputs: **builder code + reviewer verdict + curator memory pass**.
-
-This role ratifies the seat and chain only. Change-set feeding, c-12/c-05 process rewiring, and
-tool-level closeout enforcement stay outside this leaf.
+leaf from three inputs: **builder code + reviewer verdict + curator memory pass** — the `c-12-closeout`
+skill's missing-onboarding and changed-sidecar checks are satisfied by THIS pass, before the manager
+ever runs the closeout preview. If those checks still fail after this pass, that is a closeout
+failure to escalate back to a respawned curator pass, never something the closing seat patches
+inline.
 
 ## Role-Seat Immutability
 
@@ -35,10 +45,11 @@ brief -> intake -> inspect diff + evidence -> write onboarding -> indexes/checks
 
 ### 1 — Intake
 
-Read the brief fully, then the leaf task doc, builder turn report, reviewer verdict, changed-path
-list, and any notes the owning seat names. Confirm the code worktree and memory worktree paths. If
-the diff/evidence is missing or ambiguous enough that onboarding would become guesswork, ask the
-owning seat for one clarification row; do not infer a change set from transcript memory.
+Read the brief fully, then the leaf task doc, builder turn report, reviewer verdict, the FED
+change-set (paths + counters over the leaf's base-to-head range), and any notes the owning seat
+names. Confirm the code worktree and memory worktree paths. If the diff/evidence is missing or
+ambiguous enough that onboarding would become guesswork, ask the owning seat for one clarification
+row; do not infer a change set from transcript memory.
 
 ### 2 — Inspect
 
@@ -49,11 +60,17 @@ needs reference checking, but the main curator session owns every durable write.
 
 ### 3 — Write Onboarding Only
 
+Route every change-set item and every notes/ item to the RIGHT onboarding home — the specific
+sidecar or the overview whose subject it actually is. Overview-dumping (writing everything into the
+nearest overview because it is easiest) is rejected as a default:
+
 - Changed source files: update/create their file-level sidecars with real body changes and newest
   update-history entries.
 - Route overviews: update bodies when route meaning changed; otherwise record an explicit reviewed
   no-impact history entry only when that overview was reviewed.
 - Entity catalog: update only for real load-bearing entity changes.
+- A notes/ item with no file, route, or entity home routes to the L3 Operational-Notes target —
+  LAST RESORT ONLY, never the default drop point for a finding that is merely inconvenient to place.
 - Generated route indexes: regenerate locally with `build_route_indexes(...)` from the memory
   worktree.
 

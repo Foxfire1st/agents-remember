@@ -1,0 +1,83 @@
+# Template — Curator Brief
+
+The dispatch packet the **manager** (or the architect in a flat series) compiles for a **curator**,
+spawned fresh per leaf after builder code exists and the reviewer verdict is available. **The brief
+is the curator's entire session start** — it replaces the front half the spawner already ran. This
+is the change-set feeding contract: the curator never infers a change set from transcript memory,
+it is FED the landed change set, the leaf task doc, and notes/ as inputs.
+
+Spawn with `env={"AR_SPAWN_ROLE": "curator"}` and the **qualified** leaf key
+`<repository>/<master>/<docId>` so the session-start router and the dashboard leaf rail both engage.
+
+---
+
+```md
+ROLE BRIEF — curator
+
+# CURATOR BRIEF — <leaf-id> · <leaf title>
+
+You are the CURATOR for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
+`skills/l-01-agent-lifecycles/roles/curator.md`; this brief is your session start. Write the leaf's
+memory pass from the inputs below, then stop.
+
+## Worktrees
+- Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`) — read-only for you.
+- Memory: `<memory-worktree-path>` (branch `<memory-work-branch>`) — your only write surface.
+
+## The landed change set (fed, not inferred)
+- Code diff: `<base-commit>..<worker-head-commit-or-HEAD>` in the code worktree — <changed-path
+  list, or the dashboard change-set view ref (`/api/changeset/task` scope, or the leaf's
+  `committed`/`working` change-set) the manager pulled it from>.
+- Memory diff (if any pre-existing memory-worktree changes carry forward): `<memory-base>..<HEAD>`.
+- Counters: `<files changed / insertions / deletions>` from the change-set the manager attached —
+  do not re-derive this from your own guess at "what probably changed."
+
+## Task inputs
+- Leaf task doc: `<leaf-doc-path>` (read it first — objective, requirements, decision log).
+- notes/: `<series-notes-path>` — the builder turn report
+  (`notes/reports/<leaf-id>-worker-report.md`), the reviewer verdict when this leaf ran a loop, and
+  any other task-local notes naming a factual current-state clarification.
+
+## Routing rule (mgmt-L4 design — apply this before writing anything)
+Route each piece of the change set and each notes/ item to the RIGHT onboarding home:
+1. A concrete source file's own sidecar, when the change is about that file's behavior.
+2. The nearest governing route-local overview, when the change is about route/package shape or
+   crosses several files in one route.
+3. The repo entity catalog, only for a real load-bearing cross-layer entity change.
+4. The L3 Operational-Notes target is LAST RESORT ONLY — use it when a finding is real but has no
+   file, route, or entity home; never as the default drop point for convenience.
+Overview-dumping (writing everything into the nearest overview because it is easiest) is rejected.
+
+## Tool surface
+- Native reads in the code worktree; native reads/edits in the memory worktree.
+- `c-05-create-or-update-onboarding-files` skill workflows for sidecars and entity catalogs.
+- Local `route_index_refresh`-equivalent (`build_route_indexes(...)`) from the memory worktree.
+- Inbox for one clarification row back to <owning-seat contact> if the fed change set is missing or
+  ambiguous — never invent a change set from memory.
+- No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_quality_check`-mutating tools beyond
+  what your role file names, no code edits.
+
+## Checks (before you report)
+- `git diff --check` in the memory worktree.
+- Any onboarding/reference checks the brief or your role file names.
+
+## Memory-pass report (mandatory, last act)
+Write `<notes-reports-path>/<leaf-id>-curator-report.md`: changed onboarding files (with which
+change-set item or notes/ item each one routes to and why), route index results, reference checks,
+blockers, and the exact commands run. This report — together with the builder's code and the
+reviewer's verdict — is exactly the manager's three closeout inputs.
+```
+
+---
+
+**Compiler notes for the manager.**
+
+- Fill every `<placeholder>`; a brief with an unresolved placeholder is not dispatchable.
+- Pull the change-set counters/paths from the leaf's actual landed range (the leaf contract's
+  recorded base commit through the builder's current HEAD/worktree state) — do not hand the curator
+  a stale or guessed diff.
+- Attach the builder turn report and (when the leaf ran a loop) the reviewer verdict as the notes/
+  inputs; the curator does not re-request evidence that already exists in `notes/reports/`.
+- Deliver as an echo-confirmed paste; only count delivery on a post-boot echo.
+- This brief runs strictly AFTER builder code exists and the reviewer verdict (when the leaf tier
+  requires one) is available — never before, and never in place of either.
