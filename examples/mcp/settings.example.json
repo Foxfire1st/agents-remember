@@ -26,5 +26,9 @@
     "failSafeEnabled": true,
     "memoryDegradedRatio": 0.8,
     "memoryCriticalRatio": 0.92
+  },
+  "retirement": {
+    "autoRetireOnIntegration": true,
+    "autoRetireOnFinalize": true
   }
 }

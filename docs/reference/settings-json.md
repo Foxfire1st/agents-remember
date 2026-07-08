@@ -138,6 +138,10 @@ watch settings internally.
     "failSafeEnabled": true,
     "memoryDegradedRatio": 0.8,
     "memoryCriticalRatio": 0.92
+  },
+  "retirement": {
+    "autoRetireOnIntegration": true,
+    "autoRetireOnFinalize": true
   }
 }
 ```
@@ -232,6 +236,12 @@ stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
 `probeCriticalMs`, `setupFailureDegradedStreak`,
 `setupFailureCriticalStreak`, and `recentSampleLimit`. Unknown
 `providerDegradation` keys are rejected.
+
+`retirement` (optional, 260707-HFX-L8) configures the auto-retire hooks for
+worktree-backed tmux seats. `autoRetireOnIntegration` and
+`autoRetireOnFinalize` (both default `true`) gate whether integrating or
+finalizing a leaf automatically retires its hosted terminal seat. Unknown
+`retirement` keys are rejected.
 
 `orchestration` in the authority file is LEGACY territory (260703-L13): the
 agentic family moved to the global agentic settings file documented below. For

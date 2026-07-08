@@ -20,6 +20,8 @@ AgentRole = Literal[
     "worker",
     "reviewer",
     "system-specialist",
+    "architect",
+    "curator",
     "agent",
     "system",
 ]
@@ -31,6 +33,8 @@ InboxMessageKind = Literal[
     "nudge",
     "escalation",
     "degradation-alert",
+    "decision-item",
+    "decision-ruling",
 ]
 InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconfirmed"]
 

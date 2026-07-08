@@ -275,6 +275,68 @@ class OperatorInboxToolTests(unittest.TestCase):
                 recipient_role=None,
             )
 
+    def test_decision_item_relay_round_trip_between_orchestrator_and_architect(self) -> None:
+        # HFX-L6 doctrine (architect.md/orchestrator.md/SKILL.md) mandates this exact call shape.
+        # Master-exit Finding 1: the schema rejected it with a ValidationError before this leaf.
+        posted_item = inbox_tools.operator_inbox_post_payload(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            agent_id=None,
+            ask="Ratify the escalation-ladder change?",
+            response="See notes/reports/decision-context.md",
+            created_by="orchestrator",
+            created_via="cli",
+            sender_role="orchestrator",
+            recipient_role="architect",
+            message_kind="decision-item",
+            deliver_to_hosted=False,
+        )
+        self.assertEqual(posted_item["messageKind"], "decision-item")
+        self.assertEqual(posted_item["recipientRole"], "architect")
+
+        polled = inbox_tools.operator_inbox_poll_payload(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            agent_id=None,
+            recipient_role="architect",
+        )
+        self.assertEqual(polled["entryCount"], 1)
+        self.assertEqual(polled["entries"][0]["messageKind"], "decision-item")
+
+        posted_ruling = inbox_tools.operator_inbox_post_payload(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            agent_id=None,
+            ask="Ruling on the escalation-ladder change",
+            response="Ratified as proposed.",
+            created_by="architect",
+            created_via="cli",
+            sender_role="architect",
+            recipient_role="orchestrator",
+            message_kind="decision-ruling",
+            deliver_to_hosted=False,
+        )
+        self.assertEqual(posted_ruling["messageKind"], "decision-ruling")
+        self.assertEqual(posted_ruling["recipientRole"], "orchestrator")
+
+    def test_plain_message_addressed_to_architect_and_curator_succeeds(self) -> None:
+        for role in ("architect", "curator"):
+            posted = inbox_tools.operator_inbox_post_payload(
+                None,  # type: ignore[arg-type]
+                lifecycle_id="L1",
+                agent_id=None,
+                ask="FYI",
+                response="Nothing to action.",
+                created_by="developer",
+                created_via="dashboard",
+                sender_role="developer",
+                recipient_role=role,
+                message_kind="message",
+                deliver_to_hosted=False,
+            )
+            self.assertEqual(posted["recipientRole"], role)
+            self.assertEqual(posted["messageKind"], "message")
+
 
 class OperatorInboxDeliveryTests(unittest.TestCase):
     def setUp(self) -> None:

@@ -107,12 +107,17 @@ const roleChip = cva({
         borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)",
       },
       strategist: { color: "gold" },
+      designer: {
+        color: "gold",
+        borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)",
+      },
       manager: {
         color: "purple",
         borderColor: "color-mix(in oklch, token(colors.purple) 45%, transparent)",
       },
       worker: { color: "cyan" },
       curator: { color: "cyan" },
+      "system-specialist": { color: "cyan" },
       reviewer: { color: "amber" },
     },
   },
@@ -121,9 +126,11 @@ const ROLE_VALUES = [
   "architect",
   "orchestrator",
   "strategist",
+  "designer",
   "manager",
   "worker",
   "curator",
+  "system-specialist",
   "reviewer",
 ] as const;
 type KnownRole = (typeof ROLE_VALUES)[number];
