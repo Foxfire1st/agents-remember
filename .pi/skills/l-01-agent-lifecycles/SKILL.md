@@ -36,6 +36,42 @@ One exception to the no-cross-reading rule above: **a seat that WEARS a hat runs
 as its own** — the architect may wear `roles/designer.md`, and in solo/flat runs may wear backend
 or build hats (the hat-collapse rule). A spawned role seat never wears another role's hat.
 
+## Developer-Declared Task-Seat Takeover
+
+When the developer says *"you are the orchestrator/manager/worker for task X"* (or equivalent),
+that is a **task-seat takeover**, not a loose role hint. The named task leaf is the seat. Before
+analysis, profile checks, spawning, or implementation, open the named task doc and attach the
+current dashboard chat to that leaf.
+
+Operational checklist:
+
+1. Resolve the named task to the **qualified** leaf key `<repository>/<master>/<docId>`.
+2. Use the dashboard terminal catalog session id for this chat — not `CLAUDE_CODE_SESSION_ID`, not
+   `CODEX_THREAD_ID`.
+3. Call `attach_terminal_session_to_leaf` with that qualified leaf key.
+4. Rename the session to the seat label the developer expects.
+5. Verify the terminal catalog and dashboard row show the attachment before continuing.
+
+If no dashboard terminal catalog session id can be found, record the blocker and ask for the
+missing attachment path. Do not claim the seat is attached until the catalog/dashboard row proves
+it. After the attachment is verified, continue with the lifecycle selected above.
+
+## Developer Clarification Triage
+
+When the developer clarifies a rule, boundary, or desired behavior during an active task, decide
+whether it is **current implementation** or **future queue** before writing only a note.
+
+Treat it as current implementation when all of these are true: it is close to the task already
+being edited, small enough to fit the current change set, and clearly improves the same doctrine or
+code path. In that case, extend the current task doc and implement it now.
+
+Treat it as future queue when it names a later release, a separate subsystem, a large scope jump, or
+work whose correctness depends on another unfinished master. Record the item in the right durable
+queue or ask the owning seat to plan it later. If the intent is ambiguous, ask the developer
+directly whether they want immediate implementation or a queued note; do not silently downgrade a
+close/current/small change into future speak, and do not silently expand the active leaf when the
+fit is unclear.
+
 ## The Role Registry
 
 | Role | Seat | Lifecycle file |
@@ -184,6 +220,25 @@ workflow-free) are configured per level in the `orchestration.loops` settings bl
 `docs/reference/settings-json.md`; stored in the global agentic settings file with repo-local
 override, parsed by the kernel agentic-settings loader — L13, landed). The strategist's mandatory
 pre-run is doctrine, not a knob — it is unconditional.
+
+## Delegated Series Authority
+
+Once the developer accepts an orchestrated series/portfolio plan, that acceptance is standing
+authority for the owning seats to execute the subordinate edges in that series. Managers govern
+their workers and leaf closeouts. The orchestrator governs managers, master handovers, master →
+super integrations, and the same closeout/finalize/cleanup mechanics when it wears a manager or
+worker hat in a flat/direct run. These edges do **not** stop for a new developer approval just
+because a commit, lifecycle finalization, cleanup, or integration command is next; the owner runs
+the preview/check, records the accepted-series authority in the intent note or decision log, and
+continues.
+
+This does **not** weaken the escalation ladder. Developer approval is still required for the final
+completed super integration branch / PR-carryover gate, for any human-pinned gate that is actually
+raised (`integration-approval`, `push-approval`, `cleanup-approval`), for scope changes beyond the
+accepted plan, for red checks that cannot be fixed inside the task, and for quo-vadis decisions.
+Owner-never-self-approves means verdicts and delegated gates need the configured distinct decider;
+it does not force a developer hand-off for mechanical closeout of in-scope work the owning seat
+performed directly under standing series authority.
 
 ## Knob Block & Capability Doctrine (no per-harness files)
 

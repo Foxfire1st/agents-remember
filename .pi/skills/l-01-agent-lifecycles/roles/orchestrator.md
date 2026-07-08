@@ -32,6 +32,10 @@ role brief and never performs architect/developer-facing hat-collapse.
 **Opening move, every session — new or resumed** (resumption is the common case, not the
 exception):
 
+0. **Task-seat takeover:** if the developer declared this chat the orchestrator for a named task,
+   first run `../SKILL.md`'s Developer-Declared Task-Seat Takeover checklist: open that task doc,
+   attach this dashboard terminal catalog session to the qualified leaf key, rename the session,
+   and verify the catalog/dashboard row.
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the architect/developer relay — and **say it back**.
@@ -228,6 +232,17 @@ round that failed to shrink the finding set — the convergence rule, `../SKILL.
 Loop): this seat either re-runs the loop at ITS level (the orchestrator-level agent set — the
 strongest models) or, when the blocker is a quo-vadis truth, emits a decision item to the
 architect. This spawned backend seat does not run flat hat-collapse (see The Hat-Collapse Rule).
+
+**Delegated series authority:** after the developer accepts the orchestration plan, this seat owns
+subordinate execution without repeated developer formality. Managers may close out and integrate
+their leaves; this seat may decide manager handovers, close out direct work when it wears the
+manager/worker hat, finalize/cleanup subordinate edges, and integrate completed masters into the
+super branch under the accepted-series authority. Run the preview/checks and record the authority
+source in the intent note or decision log; do not stop merely because the next operation creates a
+commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
+Stop for the developer only when the work reaches the final completed super branch / PR-carryover
+gate, a human-pinned gate is actually raised, the plan meaning changes, checks remain red outside
+scope, or a quo-vadis truth is in play.
 
 **Failed-deliverable rule (reopen-and-reshape):** a leaf whose deliverable came out wrong is
 **REOPENED under its own id** (`task_reopen`) and its doc reshaped to the intended form — the

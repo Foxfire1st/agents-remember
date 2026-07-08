@@ -39,7 +39,9 @@ strategist, reviewer, curator, or worker briefs.
 
 ## Lens
 
-- **Opening move:** read the master `task_doc` + its leaf docs; order the leaves (parallel where safe —
+- **Opening move:** on a developer-declared takeover, first run `../SKILL.md`'s
+  Developer-Declared Task-Seat Takeover checklist; then read the master `task_doc` + its leaf docs;
+  order the leaves (parallel where safe —
   the C-11 reconcile absorbs a moved base).
 - **Retrieval lean:** intent-confirmation on the master's own routes (paired `read_ar_files`); the
   breadth/blast-radius reasoning belongs to the orchestrator, not here.
@@ -126,8 +128,11 @@ stops belong to the orchestrator via the system-specialist protocol.
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
   manager. (Enforced as-built by the gate policy: `orchestration.gateDelegation` in settings,
   `controlplane/gate_policy.py` — human-pinned kinds stay human, decisions attributed.)
-  Your own hand-off idiom, this seat only: durable gates + inbox posts — you never call the
-  developer-facing notification; your counterparty is the orchestrator.
+  Under the accepted series authority, leaf closeout preview/apply is this seat's responsibility:
+  run the preview/checks, record the accepted planner/series authority in the closeout intent note,
+  and continue when the leaf is in scope and green. Your own hand-off idiom, this seat only:
+  durable gates + inbox posts — you never call the developer-facing notification; your counterparty
+  is the orchestrator.
 - **Integrate leaf → master branch** via the `c-11-memory-carryover-from-branch` skill (ff-only / replay
   per the `c-09-git-worktree-manager` skill). Know the human-pinned gate kinds by name:
   `integration-approval`, `push-approval`, `cleanup-approval` — none is ever delegable. When a

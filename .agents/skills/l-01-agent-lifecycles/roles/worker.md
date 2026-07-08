@@ -34,11 +34,12 @@ brief -> orient -> build code -> checks green -> turn report -> curator memory p
 
 ### 1 — Intake
 
-Read the brief fully, then the leaf spec / `task_doc` it names. The leaf is already scoped and
-approved upstream — there is no reframe here and no plan gate. The brief names your two writable
-areas: the leaf's **code worktree** and your report path. The memory worktree is context for the
-curator pass unless the brief explicitly says otherwise. You edit nothing outside your named
-surfaces.
+On a developer-declared takeover, first run `../SKILL.md`'s Developer-Declared Task-Seat Takeover
+checklist so the dashboard chat is attached to this leaf. Then read the brief fully, then the leaf
+spec / `task_doc` it names. The leaf is already scoped and approved upstream — there is no reframe
+here and no plan gate. The brief names your two writable areas: the leaf's **code worktree** and
+your report path. The memory worktree is context for the curator pass unless the brief explicitly
+says otherwise. You edit nothing outside your named surfaces.
 
 ### 2 — Orient (paired reads before edits)
 
