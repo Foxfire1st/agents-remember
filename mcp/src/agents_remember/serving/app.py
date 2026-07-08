@@ -86,6 +86,18 @@ from agents_remember.serving.harnesses import detect_harnesses
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projector import Projector
+from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.retire_policy import (
+    RetirePolicyError,
+    SeatRef,
+    check_retire_authority,
+    master_of,
+)
+from agents_remember.serving.seat_events import (
+    log_rename_event,
+    log_retire_event,
+    log_turn_state_change_event,
+)
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
 from agents_remember.serving.terminal_catalog import (
@@ -323,6 +335,25 @@ class TerminalAttachLeafRequest(BaseModel):
     leaf_key: str = Field(alias="leafKey")
 
 
+class TerminalRetireRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}/retire`` (260707-HFX-L8): the retire authority check.
+
+    ``actor_session`` is the RETIRING seat's own catalog session id (self-declared, mirroring
+    ``spawn_agent_session``'s ``spawned_by_session`` provenance -- there is no ambient "who am I"
+    session-id resolution in this codebase). ``reason`` is a free-form human-readable justification,
+    always recorded in the retirement provenance.
+    """
+
+    actor_session: str = Field(alias="actorSession")
+    reason: str = "manual retire"
+
+
+class TerminalRenameRequest(BaseModel):
+    """Body of ``POST /api/terminal/{session}/rename`` (260707-HFX-L8, issue #4): the new display label."""
+
+    label: str
+
+
 class TerminalPasteRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}/paste``: deliver a context packet to a hosted session.
 
@@ -438,6 +469,7 @@ def create_app(
         host,
         now=now,
         config=liveness_config,
+        on_turn_state_change=lambda observation: log_turn_state_change_event(config, observation.entry),
     )
     # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
     build = resolve_serving_build()
@@ -836,6 +868,92 @@ def create_app(
                 "status": "terminated",
                 "terminatedAt": terminated_at,
                 **({"tmuxName": updated.tmux_name} if updated is not None else {}),
+            },
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/retire")
+    def api_terminal_retire(session: str, request: TerminalRetireRequest) -> Response:
+        # 260707-HFX-L8 (issue #12): the server-authoritative retire surface. Never a zombie row --
+        # a retire is the SAME terminal mark ``/terminate`` writes, plus retirement provenance
+        # (who, why, when, which edge); transcripts are never touched. Authority is enforced here,
+        # not trusted from the caller: owner-never-self-retires, a manager retires only its own
+        # master's worker/reviewer seats, the orchestrator retires anything.
+        target_entry = catalog.get(session)
+        if target_entry is None:
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        actor_entry = catalog.get(request.actor_session)
+        if actor_entry is None:
+            return JSONResponse(
+                content={"status": "unknown-actor", "actorSession": request.actor_session},
+                status_code=404,
+            )
+        if target_entry.status == "terminated":
+            return JSONResponse(
+                content={
+                    "session": session,
+                    "status": "already-retired",
+                    "retiredAt": target_entry.retired_at,
+                },
+                status_code=200,
+            )
+        try:
+            check_retire_authority(
+                SeatRef(
+                    session_id=actor_entry.id,
+                    role=actor_entry.spawn_role,
+                    master=master_of(actor_entry.leaf_key),
+                ),
+                SeatRef(
+                    session_id=target_entry.id,
+                    role=target_entry.spawn_role,
+                    master=master_of(target_entry.leaf_key),
+                ),
+            )
+        except RetirePolicyError as exc:
+            return JSONResponse(
+                content={"session": session, "status": "retire-refused", "detail": str(exc)},
+                status_code=403,
+            )
+        updated = retire_entry(
+            catalog,
+            host,
+            target_entry,
+            at=now_iso(),
+            by_session=request.actor_session,
+            reason=request.reason,
+            edge="manual",
+        )
+        assert updated is not None  # the entry existed above; no concurrent delete path removes rows
+        log_retire_event(config, updated)
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "retired",
+                "retiredAt": updated.retired_at,
+                "retiredBySession": updated.retired_by_session,
+                "retiredReason": updated.retired_reason,
+                "retiredEdge": updated.retired_edge,
+            },
+            status_code=200,
+        )
+
+    @app.post("/api/terminal/{session}/rename")
+    def api_terminal_rename(session: str, request: TerminalRenameRequest) -> Response:
+        # 260707-HFX-L8 (issue #4): post-spawn identity rename. Identity text ONLY -- spawn_role
+        # (the L6-immutable seat role) is never touched by a rename.
+        entry = catalog.get(session)
+        if entry is None or entry.status == "terminated":
+            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        updated = catalog.set_label(session, request.label)
+        assert updated is not None
+        log_rename_event(config, updated)
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "renamed",
+                "label": updated.label,
+                "spawnedLabel": updated.spawned_label,
             },
             status_code=200,
         )

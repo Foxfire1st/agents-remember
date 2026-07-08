@@ -185,6 +185,16 @@ def _tmux_capture_pane(tmux_name: str) -> str:
     return result.stdout or ""
 
 
+def capture_pane(tmux_name: str) -> str:
+    """Public raw pane-capture entry point (260707-HFX-L8 turn-state classification).
+
+    Shares the same history-inclusive ``tmux capture-pane`` this module already uses to verify
+    pastes, so turn-state classification reads the identical view a paste-verification capture
+    would -- no second capture command, no new tmux round-trip shape.
+    """
+    return _tmux_capture_pane(tmux_name)
+
+
 class TerminalPaster:
     """Capture-verified paste into a durable tmux session, mirroring the frontend paste/submit loop.
 

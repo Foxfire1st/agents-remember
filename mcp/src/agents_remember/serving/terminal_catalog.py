@@ -15,6 +15,11 @@ from uuid import uuid4
 TerminalSessionKind = Literal["terminal", "harness"]
 TerminalSessionStatus = Literal["running", "exited", "terminated"]
 TerminalLivenessEvidence = Literal["tmux-command-failed", "pane-gone"]
+# Live turn-state (260707-HFX-L8): derived from pane observation on the L5 prober cadence, never a
+# new hot loop. "working" = the harness appears to be generating; "turn-ended" = an idle prompt
+# marker was seen (the model ended its turn); "awaiting-input" = a harness-specific waiting-on-you
+# marker; "stale" = no classifiable marker for long enough that the state itself is suspect.
+SeatTurnState = Literal["working", "turn-ended", "awaiting-input", "stale"]
 # The leaf-uniqueness role: a plain shell (``kind == "terminal"``) is a TERMINAL; any agent harness
 # is a CHAT. Uniqueness is per (leaf, role) -- at most one running chat AND one running terminal per
 # leaf -- so an agent chat and a scratch terminal can share a leaf without colliding (L5 fix 2).
@@ -78,6 +83,24 @@ class TerminalCatalogEntry:
     liveness_last_failed_at: str | None = None
     liveness_evidence: TerminalLivenessEvidence | None = None
     exit_evidence: TerminalLivenessEvidence | None = None
+    # Retirement provenance (260707-HFX-L8): a retire is a TERMINAL mark layered on top of the
+    # existing ``terminated`` status (liveness hysteresis already never resurrects a terminated row,
+    # see ``with_liveness_success``/``with_liveness_failure`` -- retirement rides that same
+    # invariant instead of inventing a second terminal state). Written-only-when-set, same
+    # migration-safe pattern as the fields above.
+    retired_at: str | None = None
+    retired_by_session: str | None = None
+    retired_reason: str | None = None
+    retired_edge: str | None = None
+    # Live identity (260707-HFX-L8, issue #4): ``label`` is mutable post-spawn via the rename API;
+    # ``spawned_label`` freezes the ORIGINAL label the first time a rename happens, for audit --
+    # never overwritten again. ``None`` until the first rename (no rename = no provenance to keep).
+    spawned_label: str | None = None
+    # Live turn-state (260707-HFX-L8, issue #4): classified from pane observation on the L5 prober
+    # cadence. ``None`` until the first classification (legacy/newly-spawned rows read back as
+    # unclassified, not a fabricated state).
+    turn_state: SeatTurnState | None = None
+    turn_state_changed_at: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -130,6 +153,23 @@ class TerminalCatalogEntry:
             ),
             liveness_evidence=_liveness_evidence(data.get("livenessEvidence")),
             exit_evidence=_liveness_evidence(data.get("exitEvidence")),
+            retired_at=str(data["retiredAt"]) if data.get("retiredAt") is not None else None,
+            retired_by_session=(
+                str(data["retiredBySession"]) if data.get("retiredBySession") is not None else None
+            ),
+            retired_reason=(
+                str(data["retiredReason"]) if data.get("retiredReason") is not None else None
+            ),
+            retired_edge=str(data["retiredEdge"]) if data.get("retiredEdge") is not None else None,
+            spawned_label=(
+                str(data["spawnedLabel"]) if data.get("spawnedLabel") is not None else None
+            ),
+            turn_state=_turn_state(data.get("turnState")),
+            turn_state_changed_at=(
+                str(data["turnStateChangedAt"])
+                if data.get("turnStateChangedAt") is not None
+                else None
+            ),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -178,6 +218,20 @@ class TerminalCatalogEntry:
             data["livenessEvidence"] = self.liveness_evidence
         if self.status == "exited" and self.exit_evidence is not None:
             data["exitEvidence"] = self.exit_evidence
+        if self.retired_at is not None:
+            data["retiredAt"] = self.retired_at
+        if self.retired_by_session is not None:
+            data["retiredBySession"] = self.retired_by_session
+        if self.retired_reason is not None:
+            data["retiredReason"] = self.retired_reason
+        if self.retired_edge is not None:
+            data["retiredEdge"] = self.retired_edge
+        if self.spawned_label is not None:
+            data["spawnedLabel"] = self.spawned_label
+        if self.turn_state is not None:
+            data["turnState"] = self.turn_state
+        if self.turn_state_changed_at is not None:
+            data["turnStateChangedAt"] = self.turn_state_changed_at
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
@@ -207,6 +261,47 @@ class TerminalCatalogEntry:
     def with_leaf_key(self, leaf_key: str | None) -> TerminalCatalogEntry:
         """A copy bound to ``leaf_key`` (or unbound when ``None``); the leaf-attach write point."""
         return replace(self, leaf_key=leaf_key)
+
+    def with_retirement(
+        self,
+        *,
+        at: str,
+        by_session: str | None,
+        reason: str,
+        edge: str,
+    ) -> TerminalCatalogEntry:
+        """The explicit retire terminal mark: ``terminated`` status + retirement provenance.
+
+        Idempotent -- retiring an already-terminated row returns it unchanged (never re-stamps
+        provenance, never a zombie row that gets retired twice). The existing liveness hysteresis
+        already refuses to resurrect a ``terminated`` row (``with_liveness_success``), so a retired
+        seat composes with L5 for free.
+        """
+        if self.status == "terminated":
+            return self
+        return replace(
+            self,
+            status="terminated",
+            terminated_at=at,
+            retired_at=at,
+            retired_by_session=by_session,
+            retired_reason=reason,
+            retired_edge=edge,
+        )
+
+    def with_label(self, label: str) -> TerminalCatalogEntry:
+        """A copy renamed to ``label`` -- identity text ONLY, never ``spawn_role`` (L6 immutability).
+
+        The FIRST rename freezes the original label into ``spawned_label`` for audit; later renames
+        leave that provenance field alone.
+        """
+        return replace(self, label=label, spawned_label=self.spawned_label or self.label)
+
+    def with_turn_state(self, state: SeatTurnState, *, changed_at: str) -> TerminalCatalogEntry:
+        """A copy classified into ``state``, or ``self`` unchanged when the state did not transition."""
+        if self.turn_state == state:
+            return self
+        return replace(self, turn_state=state, turn_state_changed_at=changed_at)
 
     def with_liveness_success(self) -> TerminalCatalogEntry:
         """Clear liveness failures and restore an exited row when the tmux session probes alive."""
@@ -398,6 +493,57 @@ class TerminalCatalog:
             self._write(entries)
             return updated
 
+    def mark_retired(
+        self,
+        session_id: str,
+        *,
+        at: str,
+        by_session: str | None,
+        reason: str,
+        edge: str,
+    ) -> TerminalCatalogEntry | None:
+        """The explicit retire terminal mark (260707-HFX-L8): never a zombie row, never resurrected."""
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            updated = entries[index].with_retirement(
+                at=at, by_session=by_session, reason=reason, edge=edge
+            )
+            if updated != entries[index]:
+                entries[index] = updated
+                self._write(entries)
+            return updated
+
+    def set_label(self, session_id: str, label: str) -> TerminalCatalogEntry | None:
+        """Rename a session's display label (identity text only -- ``spawn_role`` never changes)."""
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            updated = entries[index].with_label(label)
+            entries[index] = updated
+            self._write(entries)
+            return updated
+
+    def record_turn_state(
+        self, session_id: str, state: SeatTurnState, *, changed_at: str
+    ) -> TerminalCatalogEntry | None:
+        """Persist a live turn-state classification; a no-op write when the state did not change."""
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            entry = entries[index]
+            updated = entry.with_turn_state(state, changed_at=changed_at)
+            if updated != entry:
+                entries[index] = updated
+                self._write(entries)
+            return updated
+
     def _read(self) -> list[TerminalCatalogEntry]:
         if not self.path.exists():
             return []
@@ -441,6 +587,12 @@ def _liveness_evidence(raw: object) -> TerminalLivenessEvidence | None:
         return "tmux-command-failed"
     if raw == "pane-gone":
         return "pane-gone"
+    return None
+
+
+def _turn_state(raw: object) -> SeatTurnState | None:
+    if raw in ("working", "turn-ended", "awaiting-input", "stale"):
+        return raw  # type: ignore[return-value]
     return None
 
 

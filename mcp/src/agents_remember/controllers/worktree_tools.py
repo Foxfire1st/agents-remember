@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from agents_remember.controllers._guards import require_repo, require_within_coordination
@@ -12,10 +13,16 @@ from agents_remember.mcp.config import (
     reload_provider_authority,
 )
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
+from agents_remember.observer.events import now_iso
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.settings import write_lifecycle_settings
+from agents_remember.serving.retire import retire_seats_for_leaf
+from agents_remember.serving.seat_events import log_retire_event
+from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.worktree_contract import load_contract
 
 
 def worktree_start_tool(
@@ -274,8 +281,9 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    confined_contract = require_within_coordination(config, contract_path, "contract_path")
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        contract_path=confined_contract,
         strategy=strategy,
         approved=not dry_run,
         ledger_commit_message=ledger_commit_message,
@@ -285,7 +293,16 @@ def worktree_integrate_tool(
         # exact delegated approval the master-handover channel produces.
         gate_policy=config.orchestration.gate_policy,
     )
-    return _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
+    result = _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
+    if result["ok"] and not dry_run and config.retirement.auto_retire_on_integration:
+        result["autoRetiredSeats"] = _auto_retire_completed_seats(
+            config,
+            confined_contract,
+            roles=frozenset({"worker", "reviewer"}),
+            reason="leaf integrated into master",
+            edge="leaf-integration",
+        )
+    return result
 
 
 def worktree_cleanup_tool(
@@ -359,7 +376,53 @@ def lifecycle_finalize_task_tool(
         dry_run=dry_run,
         teardown_providers=teardown_providers,
     )
-    return _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
+    result = _worktree_result(
+        "lifecycle_finalize_task", git_worktree_manager.finalize_result(args)
+    )
+    if result["ok"] and not dry_run and config.retirement.auto_retire_on_finalize:
+        result["autoRetiredSeats"] = _auto_retire_completed_seats(
+            config,
+            confined_contract,
+            roles=frozenset({"manager", "reviewer"}),
+            reason="master finalized into super",
+            edge="master-finalization",
+        )
+    return result
+
+
+def _auto_retire_completed_seats(
+    config: McpRuntimeConfig,
+    contract_path: Path,
+    *,
+    roles: frozenset[str],
+    reason: str,
+    edge: str,
+) -> list[str]:
+    """The completion-edge auto-retire hook (260707-HFX-L8): resolve the contract's own qualified
+    leaf key and retire every non-terminated seat of ``roles`` bound to it.
+
+    Best-effort, END TO END: an unreadable/already-archived contract, a catalog read/write failure,
+    or any other failure in the retire body (F1, HFX-L8 doctrine review) skips the auto-retire
+    rather than failing the completion edge itself -- retirement is a cleanup courtesy, never a gate
+    on the edge it rides. The whole body is guarded, not just ``load_contract``: ``retire_seats_for_leaf``
+    does catalog file I/O that can raise just as easily as a missing contract file, and a raise from
+    there must never propagate out of an already-succeeded ``worktree_integrate``/
+    ``lifecycle_finalize_task`` call.
+    """
+    try:
+        contract = load_contract(contract_path)
+        leaf_key = f"{contract.repo_name}/{contract.task_root.name}/{contract.task_id}"
+        catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+        host = TerminalHost()
+        at = now_iso()
+        retired = retire_seats_for_leaf(
+            catalog, host, leaf_key=leaf_key, roles=roles, reason=reason, edge=edge, at=at
+        )
+        for entry in retired:
+            log_retire_event(config, entry)
+        return [entry.id for entry in retired]
+    except Exception:
+        return []
 
 
 def _worktree_namespace(

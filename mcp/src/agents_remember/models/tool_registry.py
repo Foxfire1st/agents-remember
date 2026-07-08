@@ -82,6 +82,8 @@ from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.task_doc import TaskDocResponse, TaskReopenResponse
 from agents_remember.models.terminal import (
     AttachTerminalSessionToLeafResponse,
+    SessionRenameResponse,
+    SessionRetireResponse,
     SpawnAgentSessionResponse,
 )
 from agents_remember.models.worktree import (
@@ -113,6 +115,8 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "read_ar_files": ReadArFilesResponse,
     "attach_terminal_session_to_leaf": AttachTerminalSessionToLeafResponse,
     "spawn_agent_session": SpawnAgentSessionResponse,
+    "session_retire": SessionRetireResponse,
+    "session_rename": SessionRenameResponse,
     "runtime_install": RuntimeInstallResponse,
     "resolve_context": ResolveContextResponse,
     "drift_check": DriftCheckResponse,

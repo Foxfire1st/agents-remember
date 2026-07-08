@@ -55,6 +55,8 @@ from .tools import (
     route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
+    session_rename_payload,
+    session_retire_payload,
     skills_install_payload,
     spawn_agent_session_payload,
     switch_lifecycle_payload,
@@ -215,6 +217,41 @@ def create_server(config: McpRuntimeConfig) -> Any:
             spawned_by_lifecycle=spawned_by_lifecycle,
             kind=kind,
         )
+
+    @server.tool()
+    def session_retire(
+        actor_session_id: str,
+        session_id: str,
+        reason: str = "manual retire",
+    ) -> dict[str, Any]:
+        """Retire a tracked chat/terminal session (260707-HFX-L8, issue #12): kill its tmux session,
+        mark the catalog row terminated with retirement provenance (who/why/when/edge), and remove
+        it from the active rail. Transcripts are never deleted.
+
+        `actor_session_id` is the RETIRING seat's own catalog session id (self-declared -- there is
+        no ambient "who am I" resolution, mirroring `spawn_agent_session`'s `spawned_by_session`).
+        Authority is enforced server-side and refusals are loud and policy-naming: a seat never
+        retires itself (`retire-refused`); a manager may retire only worker/reviewer seats of its
+        OWN master; the orchestrator may retire any seat, including a completed manager. Status
+        'retired' on success, 'already-retired' when the target was already terminated (idempotent),
+        'unknown-session'/'unknown-actor' when a session id has no catalog row, 'retire-refused' for
+        every authority-policy refusal."""
+        return session_retire_payload(
+            config,
+            actor_session_id=actor_session_id,
+            session_id=session_id,
+            reason=reason,
+        )
+
+    @server.tool()
+    def session_rename(session_id: str, label: str) -> dict[str, Any]:
+        """Update a chat/terminal session's display label post-spawn (260707-HFX-L8, issue #4).
+
+        Identity text only: the seat's spawned role never changes (L6 role-seat immutability). The
+        FIRST rename freezes the original spawn-time label into spawn provenance for audit (later
+        renames leave it alone). Status 'renamed' on success, 'unknown-session' when the session has
+        no catalog row or is already retired."""
+        return session_rename_payload(config, session_id=session_id, label=label)
 
     @server.tool()
     def runtime_install(

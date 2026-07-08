@@ -97,3 +97,48 @@ class SpawnAgentSessionResponse(ToolResponse):
     # trusted from a bare boolean. Absent on full success.
     deliveryCapture: str | None = None
     detail: str | None = None
+
+
+SessionRetireStatus = Literal[
+    "retired",
+    "already-retired",
+    "unknown-session",
+    "unknown-actor",
+    "retire-refused",
+]
+
+
+class SessionRetireResponse(ToolResponse):
+    """``session_retire`` (260707-HFX-L8, issue #12): terminate/park a tracked chat session.
+
+    ``ok`` is true for ``retired``/``already-retired`` (idempotent); false for every refusal
+    status. ``retire-refused`` is the server-side authority-policy refusal (owner-never-self-
+    retires, manager-scoped-to-its-own-master, orchestrator-only-otherwise) -- ``detail`` names the
+    exact clause that fired.
+    """
+
+    operation: Literal["session_retire"] = "session_retire"
+    status: SessionRetireStatus
+    session: str
+    retiredAt: str | None = None
+    retiredBySession: str | None = None
+    retiredReason: str | None = None
+    retiredEdge: str | None = None
+    detail: str | None = None
+
+
+SessionRenameStatus = Literal["renamed", "unknown-session"]
+
+
+class SessionRenameResponse(ToolResponse):
+    """``session_rename`` (260707-HFX-L8, issue #4): update a chat's display label post-spawn.
+
+    Identity text only -- the seat's ``spawn_role`` (L6 role-seat immutability) never changes.
+    ``spawnedLabel`` is the ORIGINAL spawn-time label, frozen for audit on the first rename.
+    """
+
+    operation: Literal["session_rename"] = "session_rename"
+    status: SessionRenameStatus
+    session: str
+    label: str | None = None
+    spawnedLabel: str | None = None

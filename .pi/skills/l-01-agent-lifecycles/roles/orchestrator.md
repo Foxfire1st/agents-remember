@@ -256,6 +256,14 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 4. Carry memory + map the ledger (C-11; duplicate memory single-sided; memory quality before the
    memory edge lands).
 5. Record the new super tips in durable notes; mark next masters ready.
+6. **Retire the completed master's spent seats (260707-HFX-L8, issue #12)** —
+   `lifecycle_finalize_task` auto-retires the master's manager + any master-level reviewer seats
+   (config-gated, default ON) the moment the master finalizes into super, so this is usually
+   automatic. You hold the **only** portfolio-wide retire authority: unlike a manager (scoped to
+   its own master's worker/reviewer seats), you may retire ANY seat in the portfolio, including a
+   completed manager — `session_retire(actor_session_id=<your own session>, session_id=<the seat>,
+   reason=...)`. Owner-never-self-retires still holds (you can never retire your own seat). Use
+   this by hand for a stuck/abandoned seat the automation missed; transcripts are never deleted.
 
 **The topology (single home — this section owns it):**
 
@@ -394,6 +402,6 @@ task, fill small blanks, escalate real deltas).
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
 | promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
-| tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · worktree/C-11 |
+| tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · `session_retire` (any seat, portfolio-wide) · worktree/C-11 |
 
 Settings.json `orchestration.roles.orchestrator` overrides these, and `orchestration.rolesPerLevel.<level>.orchestrator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

@@ -14,6 +14,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
 )
 from agents_remember.observer.ambient import ambient
+from agents_remember.observer.events import now_iso
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -25,6 +26,14 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
+from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.retire_policy import (
+    RetirePolicyError,
+    SeatRef,
+    check_retire_authority,
+    master_of,
+)
+from agents_remember.serving.seat_events import log_rename_event, log_retire_event
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -586,5 +595,147 @@ def _spawn_refusal(
             "harness": harness,
             "kind": kind if kind in ("harness", "terminal") else None,
             "detail": detail,
+        },
+    )
+
+
+def session_retire_payload(
+    config: McpRuntimeConfig,
+    *,
+    actor_session_id: str,
+    session_id: str,
+    reason: str = "manual retire",
+    host: TerminalHost | None = None,
+) -> dict[str, Any]:
+    """Retire ``session_id`` (issue #12): terminal mark + provenance, authority enforced server-side.
+
+    ``actor_session_id`` is the RETIRING seat's own catalog session id (self-declared, mirroring the
+    ``spawned_by_session`` provenance pattern -- there is no ambient "who am I" session-id
+    resolution). Authority: owner-never-self-retires; a manager retires only worker/reviewer seats
+    of its own master; the orchestrator retires anything. Idempotent against an already-retired
+    target -- a second retire call reports ``already-retired``, never re-stamps provenance.
+    """
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    target_entry = catalog.get(session_id)
+    if target_entry is None:
+        return _tool_payload(
+            "session_retire",
+            {
+                "ok": False,
+                "operation": "session_retire",
+                "status": "unknown-session",
+                "session": session_id,
+                "detail": f"no catalog entry for session {session_id!r}",
+            },
+        )
+    actor_entry = catalog.get(actor_session_id)
+    if actor_entry is None:
+        return _tool_payload(
+            "session_retire",
+            {
+                "ok": False,
+                "operation": "session_retire",
+                "status": "unknown-actor",
+                "session": session_id,
+                "detail": f"no catalog entry for actor session {actor_session_id!r}",
+            },
+        )
+    if target_entry.status == "terminated":
+        return _tool_payload(
+            "session_retire",
+            {
+                "ok": True,
+                "operation": "session_retire",
+                "status": "already-retired",
+                "session": session_id,
+                "retiredAt": target_entry.retired_at,
+                "retiredBySession": target_entry.retired_by_session,
+                "retiredReason": target_entry.retired_reason,
+                "retiredEdge": target_entry.retired_edge,
+            },
+        )
+    try:
+        check_retire_authority(
+            SeatRef(
+                session_id=actor_entry.id,
+                role=actor_entry.spawn_role,
+                master=master_of(actor_entry.leaf_key),
+            ),
+            SeatRef(
+                session_id=target_entry.id,
+                role=target_entry.spawn_role,
+                master=master_of(target_entry.leaf_key),
+            ),
+        )
+    except RetirePolicyError as exc:
+        return _tool_payload(
+            "session_retire",
+            {
+                "ok": False,
+                "operation": "session_retire",
+                "status": "retire-refused",
+                "session": session_id,
+                "detail": str(exc),
+            },
+        )
+    retire_host = host if host is not None else TerminalHost()
+    updated = retire_entry(
+        catalog,
+        retire_host,
+        target_entry,
+        at=now_iso(),
+        by_session=actor_session_id,
+        reason=reason,
+        edge="manual",
+    )
+    assert updated is not None  # the entry existed above; nothing between here removes rows
+    log_retire_event(config, updated)
+    return _tool_payload(
+        "session_retire",
+        {
+            "ok": True,
+            "operation": "session_retire",
+            "status": "retired",
+            "session": session_id,
+            "retiredAt": updated.retired_at,
+            "retiredBySession": updated.retired_by_session,
+            "retiredReason": updated.retired_reason,
+            "retiredEdge": updated.retired_edge,
+        },
+    )
+
+
+def session_rename_payload(
+    config: McpRuntimeConfig,
+    *,
+    session_id: str,
+    label: str,
+) -> dict[str, Any]:
+    """Rename ``session_id``'s display label post-spawn (issue #4). Identity text only -- never role."""
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    entry = catalog.get(session_id)
+    if entry is None or entry.status == "terminated":
+        return _tool_payload(
+            "session_rename",
+            {
+                "ok": False,
+                "operation": "session_rename",
+                "status": "unknown-session",
+                "session": session_id,
+                "label": label,
+            },
+        )
+    updated = catalog.set_label(session_id, label)
+    assert updated is not None
+    log_rename_event(config, updated)
+    return _tool_payload(
+        "session_rename",
+        {
+            "ok": True,
+            "operation": "session_rename",
+            "status": "renamed",
+            "session": session_id,
+            "label": updated.label,
+            "spawnedLabel": updated.spawned_label,
         },
     )

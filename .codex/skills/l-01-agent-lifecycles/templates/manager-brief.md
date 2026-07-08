@@ -43,6 +43,9 @@ master's leaf loop to the master-exit seam, then hand over.
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
   no provider kill authority; provider stops and fixes route through the orchestrator and
   system-specialist.
+- Cleanup: `worktree_integrate` auto-retires a landed leaf's worker/reviewer seats (config-gated,
+  default ON); `session_retire` is available for a stuck/abandoned seat of YOUR OWN master only —
+  server policy refuses any other target.
 
 ## The exit
 - When all leaves have landed on your branch: spawn the master-exit reviewer

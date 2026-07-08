@@ -154,6 +154,18 @@ def _simple_payloads(config) -> dict[str, dict]:
             config,
             harness="definitely-not-a-real-harness",
         ),
+        # Representative refusal payloads: neither session id has a catalog row, so both
+        # short-circuit before touching a real tmux host.
+        "session_retire": tools.session_retire_payload(
+            config,
+            actor_session_id="missing-actor",
+            session_id="missing-session",
+        ),
+        "session_rename": tools.session_rename_payload(
+            config,
+            session_id="missing-session",
+            label="New Label",
+        ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, REPO),
         "drift_check": tools.drift_check_payload(config, REPO),
