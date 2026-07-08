@@ -28,6 +28,7 @@ from agents_remember.serving.harnesses import (
     is_detected,
     unknown_harness_detail,
 )
+from agents_remember.serving.injector import DeliveryRow, deliver
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.retire import retire_entry
 from agents_remember.serving.retire_policy import (
@@ -362,12 +363,26 @@ def _deliver_spawn_pastes(
     session_commands: list[str],
     packet: str | None,
     submit: bool,
+    *,
+    entry_id: str,
+    harness: str | None,
 ) -> _SpawnDelivery:
     """Deliver the session layer: session commands FIRST (each its own capture-verified paste, always
     submitted -- an unexecuted ``/effort ultracode`` would be a silent downgrade), THEN the brief.
 
-    Every ``True`` here is capture-verified by the paster (260707-HFX-L3): a ``False`` means the
-    pane provably shows no trace of the paste, and the failing capture rides the result.
+    260707-HFX2-L3 (R3, ONE PATH): this is no longer a separate raw-spawn delivery loop -- every
+    paste here goes through ``serving.injector.deliver``, the SAME path ``inbox_delivery.py`` calls
+    for dispatch/nudge/redelivery rows. ``envelope=False`` on both rows: a fresh harness's very
+    first paste is the session-command/brief text itself, unchanged wire format (other machinery --
+    the ``briefed-by`` expectation row, the spawn payload's ``contextDelivered`` -- already keys off
+    the session, not a parsed envelope header).
+
+    Every ``True`` here is still capture-verified (260707-HFX-L3): a ``False`` means the pane
+    provably shows no trace of the paste, and the failing capture rides the result. A ``blocked``
+    outcome (a modal trap already sitting in a freshly-spawned pane) also counts as undelivered here
+    -- the caller's ``contextDelivered``/``sessionCommandsDelivered`` booleans predate the R1
+    four-way outcome and this function preserves their existing meaning; the richer outcome is
+    available to any future caller via ``serving.injector.deliver`` directly.
     """
     session_commands_delivered: bool | None = None
     context_delivered: bool | None = None
@@ -377,20 +392,24 @@ def _deliver_spawn_pastes(
     if session_commands:
         session_commands_delivered = True
         for command_line in session_commands:
-            outcome = paster.paste(tmux_name, command_line, submit=True)
-            if not (outcome.delivered and outcome.submitted):
+            row = DeliveryRow(
+                kind="session-command", entry_id=entry_id, text=command_line, submit=True, envelope=False
+            )
+            result = deliver(row, tmux_name=tmux_name, paster=paster, harness=harness)
+            if result.outcome != "acked":
                 session_commands_delivered = False
                 failed = True
-                failure_capture = outcome.capture or failure_capture
+                failure_capture = result.capture or failure_capture
     if packet:
         # Workers auto-start (paste + submit); a human draft-only flow leaves submit=False so the
         # draft stays editable. Capture-verified server-side (the frontend pasteAndConfirm mirror).
-        outcome = paster.paste(tmux_name, packet, submit=submit)
-        context_delivered = outcome.delivered
-        submitted = outcome.submitted if submit else None
-        if not outcome.delivered or (submit and not outcome.submitted):
+        row = DeliveryRow(kind="brief", entry_id=entry_id, text=packet, submit=submit, envelope=False)
+        result = deliver(row, tmux_name=tmux_name, paster=paster, harness=harness)
+        context_delivered = result.outcome in ("acked", "landed-unacked")
+        submitted = result.submitted if submit else None
+        if result.outcome in ("blocked", "failed") or (submit and result.outcome != "acked"):
             failed = True
-            failure_capture = outcome.capture or failure_capture
+            failure_capture = result.capture or failure_capture
     if failed and failure_capture is None:
         failure_capture = _EMPTY_PANE_CAPTURE
     return _SpawnDelivery(
@@ -543,7 +562,13 @@ def spawn_agent_session_payload(
     if resolved_session_commands or packet:
         spawn_paster = paster if paster is not None else TerminalPaster()
         delivery = _deliver_spawn_pastes(
-            spawn_paster, entry.tmux_name, resolved_session_commands, packet, submit
+            spawn_paster,
+            entry.tmux_name,
+            resolved_session_commands,
+            packet,
+            submit,
+            entry_id=entry.id,
+            harness=harness if kind == "harness" else None,
         )
 
     return _tool_payload("spawn_agent_session", _spawned_payload(entry, delivery))

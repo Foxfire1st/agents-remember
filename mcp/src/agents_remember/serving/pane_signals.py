@@ -57,9 +57,61 @@ _EMPTY_COMPOSER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?m)^\s*│\s*>\s*│?\s*$"),
 )
 
+# Codex-specific modal traps (260707-HFX2-L3, issue #20): the quota/rate-limit dialog ends the
+# seat's turn and needs a developer decision (spend a reset / wait / switch harness) no automatic
+# action can make -- classified as ``blocked`` here, never a silent non-delivery.
 _HARNESS_MID_TURN_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
-_HARNESS_BLOCKED_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
+_HARNESS_BLOCKED_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "codex": (
+        re.compile(r"approaching rate limits", re.IGNORECASE),
+        re.compile(r"switch model\?", re.IGNORECASE),
+        re.compile(r"hit your usage limit", re.IGNORECASE),
+        re.compile(r"\busage limit\b", re.IGNORECASE),
+    ),
+}
 _HARNESS_EMPTY_COMPOSER_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
+
+# Blocked-reason label lookup (structured NEEDS-ATTENTION classification, R2): each pattern above
+# maps to a short machine-readable reason so a caller never has to re-parse pane text to tell a
+# quota modal apart from an ordinary permission prompt.
+_QUOTA_REASON_MARKERS: tuple[str, ...] = ("rate limit", "usage limit", "switch model")
+
+
+def blocked_reason_label(evidence: str | None) -> str:
+    """The structured NEEDS-ATTENTION reason for a ``blocked`` classification's ``evidence`` pattern.
+
+    ``evidence`` is the regex source text ``classify_pane_signal`` matched on -- reusing it (rather
+    than re-scanning the pane) keeps this a pure lookup: no new pane read, no new pattern family.
+    """
+    if evidence is None:
+        return "modal-dialog"
+    lowered = evidence.lower()
+    if any(marker in lowered for marker in _QUOTA_REASON_MARKERS):
+        return "codex-quota-limit"
+    return "permission-prompt"
+
+
+ComposerState = Literal["empty", "has-content", "chip-stacked"]
+
+
+def composer_state(pane_text: str | None, *, harness: str | None = None) -> ComposerState:
+    """The R2 composer-state signature: ``empty`` / ``has-content`` / ``chip-stacked``.
+
+    Reuses this module's own chip-count threshold and empty-composer patterns -- the single source
+    of truth ``harness_adapters.py`` composes into the per-harness adapter, never a duplicated
+    pattern table.
+    """
+    if not pane_text or not pane_text.strip():
+        return "empty"
+    if count_paste_chips(pane_text) >= STACKED_CHIP_THRESHOLD:
+        return "chip-stacked"
+    for pattern in (
+        *_HARNESS_EMPTY_COMPOSER_PATTERNS.get(harness or "", ()),
+        *_EMPTY_COMPOSER_PATTERNS,
+    ):
+        if pattern.search(pane_text):
+            return "empty"
+    return "has-content"
 
 
 @dataclass(frozen=True)

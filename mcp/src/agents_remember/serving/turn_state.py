@@ -88,3 +88,15 @@ def classify_turn_state(pane_text: str | None, *, harness: str | None = None) ->
         if pattern.search(pane_text):
             return TurnStateClassification("turn-ended", evidence=pattern.pattern)
     return TurnStateClassification("stale", evidence=None)
+
+
+def boot_ready(pane_text: str | None, *, harness: str | None = None) -> bool:
+    """The R2 boot-readiness signature (the P-5 window): has the composer rendered ANY recognizable
+    state yet (working / awaiting-input / turn-ended), as opposed to a still-booting pane with no
+    marker at all (``stale``, this classifier's catch-all for "nothing recognized")?
+
+    Deliberately reuses :func:`classify_turn_state` rather than a second marker table: a harness
+    that has rendered any of its known shapes has, by construction, mounted a composer a paste can
+    land in.
+    """
+    return classify_turn_state(pane_text, harness=harness).state != "stale"
