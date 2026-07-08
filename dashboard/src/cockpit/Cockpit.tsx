@@ -590,6 +590,30 @@ function ServingBuildStamp() {
   );
 }
 
+// 260707-HFX2-L2 R5: "the last turtle is the developer's glance" -- the supervisor sweep's own
+// heartbeat tick, red past its staleness cutoff. `lastTickAt: null` means the supervisor has
+// never ticked in this workspace (dashboard/supervisor autostart is opt-in), which is NOT the
+// same as stale -- the badge renders nothing for it rather than a false alarm.
+function SupervisorHeartbeatBadge() {
+  const heartbeat = useDashboard((s) => s.supervisorHeartbeat);
+  if (!heartbeat || heartbeat.lastTickAt === null) return null;
+  const ageMinutes = heartbeat.ageSeconds !== null ? heartbeat.ageSeconds / 60 : null;
+  const label =
+    ageMinutes !== null
+      ? `supervisor ${heartbeat.stale ? "stale" : "ok"} ${ageMinutes.toFixed(1)}m`
+      : "supervisor stale";
+  return (
+    <span
+      className={heartbeat.stale ? caution({ sev: "alarm" }) : dim}
+      data-testid="supervisor-heartbeat"
+      title={`Supervisor last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s`}
+    >
+      {heartbeat.stale ? "⚠ " : ""}
+      {label}
+    </span>
+  );
+}
+
 function TopBar() {
   const conn = useDashboard((s) => s.conn);
   const metrics = useDashboard((s) => s.metrics);
@@ -611,6 +635,7 @@ function TopBar() {
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
+        <SupervisorHeartbeatBadge />
         <ServingBuildStamp />
         <ConnBadge conn={conn} />
         <EffectsToggle />

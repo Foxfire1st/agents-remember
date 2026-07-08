@@ -103,6 +103,48 @@ describe("dashboard store change gate (260703-L15)", () => {
     expect(after.generatedAt).toBe(before.generatedAt); // ages/stamp coherence: no new content, no new stamp
   });
 
+  it("applies an idle re-snapshot with an unchanged supervisorHeartbeat (incl. null/null) with zero store writes", () => {
+    dashboardStore.getState().applySnapshot(projection); // supervisorHeartbeat stays null
+    const before = dashboardStore.getState();
+    expect(before.supervisorHeartbeat).toBeNull();
+    let notifications = 0;
+    const unsubscribe = dashboardStore.subscribe(() => {
+      notifications += 1;
+    });
+    dashboardStore.getState().applySnapshot(volatileBump(projection, 1)); // still no supervisorHeartbeat
+    unsubscribe();
+    expect(notifications).toBe(0);
+    expect(dashboardStore.getState()).toBe(before);
+    expect(dashboardStore.getState().supervisorHeartbeat).toBeNull();
+  });
+
+  it("applies an idle re-snapshot with a genuinely changed supervisorHeartbeat", () => {
+    const withHeartbeat = {
+      ...projection,
+      supervisorHeartbeat: { lastTickAt: "2026-07-08T00:00:00+00:00", ageSeconds: 1, staleCutoffSeconds: 30, stale: false },
+    } as WorkspaceProjection;
+    dashboardStore.getState().applySnapshot(withHeartbeat);
+    const before = dashboardStore.getState();
+    let notifications = 0;
+    const unsubscribe = dashboardStore.subscribe(() => {
+      notifications += 1;
+    });
+    const advanced = {
+      ...withHeartbeat,
+      supervisorHeartbeat: { ...withHeartbeat.supervisorHeartbeat, ageSeconds: 5 },
+    } as WorkspaceProjection;
+    dashboardStore.getState().applySnapshot(advanced);
+    unsubscribe();
+    expect(notifications).toBe(1); // the tick advance IS a store write
+    const after = dashboardStore.getState();
+    expect(after).not.toBe(before);
+    expect(after.supervisorHeartbeat).toEqual(advanced.supervisorHeartbeat);
+    // everything else stays identity-stable — only supervisorHeartbeat rode through
+    expect(after.lifecycles).toBe(before.lifecycles);
+    expect(after.analytics).toBe(before.analytics);
+    expect(after.generatedAt).toBe(before.generatedAt);
+  });
+
   it("skips a redundant delta (volatile-only node) without a store write", () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();

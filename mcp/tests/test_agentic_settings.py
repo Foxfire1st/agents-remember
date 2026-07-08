@@ -436,6 +436,43 @@ class TypedModelTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "maxSubAgents"):
             self._load({"concurrency": {"maxSubAgents": 0}})
 
+    def test_supervisor_defaults_when_absent(self) -> None:
+        settings = self._load({})
+
+        self.assertTrue(settings.supervisor.enabled)
+        self.assertEqual(settings.supervisor.interval_seconds, 10.0)
+        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
+        self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
+
+    def test_supervisor_knobs_parse(self) -> None:
+        settings = self._load(
+            {
+                "supervisor": {
+                    "enabled": False,
+                    "intervalSeconds": 5,
+                    "staleCutoffSeconds": 30,
+                    "redeliverRateLimitSeconds": 45,
+                }
+            }
+        )
+
+        self.assertFalse(settings.supervisor.enabled)
+        self.assertEqual(settings.supervisor.interval_seconds, 5.0)
+        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 30.0)
+        self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 45.0)
+
+    def test_supervisor_enabled_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "supervisor.enabled"):
+            self._load({"supervisor": {"enabled": "yes"}})
+
+    def test_supervisor_interval_must_be_positive(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "intervalSeconds"):
+            self._load({"supervisor": {"intervalSeconds": 0}})
+
+    def test_unknown_supervisor_key_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "sweepSeconds"):
+            self._load({"supervisor": {"sweepSeconds": 5}})
+
     def test_gate_delegation_parses_in_its_new_home(self) -> None:
         settings = self._load(
             {

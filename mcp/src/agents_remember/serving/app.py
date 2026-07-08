@@ -63,14 +63,17 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
+from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
+from agents_remember.observer.store import EventStore
 from agents_remember.providers.degradation import evaluate_provider_degradation
 from agents_remember.providers.metrics import (
     DEFAULT_SAMPLE_INTERVAL_SECONDS,
@@ -99,6 +102,11 @@ from agents_remember.serving.seat_events import (
     log_turn_state_change_event,
 )
 from agents_remember.serving.static import mount_static
+from agents_remember.serving.supervisor import SupervisorContext, run_supervisor_sweep
+from agents_remember.serving.supervisor_heartbeat import (
+    SupervisorHeartbeatStore,
+    heartbeat_age_seconds,
+)
 from agents_remember.serving.terminal import TerminalHost, TerminalSession
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -153,19 +161,26 @@ def _if_none_match_matches(header: str | None, revision: str) -> bool:
 
 
 async def stream_events(
-    projector: Projector, *, build: ServingBuild | None = None
+    projector: Projector,
+    *,
+    build: ServingBuild | None = None,
+    supervisor_heartbeat: dict[str, Any] | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one connection: snapshot, then per-entity deltas.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
     ``build`` (the boot-time serving stamp, 260703-L15) rides the snapshot as
     ``servingBuild`` so the cockpit can render which process/commit is answering.
+    ``supervisor_heartbeat`` (260707-HFX2-L2 R5) rides as ``supervisorHeartbeat`` -- the tick age
+    at connect time, so a stale supervisor is visible in the dashboard header at a glance.
     """
     seq, snapshot = projector.current()
     if snapshot is not None:
         payload = _encode(snapshot)
         if build is not None:
             payload["servingBuild"] = build.payload()
+        if supervisor_heartbeat is not None:
+            payload["supervisorHeartbeat"] = supervisor_heartbeat
         yield ServerSentEvent(data=payload, event="snapshot", id=str(seq), retry=2000)
     async for seq, delta in projector.subscribe():
         yield ServerSentEvent(data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000)
@@ -492,16 +507,56 @@ def create_app(
                 logger.exception("provider metrics sample failed; retrying next interval")
             await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
 
+    # 260707-HFX2-L2 R1: the deterministic supervisor sweep -- its own decoupled cadence
+    # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
+    # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
+    # ExpectationRowStore/the nudge log DIRECTLY (R3), never the projection.
+    supervisor_heartbeat_store = SupervisorHeartbeatStore(observer_root(config))
+
+    def _supervisor_context() -> SupervisorContext:
+        settings = load_agentic_settings(config.coordination_root)
+        root = observer_root(config)
+        return SupervisorContext(
+            catalog=catalog,
+            host=host,
+            paster=paster,
+            inbox_store=OperatorInboxStore(root),
+            expectation_store=ExpectationRowStore(root),
+            nudge_store=OrchestrationNudgeStore(root),
+            event_store=EventStore(root),
+            heartbeat_store=supervisor_heartbeat_store,
+            coordination_root=config.coordination_root,
+            stale_seat_seconds=max(settings.supervisor.interval_seconds * 4, 60.0),
+            redeliver_rate_limit_seconds=settings.supervisor.redeliver_rate_limit_seconds,
+        )
+
+    async def supervisor_loop() -> None:
+        while True:
+            settings = load_agentic_settings(config.coordination_root)
+            if not settings.supervisor.enabled:
+                await asyncio.sleep(settings.supervisor.interval_seconds)
+                continue
+            try:
+                ctx = _supervisor_context()
+                await asyncio.to_thread(run_supervisor_sweep, ctx, now=(now or utc_now)())
+            except Exception:
+                logger.exception("supervisor sweep failed; retrying next interval")
+            await asyncio.sleep(settings.supervisor.interval_seconds)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await projector.prime()
         task = asyncio.create_task(projector.run())
         metrics_task = asyncio.create_task(metrics_loop())
+        supervisor_task = asyncio.create_task(supervisor_loop())
         try:
             yield
         finally:
+            supervisor_task.cancel()
             metrics_task.cancel()
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await supervisor_task
             with contextlib.suppress(asyncio.CancelledError):
                 await metrics_task
             with contextlib.suppress(asyncio.CancelledError):
@@ -509,6 +564,22 @@ def create_app(
             host.shutdown()
 
     app = FastAPI(title="Agents Remember dashboard", lifespan=lifespan)
+
+    def _supervisor_heartbeat_payload() -> dict[str, Any]:
+        # 260707-HFX2-L2 R5: the tick age at RESPONSE time (not the ETag-gated content revision --
+        # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
+        # applies to other live ages, so it never busts the projection's change-gate revision).
+        settings = load_agentic_settings(config.coordination_root)
+        moment = liveness_clock()
+        heartbeat = supervisor_heartbeat_store.read()
+        age = heartbeat_age_seconds(heartbeat, now=moment)
+        stale_cutoff = settings.supervisor.stale_cutoff_seconds
+        return {
+            "lastTickAt": heartbeat.lastTickAt if heartbeat is not None else None,
+            "ageSeconds": age,
+            "staleCutoffSeconds": stale_cutoff,
+            "stale": age is None or age >= stale_cutoff,
+        }
 
     @app.get("/api/state")
     def api_state(
@@ -529,11 +600,14 @@ def create_app(
             return Response(status_code=304, headers=headers)
         body = snapshot.model_dump(by_alias=True, exclude_none=True)
         body["servingBuild"] = build.payload()
+        body["supervisorHeartbeat"] = _supervisor_heartbeat_payload()
         return JSONResponse(content=body, headers=headers)
 
     @app.get("/api/stream", response_class=EventSourceResponse)
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(projector, build=build):
+        async for event in stream_events(
+            projector, build=build, supervisor_heartbeat=_supervisor_heartbeat_payload()
+        ):
             yield event
 
     @app.get("/api/events", response_class=EventSourceResponse)

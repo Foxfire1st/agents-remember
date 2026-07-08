@@ -70,6 +70,7 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "spawn",
         "harnesses",
         "expectations",
+        "supervisor",
     }
 )
 # One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
@@ -115,6 +116,14 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
 )
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
+# R1/R5 (260707-HFX2-L2): the deterministic supervisor sweep's own knobs -- interval, enable
+# flag, self-liveness staleness cutoff, and the inbox redelivery rate limit (the sweep's own
+# reuse of OperatorInboxStore.list_redeliverable's rate_limit_seconds, R3/R4a).
+KNOWN_SUPERVISOR_FIELDS = frozenset(
+    {"enabled", "intervalSeconds", "staleCutoffSeconds", "redeliverRateLimitSeconds"}
+)
+DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
+DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
@@ -227,6 +236,21 @@ class ExpectationSettings:
 
 
 @dataclass(frozen=True)
+class SupervisorSettings:
+    """``orchestration.supervisor`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
+
+    ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
+    own default (``inbox_backoff.DEFAULT_RATE_LIMIT_SECONDS``) rather than duplicating that number
+    here as a second source of truth.
+    """
+
+    enabled: bool = True
+    interval_seconds: float = DEFAULT_SUPERVISOR_INTERVAL_SECONDS
+    stale_cutoff_seconds: float = DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+    redeliver_rate_limit_seconds: float | None = None
+
+
+@dataclass(frozen=True)
 class AgenticSettings:
     """The merged, typed agentic settings for one read (global <- local)."""
 
@@ -244,6 +268,7 @@ class AgenticSettings:
     roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
+    supervisor: SupervisorSettings = field(default_factory=SupervisorSettings)
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
     # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
@@ -464,6 +489,18 @@ def _require_positive_int(raw: object, owner: str, source: str) -> int:
     return raw
 
 
+def _require_positive_number(raw: object, owner: str, source: str) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw <= 0:
+        raise AgenticSettingsError(f"{owner} must be a positive number: {source}")
+    return float(raw)
+
+
+def _require_bool(raw: object, owner: str, source: str) -> bool:
+    if not isinstance(raw, bool):
+        raise AgenticSettingsError(f"{owner} must be a boolean: {source}")
+    return raw
+
+
 def _require_string_list(raw: object, owner: str, source: str) -> tuple[str, ...]:
     """A free-form list of non-empty strings (shape-checked only; content never validated).
 
@@ -538,6 +575,7 @@ def _parse_orchestration(
         ),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
         expectations=_parse_expectations(raw.get("expectations"), source=source),
+        supervisor=_parse_supervisor(raw.get("supervisor"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,
@@ -1051,6 +1089,52 @@ def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:
                 raise AgenticSettingsError(f"{owner} must be a positive number of seconds: {source}")
             sla_seconds[kind] = float(value)
     return ExpectationSettings(sla_seconds=sla_seconds)
+
+
+def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
+    """``orchestration.supervisor``: the deterministic sweep's own knobs (R1/R5).
+
+    Absent -> the documented defaults (enabled, 10s interval, 60s staleness cutoff, inbox-store
+    redelivery rate limit inherited).
+    """
+    if raw is None:
+        return SupervisorSettings()
+    block = _require_object(raw, "orchestration.supervisor", source)
+    _refuse_unknown(block, KNOWN_SUPERVISOR_FIELDS, "orchestration.supervisor", source)
+    enabled = (
+        _require_bool(block["enabled"], "orchestration.supervisor.enabled", source)
+        if "enabled" in block
+        else True
+    )
+    interval_seconds = (
+        _require_positive_number(
+            block["intervalSeconds"], "orchestration.supervisor.intervalSeconds", source
+        )
+        if "intervalSeconds" in block
+        else DEFAULT_SUPERVISOR_INTERVAL_SECONDS
+    )
+    stale_cutoff_seconds = (
+        _require_positive_number(
+            block["staleCutoffSeconds"], "orchestration.supervisor.staleCutoffSeconds", source
+        )
+        if "staleCutoffSeconds" in block
+        else DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+    )
+    redeliver_rate_limit_seconds = (
+        _require_positive_number(
+            block["redeliverRateLimitSeconds"],
+            "orchestration.supervisor.redeliverRateLimitSeconds",
+            source,
+        )
+        if "redeliverRateLimitSeconds" in block
+        else None
+    )
+    return SupervisorSettings(
+        enabled=enabled,
+        interval_seconds=interval_seconds,
+        stale_cutoff_seconds=stale_cutoff_seconds,
+        redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
+    )
 
 
 def _parse_spawn(raw: object, *, source: str, harness_ids: tuple[str, ...] | None) -> str | None:

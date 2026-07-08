@@ -25,6 +25,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -110,6 +111,15 @@ class AmbientLifecycle:
         # compaction (the same lifecycle process keeps running).
         self._served_store = served_store or ServedStore(store.root)
         self._served: dict[str, set[str]] = {}
+
+    @property
+    def root(self) -> Path:
+        """The observer store root (``logs/observer``) this ambient lifecycle writes under.
+
+        260707-HFX2-L2 R5: the MCP tool choke point (``_tool_payload``) reads this to check the
+        supervisor heartbeat opportunistically, without needing its own ``McpRuntimeConfig``.
+        """
+        return self._store.root
 
     # --- signals -----------------------------------------------------------
 
