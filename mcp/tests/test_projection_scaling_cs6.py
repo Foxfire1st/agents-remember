@@ -162,17 +162,17 @@ class LifecycleLogCacheTests(unittest.TestCase):
         projection_store._lifecycle_log_cache.clear()
         projection_store.read_lifecycle_logs(root)  # first pass populates the cache
         reads = {"count": 0}
-        original = EventStore.read
+        original = EventStore.read_log
 
-        def counting_read(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
+        def counting_read_log(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
             reads["count"] += 1
             return _orig(self, lifecycle_id)
 
-        EventStore.read = counting_read  # type: ignore[assignment]
+        EventStore.read_log = counting_read_log  # type: ignore[assignment]
         try:
             projection_store.read_lifecycle_logs(root)  # second pass, logs unchanged
         finally:
-            EventStore.read = original  # type: ignore[assignment]
+            EventStore.read_log = original  # type: ignore[assignment]
         return reads["count"]
 
     def test_unchanged_logs_reparse_count_is_zero_regardless_of_size(self) -> None:
@@ -183,6 +183,57 @@ class LifecycleLogCacheTests(unittest.TestCase):
                     0,
                     label=f"lifecycle-log re-reads on unchanged tick (n={size})",
                 )
+
+    def test_heartbeat_sidecar_refreshes_merged_view_without_reparsing_cached_log(self) -> None:
+        """B2/F7: a heartbeat update changes the merged projection view but not the cached
+        events.jsonl parse count."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = EventStore(root)
+            store.append(
+                Event(
+                    id="started",
+                    ts=NOW.isoformat(),
+                    kind="lifecycle.started",
+                    trust="declared",
+                    actor="model",
+                    lifecycleId="life-1",
+                    data={"fleeting": True},
+                )
+            )
+            projection_store._lifecycle_log_cache.clear()
+            reads = {"count": 0}
+            original = EventStore.read_log
+
+            def counting_read_log(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
+                reads["count"] += 1
+                return _orig(self, lifecycle_id)
+
+            EventStore.read_log = counting_read_log  # type: ignore[assignment]
+            try:
+                first = projection_store.read_lifecycle_logs(root)
+                self.assertEqual(reads["count"], 1)
+                store.append(
+                    Event(
+                        id="beat-1",
+                        ts=(NOW + timedelta(seconds=15)).isoformat(),
+                        kind="lifecycle.heartbeat",
+                        trust="observed",
+                        actor="system",
+                        lifecycleId="life-1",
+                        data={"state": "running", "phase": "build"},
+                    )
+                )
+                second = projection_store.read_lifecycle_logs(root)
+            finally:
+                EventStore.read_log = original  # type: ignore[assignment]
+                projection_store._lifecycle_log_cache.clear()
+
+            self.assertEqual([event.id for event in first[0]], ["started"])
+            self.assertEqual([event.id for event in second[0]], ["started", "beat-1"])
+            assert_bounded_count(
+                reads["count"], 1, label="event-log parses across heartbeat sidecar update"
+            )
 
 
 class TaskDocumentsPayloadBudgetTests(unittest.TestCase):

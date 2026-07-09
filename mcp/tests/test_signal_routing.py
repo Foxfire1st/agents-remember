@@ -15,6 +15,7 @@ from agents_remember.controlplane.signal_routing import (
     derive_signal_owner,
     derive_skip_level_owner,
     is_seat_dead,
+    leaf_chain_has_progress,
 )
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 
@@ -45,6 +46,7 @@ class SignalRoutingTests(unittest.TestCase):
         self.catalog.upsert(TerminalCatalogEntry(**base))  # type: ignore[arg-type]
 
     def test_worker_signal_routes_to_its_manager(self) -> None:
+        self._upsert(id="manager-1", lifecycle_id="L-manager", spawn_role="manager")
         self._upsert(
             id="worker-1",
             spawn_role="worker",
@@ -53,6 +55,98 @@ class SignalRoutingTests(unittest.TestCase):
         )
         owner = derive_signal_owner(self.catalog, sender_agent_id="worker-1", message_kind="turn-report")
         self.assertEqual(owner, RoutedOwner(role="manager", agent_id="manager-1", lifecycle_id="L-manager"))
+
+    def test_reviewer_signal_resolves_current_manager_instead_of_stale_binding(self) -> None:
+        leaf_key = "repo-a/260707_master/leaf-9"
+        self._upsert(
+            id="manager-old",
+            spawn_role="manager",
+            status="terminated",
+            leaf_key="repo-a/260707_master/manager-anchor",
+        )
+        self._upsert(
+            id="manager-current",
+            lifecycle_id="L-manager-current",
+            spawn_role="manager",
+            leaf_key="repo-a/260707_master/current-manager-anchor",
+        )
+        self._upsert(
+            id="reviewer-1",
+            spawn_role="reviewer",
+            spawned_by_session="manager-old",
+            leaf_key=leaf_key,
+        )
+
+        owner = derive_signal_owner(
+            self.catalog,
+            sender_agent_id="reviewer-1",
+            message_kind="turn-report",
+            leaf_key=leaf_key,
+        )
+
+        self.assertEqual(
+            owner,
+            RoutedOwner(
+                role="manager",
+                agent_id="manager-current",
+                lifecycle_id="L-manager-current",
+            ),
+        )
+
+    def test_stale_manager_binding_never_falls_directly_to_orchestrator(self) -> None:
+        self._upsert(id="orchestrator-1", spawn_role="orchestrator")
+        self._upsert(
+            id="manager-old",
+            spawn_role="manager",
+            status="terminated",
+            spawned_by_session="orchestrator-1",
+        )
+        self._upsert(
+            id="worker-1",
+            spawn_role="worker",
+            spawned_by_session="manager-old",
+            leaf_key="repo-a/260707_master/leaf-9",
+        )
+
+        owner = derive_signal_owner(
+            self.catalog,
+            sender_agent_id="worker-1",
+            message_kind="escalation",
+            leaf_key="repo-a/260707_master/leaf-9",
+        )
+
+        self.assertEqual(owner, RoutedOwner(role="manager"))
+
+    def test_unbound_reviewer_completion_counts_as_leaf_chain_progress(self) -> None:
+        leaf_key = "repo-a/260707_master/leaf-9"
+        self._upsert(
+            id="manager-current",
+            spawn_role="manager",
+            leaf_key="repo-a/260707_master/current-manager-anchor",
+        )
+        self._upsert(
+            id="worker-1",
+            spawn_role="worker",
+            spawned_by_session="manager-current",
+            leaf_key=leaf_key,
+        )
+        self._upsert(
+            id="reviewer-1",
+            spawn_role="reviewer",
+            spawned_by_session="manager-current",
+            leaf_key=None,
+            status="landed",
+            landed_at="2026-06-23T10:05:00+00:00",
+        )
+
+        self.assertTrue(
+            leaf_chain_has_progress(
+                self.catalog,
+                leaf_key=leaf_key,
+                subject_agent_id="worker-1",
+                since=T1,
+            )
+        )
 
     def test_manager_signal_routes_to_orchestrator(self) -> None:
         self._upsert(

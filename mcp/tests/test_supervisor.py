@@ -14,6 +14,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -29,6 +30,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
+from agents_remember.serving import supervisor as supervisor_module
 from agents_remember.serving.supervisor import (
     SupervisorContext,
     SupervisorFinding,
@@ -311,6 +313,42 @@ class SeatLivenessPredicateTests(unittest.TestCase):
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].detail, "liveness-degraded")
 
+    def test_unbound_reviewer_completion_suppresses_false_inactive_refire(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            leaf_key = "repo-a/260707_master/leaf-9"
+            catalog.upsert(
+                replace(
+                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    spawn_role="manager",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry(
+                        "worker-1",
+                        leaf_key=leaf_key,
+                        turn_state="stale",
+                        turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+                    ),
+                    spawn_role="worker",
+                    spawned_by_session="manager-current",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("reviewer-1", status="landed"),
+                    spawn_role="reviewer",
+                    spawned_by_session="manager-current",
+                    landed_at=(NOW - timedelta(minutes=1)).isoformat(),
+                )
+            )
+
+            self.assertEqual(
+                evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0),
+                [],
+            )
+
 
 class SweepIntegrationTests(unittest.TestCase):
     """Seeded drift across every predicate family -> the expected action set."""
@@ -348,7 +386,7 @@ class SweepIntegrationTests(unittest.TestCase):
 
     def test_seeded_drift_produces_expected_actions_and_ticks_heartbeat(self) -> None:
         # A worker seat spawned by a manager seat -- the routing edge signal-emit/auto-nudge walk.
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         worker = replace(
             _entry("worker-1", leaf_key="repo-a/260707_master/leaf-9"),
             spawn_role="worker",
@@ -686,6 +724,66 @@ class EscalationPredicateTests(unittest.TestCase):
             )
             self.assertEqual(findings, [])
 
+    def test_leaf_chain_progress_suppresses_inactivity_signal_escalation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = OperatorInboxStore(root / "observer")
+            catalog = TerminalCatalog(root / "catalog.json")
+            leaf_key = "repo-a/260707_master/leaf-9"
+            catalog.upsert(
+                replace(
+                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    spawn_role="manager",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("worker-1", leaf_key=leaf_key),
+                    spawn_role="worker",
+                    spawned_by_session="manager-current",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("reviewer-1", status="landed"),
+                    spawn_role="reviewer",
+                    spawned_by_session="manager-current",
+                    landed_at=(NOW - timedelta(minutes=1)).isoformat(),
+                )
+            )
+            store.append(
+                create_operator_inbox_entry(
+                    entry_id="e1",
+                    now=(NOW - timedelta(minutes=10)).isoformat(),
+                    lifecycle_id=None,
+                    agent_id="manager-current",
+                    ask="Supervisor observed seat-liveness: turn-state-stale",
+                    response="worker-1 inactive",
+                    created_by="supervisor",
+                    created_via="cli",
+                    message_kind="escalation",
+                    recipient_role="manager",
+                    leaf_key=leaf_key,
+                    subject_agent_id="worker-1",
+                ).model_copy(
+                    update={
+                        "rung": 1,
+                        "escalatedAt": (NOW - timedelta(minutes=10)).isoformat(),
+                    }
+                )
+            )
+
+            self.assertEqual(
+                evaluate_escalation_findings(
+                    store,
+                    now=NOW,
+                    sla_seconds={"escalation": 60.0},
+                    rung_seconds={1: 60.0},
+                    catalog=catalog,
+                ),
+                [],
+            )
+
 
 class DeadUpstreamPredicateTests(unittest.TestCase):
     def test_worker_with_dead_manager_fires(self) -> None:
@@ -785,15 +883,23 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.assertIn("orchestration.escalation.rung", self._events())
 
         run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=2))
+        still_rung1 = self.inbox_store.current()["e1"]
+        self.assertEqual(still_rung1.rung, 1)
+
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=5))
         rung2 = self.inbox_store.current()["e1"]
         self.assertEqual(rung2.rung, 2)
 
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=4))
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=7))
+        still_rung2 = self.inbox_store.current()["e1"]
+        self.assertEqual(still_rung2.rung, 2)
+
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=10))
         rung3 = self.inbox_store.current()["e1"]
         self.assertEqual(rung3.rung, 3)
 
         # Rung 3 is terminal -- a further sweep never advances it past the developer.
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=10))
+        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=20))
         still_rung3 = self.inbox_store.current()["e1"]
         self.assertEqual(still_rung3.rung, 3)
 
@@ -806,6 +912,39 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.assertEqual(still_rung3.ask, "ask")
         self.assertEqual(still_rung3.recipientRole, "architect")
         self.assertIsNone(still_rung3.agentId)
+
+    def test_duplicate_due_findings_cannot_advance_two_rungs_in_one_sweep(self) -> None:
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        self.inbox_store.append(
+            create_operator_inbox_entry(
+                entry_id="e1",
+                now=(NOW - timedelta(minutes=5)).isoformat(),
+                lifecycle_id=None,
+                agent_id="worker-1",
+                ask="ask",
+                response="resp",
+                created_by="system",
+                created_via="cli",
+                message_kind="escalation",
+                recipient_role="worker",
+            )
+        )
+        duplicate = SupervisorFinding(
+            kind="escalation-due",
+            detail="escalation",
+            session_id="worker-1",
+            source_id="e1",
+        )
+        with mock.patch.object(
+            supervisor_module, "evaluate_predicates", return_value=[duplicate, duplicate]
+        ):
+            result = run_supervisor_sweep(self._ctx(), now=NOW)
+
+        self.assertEqual(self.inbox_store.current()["e1"].rung, 1)
+        self.assertEqual(result.actions[1].detail, "entry already transitioned this sweep")
 
     def test_dead_intermediate_manager_is_skipped_at_rung_two(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
@@ -977,7 +1116,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         # escalated stamp); the divergent pre-fix shape produced THOUSANDS of lines here.
         self.assertLessEqual(len(lines), seeded * 8)
 
-    def test_dead_upstream_signals_the_grandparent(self) -> None:
+    def test_dead_upstream_signals_the_current_manager(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(
@@ -985,10 +1124,21 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 status="terminated",
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
+                leaf_key="repo-a/260707_master/old-manager-anchor",
             )
         )
         self.catalog.upsert(
-            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        self.catalog.upsert(
+            replace(
+                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                spawn_role="manager",
+            )
         )
         ctx = self._ctx()
         result = run_supervisor_sweep(ctx, now=NOW)
@@ -1001,7 +1151,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             if event.kind == "orchestration.supervisor.dead-upstream"
         ]
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].data["grandparentAgentId"], "orchestrator-1")
+        self.assertEqual(events[0].data["managerAgentId"], "manager-2")
 
 
 class Cs6SweepScalingTests(unittest.TestCase):

@@ -15,15 +15,18 @@ reserved here).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 
 # One hop up the spawn edge: the role a signal's SENDER was spawned as -> the role its routed
 # owner carries. A sender spawned as anything else (orchestrator, strategist, reviewer, ...) has
 # no owner-role mapping here -- the caller's explicit recipient_role stands, unrouted.
 _OWNER_ROLE_BY_SENDER_SPAWN_ROLE: dict[str, AgentRole] = {
     "worker": "manager",
+    "reviewer": "manager",
+    "curator": "manager",
     "manager": "orchestrator",
 }
 
@@ -38,13 +41,265 @@ class RoutedOwner:
     lifecycle_id: str | None = None
 
 
+def _manager_owner(entry: TerminalCatalogEntry) -> RoutedOwner:
+    return RoutedOwner(
+        role="manager",
+        agent_id=entry.id,
+        lifecycle_id=entry.lifecycle_id,
+    )
+
+
+def _master_key(leaf_key: str | None) -> str | None:
+    if leaf_key is None:
+        return None
+    parts = leaf_key.split("/", 2)
+    if len(parts) != 3 or not all(parts):
+        return None
+    return "/".join(parts[:2])
+
+
+def signal_leaf_key(
+    catalog: TerminalCatalog,
+    *,
+    sender_agent_id: str | None,
+    leaf_key: str | None = None,
+) -> str | None:
+    """Best current leaf/master anchor for a signal sender.
+
+    A bound worker/reviewer supplies its leaf directly. An unbound successor seat can still inherit
+    the master anchor from its recorded manager, including a retired prior manager whose catalog
+    row remains available for provenance.
+    """
+    if leaf_key is not None:
+        return leaf_key
+    sender = catalog.get(sender_agent_id) if sender_agent_id is not None else None
+    if sender is None:
+        return None
+    if sender.leaf_key is not None:
+        return sender.leaf_key
+    prior_manager = (
+        catalog.get(sender.spawned_by_session) if sender.spawned_by_session is not None else None
+    )
+    return prior_manager.leaf_key if prior_manager is not None else None
+
+
+def _direct_live_manager(
+    catalog: TerminalCatalog, sender_agent_id: str | None
+) -> TerminalCatalogEntry | None:
+    sender = catalog.get(sender_agent_id) if sender_agent_id is not None else None
+    if sender is None or sender.spawned_by_session is None:
+        return None
+    manager = catalog.get(sender.spawned_by_session)
+    if (
+        manager is None
+        or manager.kind != "harness"
+        or manager.status != "running"
+        or manager.spawn_role != "manager"
+    ):
+        return None
+    return manager
+
+
+def _live_managers(catalog: TerminalCatalog) -> list[TerminalCatalogEntry]:
+    return [
+        entry
+        for entry in catalog.list()
+        if entry.kind == "harness"
+        and entry.status == "running"
+        and entry.spawn_role == "manager"
+    ]
+
+
+def _scoped_managers(
+    catalog: TerminalCatalog,
+    managers: list[TerminalCatalogEntry],
+    *,
+    route_leaf: str,
+) -> list[TerminalCatalogEntry]:
+    route_master = _master_key(route_leaf)
+    linked_manager_ids = {
+        entry.spawned_by_session
+        for entry in catalog.list()
+        if entry.leaf_key == route_leaf and entry.spawned_by_session is not None
+    }
+    return [
+        manager
+        for manager in managers
+        if manager.id in linked_manager_ids
+        or manager.leaf_key == route_leaf
+        or (route_master is not None and _master_key(manager.leaf_key) == route_master)
+    ]
+
+
+def derive_leaf_manager_owner(
+    catalog: TerminalCatalog,
+    *,
+    sender_agent_id: str | None,
+    leaf_key: str | None = None,
+) -> RoutedOwner:
+    """Resolve a leaf signal to its current responsible manager at address time.
+
+    A live direct manager remains authoritative. When that binding is stale, prefer a live manager
+    attached to the same qualified master or currently parenting a seat bound to the same leaf.
+    Only an unambiguous single live manager is used without a leaf/master anchor. If no concrete
+    current manager can be proven, return the role-only manager mailbox; never fall directly to an
+    orchestrator or architect because the ladder owns later escalation.
+    """
+    direct_manager = _direct_live_manager(catalog, sender_agent_id)
+    if direct_manager is not None:
+        return _manager_owner(direct_manager)
+
+    live_managers = _live_managers(catalog)
+    route_leaf = signal_leaf_key(
+        catalog, sender_agent_id=sender_agent_id, leaf_key=leaf_key
+    )
+    if route_leaf is not None:
+        scoped = _scoped_managers(catalog, live_managers, route_leaf=route_leaf)
+        if scoped:
+            return _manager_owner(
+                max(scoped, key=lambda entry: (entry.last_attached_at, entry.created_at, entry.id))
+            )
+    return RoutedOwner(role="manager")
+
+
+def _parsed_at(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _entry_progressed_after(entry: TerminalCatalogEntry, since: datetime) -> bool:
+    if entry.status == "running" and entry.turn_state == "working":
+        return True
+    timestamps = (
+        entry.created_at,
+        entry.last_attached_at,
+        entry.turn_state_changed_at,
+        entry.landed_at,
+    )
+    return any(at is not None and at > since for at in map(_parsed_at, timestamps))
+
+
+def _entry_carries_leaf_chain(
+    entry: TerminalCatalogEntry,
+    *,
+    leaf_key: str,
+    manager_agent_id: str | None,
+    subject: TerminalCatalogEntry | None,
+) -> bool:
+    if entry.leaf_key == leaf_key or (
+        manager_agent_id is not None and entry.id == manager_agent_id
+    ):
+        return True
+    # Workers are expected to be leaf-bound; accepting an unbound sibling worker here would let
+    # activity on a different parallel leaf suppress this leaf. Reviewers and curators may
+    # legitimately carry the same worktree without a leaf attachment.
+    return bool(
+        manager_agent_id is not None
+        and entry.spawned_by_session == manager_agent_id
+        and entry.spawn_role in ("reviewer", "curator")
+        and entry.leaf_key is None
+        and subject is not None
+        and entry.cwd == subject.cwd
+    )
+
+
+def _is_chain_progress(
+    entry: TerminalCatalogEntry,
+    *,
+    leaf_key: str,
+    manager_agent_id: str | None,
+    subject_agent_id: str | None,
+    subject: TerminalCatalogEntry | None,
+    since: datetime,
+) -> bool:
+    if entry.id == subject_agent_id or entry.status not in ("running", "landed"):
+        return False
+    return _entry_carries_leaf_chain(
+        entry,
+        leaf_key=leaf_key,
+        manager_agent_id=manager_agent_id,
+        subject=subject,
+    ) and _entry_progressed_after(entry, since)
+
+
+def leaf_chain_has_progress(
+    catalog: TerminalCatalog,
+    *,
+    leaf_key: str,
+    subject_agent_id: str | None,
+    since: str,
+) -> bool:
+    """Whether another observable seat carrying ``leaf_key`` progressed after ``since``.
+
+    The chain includes exact-leaf seats, the current manager, and an unbound worker/reviewer/curator
+    spawned by that manager in the same worktree as the bound subject. The cwd check is what credits
+    an unbound reviewer without treating unrelated parallel leaves under the same manager as activity.
+    """
+    since_at = _parsed_at(since)
+    if since_at is None:
+        return False
+    subject = catalog.get(subject_agent_id) if subject_agent_id is not None else None
+    manager = derive_leaf_manager_owner(
+        catalog, sender_agent_id=subject_agent_id, leaf_key=leaf_key
+    )
+    return any(
+        _is_chain_progress(
+            entry,
+            leaf_key=leaf_key,
+            manager_agent_id=manager.agent_id,
+            subject_agent_id=subject_agent_id,
+            subject=subject,
+            since=since_at,
+        )
+        for entry in catalog.list()
+    )
+
+
 def derive_signal_owner(
     catalog: TerminalCatalog,
     *,
     sender_agent_id: str | None,
     message_kind: InboxMessageKind,
+    leaf_key: str | None = None,
 ) -> RoutedOwner:
     """The owner address for a signal from ``sender_agent_id``, or an empty :class:`RoutedOwner`."""
+    if message_kind == "decision-item":
+        return RoutedOwner(role="architect")
+    if sender_agent_id is None:
+        return RoutedOwner()
+    entry = catalog.get(sender_agent_id)
+    if entry is None or entry.spawn_role is None:
+        return RoutedOwner()
+    owner_role = _OWNER_ROLE_BY_SENDER_SPAWN_ROLE.get(entry.spawn_role)
+    if owner_role is None:
+        return RoutedOwner()
+    if owner_role == "manager":
+        return derive_leaf_manager_owner(
+            catalog, sender_agent_id=sender_agent_id, leaf_key=leaf_key
+        )
+    return RoutedOwner(
+        role=owner_role,
+        agent_id=entry.spawned_by_session,
+        lifecycle_id=entry.spawned_by_lifecycle,
+    )
+
+
+def _derive_spawn_owner(
+    catalog: TerminalCatalog,
+    *,
+    sender_agent_id: str | None,
+    message_kind: InboxMessageKind,
+) -> RoutedOwner:
+    """One historical provenance hop for the escalation ladder only.
+
+    Initial signal addressing uses :func:`derive_signal_owner` and refuses stale managers. Once a
+    manager has failed, the ladder still needs the recorded edge in order to climb past that dead
+    seat to its owner; replacing this with current-manager routing would erase the path it must walk.
+    """
     if message_kind == "decision-item":
         return RoutedOwner(role="architect")
     if sender_agent_id is None:
@@ -122,7 +377,9 @@ def derive_skip_level_owner(
         if current_agent_id is None or current_agent_id in seen:
             return owner if hops_done >= 2 else RoutedOwner()
         seen.add(current_agent_id)
-        owner = derive_signal_owner(catalog, sender_agent_id=current_agent_id, message_kind=message_kind)
+        owner = _derive_spawn_owner(
+            catalog, sender_agent_id=current_agent_id, message_kind=message_kind
+        )
         if owner.agent_id is None:
             return owner
         current_agent_id = owner.agent_id

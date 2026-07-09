@@ -42,10 +42,12 @@ from agents_remember.controlplane.supervisor_signals import (
     SupervisorSignalCooldownStore,
     SupervisorSignalRecord,
 )
+from agents_remember.observer.ambient import AmbientLifecycle
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_TTL_SECONDS,
     compact_workspace_river,
     initial_event_offsets,
+    prune_expired_lifecycle_event_logs,
 )
 from agents_remember.observer.events import Event
 from agents_remember.observer.served_store import ServedRecord, ServedStore
@@ -301,6 +303,50 @@ class LifecycleHeartbeatSidecarTests(unittest.TestCase):
                 events = store.read("life-1")
                 self.assertEqual([event.kind for event in events], ["lifecycle.started", "lifecycle.heartbeat"])
                 self.assertEqual(events[-1].id, f"beat-{beats - 1}")
+
+    def test_prune_fully_reclaims_beaten_lifecycles_before_fleeting_reap_at_two_sizes(self) -> None:
+        """B1/F7/CS-6 D3: pruning owns every sidecar plus the lifecycle directory; the later
+        opportunistic fleeting reap sees no heartbeat-only orphan left behind."""
+        for lifecycle_count in (10, 100):
+            with self.subTest(lifecycle_count=lifecycle_count), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                store = EventStore(root)
+                for index in range(lifecycle_count):
+                    lifecycle_id = f"life-{index:03d}"
+                    store.append(
+                        Event(
+                            id=f"started-{index}",
+                            ts=(NOW - timedelta(hours=2)).isoformat(),
+                            kind="lifecycle.started",
+                            trust="declared",
+                            actor="model",
+                            lifecycleId=lifecycle_id,
+                            data={"fleeting": True},
+                        )
+                    )
+                    store.append(
+                        Event(
+                            id=f"beat-{index}",
+                            ts=(NOW - timedelta(minutes=90)).isoformat(),
+                            kind="lifecycle.heartbeat",
+                            trust="observed",
+                            actor="system",
+                            lifecycleId=lifecycle_id,
+                            data={"state": "running", "phase": "build"},
+                        )
+                    )
+                self.assertEqual(
+                    len(list((root / "lifecycles").glob("*/heartbeat.json"))),
+                    lifecycle_count,
+                )
+
+                removed = prune_expired_lifecycle_event_logs(root, now=NOW)
+                self.assertEqual(len(removed), lifecycle_count)
+                self.assertEqual(list((root / "lifecycles").iterdir()), [])
+
+                ambient = AmbientLifecycle(store, heartbeat_seconds=3600, clock=lambda: NOW)
+                self.addCleanup(ambient.shutdown)
+                self.assertEqual(ambient._reap_stale_fleeting(), [])
 
 
 class ExpectationCompactTests(unittest.TestCase):

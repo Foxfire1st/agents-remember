@@ -13,6 +13,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.escalation_ladder import (
     MAX_RUNG,
+    MIN_RUNG_DWELL_SECONDS,
     next_step,
     rung_due,
     seat_is_suspect,
@@ -72,6 +73,27 @@ class RungDueTests(unittest.TestCase):
         )
         self.assertFalse(rung_due(entry, now=NOW, sla_seconds=30.0, rung_seconds=3600.0))
         self.assertTrue(rung_due(entry, now=NOW, sla_seconds=30.0, rung_seconds=600.0))
+
+    def test_later_rung_requires_five_minute_floor_from_redundant_snapshot_anchor(self) -> None:
+        """The live cascade guard: even a stale escalatedAt cannot advance again until five
+        minutes after the transition snapshot timestamp."""
+        transitioned_at = NOW - timedelta(minutes=2)
+        entry = _entry().model_copy(
+            update={
+                "rung": 1,
+                "escalatedAt": (NOW - timedelta(hours=1)).isoformat(),
+                "rungTransitionAt": transitioned_at.isoformat(),
+            }
+        )
+        self.assertFalse(rung_due(entry, now=NOW, sla_seconds=1.0, rung_seconds=1.0))
+        self.assertTrue(
+            rung_due(
+                entry,
+                now=transitioned_at + timedelta(seconds=MIN_RUNG_DWELL_SECONDS),
+                sla_seconds=1.0,
+                rung_seconds=1.0,
+            )
+        )
 
     def test_consumed_row_never_advances(self) -> None:
         entry = _entry().model_copy(update={"state": "consumed"})

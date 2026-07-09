@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Iterator
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -97,10 +98,13 @@ def prune_expired_lifecycle_event_logs(
             continue  # part of a live master series -> never pruned by inactivity
         if not lifecycle_is_dormant(path, now=now):
             continue
-        path.unlink()
+        # F7 reclamation owns the whole dormant lifecycle directory, not only events.jsonl.
+        # Heartbeats are coalesced into heartbeat.json and served-onboarding state may also live
+        # beside the log; unlinking only the log makes every such directory permanently
+        # unreapable. The lifecycle is dormant and unprotected at this point, so reclaim the
+        # complete directory through the same project-and-prune boundary.
+        shutil.rmtree(entry)
         removed.append(path)
-        with suppress(OSError):
-            entry.rmdir()
     return removed
 
 

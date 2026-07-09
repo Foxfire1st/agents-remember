@@ -67,6 +67,10 @@ class OperatorInboxEntry(BaseModel):
     gateId: str | None = None
     messageKind: InboxMessageKind = "message"
     artifactPath: str | None = None
+    # Leaf-scoped supervisor/completion signals carry their durable routing subject so later
+    # redelivery/escalation can re-check the live leaf chain instead of trusting a stale address.
+    leafKey: str | None = None
+    subjectAgentId: str | None = None
     ask: str
     response: str
     createdAt: str
@@ -90,6 +94,9 @@ class OperatorInboxEntry(BaseModel):
     # Set only when the ladder (HFX2-L4) escalates an unacked row past redelivery; this leaf only
     # reserves the field so the row stays escalatable -- it never sets it itself.
     escalatedAt: str | None = None
+    # Independent safety-floor stamp written only by advance_rung. General row ``ts`` changes on
+    # delivery/renewal and therefore cannot prove when the last rung transition occurred.
+    rungTransitionAt: str | None = None
     # P-15 tier 3 (260707-HFX2-L4): the ladder's own rung marker. 0 = not yet escalated;
     # 1 = renudged to the original addressee; 2 = skip-level re-addressed to the owner's owner;
     # 3 = surfaced to the developer attention queue. ``escalatedAt`` is re-stamped on every rung
@@ -123,6 +130,8 @@ def create_operator_inbox_entry(
     recipient_role: AgentRole | None = None,
     message_kind: InboxMessageKind = "message",
     artifact_path: str | None = None,
+    leaf_key: str | None = None,
+    subject_agent_id: str | None = None,
     owner_role: AgentRole | None = None,
     owner_agent_id: str | None = None,
     owner_lifecycle_id: str | None = None,
@@ -151,6 +160,8 @@ def create_operator_inbox_entry(
         gateId=gate_id,
         messageKind=message_kind,
         artifactPath=artifact_path,
+        leafKey=leaf_key,
+        subjectAgentId=subject_agent_id,
         ask=ask,
         response=response,
         createdAt=now,
