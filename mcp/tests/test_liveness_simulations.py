@@ -44,6 +44,7 @@ from agents_remember.controlplane.expectation_rows import (
     ExpectationRowStore,
     write_expectation_row,
 )
+from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
@@ -357,7 +358,12 @@ class NoHostedSessionTests(_LivenessSimulationCase):
 
 
 class DeadSeatStormTests(_LivenessSimulationCase):
-    """HFX2-L8: fleet-scale rung-terminal no-hosted-session rows terminate in bounded time."""
+    """HFX2-L8: fleet-scale rung-terminal no-hosted-session rows terminate in bounded time.
+
+    Updated for the ruled invariant (developer, 2026-07-09): a storm past the hard health cap is
+    trimmed to INBOX_MAX_CURRENT_ROWS by the sweep's own compaction BEFORE the sweep reads its
+    snapshot -- system health outranks the rows -- and the capped survivors then ladder-resolve
+    and compact away exactly as before."""
 
     def test_dead_seat_storm_terminates_and_compacts_without_stale_heartbeat(self) -> None:
         row_count = 2000
@@ -390,16 +396,20 @@ class DeadSeatStormTests(_LivenessSimulationCase):
         elapsed = perf_counter() - started
 
         self.assertLess(elapsed, 20.0)
-        self.assertEqual(result.pending_inbox_count, row_count)
-        self.assertEqual(result.redeliverable_inbox_count, row_count)
+        # The health cap trims the storm before the sweep reads its snapshot: the sweep carries
+        # at most INBOX_MAX_CURRENT_ROWS, never the full 2000-row storm.
+        capped = INBOX_MAX_CURRENT_ROWS
+        self.assertEqual(result.pending_inbox_count, capped)
+        self.assertEqual(result.redeliverable_inbox_count, capped)
         self.assertEqual(result.findings[0].kind, "inbox-ladder-terminal")
         self.assertEqual(
             len([action for action in result.actions if action.action == "ladder-resolve"]),
-            row_count,
+            capped,
         )
         self.assertEqual([action for action in result.actions if action.action == "redeliver"], [])
 
         current = self.inbox_store.current()
+        self.assertLessEqual(len(current), capped)
         self.assertTrue(all(entry.state == "ladder-resolved" for entry in current.values()))
         self.assertEqual(
             self.inbox_store.list_redeliverable(now=NOW + timedelta(seconds=1)),
@@ -409,8 +419,8 @@ class DeadSeatStormTests(_LivenessSimulationCase):
         heartbeat = self.heartbeat_store.read()
         assert heartbeat is not None
         self.assertEqual(heartbeat.sweepCount, 1)
-        self.assertEqual(heartbeat.pendingInboxCount, row_count)
-        self.assertEqual(heartbeat.redeliverableInboxCount, row_count)
+        self.assertEqual(heartbeat.pendingInboxCount, capped)
+        self.assertEqual(heartbeat.redeliverableInboxCount, capped)
         self.assertIsNotNone(heartbeat.lastSweepDurationSeconds)
         self.assertIsNone(
             supervisor_staleness_banner(
@@ -421,7 +431,7 @@ class DeadSeatStormTests(_LivenessSimulationCase):
         )
 
         removed = self.inbox_store.compact(now=NOW + timedelta(seconds=1))
-        self.assertGreaterEqual(removed, row_count)
+        self.assertGreaterEqual(removed, capped)
         self.assertEqual(self.inbox_store.read(), [])
 
 

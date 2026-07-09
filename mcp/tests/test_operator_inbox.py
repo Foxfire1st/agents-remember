@@ -5,13 +5,14 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     consume_operator_inbox_entry,
@@ -301,10 +302,11 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertFalse(consumed_now)
         self.assertEqual(consumed.state, "ladder-resolved")
 
-    def test_compaction_never_removes_a_pending_unacked_row_regardless_of_age(self) -> None:
-        # R1: an unacked row outlives any cleanup until acked or ladder-resolved. Exercised
-        # against the exact post-time compaction path (operator_inbox_post_payload calls
-        # store.compact() right after append) via a row far past the retention TTL.
+    def test_compaction_purges_pending_rows_past_the_pending_ttl(self) -> None:
+        # Ruled invariant (developer, 2026-07-09): no row outranks system health -- a pending row
+        # past INBOX_PENDING_TTL_SECONDS is stale noise and is physically dropped. The durable
+        # record is the artifact on disk, never the inbox row. Supersedes the HFX2-L1 R1
+        # immortal-pending rule that let the 2026-07-09 escalation storm fill the store.
         ancient = create_operator_inbox_entry(
             entry_id="OLD",
             now="2020-01-01T00:00:00+00:00",
@@ -317,8 +319,50 @@ class OperatorInboxStoreTests(unittest.TestCase):
         )
         self.store.append(ancient)
         removed = self.store.compact(now=datetime.now(UTC))
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.store.read(), [])
+
+    def test_compaction_keeps_a_fresh_pending_row(self) -> None:
+        fresh = create_operator_inbox_entry(
+            entry_id="FRESH",
+            now=datetime.now(UTC).isoformat(),
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            ask="Fresh ask",
+            response="Fresh response",
+            created_by="developer",
+            created_via="dashboard",
+        )
+        self.store.append(fresh)
+        removed = self.store.compact(now=datetime.now(UTC))
         self.assertEqual(removed, 0)
-        self.assertEqual([entry.id for entry in self.store.read()], ["OLD"])
+        self.assertEqual([entry.id for entry in self.store.read()], ["FRESH"])
+
+    def test_compaction_enforces_the_hard_health_cap_keeping_newest(self) -> None:
+        # The health-cap backstop: even fresh pending rows are evicted oldest-first past
+        # INBOX_MAX_CURRENT_ROWS -- a store that size means a producer is misbehaving, and the
+        # host matters more than any row.
+        now = datetime.now(UTC)
+        total = INBOX_MAX_CURRENT_ROWS + 25
+        for index in range(total):
+            self.store.append(
+                create_operator_inbox_entry(
+                    entry_id=f"row-{index:04d}",
+                    now=(now - timedelta(seconds=total - index)).isoformat(),
+                    lifecycle_id="L1",
+                    agent_id="agent-a",
+                    ask=f"ask {index}",
+                    response="resp",
+                    created_by="developer",
+                    created_via="dashboard",
+                )
+            )
+        removed = self.store.compact(now=now)
+        self.assertEqual(removed, 25)
+        kept_ids = {entry.id for entry in self.store.read()}
+        self.assertEqual(len(kept_ids), INBOX_MAX_CURRENT_ROWS)
+        self.assertNotIn("row-0000", kept_ids)
+        self.assertIn(f"row-{total - 1:04d}", kept_ids)
 
     def test_compaction_prunes_ladder_resolved_rows(self) -> None:
         self.store.append(self._entry("A"))

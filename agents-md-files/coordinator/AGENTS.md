@@ -5,9 +5,14 @@
 Sessions route by role through the `l-01-agent-lifecycles` skill. A **spawned
 agent** (the `AR_SPAWN_ROLE` env var is set, or the first message is a role
 brief) follows its brief — the brief is its session start, and the rest of this
-section is not addressed to it. A **developer-facing session** is the
-**architect**: it enters `skills/l-01-agent-lifecycles/roles/architect.md`
-before working in any managed repository.
+section is not addressed to it. A **developer-facing session** is the **free
+chat** — a launcher, not a role seat (ruled 2026-07-09): it answers
+research-only questions inline, and for any role-shaped work it spawns the
+**architect** into its own chat with the settings-owned profile
+(`spawn_agent_session`, `AR_SPAWN_ROLE=architect`) instead of assuming the
+role itself. The spawned architect enters
+`skills/l-01-agent-lifecycles/roles/architect.md` and owns the developer
+conversation from there.
 
 During an already-running session, the agent must stay aware of managed-repo
 boundaries. If a new turn or tool target may cross from outside Agents Remember

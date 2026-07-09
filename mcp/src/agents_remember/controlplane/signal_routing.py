@@ -73,6 +73,25 @@ def is_seat_dead(catalog: TerminalCatalog, agent_id: str | None) -> bool:
     return entry is None or entry.status != "running"
 
 
+def derive_architect_owner(catalog: TerminalCatalog) -> RoutedOwner:
+    """The ladder's terminal addressee (ruled 2026-07-09): the LIVE architect seat when one is
+    attached, else the role-only architect mailbox. The developer is an authority label, never an
+    address -- a human-shaped mailbox cannot mechanically ack, which is how the 2026-07-09 storm's
+    rows became immortal. The architect seat acks custody and briefs the human; with no architect
+    seat attached the role-addressed row waits, level-triggered, for the next architect session
+    (delivery on appearance, or poll at session start)."""
+    for entry in catalog.list():
+        if (
+            entry.kind == "harness"
+            and entry.status == "running"
+            and entry.spawn_role == "architect"
+        ):
+            return RoutedOwner(
+                role="architect", agent_id=entry.id, lifecycle_id=entry.lifecycle_id
+            )
+    return RoutedOwner(role="architect")
+
+
 def derive_skip_level_owner(
     catalog: TerminalCatalog,
     *,

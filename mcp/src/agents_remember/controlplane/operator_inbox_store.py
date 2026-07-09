@@ -179,19 +179,65 @@ class OperatorInboxStore:
         *,
         rung: int,
         now: str,
+        owner_role: AgentRole | None = None,
+        owner_agent_id: str | None = None,
+        owner_lifecycle_id: str | None = None,
+        readdress: bool = False,
         current: dict[str, OperatorInboxEntry] | None = None,
     ) -> OperatorInboxEntry:
         """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
         ``now`` so the NEXT rung's SLA is measured from this transition, not the row's original
         creation. Distinct from :meth:`mark_escalated` (HFX2-L2's reserved "this row is now
         escalatable" stamp, rung-agnostic) -- the ladder is the only caller of this method.
+
+        Ruled invariant (developer, 2026-07-09): the ladder climbs by MUTATING this one row --
+        with ``readdress=True`` the row itself moves to the next addressee (skip-level owner,
+        then the developer attention queue). It never mints a sibling row; one root cause is one
+        row for its whole ladder life. (The escalation storm that took the host down was every
+        rung transition posting a new pending row whose own rungs posted more rows.)
         """
         entry = self._entry_from_current(entry_id, current)
         if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        advanced = entry.model_copy(update={"ts": now, "rung": rung, "escalatedAt": now})
+        update: dict[str, object] = {"ts": now, "rung": rung, "escalatedAt": now}
+        if readdress:
+            update.update(
+                {
+                    "recipientRole": owner_role,
+                    "agentId": owner_agent_id,
+                    "lifecycleId": owner_lifecycle_id,
+                    "ownerRole": owner_role,
+                    "ownerAgentId": owner_agent_id,
+                    "ownerLifecycleId": owner_lifecycle_id,
+                }
+            )
+        advanced = entry.model_copy(update=update)
         self.append(advanced)
         return advanced
+
+    def renew(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        response: str | None = None,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
+        """Refresh one still-pending row in place: same id, bumped ``ts``, optionally refreshed
+        ``response``. The ruled coalescing primitive (developer, 2026-07-09): a condition that
+        re-fires updates its ONE existing row's date/detail instead of appending a duplicate --
+        there is zero reason to repeat the same message until the system catches fire."""
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        if entry.state != "pending":
+            return entry
+        update: dict[str, object] = {"ts": now}
+        if response is not None:
+            update["response"] = response
+        renewed = entry.model_copy(update=update)
+        self.append(renewed)
+        return renewed
 
     def mark_ladder_resolved(
         self,

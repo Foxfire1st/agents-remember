@@ -691,6 +691,23 @@ def _mark_expectation_missed(
             sweep.remember_expectation(marked)
 
 
+def _find_coalescible(
+    entries: dict[str, OperatorInboxEntry], *, ask: str, message_kind: InboxMessageKind
+) -> OperatorInboxEntry | None:
+    """The ruled coalescing lookup (developer, 2026-07-09): a supervisor-authored condition that
+    is still pending under the SAME ask is the row to renew -- matched on content, not address,
+    so a row the ladder has re-addressed still coalesces with its re-firing root condition."""
+    for row in entries.values():
+        if (
+            row.state == "pending"
+            and row.createdBy == "supervisor"
+            and row.messageKind == message_kind
+            and row.ask == ask
+        ):
+            return row
+    return None
+
+
 def _post_owner_signal(
     ctx: SupervisorContext,
     owner: RoutedOwner,
@@ -702,24 +719,36 @@ def _post_owner_signal(
     sweep: _SweepState | None = None,
 ) -> InboxDeliveryState:
     """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
-    its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses."""
-    entry = create_operator_inbox_entry(
-        entry_id=new_ulid(),
-        now=now.isoformat(),
-        lifecycle_id=owner.lifecycle_id,
-        agent_id=owner.agent_id,
-        ask=ask,
-        response=response,
-        created_by="supervisor",
-        created_via="cli",
-        sender_role="system",
-        recipient_role=owner.role,
-        message_kind=message_kind,
-        owner_role=owner.role,
-        owner_agent_id=owner.agent_id,
-        owner_lifecycle_id=owner.lifecycle_id,
-    )
-    ctx.inbox_store.append(entry)
+    its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses.
+
+    Ruled invariant (developer, 2026-07-09): one row per root cause. A condition that re-fires
+    while its row is still pending RENEWS that row (bumped date, refreshed detail) instead of
+    appending a duplicate -- the storm that took the host down was this function minting a new
+    pending row per re-fire, each of which the ladder then escalated into more rows."""
+    entries = sweep.inbox_current if sweep is not None else ctx.inbox_store.current()
+    existing = _find_coalescible(entries, ask=ask, message_kind=message_kind)
+    if existing is not None:
+        entry = ctx.inbox_store.renew(
+            existing.id, now=now.isoformat(), response=response, current=entries
+        )
+    else:
+        entry = create_operator_inbox_entry(
+            entry_id=new_ulid(),
+            now=now.isoformat(),
+            lifecycle_id=owner.lifecycle_id,
+            agent_id=owner.agent_id,
+            ask=ask,
+            response=response,
+            created_by="supervisor",
+            created_via="cli",
+            sender_role="system",
+            recipient_role=owner.role,
+            message_kind=message_kind,
+            owner_role=owner.role,
+            owner_agent_id=owner.agent_id,
+            owner_lifecycle_id=owner.lifecycle_id,
+        )
+        ctx.inbox_store.append(entry)
     if sweep is not None:
         sweep.remember(entry)
     delivered = deliver_inbox_entry(
@@ -808,7 +837,13 @@ def _escalate_rung(
     sweep: _SweepState,
 ) -> SupervisorActionResult:
     """R2: advance one pending, unacked row to its next ladder rung -- renudge (1), skip-level
-    (2), or the developer attention queue (3, terminal) -- and durably stamp the transition."""
+    (2), or architect custody (3, terminal) -- and durably stamp the transition.
+
+    Ruled invariant (developer, 2026-07-09): the ladder never mints rows. Each rung transition
+    MUTATES the one root row -- re-anchors its dwell clock, re-addresses it to the next owner,
+    and redelivers it (which increments its attempt count). The prior shape (a new pending row
+    per transition, itself ladder-eligible) was a branching process: with an absent developer it
+    grew the inbox to 20k+ pending rows and took the host down."""
     if finding.source_id is None:
         return SupervisorActionResult("escalate-rung", finding, "skipped", "no source entry id")
     entry = sweep.inbox_current.get(finding.source_id)
@@ -817,25 +852,29 @@ def _escalate_rung(
     step = next_step(ctx.catalog, entry)
     if step.owner.agent_id is None and step.owner.role is None:
         return SupervisorActionResult("escalate-rung", finding, "skipped", "no routable owner")
-    ask = (
-        f"Escalation rung {step.rung} ({step.action}): {entry.messageKind} unacked "
-        f"since {entry.createdAt} (original entry {entry.id})"
-    )
-    response = f"Original ask: {entry.ask}\nOriginal response: {entry.response}"
-    message_kind: InboxMessageKind = "nudge" if step.action == "renudge" else "escalation"
-    delivery_state = _post_owner_signal(
-        ctx,
-        step.owner,
-        message_kind=message_kind,
-        ask=ask,
-        response=response,
-        now=now,
-        sweep=sweep,
-    )
     advanced = ctx.inbox_store.advance_rung(
-        entry.id, rung=step.rung, now=now.isoformat(), current=sweep.inbox_current
+        entry.id,
+        rung=step.rung,
+        now=now.isoformat(),
+        owner_role=step.owner.role,
+        owner_agent_id=step.owner.agent_id,
+        owner_lifecycle_id=step.owner.lifecycle_id,
+        readdress=step.rung > 1,
+        current=sweep.inbox_current,
     )
     sweep.remember(advanced)
+    delivered = deliver_inbox_entry(
+        store=ctx.inbox_store,
+        catalog=ctx.catalog,
+        host=ctx.host,
+        paster=ctx.paster,
+        entry=advanced,
+        submit=True,
+        current=sweep.inbox_current,
+        redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
+    )
+    sweep.remember(delivered)
+    delivery_state = delivered.deliveryState
     _log_event(
         ctx,
         "orchestration.escalation.rung",
@@ -1009,7 +1048,18 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     liveness (R5).
     """
     started = perf_counter()
+    # Ruled invariant (developer, 2026-07-09): the inbox is reclaimed EVERY sweep -- expired
+    # pending rows (past the pending TTL), stale consumed rows, ladder-resolved rows, and
+    # anything beyond the hard health cap are physically dropped before the sweep reads its
+    # snapshot, so the on-disk log stays folded-size-bounded no matter what produced into it.
+    inbox_removed = ctx.inbox_store.compact(now=now)
     current = ctx.inbox_store.current()
+    if inbox_removed:
+        _log_event(
+            ctx,
+            "orchestration.supervisor.inbox-compacted",
+            {"removed": inbox_removed, "kept": len(current)},
+        )
     # CS-6 D2/D3: read + reclaim the append-only signal cooldown log ONCE per sweep. compact()
     # drops rows older than the cooldown window (they can no longer suppress a signal) and returns
     # the kept snapshot, which every per-finding in_cooldown check reads in-memory -- so the store

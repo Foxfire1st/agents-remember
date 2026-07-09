@@ -114,7 +114,7 @@ class NextStepTests(unittest.TestCase):
         self.assertEqual(step.action, "skip-level")
         self.assertEqual(step.owner.agent_id, "orchestrator-1")
 
-    def test_rung_two_with_no_further_owner_jumps_straight_to_developer(self) -> None:
+    def test_rung_two_with_no_further_owner_jumps_straight_to_architect(self) -> None:
         # A manager-addressed row: the manager's own owner is the orchestrator, which has no
         # further owner recorded -- the "owner's owner" hits the hierarchy ceiling, so the walker
         # jumps straight to rung 3 rather than stalling at an unaddressable rung 2.
@@ -125,21 +125,35 @@ class NextStepTests(unittest.TestCase):
         entry = _entry(agent_id="manager-1", recipient_role="manager").model_copy(update={"rung": 1})
         step = next_step(self.catalog, entry)
         self.assertEqual(step.rung, MAX_RUNG)
-        self.assertEqual(step.action, "developer-attention")
-        self.assertEqual(step.owner.role, "developer")
+        self.assertEqual(step.action, "architect-attention")
+        self.assertEqual(step.owner.role, "architect")
 
-    def test_rung_three_surfaces_to_the_developer(self) -> None:
+    def test_rung_three_lands_on_the_live_architect_seat(self) -> None:
+        # Ruled terminal (developer, 2026-07-09): the ladder ends at the architect seat -- the
+        # session the human actually talks to -- so custody can be mechanically acked.
+        self.catalog.upsert(_catalog_entry("architect-1", spawn_role="architect"))
         entry = _entry(agent_id="worker-1").model_copy(update={"rung": 2})
         step = next_step(self.catalog, entry)
         self.assertEqual(step.rung, 3)
-        self.assertEqual(step.action, "developer-attention")
-        self.assertEqual(step.owner.role, "developer")
+        self.assertEqual(step.action, "architect-attention")
+        self.assertEqual(step.owner.role, "architect")
+        self.assertEqual(step.owner.agent_id, "architect-1")
+
+    def test_rung_three_without_an_architect_seat_stays_role_addressed(self) -> None:
+        # Graceful degradation: no architect session attached -> the row is role-addressed and
+        # waits, level-triggered, for the next architect session instead of targeting a phantom.
+        entry = _entry(agent_id="worker-1").model_copy(update={"rung": 2})
+        step = next_step(self.catalog, entry)
+        self.assertEqual(step.rung, 3)
+        self.assertEqual(step.action, "architect-attention")
+        self.assertEqual(step.owner.role, "architect")
+        self.assertIsNone(step.owner.agent_id)
 
     def test_rung_never_exceeds_max_rung(self) -> None:
         entry = _entry(agent_id="worker-1").model_copy(update={"rung": MAX_RUNG})
         step = next_step(self.catalog, entry)
         self.assertEqual(step.rung, MAX_RUNG)
-        self.assertEqual(step.action, "developer-attention")
+        self.assertEqual(step.action, "architect-attention")
 
 
 class SeatSuspectTests(unittest.TestCase):
@@ -175,6 +189,21 @@ class SeatSuspectTests(unittest.TestCase):
     def test_live_non_stale_seat_is_not_suspect(self) -> None:
         self.catalog.upsert(_catalog_entry("worker-1"))
         self.assertFalse(seat_is_suspect(self.catalog, "worker-1", now=NOW, stale_seconds=60.0))
+
+    def test_architect_seat_is_never_suspect_even_when_stale(self) -> None:
+        # Ruled (developer, 2026-07-09): the architect seat is the human's own session -- its
+        # silence means the human is away, and retiring/respawning it cannot produce the human.
+        self.catalog.upsert(
+            _catalog_entry(
+                "architect-1",
+                spawn_role="architect",
+                turn_state="stale",
+                turn_state_changed_at=(NOW - timedelta(hours=6)).isoformat(),
+            )
+        )
+        self.assertFalse(
+            seat_is_suspect(self.catalog, "architect-1", now=NOW, stale_seconds=60.0)
+        )
 
 
 class OrphanPolicyTests(unittest.TestCase):
