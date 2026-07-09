@@ -172,33 +172,29 @@ def create_server(config: McpRuntimeConfig) -> Any:
         Composes the EXISTING session primitives so an orchestrator can spawn a manager and a manager
         a worker without dashboard clicks: create a hosted session via the serving opener, attach it
         to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
-        overridden), seed the role knobs (`model`/`effort`/`env` injected as spawn env — the terminal
-        host's `tmux new-session -e KEY=VALUE` seam — AND mapped onto the harness argv per-harness
-        via the registry: claude gets `--model`/`--effort`; a mapping-less harness stays env-only),
-        and deliver `context` as an echo-confirmed bracketed paste. `effort` is validated against the
-        resolved harness's known vocabulary BEFORE spawning: an unknown value returns status
-        'effort-invalid' naming the harness and its valid sets (the CLI would warn-and-silently-
-        degrade); a session-level value (claude 'ultracode') is delivered as a post-launch session
-        command instead of the flag. The free-form escape hatch is never validated, only recorded in
-        spawn provenance: `launch_args` (appended to the harness argv verbatim), `session_commands`
-        (each line pasted + submitted into the fresh session BEFORE the brief), `prompt_keywords`
-        (prepended as the first line of the brief paste — session modes the model interprets).
+        overridden), resolve the role knobs from developer-owned agentic settings, seed resolved
+        `model`/`effort` into spawn env, map them onto the harness argv per-harness via the registry,
+        and deliver `context` as an echo-confirmed bracketed paste. Ordinary callers declare the seat
+        (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or direct
+        launch/session spend controls. Legacy non-null `harness`, `model`, `effort`, `launch_args`,
+        `prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, `env.AR_SPAWN_EFFORT`, or
+        harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` and `OPENAI_BASE_URL`
+        return status 'spend-override-unsupported' before spawning, with guidance to configure
+        `orchestration.roles`, `orchestration.rolesPerLevel`, `orchestration.spawn`, or
+        `orchestration.harnesses` instead.
         `level` declares the dispatch level (leaf|master|portfolio, default leaf — a manager
         dispatching leaf seats passes leaf, the seam reviewer master, portfolio seats portfolio):
-        unset knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]`
-        deep-merged over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding
-        `env`; the resolved level + source land in spawn provenance.
-        `submit=true` presses Enter so a worker auto-starts; leave it false for a
-        draft. `harness` is optional: explicit values are validated against the detection set; omitted,
-        it resolves per-use from the agentic settings (role knobs, else repo-local
-        `<repo>/system/settings.json` over the global coordination-root file,
-        `orchestration.spawn.harness`; the repo comes from the
-        qualified leaf key), else the first detected registry harness. Each spawned session
-        is its own harness process (the ambient-lifecycle singleton is untouched). Spawned-by
-        provenance (`spawned_by_session` + the active/`spawned_by_lifecycle` lifecycle) is recorded on
-        the catalog row so the dashboard can render the orchestration tree. Status 'spawned' on
-        success; 'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/
-        'level-invalid'/'bad-kind' are pre-spawn refusals."""
+        knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]` deep-merged
+        over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding `env`; the
+        resolved level + source land in spawn provenance. `submit=true` presses Enter so a worker
+        auto-starts; leave it false for a draft. If role settings do not choose a harness, the
+        dispatch falls through to repo-local/global `orchestration.spawn.harness`, then the first
+        detected registry harness. Each spawned session is its own harness process (the
+        ambient-lifecycle singleton is untouched). Spawned-by provenance (`spawned_by_session` + the
+        active/`spawned_by_lifecycle` lifecycle) is recorded on the catalog row so the dashboard can
+        render the orchestration tree. Status 'spawned' on success; 'spend-override-unsupported',
+        'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/'level-invalid'/
+        'bad-kind' are pre-spawn refusals."""
         return spawn_agent_session_payload(
             config,
             harness=harness,

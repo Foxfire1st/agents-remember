@@ -321,7 +321,10 @@ Read cadence above).
 `orchestration.roles.<role>` overrides a role file's knob block per role
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
 `system-specialist`, `reviewer`).
-Precedence: role-file defaults < global settings < repo-local settings. The
+Precedence: role-file defaults < global settings < repo-local settings. These
+settings are the sole developer-controlled spend surface for ordinary spawned
+seats; `spawn_agent_session` callers declare role and level, not
+`harness`/`model`/`effort` or direct launch/session spend controls. The
 knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
 with every parameter, vocabulary, and refusal is
 **`docs/reference/harnesses.md`**):
@@ -359,10 +362,15 @@ the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
 knob-override shape. A level override deep-merges over the flat
 `orchestration.roles` default at leaf-key granularity (harness inherited
 unless overridden; arrays replace). The dispatcher declares its level via
-`spawn_agent_session(level=...)`, default `leaf`. Full resolution chain:
-explicit args > repo-local level override > global level override >
-repo-local role default > global role default > detection-gated default. The
-resolved level rides spawn provenance (`spawnLevel`/`spawnLevelSource`).
+`spawn_agent_session(level=...)`, default `leaf`. Full spend resolution chain:
+repo-local level override > global level override > repo-local role default >
+global role default > detection-gated default. The resolved level rides spawn
+provenance (`spawnLevel`/`spawnLevelSource`). Legacy caller-supplied
+`harness`/`model`/`effort`, direct `launch_args`/`prompt_keywords`/
+`session_commands`, `env.AR_SPAWN_MODEL`/`env.AR_SPAWN_EFFORT`, or
+harness-native spend/endpoint env keys for the built-in Claude/Anthropic and
+Codex/OpenAI families refuse with `spend-override-unsupported` before
+spawning; move those choices into these settings families.
 
 ### orchestration.harnesses
 
@@ -403,9 +411,9 @@ passed smoke.
 omitted means uncapped). The caps are doctrine input for the spawning seats.
 
 `orchestration.spawn.harness` names the default harness `spawn_agent_session`
-uses when the caller passes none and no role knob supplies one. Resolution
-order at the spawn seam: explicit argument > role knobs (level-merged) >
-repo-local settings > global settings > detection-gated default (the first
+uses when no role/level knob supplies one. Resolution order at the spawn seam:
+role knobs (level-merged) > repo-local settings > global settings >
+detection-gated default (the first
 effective-registry harness found on PATH; the repo-local layer is selected by
 the qualified leaf key's repository segment). Values are validated against
 the effective harness ids (builtin + `orchestration.harnesses`) and gated by

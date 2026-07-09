@@ -83,7 +83,6 @@ class SpawnExpectationRowTests(unittest.TestCase):
     def test_spawn_writes_briefed_by_and_turn_report_by_atomically(self) -> None:
         payload = spawn_agent_session_payload(
             self.config,
-            harness="claude",
             session_id="worker-1",
             leaf_key="repo/master/leaf-1",
             context="You are the worker.",
@@ -102,7 +101,6 @@ class SpawnExpectationRowTests(unittest.TestCase):
     def test_a_bare_command_chat_with_no_leaf_key_gets_no_turn_report_by(self) -> None:
         payload = spawn_agent_session_payload(
             self.config,
-            harness="claude",
             session_id="chat-1",
             host=self.host,  # type: ignore[arg-type]
             which=_detected,

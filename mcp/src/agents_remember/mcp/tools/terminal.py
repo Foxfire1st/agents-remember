@@ -62,6 +62,42 @@ _DEFAULT_SHELL = "/bin/bash"
 # congruent. The dispatcher knows its level: a manager dispatching leaf seats = leaf, the seam
 # reviewer = master, portfolio/end-to-end seats = portfolio. Omitted = leaf.
 _SPAWN_LEVELS = ("leaf", "master", "portfolio")
+_REMOVED_CALLER_SPEND_FIELDS = (
+    "harness",
+    "model",
+    "effort",
+    "launch_args",
+    "prompt_keywords",
+    "session_commands",
+)
+# The retained caller env field reaches the spawned harness process through tmux -e. Block
+# harness-native model, effort, endpoint, and credential env vars so env cannot bypass the
+# developer-owned settings surface.
+_HARNESS_NATIVE_SPEND_ENV_KEYS = (
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "MAX_THINKING_TOKENS",
+    "DISABLE_PROMPT_CACHING",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_VERTEX_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENAI_MODEL",
+    "OPENAI_DEFAULT_MODEL",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "OPENAI_API_KEY",
+    "OPENAI_ORGANIZATION",
+    "OPENAI_ORG_ID",
+    "OPENAI_PROJECT",
+)
+_SPEND_ENV_KEYS = ("AR_SPAWN_MODEL", "AR_SPAWN_EFFORT", *_HARNESS_NATIVE_SPEND_ENV_KEYS)
 
 
 def attach_terminal_session_to_leaf_payload(
@@ -105,15 +141,14 @@ def _spawn_env(
     """Fold the role knobs into the spawn env the terminal host seeds at ``tmux new-session``.
 
     Model/effort ride as namespaced env vars (``AR_SPAWN_MODEL`` / ``AR_SPAWN_EFFORT``) alongside any
-    caller-supplied ``env`` (explicit keys win). This is the injection SEAM the leaf owns; mapping these
-    to a given harness's concrete CLI flags / config is the role-knob resolution layer's job (job-file
-    defaults + settings overrides), deferred to that layer -- this tool just delivers the passthrough.
+    caller-supplied ``env``. Caller-supplied spend env keys are rejected before this helper runs; settings
+    are the only authority for model/effort selection.
     """
     resolved = dict(env or {})
     if model:
-        resolved.setdefault("AR_SPAWN_MODEL", model)
+        resolved["AR_SPAWN_MODEL"] = model
     if effort:
-        resolved.setdefault("AR_SPAWN_EFFORT", effort)
+        resolved["AR_SPAWN_EFFORT"] = effort
     return resolved
 
 
@@ -147,14 +182,14 @@ def _resolve_spawn_harness(
 ) -> tuple[Harness | None, dict[str, Any] | None]:
     """Resolve the harness for a spawn (260703-L13 seam; effective registry 260703-L16).
 
-    Precedence: explicit argument > repo-local settings > global settings >
-    detection-gated default (the first EFFECTIVE-registry harness detected on
-    PATH). Every id resolves against ``settings.harnesses`` -- the builtin
-    registry merged with the ``orchestration.harnesses`` family, so users can
-    teach the system a new TUI or pre-customize a builtin's launch. An id known
-    nowhere refuses loudly pointing at the manual (never a crash); ``settings``
-    comes from the per-use loader (a malformed file raises -- never a silent
-    fallback). Returns ``(harness, refusal_payload)`` with exactly one side set.
+    Precedence: role/level settings > spawn settings > detection-gated default
+    (the first EFFECTIVE-registry harness detected on PATH). Every id resolves
+    against ``settings.harnesses`` -- the builtin registry merged with the
+    ``orchestration.harnesses`` family, so users can teach the system a new TUI
+    or pre-customize a builtin's launch. An id known nowhere refuses loudly
+    pointing at the manual (never a crash); ``settings`` comes from the per-use
+    loader (a malformed file raises -- never a silent fallback). Returns
+    ``(harness, refusal_payload)`` with exactly one side set.
     """
     registry = settings.harnesses
     if harness is not None:
@@ -202,7 +237,7 @@ def _resolve_spawn_harness(
         "harness",
         detail=(
             "no harness given, none preferred in settings, and none detected on "
-            f"PATH; install one of: {ids} (or pass harness explicitly)"
+            f"PATH; install one of: {ids} or configure orchestration.roles / orchestration.spawn"
         ),
     )
 
@@ -212,9 +247,8 @@ class _HarnessDispatch:
     """The pre-spawn knob bundle for one harness-kind dispatch (260703-L16).
 
     Everything the settings rungs resolved for this seat: the harness id (effective-registry
-    validated), the effective registry itself, the folded model/effort (explicit args over role
-    knobs), the free-form escape hatch, the RESOLVED session-command list (effort vehicle first),
-    and the level provenance.
+    validated), the effective registry itself, the resolved model/effort, the settings-owned free-form
+    escape hatch, the RESOLVED session-command list (effort vehicle first), and the level provenance.
     """
 
     harness_id: str
@@ -231,26 +265,20 @@ class _HarnessDispatch:
 def _resolve_harness_dispatch(
     config: McpRuntimeConfig,
     *,
-    harness: str | None,
     leaf_key: str | None,
     level: str | None,
-    model: str | None,
-    effort: str | None,
     env: dict[str, str] | None,
-    launch_args: list[str] | None,
-    prompt_keywords: list[str] | None,
-    session_commands: list[str] | None,
     which: Which | None,
 ) -> tuple[_HarnessDispatch | None, dict[str, Any] | None]:
     """Resolve + validate every knob BEFORE anything spawns (260703-L16).
 
-    Realizes the dispatch chain explicit args > repo-local level override > global level override >
+    Realizes the settings-only dispatch chain repo-local level override > global level override >
     repo-local role default > global role default > spawn preference > detection-gated default: the
-    settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the
-    repo-local layer selected by the qualified leaf key), the harness resolves against the EFFECTIVE
-    registry, and model/effort are refused per-harness (``model-invalid``/``effort-invalid``) before
-    any tmux exists. A session-vocabulary effort (claude ``ultracode``) contributes the FIRST
-    session command. Returns ``(dispatch, refusal)`` with exactly one side set.
+    settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the repo-local
+    layer selected by the qualified leaf key), the harness resolves against the EFFECTIVE registry, and
+    model/effort are refused per-harness (``model-invalid``/``effort-invalid``) before any tmux exists.
+    A session-vocabulary effort (claude ``ultracode``) contributes the FIRST session command. Returns
+    ``(dispatch, refusal)`` with exactly one side set.
     """
     spawn_level = level or "leaf"
     spawn_level_source = "explicit" if level is not None else "default"
@@ -258,7 +286,7 @@ def _resolve_harness_dispatch(
         valid = ", ".join(_SPAWN_LEVELS)
         return None, _spawn_refusal(
             "level-invalid",
-            harness,
+            None,
             "harness",
             detail=f"unknown dispatch level {spawn_level!r}; valid levels: [{valid}]",
         )
@@ -266,32 +294,29 @@ def _resolve_harness_dispatch(
         config.coordination_root, repo_root=_spawn_repo_root(config, leaf_key)
     )
     # The settings rungs, keyed by the AR_SPAWN_ROLE riding the caller's env (no role = no settings
-    # rung, today's behavior); unset explicit args fold in from the level-merged role knobs.
+    # rung, today's behavior); role/level settings are the sole spend source for ordinary spawns.
     role = (env or {}).get("AR_SPAWN_ROLE")
     knobs = settings.resolved_role_knobs(role, spawn_level) if role else RoleKnobs()
-    model = model or knobs.model
-    effort = effort or knobs.effort
-    if launch_args is None and knobs.launch_args:
-        launch_args = list(knobs.launch_args)
-    if prompt_keywords is None and knobs.prompt_keywords:
-        prompt_keywords = list(knobs.prompt_keywords)
-    resolved_session_commands = (
-        list(session_commands) if session_commands is not None else list(knobs.session_commands)
-    )
-    # Harness rung order: explicit argument > role knobs (level-merged) > spawn preference >
-    # detection-gated default (the last two inside _resolve_spawn_harness).
-    found, refusal = _resolve_spawn_harness(settings, harness or knobs.harness, which)
+    model = knobs.model
+    effort = knobs.effort
+    launch_args = list(knobs.launch_args) if knobs.launch_args else None
+    prompt_keywords = list(knobs.prompt_keywords) if knobs.prompt_keywords else None
+    resolved_session_commands = list(knobs.session_commands)
+    # Harness rung order: role knobs (level-merged) > spawn preference > detection-gated default
+    # (the last two inside _resolve_spawn_harness).
+    found, refusal = _resolve_spawn_harness(settings, knobs.harness, which)
     if refusal is not None:
         return None, refusal
     assert found is not None  # no refusal => a resolved effective-registry harness
-    # Validate the EFFECTIVE values (env wins over arg wins over settings, mirroring _spawn_env).
-    effective_model = (env or {}).get("AR_SPAWN_MODEL") or model
-    effective_effort = (env or {}).get("AR_SPAWN_EFFORT") or effort
+    # Validate the settings-resolved values. Caller-provided AR_SPAWN_MODEL/AR_SPAWN_EFFORT keys are
+    # rejected before this function runs, so env cannot replace the developer's settings.
+    effective_model = model
+    effective_effort = effort
     refusal = _knob_refusal(found, effective_model, effective_effort)
     if refusal is not None:
         return None, refusal
     # A session-vocabulary effort is delivered as the FIRST post-launch session command, ahead of
-    # any caller/settings free-form ones, then the brief.
+    # any settings-owned free-form ones, then the brief.
     resolved_session_commands = (
         effort_session_commands(found, effective_effort) + resolved_session_commands
     )
@@ -326,6 +351,53 @@ def _knob_refusal(
         if detail is not None:
             return _spawn_refusal(status, found.id, "harness", detail=detail)
     return None
+
+
+def _caller_spend_override_refusal(
+    *,
+    harness: str | None,
+    model: str | None,
+    effort: str | None,
+    env: dict[str, str] | None,
+    launch_args: list[str] | None,
+    prompt_keywords: list[str] | None,
+    session_commands: list[str] | None,
+    kind: str,
+) -> dict[str, Any] | None:
+    """Reject legacy caller-controlled spend knobs before any spawn-side effect."""
+
+    removed = []
+    values = {
+        "harness": harness,
+        "model": model,
+        "effort": effort,
+        "launch_args": launch_args,
+        "prompt_keywords": prompt_keywords,
+        "session_commands": session_commands,
+    }
+    for field in _REMOVED_CALLER_SPEND_FIELDS:
+        if values[field] is not None:
+            removed.append(field)
+    for key in _SPEND_ENV_KEYS:
+        if env is not None and key in env:
+            removed.append(f"env.{key}")
+    if not removed:
+        return None
+    fields = ", ".join(removed)
+    detail = (
+        "spawn_agent_session no longer accepts caller-selected spend fields "
+        f"({fields}) for ordinary agent-driven spawns. Configure harness/model/effort and "
+        "launch/session spend controls in agentic settings under orchestration.roles, "
+        "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses; call "
+        "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, leaf_key, context, submit, label, "
+        "env, and provenance only."
+    )
+    return _spawn_refusal(
+        "spend-override-unsupported",
+        harness,
+        kind,
+        detail=detail,
+    )
 
 
 def _brief_packet(context: str | None, prompt_keywords: list[str] | None) -> str | None:
@@ -446,35 +518,47 @@ def spawn_agent_session_payload(
     detached tmux ensure with env-seeded knobs), then a capture-verified context-packet paste with an
     optional submit (260707-HFX-L3: ``contextDelivered:true`` only after the pane provably shows the
     payload; an unverifiable delivery reports false WITH the pane capture) -- so orchestrators spawn
-    managers and managers spawn workers without dashboard clicks. ``harness`` is optional
-    (260703-L13): omitted, it resolves per-use through the agentic settings (repo-local over global
+    managers and managers spawn workers without dashboard clicks. The harness is resolved per-use
+    through the agentic settings (role/level knobs, repo-local over global
     ``orchestration.spawn.harness``), else the detection-gated default. Leaf uniqueness stays
     server-arbitrated: a taken leaf returns ``leaf-taken`` (never overridden).
     ``host``/``paster``/``which``/``session_id`` are injectable seams for tests.
 
     Per-level knob resolution (ruling 2026-07-07T08:15): the settings rungs come from
     ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` -- the ``orchestration.rolesPerLevel[level]``
-    override deep-merged over the flat ``orchestration.roles`` default -- realizing the chain
-    explicit args > repo-local level override > global level override > repo-local role default >
-    global role default > detection-gated default. ``level`` is the dispatcher's declaration
-    (leaf|master|portfolio, default leaf); the RESOLVED level + its source (explicit/default) are
-    recorded in spawn provenance.
+    override deep-merged over the flat ``orchestration.roles`` default -- realizing the settings-only
+    chain repo-local level override > global level override > repo-local role default > global role
+    default > detection-gated default. ``level`` is the dispatcher's declaration (leaf|master|portfolio,
+    default leaf); the RESOLVED level + its source (explicit/default) are recorded in spawn provenance.
 
-    Knob application (260703-L16): ``model``/``effort`` keep riding the spawn env AND are mapped onto
-    the harness argv per-harness via the EFFECTIVE registry -- the builtin table merged with the
-    ``orchestration.harnesses`` settings family (new ids add a harness, builtin ids can be
-    pre-customized; an id known nowhere refuses loudly pointing at ``docs/reference/harnesses.md``,
-    never a crash). Env-only builtins get no flags; a settings-defined harness with no declared
-    mapping refuses the knob with guidance (``model-invalid``/``effort-invalid``). ``effort`` is
-    validated against the resolved harness's known vocabulary BEFORE anything spawns -- an unknown
-    value returns the ``effort-invalid`` refusal naming the harness and its valid sets (the CLI
-    would warn-and-silently-degrade). A session-level effort value (claude ``ultracode``) rides a
-    post-launch session command instead of the flag. The free-form escape hatch is never validated,
-    only recorded in spawn provenance: ``launch_args`` (verbatim argv), ``session_commands`` (each
-    line pasted + submitted into the fresh session BEFORE the brief; the resolved list -- effort
-    vehicle first, then the caller's -- is what gets recorded), ``prompt_keywords`` (prepended as
-    the first line of the brief paste).
+    Knob application (260703-L16): settings-resolved ``model``/``effort`` keep riding the spawn env
+    AND are mapped onto the harness argv per-harness via the EFFECTIVE registry -- the builtin table
+    merged with the ``orchestration.harnesses`` settings family (new ids add a harness, builtin ids
+    can be pre-customized; an id known nowhere refuses loudly pointing at
+    ``docs/reference/harnesses.md``, never a crash). Env-only builtins get no flags; a
+    settings-defined harness with no declared mapping refuses the knob with guidance
+    (``model-invalid``/``effort-invalid``). ``effort`` is validated against the resolved harness's
+    known vocabulary BEFORE anything spawns -- an unknown value returns the ``effort-invalid``
+    refusal naming the harness and its valid sets (the CLI would warn-and-silently-degrade). A
+    session-level effort value (claude ``ultracode``) rides a post-launch session command instead of
+    the flag. The settings-owned free-form escape hatch is never validated, only recorded in spawn
+    provenance: ``launch_args`` (verbatim argv), ``session_commands`` (each line pasted + submitted
+    into the fresh session BEFORE the brief; the resolved list -- effort vehicle first, then
+    settings commands -- is what gets recorded), ``prompt_keywords`` (prepended as the first line of
+    the brief paste).
     """
+    spend_refusal = _caller_spend_override_refusal(
+        harness=harness,
+        model=model,
+        effort=effort,
+        env=env,
+        launch_args=launch_args,
+        prompt_keywords=prompt_keywords,
+        session_commands=session_commands,
+        kind=kind,
+    )
+    if spend_refusal is not None:
+        return spend_refusal
     if leaf_key is not None:
         try:
             leaf_key = resolve_catalog_leaf_key(config, leaf_key)
@@ -484,15 +568,9 @@ def spawn_agent_session_payload(
     if kind == "harness":
         dispatch, refusal = _resolve_harness_dispatch(
             config,
-            harness=harness,
             leaf_key=leaf_key,
             level=level,
-            model=model,
-            effort=effort,
             env=env,
-            launch_args=launch_args,
-            prompt_keywords=prompt_keywords,
-            session_commands=session_commands,
             which=which,
         )
         if refusal is not None:

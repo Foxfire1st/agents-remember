@@ -40,6 +40,11 @@ SpawnAgentSessionStatus = Literal[
     # 260703-L16: a settings-defined harness with no declared modelFlag got a model knob -- refused
     # with guidance (declare the flag or use launchArgs); explicit over guessing.
     "model-invalid",
+    # 260707-HFX2-L10: ordinary spawn callers cannot choose spend knobs. Removed/legacy caller
+    # harness/model/effort fields, direct free-form launch/session controls, AR_SPAWN_MODEL/
+    # AR_SPAWN_EFFORT, and harness-native spend/endpoint env keys refuse before spawning; settings
+    # are the authority.
+    "spend-override-unsupported",
     # 260703-L16 (ruling 2026-07-07T08:15): the dispatch level is outside leaf|master|portfolio.
     "level-invalid",
     "leaf-ref-not-found",

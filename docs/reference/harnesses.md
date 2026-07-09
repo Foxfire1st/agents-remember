@@ -18,7 +18,7 @@ Each harness is described by an entry with:
 
 | Field | Meaning |
 | --- | --- |
-| `id` | The stable identifier callers use (`harness="claude"`). Never a command. |
+| `id` | The stable identifier settings and dashboard launches use (`"claude"`). Never a command. |
 | `name` | Display name (dashboard buttons). |
 | `command` | The executable probed on `PATH` for detection. |
 | `argv` | The exact launch command array, e.g. `["claude"]`. Fixed server-side. |
@@ -75,9 +75,11 @@ dispatch, naming the known set and pointing here — never a crash.
 ## The Role Knobs, Parameter By Parameter
 
 Role knobs live in `orchestration.roles.<role>` (flat defaults) and
-`orchestration.rolesPerLevel.<level>.<role>` (per-level overrides); a spawning
-seat may also pass any of them explicitly to `spawn_agent_session`. Three
-layers with distinct validation postures:
+`orchestration.rolesPerLevel.<level>.<role>` (per-level overrides). For ordinary
+agent-driven spawns, these settings are the sole developer-controlled spend
+surface: `spawn_agent_session` callers declare `env.AR_SPAWN_ROLE` and `level`,
+not `harness`/`model`/`effort` or direct launch/session spend controls. Three
+settings layers have distinct validation postures:
 
 ### Layer 1 — validated enum knobs
 
@@ -109,14 +111,14 @@ tool payload). Example: `["--dangerously-skip-permissions"]`.
   session as its OWN echo-confirmed paste and submitted, BEFORE the dispatch
   brief — the vehicle for any session-level harness feature (a
   session-vocabulary effort like claude's `ultracode` is delivered this way
-  automatically, ahead of your own session commands). Never validated;
+  automatically, ahead of configured session commands). Never validated;
   recorded in spawn provenance.
 - `promptKeywords`: a list of keywords prepended as the first line of the
   dispatch-brief paste (session modes the model interprets, e.g. a prompt
   keyword like `ultracode`). Never validated; recorded in spawn provenance.
 
-Delivery order at spawn: **launch argv → session commands (effort vehicle
-first, then yours) → the brief paste (keywords first)**.
+Delivery order at spawn: **launch argv → settings session commands (effort
+vehicle first, then configured commands) → the brief paste (keywords first)**.
 
 ### The dispatch level: `level` and `orchestration.rolesPerLevel`
 
@@ -140,10 +142,21 @@ makes that expressible (ruling 2026-07-07T08:15):
 manager dispatching leaf seats passes `leaf`, the master-seam reviewer
 `master`, portfolio/end-to-end seats `portfolio`. The level override
 deep-merges over the flat default at leaf-key granularity (unset fields
-inherit; lists replace). Full resolution chain:
+inherit; lists replace). Full spend resolution chain:
 
-**explicit args > repo-local level override > global level override >
-repo-local role default > global role default > spawn preference/detection.**
+**repo-local level override > global level override > repo-local role default >
+global role default > spawn preference/detection.**
+
+Legacy caller-supplied `harness`, `model`, `effort`, `launch_args`,
+`prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, or
+`env.AR_SPAWN_EFFORT` values return `spend-override-unsupported` before any
+session is spawned. Harness-native spend/endpoint env keys for the built-in
+Claude/Anthropic and Codex/OpenAI families, such as `ANTHROPIC_MODEL`,
+`ANTHROPIC_BASE_URL`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, and API key/project
+selectors, refuse the same way because caller `env` is otherwise seeded into
+the spawned harness process. Move those choices into `orchestration.roles`,
+`orchestration.rolesPerLevel`, `orchestration.spawn`, or
+`orchestration.harnesses`.
 
 The resolution walk for the reviewer economics above (role riding the spawn
 env as `AR_SPAWN_ROLE=reviewer`):
@@ -162,9 +175,9 @@ payload).
 
 A harness is launchable only when its `command` resolves on `PATH`
 (`shutil.which`). `GET /api/harnesses` reports the effective set with
-per-harness detection; harness resolution order when `spawn_agent_session`
-gets no explicit id: role knobs (level-merged) > `orchestration.spawn.harness`
-preference > the first detected effective-registry harness.
+per-harness detection; `spawn_agent_session` harness resolution order is role
+knobs (level-merged) > `orchestration.spawn.harness` preference > the first
+detected effective-registry harness.
 
 ## Refusals (never crashes)
 
@@ -176,17 +189,19 @@ All pre-spawn, nothing mutated:
 | `harness-not-detected` | known id whose command is not on `PATH` | the id (and the settings source when a configured preference caused it) |
 | `effort-invalid` | effort outside the harness's vocabulary, or any effort for a mapping-less settings-defined harness | the harness, BOTH value sets (flag + session), and the launchArgs/sessionCommands guidance |
 | `model-invalid` | model knob for a settings-defined harness with no `modelFlag` | the harness and the declare-or-launchArgs guidance |
+| `spend-override-unsupported` | ordinary caller supplied removed spend fields (`harness`, `model`, `effort`, launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` / `OPENAI_BASE_URL`) | the removed fields and the settings families that own them |
 | `level-invalid` | dispatch level outside `leaf|master|portfolio` | the value and the valid set |
 | `leaf-taken` | the target leaf already has a running same-role session | the owning session (server-arbitrated, never overridden) |
 
 ## Worked Example: Teaching The System `hermes`
 
-Suppose you use a TUI agent called `hermes` that nobody registered. A bare
-`spawn_agent_session(harness="hermes")` refuses:
+Suppose you use a TUI agent called `hermes` that nobody registered. A role
+configured with `"harness": "hermes"` refuses at settings load until the harness
+is declared:
 
-> unknown harness: 'hermes'; known harnesses: [claude, codex, pi]. Define a
-> new one under orchestration.harnesses in the agentic settings (see
-> docs/reference/harnesses.md).
+> orchestration.roles.worker.harness must be a harness registry id or an
+> orchestration.harnesses-defined id (claude, codex, pi), got 'hermes'
+> (see docs/reference/harnesses.md).
 
 Teach it in the GLOBAL agentic settings
 (`<coordinationRoot>/system/settings.json`):
@@ -215,8 +230,8 @@ Now `spawn_agent_session(env={"AR_SPAWN_ROLE": "worker"})` launches
 `hermes --tui --model h-1 --reasoning high` (knobs also riding the env), and
 `effort: "turbo"` refuses naming `[low, high]`. Had you declared NO
 `effortFlag`/vocabulary, the effort knob itself would refuse with guidance —
-declare the mapping or pass the value through `launchArgs` — explicit over
-guessing a flag that might mean something else. A repo-local
+declare the mapping or carry a deliberate raw argv through settings-owned
+`launchArgs` — explicit over guessing a flag that might mean something else. A repo-local
 `<repo>/system/settings.json` may override any leaf of the entry (e.g. a
 different `argv`) for that repo's dispatches.
 

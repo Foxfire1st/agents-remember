@@ -182,7 +182,6 @@ class SpawnAgentSessionTests(unittest.TestCase):
 
     def _spawn(self, **kwargs: object) -> dict:
         base: dict[str, object] = {
-            "harness": "claude",
             "session_id": "worker-1",
             "host": self.host,
             "which": _detected,
@@ -196,8 +195,6 @@ class SpawnAgentSessionTests(unittest.TestCase):
             leaf_key="repo/master/leaf-1",
             context="You are the worker for leaf-1.",
             submit=True,
-            model="opus",
-            effort="high",
             spawned_by_session="manager-9",
             spawned_by_lifecycle="LC-manager",
             paster=paster,
@@ -210,10 +207,6 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(payload["spawnedByLifecycle"], "LC-manager")
         self.assertTrue(payload["contextDelivered"])
         self.assertTrue(payload["submitted"])
-        # Knobs seeded into the spawn env.
-        self.assertEqual(
-            self.host.ensured[0]["env"], {"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high"}
-        )
         # Provenance persisted on the catalog row.
         row = self.catalog.get("worker-1")
         assert row is not None
@@ -313,10 +306,12 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(paster.calls, [])
         self.assertIsNone(self.catalog.get("intruder"))
 
-    def test_unknown_harness_refused_before_spawn(self) -> None:
+    def test_legacy_harness_override_refused_before_spawn(self) -> None:
         payload = self._spawn(harness="not-a-harness")
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["status"], "harness-unknown")
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("harness", payload["detail"])
+        self.assertIn("orchestration.roles", payload["detail"])
         self.assertEqual(self.host.ensured, [])
 
     def test_undetected_harness_refused_before_spawn(self) -> None:
@@ -353,9 +348,13 @@ class SpawnKnobApplicationTests(unittest.TestCase):
     def tearDown(self) -> None:
         reset_ambient()
 
+    def _write_settings(self, orchestration: dict) -> None:
+        path = agentic_settings_path(self.tmp)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"orchestration": orchestration}), encoding="utf-8")
+
     def _spawn(self, **kwargs: object) -> dict:
         base: dict[str, object] = {
-            "harness": "claude",
             "session_id": "worker-1",
             "host": self.host,
             "which": _detected,
@@ -364,8 +363,11 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
     def test_flag_vocabulary_effort_rides_the_argv_with_no_session_command(self) -> None:
+        self._write_settings(
+            {"roles": {"worker": {"harness": "claude", "model": "opus", "effort": "max"}}}
+        )
         paster = _FakePaster()
-        payload = self._spawn(effort="max", model="opus", context="brief", paster=paster)
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, context="brief", paster=paster)
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(
             self.host.ensured[0]["command"],
@@ -378,12 +380,18 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertNotIn("sessionCommandsDelivered", payload)
 
     def test_ultracode_rides_a_session_command_before_the_brief_not_the_flag(self) -> None:
+        self._write_settings(
+            {"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}}
+        )
         paster = _FakePaster()
-        payload = self._spawn(effort="ultracode", context="brief", paster=paster)
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, context="brief", paster=paster)
         self.assertEqual(payload["status"], "spawned")
         # NO --effort flag (the CLI would warn-and-degrade); the env still rides the value.
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
-        self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_EFFORT": "ultracode"})
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {"AR_SPAWN_ROLE": "worker", "AR_SPAWN_EFFORT": "ultracode"},
+        )
         # The session command is the FIRST paste (submitted), the brief follows.
         self.assertEqual(
             [(call["text"], call["submit"]) for call in paster.calls],
@@ -393,7 +401,10 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertTrue(payload["sessionCommandsDelivered"])
 
     def test_unknown_effort_refuses_at_dispatch_naming_both_sets(self) -> None:
-        payload = self._spawn(effort="turbo")
+        self._write_settings(
+            {"roles": {"worker": {"harness": "claude", "effort": "turbo"}}}
+        )
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "effort-invalid")
         self.assertIn("'claude'", payload["detail"])
@@ -404,16 +415,38 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertIsNone(self.catalog.get("worker-1"))
 
     def test_mapping_less_builtin_harness_stays_env_only(self) -> None:
-        payload = self._spawn(harness="codex", model="gpt-5", effort="whatever")
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {"harness": "codex", "model": "gpt-5", "effort": "whatever"}
+                }
+            }
+        )
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(self.host.ensured[0]["command"], ("codex",))
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_MODEL": "gpt-5", "AR_SPAWN_EFFORT": "whatever"},
+            {
+                "AR_SPAWN_ROLE": "worker",
+                "AR_SPAWN_MODEL": "gpt-5",
+                "AR_SPAWN_EFFORT": "whatever",
+            },
         )
 
     def test_launch_args_ride_the_argv_verbatim_and_are_recorded(self) -> None:
-        payload = self._spawn(effort="max", launch_args=["--dangerously-skip-permissions"])
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "effort": "max",
+                        "launchArgs": ["--dangerously-skip-permissions"],
+                    }
+                }
+            }
+        )
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(
             self.host.ensured[0]["command"],
@@ -427,10 +460,20 @@ class SpawnKnobApplicationTests(unittest.TestCase):
     def test_prompt_keywords_ride_the_brief_paste_and_are_recorded(self) -> None:
         # The original L16 acceptance case: strategist as effort:max + promptKeywords:["ultracode"]
         # dispatches claude with --effort max and the keyword riding the paste.
+        self._write_settings(
+            {
+                "roles": {
+                    "strategist": {
+                        "harness": "claude",
+                        "effort": "max",
+                        "promptKeywords": ["ultracode"],
+                    }
+                }
+            }
+        )
         paster = _FakePaster()
         payload = self._spawn(
-            effort="max",
-            prompt_keywords=["ultracode"],
+            env={"AR_SPAWN_ROLE": "strategist"},
             context="You are the strategist.",
             paster=paster,
         )
@@ -445,18 +488,31 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
     def test_prompt_keywords_without_a_brief_are_still_delivered(self) -> None:
+        self._write_settings(
+            {"roles": {"strategist": {"harness": "claude", "promptKeywords": ["ultracode"]}}}
+        )
         paster = _FakePaster()
-        payload = self._spawn(prompt_keywords=["ultracode"], paster=paster)
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "strategist"}, paster=paster)
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(paster.calls[0]["text"], "ultracode")
         self.assertTrue(payload["contextDelivered"])
 
     def test_session_command_order_is_effort_vehicle_then_free_form_then_brief(self) -> None:
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "effort": "ultracode",
+                        "sessionCommands": ["/statusline off"],
+                        "promptKeywords": ["ultracode"],
+                    }
+                }
+            }
+        )
         paster = _FakePaster()
         payload = self._spawn(
-            effort="ultracode",
-            session_commands=["/statusline off"],
-            prompt_keywords=["ultracode"],
+            env={"AR_SPAWN_ROLE": "worker"},
             context="brief",
             paster=paster,
         )
@@ -473,12 +529,28 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
     def test_undelivered_session_command_is_reported_with_capture(self) -> None:
+        self._write_settings(
+            {"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}}
+        )
         paster = _FakePaster(delivered=False, submitted=False, capture="claude> (booting)")
-        payload = self._spawn(effort="ultracode", paster=paster)
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
         self.assertEqual(payload["status"], "spawned")
         self.assertFalse(payload["sessionCommandsDelivered"])
         # 260707-HFX-L3: the failing paste's pane capture rides the payload as evidence.
         self.assertEqual(payload["deliveryCapture"], "claude> (booting)")
+
+    def test_direct_free_form_spend_controls_are_refused(self) -> None:
+        payload = self._spawn(
+            launch_args=["--model", "opus"],
+            prompt_keywords=["ultracode"],
+            session_commands=["/effort ultracode"],
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("launch_args", payload["detail"])
+        self.assertIn("prompt_keywords", payload["detail"])
+        self.assertIn("session_commands", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
 
 
 class SettingsDefinedHarnessTests(unittest.TestCase):
@@ -527,9 +599,12 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
     def test_settings_defined_harness_spawns_with_its_argv(self) -> None:
         self._write_settings(
             self.coordination_root,
-            {"harnesses": {"hermes": {"command": "hermes", "argv": ["hermes", "--tui"]}}},
+            {
+                "harnesses": {"hermes": {"command": "hermes", "argv": ["hermes", "--tui"]}},
+                "roles": {"worker": {"harness": "hermes"}},
+            },
         )
-        payload = self._spawn(harness="hermes")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(payload["harness"], "hermes")
         self.assertEqual(self.host.ensured[0]["command"], ("hermes", "--tui"))
@@ -537,30 +612,27 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
     def test_builtin_override_replaces_the_argv(self) -> None:
         self._write_settings(
             self.coordination_root,
-            {"harnesses": {"claude": {"argv": ["claude", "--continue"]}}},
+            {
+                "harnesses": {"claude": {"argv": ["claude", "--continue"]}},
+                "roles": {"worker": {"harness": "claude", "effort": "max"}},
+            },
         )
-        payload = self._spawn(harness="claude", effort="max")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
         # The user's command array replaces ours; the builtin knob mapping survives the override.
         self.assertEqual(
             self.host.ensured[0]["command"], ("claude", "--continue", "--effort", "max")
         )
 
-    def test_unknown_everywhere_harness_refuses_naming_the_manual(self) -> None:
-        payload = self._spawn(harness="hermes")
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["status"], "harness-unknown")
-        self.assertIn("'hermes'", payload["detail"])
-        self.assertIn("claude, codex, pi", payload["detail"])
-        self.assertIn("orchestration.harnesses", payload["detail"])
-        self.assertIn("docs/reference/harnesses.md", payload["detail"])
-        self.assertEqual(self.host.ensured, [])
-
     def test_vocab_less_settings_harness_refuses_effort_with_guidance(self) -> None:
         self._write_settings(
-            self.coordination_root, {"harnesses": {"hermes": {"command": "hermes"}}}
+            self.coordination_root,
+            {
+                "harnesses": {"hermes": {"command": "hermes"}},
+                "roles": {"worker": {"harness": "hermes", "effort": "high"}},
+            },
         )
-        payload = self._spawn(harness="hermes", effort="high")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "effort-invalid")
         self.assertIn("effortFlag", payload["detail"])
@@ -569,9 +641,13 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
 
     def test_vocab_less_settings_harness_refuses_model_with_guidance(self) -> None:
         self._write_settings(
-            self.coordination_root, {"harnesses": {"hermes": {"command": "hermes"}}}
+            self.coordination_root,
+            {
+                "harnesses": {"hermes": {"command": "hermes"}},
+                "roles": {"worker": {"harness": "hermes", "model": "opus"}},
+            },
         )
-        payload = self._spawn(harness="hermes", model="opus")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "model-invalid")
         self.assertIn("modelFlag", payload["detail"])
@@ -589,10 +665,11 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
                         "effortFlag": "--reasoning",
                         "effortFlagValues": ["low", "high"],
                     }
-                }
+                },
+                "roles": {"worker": {"harness": "hermes", "model": "h-1", "effort": "high"}},
             },
         )
-        payload = self._spawn(harness="hermes", model="h-1", effort="high")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(
             self.host.ensured[0]["command"],
@@ -602,25 +679,28 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
     def test_repo_local_harness_entry_overrides_global(self) -> None:
         self._write_settings(
             self.coordination_root,
-            {"harnesses": {"hermes": {"command": "hermes", "argv": ["hermes", "--global"]}}},
+            {
+                "harnesses": {"hermes": {"command": "hermes", "argv": ["hermes", "--global"]}},
+                "spawn": {"harness": "hermes"},
+            },
         )
         self._write_settings(
             self.repo_root,
             {"harnesses": {"hermes": {"argv": ["hermes", "--local"]}}},
         )
-        payload = self._spawn(harness="hermes", leaf_key="repo-a/master/leaf-1")
+        payload = self._spawn(leaf_key="repo-a/master/leaf-1")
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(self.host.ensured[0]["command"], ("hermes", "--local"))
         # A leafless spawn resolves the GLOBAL layer only (no repo-local override).
-        payload = self._spawn(harness="hermes", session_id="worker-2")
+        payload = self._spawn(session_id="worker-2")
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(self.host.ensured[-1]["command"], ("hermes", "--global"))
 
 
 class SpawnLevelResolutionTests(unittest.TestCase):
     """260703-L16 (ruling 2026-07-07T08:15): the dispatch level parameter + rolesPerLevel
-    resolution -- explicit args > repo-local level override > global level override > repo-local
-    role default > global role default > detection-gated default -- with the resolved level
+    resolution -- repo-local level override > global level override > repo-local role default >
+    global role default > detection-gated default -- with the resolved level
     recorded in spawn provenance."""
 
     # The developer's canonical reviewer economics (docs/reference/harnesses.md walks this).
@@ -714,16 +794,110 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.assertEqual(paster.calls[0]["text"], "/effort ultracode")
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
 
-    def test_explicit_args_beat_every_settings_rung(self) -> None:
+    def test_legacy_model_effort_args_are_refused_instead_of_beating_settings(self) -> None:
         self._write_settings(self.coordination_root, self.ECONOMICS)
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "reviewer"}, level="master", model="haiku", effort="low"
         )
-        self.assertEqual(payload["status"], "spawned")
-        self.assertEqual(
-            self.host.ensured[0]["command"],
-            ("claude", "--model", "haiku", "--effort", "low"),
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("model", payload["detail"])
+        self.assertIn("effort", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+
+    def test_codex_configured_worker_rejects_attempted_claude_override(self) -> None:
+        self._write_settings(
+            self.coordination_root,
+            {
+                "roles": {
+                    "manager": {"harness": "codex", "effort": "medium"},
+                    "worker": {"harness": "codex", "effort": "medium"},
+                }
+            },
         )
+        payload = self._spawn(
+            env={"AR_SPAWN_ROLE": "worker"},
+            harness="claude",
+            model="opus",
+            effort="high",
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("harness", payload["detail"])
+        self.assertIn("model", payload["detail"])
+        self.assertIn("effort", payload["detail"])
+        self.assertIn("orchestration.rolesPerLevel", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+
+    def test_spend_env_keys_are_refused_instead_of_overriding_settings(self) -> None:
+        self._write_settings(
+            self.coordination_root,
+            {"roles": {"worker": {"harness": "codex", "model": "gpt-5", "effort": "medium"}}},
+        )
+        payload = self._spawn(
+            env={
+                "AR_SPAWN_ROLE": "worker",
+                "AR_SPAWN_MODEL": "opus",
+                "AR_SPAWN_EFFORT": "high",
+            }
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("env.AR_SPAWN_MODEL", payload["detail"])
+        self.assertIn("env.AR_SPAWN_EFFORT", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+
+    def test_harness_native_spend_env_keys_are_refused(self) -> None:
+        self._write_settings(
+            self.coordination_root,
+            {"roles": {"worker": {"harness": "codex", "model": "gpt-5", "effort": "medium"}}},
+        )
+        payload = self._spawn(
+            env={
+                "AR_SPAWN_ROLE": "worker",
+                "ANTHROPIC_MODEL": "opus",
+                "ANTHROPIC_SMALL_FAST_MODEL": "haiku",
+                "ANTHROPIC_DEFAULT_FABLE_MODEL": "fable",
+                "MAX_THINKING_TOKENS": "64000",
+                "DISABLE_PROMPT_CACHING": "1",
+                "ANTHROPIC_BASE_URL": "https://example.invalid",
+                "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock.example.invalid",
+                "ANTHROPIC_VERTEX_BASE_URL": "https://vertex.example.invalid",
+                "AWS_BEARER_TOKEN_BEDROCK": "token",
+            }
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("env.ANTHROPIC_MODEL", payload["detail"])
+        self.assertIn("env.ANTHROPIC_SMALL_FAST_MODEL", payload["detail"])
+        self.assertIn("env.ANTHROPIC_DEFAULT_FABLE_MODEL", payload["detail"])
+        self.assertIn("env.MAX_THINKING_TOKENS", payload["detail"])
+        self.assertIn("env.DISABLE_PROMPT_CACHING", payload["detail"])
+        self.assertIn("env.ANTHROPIC_BASE_URL", payload["detail"])
+        self.assertIn("env.ANTHROPIC_BEDROCK_BASE_URL", payload["detail"])
+        self.assertIn("env.ANTHROPIC_VERTEX_BASE_URL", payload["detail"])
+        self.assertIn("env.AWS_BEARER_TOKEN_BEDROCK", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+
+    def test_openai_family_spend_env_keys_are_refused(self) -> None:
+        self._write_settings(
+            self.coordination_root,
+            {"roles": {"worker": {"harness": "codex", "model": "gpt-5", "effort": "medium"}}},
+        )
+        payload = self._spawn(
+            env={
+                "AR_SPAWN_ROLE": "worker",
+                "OPENAI_MODEL": "gpt-5-high",
+                "OPENAI_BASE_URL": "https://example.invalid",
+                "OPENAI_API_KEY": "sk-test",
+            }
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("env.OPENAI_MODEL", payload["detail"])
+        self.assertIn("env.OPENAI_BASE_URL", payload["detail"])
+        self.assertIn("env.OPENAI_API_KEY", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
 
     def test_repo_local_level_override_beats_global_level_override(self) -> None:
         self._write_settings(self.coordination_root, self.ECONOMICS)
@@ -744,7 +918,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         )
 
     def test_provenance_records_the_resolved_level_and_source(self) -> None:
-        payload = self._spawn(harness="claude", level="master")
+        payload = self._spawn(level="master")
         self.assertEqual(payload["spawnLevel"], "master")
         self.assertEqual(payload["spawnLevelSource"], "explicit")
         row = self.catalog.get("seat-1")
@@ -756,14 +930,14 @@ class SpawnLevelResolutionTests(unittest.TestCase):
     def test_default_level_dispatch_is_unchanged_for_existing_callers(self) -> None:
         # No settings file, no level, no role env: exactly the pre-L16 dispatch (plain argv),
         # with the defaulted level recorded as provenance.
-        payload = self._spawn(harness="claude")
+        payload = self._spawn()
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
         self.assertEqual(payload["spawnLevel"], "leaf")
         self.assertEqual(payload["spawnLevelSource"], "default")
 
     def test_unknown_level_refuses_before_spawning(self) -> None:
-        payload = self._spawn(harness="claude", level="epic")
+        payload = self._spawn(level="epic")
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "level-invalid")
         self.assertIn("'epic'", payload["detail"])
@@ -804,7 +978,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
 
 
 class SpawnHarnessResolutionTests(unittest.TestCase):
-    """The L13 spawn seam: explicit arg > repo-local settings > global settings >
+    """The L13 spawn seam after HFX2-L10: repo-local settings > global settings >
     detection-gated default, read per-use through the agentic-settings loader."""
 
     def setUp(self) -> None:
@@ -865,12 +1039,14 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
         payload = self._spawn()
         self.assertEqual(payload["harness"], "codex")
 
-    def test_explicit_argument_beats_every_settings_layer(self) -> None:
+    def test_legacy_harness_argument_is_refused_instead_of_beating_settings(self) -> None:
         self._write_settings(self.coordination_root, "codex")
         self._write_settings(self.repo_root, "pi")
         payload = self._spawn(harness="claude", leaf_key="repo-a/master/leaf-1")
-        self.assertEqual(payload["status"], "spawned")
-        self.assertEqual(payload["harness"], "claude")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "spend-override-unsupported")
+        self.assertIn("harness", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
 
     def test_no_settings_falls_back_to_the_first_detected_registry_harness(self) -> None:
         payload = self._spawn(

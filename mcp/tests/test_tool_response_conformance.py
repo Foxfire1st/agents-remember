@@ -148,8 +148,8 @@ def _simple_payloads(config) -> dict[str, dict]:
             session_id="missing-session",
             leaf_key=f"{REPO}/master/leaf-1",
         ),
-        # Representative refusal payload: an unknown harness id short-circuits before any tmux spawn,
-        # so the conformance fixture never touches a real terminal host.
+        # Representative refusal payload: a legacy caller-supplied harness short-circuits before any
+        # tmux spawn, so the conformance fixture never touches a real terminal host.
         "spawn_agent_session": tools.spawn_agent_session_payload(
             config,
             harness="definitely-not-a-real-harness",

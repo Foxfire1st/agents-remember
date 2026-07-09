@@ -252,6 +252,9 @@ doctrine any coding agent can apply, and harness PREFERENCE is deployment config
 seats, `spawn_agent_session` is itself the harness-independent fan-out: a harness with no
 sub-agent facility still dispatches seats through the framework (a chat, no leaf attachment
 required) — the DBMS principle: one behavior, any engine.
+For ordinary spawned seats, settings are the sole developer-controlled spend surface:
+`spawn_agent_session` callers declare role and level, never harness/model/effort or direct
+launch/session spend controls.
 
 ## settings.json Orchestration Block
 
@@ -278,7 +281,7 @@ defaults < global settings < repo-local settings.
       "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
     },
     "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
-    "spawn": { "harness": "claude" },  // spawn_agent_session default when the seat passes none
+    "spawn": { "harness": "claude" },  // fallback when no role/level knob supplies one
     "gateDelegation": {
       "policy": "manager-decides-leaf-gates",
       "requireReviewerVerdictAtSeams": true
@@ -298,11 +301,13 @@ needs a restart (an authority-file value is a one-cycle legacy fallback with a b
 `requireReviewerVerdictAtSeams` **binds delegated seam decisions** (`master-handover-approval`) to
 attached reviewer-verdict evidence; the named policy `manager-decides-leaf-gates` routes leaf gates
 to the manager and the master-exit handover to the **orchestrator** (human review concentrates at
-the super gate). `spawn_agent_session` resolves its knobs (260703-L16) as explicit args >
+the super gate). `spawn_agent_session` resolves its spend knobs (260703-L16 + HFX2-L10) as
 repo-local level override > global level override > repo-local role default > global role default
 > detection-gated default — the dispatcher declares its `level` (leaf|master|portfolio, default
-leaf) and the resolved level rides spawn provenance — and **applies** them at the harness
-boundary: model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` env AND map onto the launch argv
+leaf) and the resolved level rides spawn provenance. Legacy caller-supplied `harness`/`model`/
+`effort`, direct launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native
+spend/endpoint env keys refuse before spawning with `spend-override-unsupported`. Resolved knobs are
+**applied** at the harness boundary: model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` env AND map onto the launch argv
 per-harness via the effective registry (claude `--model`/`--effort`; a mapping-less harness stays
 env-only; a session-vocabulary effort like claude's `ultracode` is delivered as a post-launch
 `/effort` paste). Unknown effort values REFUSE at dispatch naming the harness's vocabulary — the
