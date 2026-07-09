@@ -13,6 +13,20 @@ GATE_RESPONSE_WAIT_POLL_SECONDS = 5.0
 INTERACTION_RECORD_TTL_SECONDS = 24 * 60 * 60.0
 AGENT_PICKUP_TTL_SECONDS = 300.0
 
+INBOX_PENDING_TTL_SECONDS = 48 * 60 * 60.0
+"""Ruled invariant (developer, 2026-07-09): no row outranks system health -- pending/unacked rows
+age out too. The inbox is a notification surface, not the record; the durable artifact (turn
+report, task doc, gate) lives on disk and survives the purge. A nudge nobody consumed within this
+window is stale noise; if its condition still holds, the supervisor recreates one fresh row.
+Supersedes the HFX2-L1 R1 immortal-pending rule, which let the 2026-07-09 escalation storm grow a
+227 MB / 20k-pending-row inbox that took the host down."""
+
+INBOX_MAX_CURRENT_ROWS = 500
+"""Hard health cap on folded inbox rows: past this, compaction keeps the newest rows and evicts
+the oldest regardless of state. A correctly coalescing system sits orders of magnitude below this
+(one row per distinct root cause); the cap is the backstop that bounds the store even when a
+producer misbehaves."""
+
 MUTATING_TOOL_GATE_KINDS: frozenset[GateKind] = frozenset(
     {
         "worktree-intent",
@@ -47,16 +61,21 @@ def inbox_keep_ids(
     *,
     now: datetime,
     ttl_seconds: float = INTERACTION_RECORD_TTL_SECONDS,
+    max_rows: int = INBOX_MAX_CURRENT_ROWS,
 ) -> set[str]:
     """Inbox ids whose current snapshot still belongs in the compacted log."""
     latest: dict[str, OperatorInboxEntry] = {}
     for entry in entries:
         latest[entry.id] = entry
-    return {
-        entry.id
+    kept = [
+        entry
         for entry in latest.values()
         if _keep_inbox_entry(entry, now=now, ttl_seconds=ttl_seconds)
-    }
+    ]
+    if len(kept) > max_rows:
+        kept.sort(key=lambda entry: entry.createdAt, reverse=True)
+        kept = kept[:max_rows]
+    return {entry.id for entry in kept}
 
 
 def delete_after_wait(gate: GateRecord) -> bool:
@@ -86,13 +105,15 @@ def _keep_gate(gate: GateRecord, *, now: datetime, ttl_seconds: float) -> bool:
 def _keep_inbox_entry(
     entry: OperatorInboxEntry, *, now: datetime, ttl_seconds: float
 ) -> bool:
-    """R1 (260707-HFX2-L1): compaction NEVER removes a pending/unacked row, regardless of age --
-    an unacked row outlives any cleanup until it is acked (consumed) or ladder-resolved. Only a
-    consumed row is subject to the age-bounded retention window (kept as an audit grace period;
-    the ordinary consume path already deletes its row explicitly and never reaches compaction)."""
+    """Ruled invariant (developer, 2026-07-09): system health outranks every row, pending
+    included. A pending/unacked row is kept only within :data:`INBOX_PENDING_TTL_SECONDS`;
+    consumed rows keep the shorter audit window; ladder-resolved rows drop immediately. This
+    supersedes HFX2-L1 R1's immortal-pending rule -- the durable record is the artifact on disk,
+    never the inbox row, so purging an old nudge loses nothing the supervisor cannot recreate
+    (as one fresh row) while its condition persists."""
     if entry.state == "ladder-resolved":
         return False
-    if entry.state == "pending":
-        return True
     age = age_seconds(entry.createdAt, now)
+    if entry.state == "pending":
+        return age is None or age <= INBOX_PENDING_TTL_SECONDS
     return age is None or age <= ttl_seconds

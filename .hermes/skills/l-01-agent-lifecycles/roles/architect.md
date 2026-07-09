@@ -21,8 +21,11 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 2. Run the trust checkpoint before relying on memory or providers: repository/branch/dirty state,
    memory + onboarding roots, provider state when configured, drift status, and branch freshness.
 3. Read the portfolio state and the decision surface: task docs, open questions, pending inbox
-   items addressed to this seat, and any backend reports awaiting a ruling.
-4. Say back the current state in plain terms before asking the developer to decide anything.
+   items addressed to this seat, and any backend reports awaiting a ruling. Poll the inbox for
+   `architect`-addressed rows FIRST, ack each one (custody), and fold them into the catch-up
+   digest — this is how signals that escalated while no architect was online reach the developer.
+4. Say back the current state in plain terms — leading with the catch-up digest when anything
+   accumulated — before asking the developer to decide anything.
 
 ## Event Routing
 
@@ -30,6 +33,7 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 | --- | --- |
 | The developer is shaping intent, requirements, or scope | **Design** — wear the designer hat inline and create/reshape durable task docs |
 | A backend seat posted a decision item | **Decision relay** — present exactly one item, record the ruling, return it via inbox |
+| An escalated signal reached terminal custody (ladder rung 3, or any inbox row addressed to this seat/role) | **Custody** — ack (consume) immediately, fold into the catch-up digest; never leave it pending |
 | An approved portfolio needs backend execution | **Spawn / supervise** — dispatch the backend orchestrator or other role seats horizontally |
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
 | No backend has been spawned and the work is small enough for one owner seat | **Solo / flat hat-collapse** — wear the needed backend/build hat under this architect lifecycle |
@@ -57,6 +61,30 @@ doctrine contradiction, irreversible branch/data operation, or where agent setti
 architect turns it into a clear drawing-board decision instead of letting the backend guess.
 Presentation-grade choices are ruled by the owning backend seat and logged; they do not consume the
 developer's window.
+
+## Terminal Custody And The Catch-Up Report
+
+The escalation ladder ends at this seat, never at the developer (ruled 2026-07-09). The developer
+is an authority, not an address: a human-shaped mailbox cannot mechanically ack, and repeated
+nudges at a human are information-free noise. This seat is the last live address a signal lands
+on, and custody is its duty:
+
+1. **Ack on receipt.** Every inbox row addressed to this seat or the `architect` role —
+   escalations, nudges, turn-reports, completed-master notices — is consumed (acked) as soon as it
+   is seen. Ack means *custody*, not resolution: "a responsible seat holds this now."
+2. **Fold, do not forward.** Acked items accumulate into one catch-up digest (durable note when
+   the session may end before the developer returns). One row per root cause is the inbox's
+   contract; one digest per absence is this seat's.
+3. **Brief on return.** When the developer comes back, open with the digest: what completed, what
+   died, what needs a ruling — ranked, in plain terms, before anything else is discussed.
+4. **Never expect to be nudged twice.** The supervisor will not repeat-nudge this seat past
+   custody, because this seat cannot make the developer react faster. If an item needs the
+   developer and the developer is absent, it waits in the digest — that is the designed state,
+   not a failure.
+5. **Absence degrades gracefully.** With no architect session attached, terminal rows stay
+   role-addressed and level-triggered: they deliver the moment an architect session appears, are
+   picked up by the session-start poll (Opening Move step 3), and age out via the inbox pending
+   TTL if nothing ever collects them — the artifact on disk, not the inbox row, is the record.
 
 ## Minimal Decision-Item Relay
 

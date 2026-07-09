@@ -19,6 +19,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _scaling import assert_bounded_count
+from agents_remember.controlplane.escalation_ladder import MAX_RUNG
 from agents_remember.controlplane.expectation_rows import (
     ExpectationRowStore,
     write_expectation_row,
@@ -529,7 +530,7 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(heartbeat.redeliverableInboxCount, 3)
         self.assertIsNotNone(heartbeat.lastSweepDurationSeconds)
 
-    def test_repeated_seat_liveness_sweeps_emit_one_signal_per_cooldown(self) -> None:
+    def test_repeated_seat_liveness_sweeps_coalesce_into_one_signal_row(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(
@@ -553,12 +554,17 @@ class SweepIntegrationTests(unittest.TestCase):
         ]
         self.assertEqual(len(signal_rows), 1)
         self.assertEqual(signal_rows[0].agentId, "manager-1")
+        first = signal_rows[0]
 
         run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=901))
         signal_rows = [
             entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
         ]
-        self.assertEqual(len(signal_rows), 2)
+        # Ruled invariant (developer, 2026-07-09): past the cooldown the re-fired condition
+        # RENEWS its one existing row (same id, bumped ts) instead of appending a duplicate.
+        self.assertEqual(len(signal_rows), 1)
+        self.assertEqual(signal_rows[0].id, first.id)
+        self.assertGreater(signal_rows[0].ts, first.ts)
 
     def test_mid_turn_pane_signal_is_observed_without_owner_inbox_noise(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
@@ -791,6 +797,16 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         still_rung3 = self.inbox_store.current()["e1"]
         self.assertEqual(still_rung3.rung, 3)
 
+        # Ruled invariant (developer, 2026-07-09): the whole climb mutated the ONE root row --
+        # re-addressed up the chain, original ask preserved, and NO sibling rows minted (the
+        # sibling-per-transition shape is the branching process behind the 2026-07-09 storm).
+        # Terminal custody is the ARCHITECT (role-addressed here: no architect seat is attached,
+        # so the row waits, level-triggered, for the next architect session).
+        self.assertEqual(len(self.inbox_store.current()), 1)
+        self.assertEqual(still_rung3.ask, "ask")
+        self.assertEqual(still_rung3.recipientRole, "architect")
+        self.assertIsNone(still_rung3.agentId)
+
     def test_dead_intermediate_manager_is_skipped_at_rung_two(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
@@ -885,6 +901,81 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         assert worker1 is not None and worker2 is not None
         self.assertEqual(worker1.status, "running")
         self.assertEqual(worker2.status, "running")
+
+    def test_rung_three_re_addresses_the_row_to_the_live_architect_seat(self) -> None:
+        """Ruled terminal (developer, 2026-07-09): with an architect session attached, terminal
+        custody lands on that seat (agent-addressed, deliverable, mechanically ackable) -- the
+        one live seat whose job is to hold the item and brief the human."""
+        self.catalog.upsert(replace(_entry("architect-1"), spawn_role="architect"))
+        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        entry = create_operator_inbox_entry(
+            entry_id="e1",
+            now=(NOW - timedelta(minutes=30)).isoformat(),
+            lifecycle_id=None,
+            agent_id="orchestrator-1",
+            ask="master completed",
+            response="resp",
+            created_by="system",
+            created_via="cli",
+            message_kind="escalation",
+            recipient_role="orchestrator",
+        ).model_copy(update={"rung": 2, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
+        self.inbox_store.append(entry)
+
+        run_supervisor_sweep(self._ctx(), now=NOW)
+
+        advanced = self.inbox_store.current()["e1"]
+        self.assertEqual(advanced.rung, 3)
+        self.assertEqual(advanced.recipientRole, "architect")
+        self.assertEqual(advanced.agentId, "architect-1")
+        self.assertEqual(len(self.inbox_store.current()), 1)
+
+    def test_unacked_backlog_reaches_a_fixed_point_with_absent_developer(self) -> None:
+        """The 2026-07-09 meltdown regression (quiescence probe the HFX2-L12 audit lacked):
+        with NO acks, NO live seats, and hours of sweeps, the inbox must reach a fixed point --
+        exactly the seeded root-cause rows, rungs capped at MAX_RUNG, on-disk log bounded near
+        folded size. The pre-fix ladder diverged here: every rung transition minted a new
+        ladder-eligible pending row, so an absent developer grew 67k lines / 227 MB overnight."""
+        seeded = 9
+        for index in range(seeded):
+            self.inbox_store.append(
+                create_operator_inbox_entry(
+                    entry_id=f"root-{index}",
+                    now=NOW.isoformat(),
+                    lifecycle_id=None,
+                    agent_id=f"dead-seat-{index}",
+                    ask=f"turn report {index}",
+                    response="resp",
+                    created_by="system",
+                    created_via="cli",
+                    message_kind="turn-report",
+                    recipient_role="manager",
+                )
+            )
+
+        ctx = self._ctx()
+        moment = NOW
+        for _ in range(50):  # 50 sweeps x 6 min = 5 hours of absent developer
+            moment += timedelta(minutes=6)
+            run_supervisor_sweep(ctx, now=moment)
+            current = self.inbox_store.current()
+            self.assertLessEqual(len(current), seeded)
+            self.assertTrue(all(entry.rung <= MAX_RUNG for entry in current.values()))
+
+        final = self.inbox_store.current()
+        self.assertEqual(len(final), seeded)
+        self.assertEqual(
+            sorted(final), [f"root-{index}" for index in range(seeded)]
+        )
+        # Per-sweep compaction keeps the on-disk log within one sweep's appends of folded size.
+        lines = [
+            line
+            for line in self.inbox_store.log_path().read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        # One sweep appends at most a handful of snapshots per row (delivery mark, rung advance,
+        # escalated stamp); the divergent pre-fix shape produced THOUSANDS of lines here.
+        self.assertLessEqual(len(lines), seeded * 8)
 
     def test_dead_upstream_signals_the_grandparent(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
