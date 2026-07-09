@@ -39,6 +39,31 @@ it never decides them silently, and it never waits for the developer to remember
   is more than ~2 leaves' worth, spool up the full orchestration — work tends to extend, and a
   single chat does not scale (context limits). In between, default to orchestration or ask.
 
+## Adding A Master To A Running Sprint
+
+When the developer says "add this master to the sprint" (or the design conversation produces a
+new master that belongs in it), this seat attaches it to the sprint STRUCTURE itself — the
+dashboard's Operations view hangs masters under a sprint via the orchestration task doc, never
+via chat context:
+
+1. **The master task doc exists first.** Create it through the normal task-doc flow
+   (`kind: "master"` under `tasks/<repo>/<slug>/`) if it does not already exist.
+2. **Attach it to the sprint:** append the master's slug to the top-level `orchestrates` list of
+   the sprint's orchestration task doc (the `kind: "master"` doc that carries `orchestrates`).
+   That field IS sprint membership — the dashboard derives the orchestration > master > leaf
+   hierarchy in Operations from it, so the master appears under the sprint the moment the edit
+   lands. `orchestrates` is master-only by schema; entries are same-repo task slugs.
+3. **Log both sides:** a decision-log entry on the sprint doc (master added, why, developer
+   ruling) and one on the master doc (joined sprint X).
+4. **Propose the strategist fit-check — a question, not a dispatch.** Per the spool-up rule,
+   ask the developer: "want the strategist to evaluate how this master fits the sprint
+   (dependencies, wave placement, blast radius)?" Recommend YES when other masters are already
+   in flight or the addition plausibly interacts with them; recommend SKIP when the master is
+   isolated or the sprint has not started implementation. Never auto-run it.
+5. **Tell the backend:** one inbox row to the sprint's orchestrator seat announcing the addition
+   (and the strategist ruling, once made) so it folds the master into its DAG/waves — the
+   orchestrator's in-sprint re-evaluation rule takes it from there.
+
 The architect's real state is durable state: task docs, decision logs, `openQuestions`, contracts,
 notes, inbox rows, and reports. It never depends on transcript memory for continuity. It records
 rulings durably, then returns those rulings to the backend seat that needs them.
@@ -64,6 +89,7 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 | A backend seat posted a decision item | **Decision relay** — present exactly one item, record the ruling, return it via inbox |
 | An escalated signal reached terminal custody (ladder rung 3, or any inbox row addressed to this seat/role) | **Custody** — ack (consume) immediately, fold into the catch-up digest; never leave it pending |
 | An approved portfolio needs backend execution | **Spawn / supervise** — dispatch the backend orchestrator or other role seats horizontally |
+| The developer adds a master to a running sprint | **Sprint attach** — master doc first, slug into the sprint doc's `orchestrates`, log both sides, propose the strategist fit-check, notify the orchestrator (see Adding A Master To A Running Sprint) |
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
 | The work looks tiny (a line or two) and no backend is spawned | **Ask first** — propose the short root as a question; solo/hat-collapse only on the developer's yes (never self-decided) |
 
