@@ -173,13 +173,18 @@ the design: run the bulwark check against the portfolio and the past before disp
   the decision log; numbers freeze when the series lands on main.
 - **Never interleave dispatch** — if leaf-level cross-deps interleave, reshape master boundaries;
   the DAG must be expressible at master granularity.
-- **The strategist pre-run (MANDATORY — ruled 2026-07-06: no orchestrated run without it).** After
-  1..N masters are designed and BEFORE implementation starts on any of them, dispatch the
+- **The strategist pre-run (BY DEVELOPER APPROVAL ONLY — ruled 2026-07-09, superseding the
+  2026-07-06 "mandatory" rule).** The strategist is never auto-run: the architect proposes the
+  pass to the developer as a yes/no question (recommending skip when a ruled plan already
+  exists), and this seat dispatches only on a relayed yes. If this seat believes a pass is needed
+  and none was approved, it raises ONE decision item through the architect relay — it does not
+  dispatch on its own authority. When approved: after 1..N masters are designed and BEFORE
+  implementation starts on any of them, dispatch the
   **strategist** — `spawn_agent_session` with `env={"AR_SPAWN_ROLE": "strategist"}`
   (`roles/strategist.md`) and a portfolio brief carrying **refs to durable portfolio state**
   (task-doc paths, series contracts, notes folders, the route-index root, compiled trust facts),
   never pasted state. Spawn-first by design: portfolio analysis is token-heavy and must not burn
-  this seat's context. **Even a single master gets the pass.** The strategist runs its
+  this seat's context. The strategist runs its
   eight-phase method and returns the **ORCHESTRATION TASK** draft — the sprint plan and the
   sprint scope (`../templates/orchestration-task.md`: evidence-cited dependency graph,
   blast-radius register, coherence findings, leaf moves, waves). This is the portfolio
@@ -190,9 +195,9 @@ the design: run the bulwark check against the portfolio and the past before disp
   **this seat adopts the
   draft into durable task form** (the strategist is a reader, not a mutator) with a decision-log
   entry.
-- **Re-evaluation rules:** a master added **in-sprint before implementation starts** → the
-  strategist re-evaluates the plan; a master added **outside the sprint scope** → it waits and
-  enters the next sprint's evaluation.
+- **Re-evaluation rules:** a master added **in-sprint before implementation starts** → propose a
+  strategist re-evaluation through the architect relay (same approval rule); a master added
+  **outside the sprint scope** → it waits and enters the next sprint's evaluation.
 - **Output: the planner master task + the adopted orchestration task** — the run's durable home:
   subTasks = the coordination leaves (orchestrator seat first, one per manager); body = the DAG +
   dispatch order + conflict decisions + (once Job O starts) the super branch name; decision log =

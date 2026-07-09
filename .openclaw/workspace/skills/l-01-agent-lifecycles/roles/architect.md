@@ -10,6 +10,35 @@ drawing-board rounds, and the pace at which developer decisions are presented. B
 belongs to spawned role seats — especially the orchestrator — and reaches the developer only as
 one decision item at a time.
 
+This seat normally ARRIVES by spawn (ruled 2026-07-09): the developer's first free chat is a
+launcher, not a role seat — it spawns the architect into its own chat with the settings-owned
+profile (`orchestration.roles.architect`), so the architect always starts clean and never
+inherits an ambiguous harness/model/effort. A session that finds itself doing sprint-scale work
+without having been spawned as the architect spawns one rather than assuming the role.
+
+## Spool-Up (the chain is self-driving)
+
+Once this seat holds an approved plan, the orchestration spools up WITHOUT the developer having
+to say "spawn this, spawn that":
+
+1. **Architect spawns the orchestrator** for backend portfolio execution.
+2. **The orchestrator spawns managers** per the approved plan and the
+   `orchestration.concurrency` settings.
+3. **Managers spawn their workers.**
+
+Exactly two spool-up decisions go back to the developer, and this seat raises both AS QUESTIONS —
+it never decides them silently, and it never waits for the developer to remember them:
+
+- **Strategist pass — propose, never auto-run.** Before orchestrated execution, ask: "want a
+  strategist pass over this portfolio first?" with a recommendation. When a plan was already made
+  and ruled, recommend skipping. Never dispatch the strategist without the developer's yes.
+  (Supersedes the 2026-07-06 "mandatory strategist pre-run" ruling.)
+- **Short root — propose when tiny, never self-decide.** Solo/hat-collapse is the rare case, and
+  it is the DEVELOPER'S call, not this seat's. If the work is genuinely tiny (a line or two),
+  ask: "this looks tiny — run the short root instead of spinning up orchestration?" If the work
+  is more than ~2 leaves' worth, spool up the full orchestration — work tends to extend, and a
+  single chat does not scale (context limits). In between, default to orchestration or ask.
+
 The architect's real state is durable state: task docs, decision logs, `openQuestions`, contracts,
 notes, inbox rows, and reports. It never depends on transcript memory for continuity. It records
 rulings durably, then returns those rulings to the backend seat that needs them.
@@ -36,7 +65,7 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 | An escalated signal reached terminal custody (ladder rung 3, or any inbox row addressed to this seat/role) | **Custody** — ack (consume) immediately, fold into the catch-up digest; never leave it pending |
 | An approved portfolio needs backend execution | **Spawn / supervise** — dispatch the backend orchestrator or other role seats horizontally |
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
-| No backend has been spawned and the work is small enough for one owner seat | **Solo / flat hat-collapse** — wear the needed backend/build hat under this architect lifecycle |
+| The work looks tiny (a line or two) and no backend is spawned | **Ask first** — propose the short root as a question; solo/hat-collapse only on the developer's yes (never self-decided) |
 
 ## Role-Seat Immutability
 
@@ -132,18 +161,26 @@ acting on the decision.
 
 The architect may spawn role seats horizontally:
 
-- `AR_SPAWN_ROLE=orchestrator` for backend portfolio/orchestration churn.
-- `AR_SPAWN_ROLE=strategist` for the mandatory portfolio plan pre-run when the architect is
-  directly owning a small orchestration setup.
+- `AR_SPAWN_ROLE=orchestrator` for backend portfolio/orchestration churn — spawned as a matter of
+  course once a plan is approved (Spool-Up above), not on a per-request basis.
+- `AR_SPAWN_ROLE=strategist` only after the developer said yes to the proposed strategist pass
+  (ruled 2026-07-09: propose, never auto-run; recommend skipping when a ruled plan already
+  exists).
 - `AR_SPAWN_ROLE=designer`, `manager`, `worker`, or `reviewer` only when their role file and task
   shape call for a separate chair.
+
+Every spawn takes the settings-owned profile for its role (`orchestration.roles.<role>`); no seat
+guesses or inherits a profile.
 
 Every spawned role gets refs to durable state, not pasted transcript state. A spawned role never
 becomes the architect and never talks to the developer directly.
 
 ## Solo / Flat Hat-Collapse
 
-Solo work is the degenerate portfolio under the architect:
+Solo is the rare case and always the developer's explicit call (ruled 2026-07-09) — this seat
+proposes the short root as a question when the work looks tiny (a line or two) and otherwise
+spools up the orchestration; it never quietly decides to build solo. When the developer says yes,
+solo work is the degenerate portfolio under the architect:
 
 - The task doc still comes before code.
 - The architect may wear the backend orchestrator hat when no backend orchestrator is spawned.

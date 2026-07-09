@@ -19,18 +19,29 @@ lifecycle, and no role reads another role's file.
    a first line of the form `ROLE BRIEF — <role>` from an orchestrating agent → run that role's
    lifecycle. The brief is your session start; a workspace session-start notice is not addressed
    to you.
-3. **Else** (a developer opened this session) → you are the **architect**: run
-   `roles/architect.md`. Solo work is the degenerate portfolio — the architect is the owner seat
-   that may wear backend hats when nothing has been spawned; the task doc still comes first.
+3. **Else** (a developer opened this session) → you are the developer-facing **free chat** — a
+   launcher, not a role seat (ruled 2026-07-09). Research-only questions are answered inline with
+   no role taken. The moment the ask is role-shaped (a sprint, a task, any durable change), do NOT
+   assume the architect role in this chat: **spawn the architect into its own chat**
+   (`spawn_agent_session` with `AR_SPAWN_ROLE=architect`; the profile — harness/model/effort —
+   comes from `orchestration.roles.architect` in settings, never from this session's guess) and
+   point the developer at that chat. A clean startup with the settings-owned profile removes all
+   profile ambiguity. The spawned architect runs `roles/architect.md` and owns the developer
+   conversation from there.
 
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
 value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
 session **whose brief never arrives** announces itself on the inbox and waits — it never
 improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
 backend takeover chair — the developer still talks to the **architect**, not the orchestrator.
-Orchestrated fan-out (spawning backend orchestrators/managers/workers at scale) begins only on an
-explicit developer request (e.g. *"orchestrate these masters"*) — no agent promotes itself into a
-spawning seat.
+The spool-up chain is fixed and self-driving (ruled 2026-07-09): free chat spawns the
+**architect**; the architect spawns the **orchestrator** for portfolio execution; the
+orchestrator spawns **managers** per the approved plan and the concurrency settings; managers
+spawn their **workers**. No seat waits to be told "spawn this, spawn that" — each level spawns
+its next level from the plan. Only two spool-up decisions ever go back to the developer, both as
+questions the agent raises itself: whether to run a **strategist** pass (proposed, never
+auto-run), and whether to take the **short root** (solo, no orchestration) when the work looks
+tiny — see `roles/architect.md`.
 
 One exception to the no-cross-reading rule above: **a seat that WEARS a hat runs that hat's file
 as its own** — the architect may wear `roles/designer.md`, and in solo/flat runs may wear backend
