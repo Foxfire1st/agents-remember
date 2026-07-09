@@ -149,10 +149,14 @@ describe("sessionStore (6e hardening)", () => {
     expect(sessionStore.getState().count).toBe(2);
   });
 
-  it("does not route lifecycle injections to exited or terminated sessions", () => {
+  it("does not route lifecycle injections to non-live sessions", () => {
     sessionStore
       .getState()
       .hydrate([{ id: "dead", label: "Claude Code 1", lifecycleId: "LC1", status: "exited" }]);
+    expect(findSessionForLifecycle("LC1")).toBeUndefined();
+    sessionStore
+      .getState()
+      .hydrate([{ id: "landed", label: "Claude Code 1", lifecycleId: "LC1", status: "landed" }]);
     expect(findSessionForLifecycle("LC1")).toBeUndefined();
   });
 
@@ -220,6 +224,15 @@ describe("sessionStore (6e hardening)", () => {
     expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
   });
 
+  it("frees a leaf so a landed owner no longer blocks a new bind", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().hydrate([{ id: "landed", label: "Chat 1", leafKey: leaf, status: "landed" }]);
+    expect(findSessionForLeaf(leaf)).toBeUndefined();
+    sessionStore.getState().add("Chat", "fresh");
+    sessionStore.getState().setLeaf("fresh", leaf);
+    expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
+  });
+
   it("clears a leaf binding when set to null", () => {
     const leaf = "repo/master/leaf-1";
     sessionStore.getState().add("Chat", "agent-1");
@@ -281,6 +294,50 @@ describe("sessionStore (6e hardening)", () => {
       harness: "claude",
       lifecycleId: "LC1",
       status: "running",
+    });
+  });
+
+  it("converts landed catalog metadata into store sessions", () => {
+    expect(
+      fromTerminalSessionInfo({
+        id: "s1",
+        label: "Claude Code 2",
+        kind: "harness",
+        harness: "claude",
+        lifecycleId: "LC1",
+        leafKey: "repo/master/leaf-1",
+        spawnRole: "worker",
+        cwd: "/ws",
+        tmuxName: "ar-s1",
+        createdAt: "2026-06-26T00:00:00Z",
+        lastAttachedAt: "2026-06-26T00:00:00Z",
+        status: "landed",
+        landedAt: "2026-07-09T00:00:00Z",
+        landedReason: "leaf integrated",
+        landedEdge: "leaf-integration",
+        spawnedBySession: "manager",
+        spawnedByLifecycle: "LC0",
+        spawnedLabel: "Worker",
+        turnState: "turn-ended",
+        turnStateChangedAt: "2026-07-09T00:01:00Z",
+      }),
+    ).toEqual({
+      id: "s1",
+      label: "Claude Code 2",
+      kind: "harness",
+      harness: "claude",
+      lifecycleId: "LC1",
+      leafKey: "repo/master/leaf-1",
+      spawnRole: "worker",
+      status: "landed",
+      landedAt: "2026-07-09T00:00:00Z",
+      landedReason: "leaf integrated",
+      landedEdge: "leaf-integration",
+      spawnedBySession: "manager",
+      spawnedByLifecycle: "LC0",
+      spawnedLabel: "Worker",
+      turnState: "turn-ended",
+      turnStateChangedAt: "2026-07-09T00:01:00Z",
     });
   });
 

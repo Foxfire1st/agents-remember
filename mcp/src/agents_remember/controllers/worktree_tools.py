@@ -17,9 +17,8 @@ from agents_remember.observer.events import now_iso
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.settings import write_lifecycle_settings
-from agents_remember.serving.retire import retire_seats_for_leaf
-from agents_remember.serving.seat_events import log_retire_event
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.landing import land_seats_for_leaf
+from agents_remember.serving.seat_events import log_landed_event
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.worktrees import git_worktree_manager
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -294,8 +293,8 @@ def worktree_integrate_tool(
         gate_policy=config.orchestration.gate_policy,
     )
     result = _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
-    if result["ok"] and not dry_run and config.retirement.auto_retire_on_integration:
-        result["autoRetiredSeats"] = _auto_retire_completed_seats(
+    if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
+        result["autoLandedSeats"] = _auto_land_completed_seats(
             config,
             confined_contract,
             roles=frozenset({"worker", "reviewer"}),
@@ -379,8 +378,8 @@ def lifecycle_finalize_task_tool(
     result = _worktree_result(
         "lifecycle_finalize_task", git_worktree_manager.finalize_result(args)
     )
-    if result["ok"] and not dry_run and config.retirement.auto_retire_on_finalize:
-        result["autoRetiredSeats"] = _auto_retire_completed_seats(
+    if result["ok"] and not dry_run and config.retirement.auto_land_on_finalize:
+        result["autoLandedSeats"] = _auto_land_completed_seats(
             config,
             confined_contract,
             roles=frozenset({"manager", "reviewer"}),
@@ -390,7 +389,7 @@ def lifecycle_finalize_task_tool(
     return result
 
 
-def _auto_retire_completed_seats(
+def _auto_land_completed_seats(
     config: McpRuntimeConfig,
     contract_path: Path,
     *,
@@ -398,29 +397,27 @@ def _auto_retire_completed_seats(
     reason: str,
     edge: str,
 ) -> list[str]:
-    """The completion-edge auto-retire hook (260707-HFX-L8): resolve the contract's own qualified
-    leaf key and retire every non-terminated seat of ``roles`` bound to it.
+    """The completion-edge auto-land hook: resolve the contract's qualified leaf key and archive seats.
 
     Best-effort, END TO END: an unreadable/already-archived contract, a catalog read/write failure,
-    or any other failure in the retire body (F1, HFX-L8 doctrine review) skips the auto-retire
-    rather than failing the completion edge itself -- retirement is a cleanup courtesy, never a gate
-    on the edge it rides. The whole body is guarded, not just ``load_contract``: ``retire_seats_for_leaf``
+    or any other failure in the landing body skips the auto-land rather than failing the completion
+    edge itself -- landing is a cleanup courtesy, never a gate on the edge it rides. The whole body
+    is guarded, not just ``load_contract``: ``land_seats_for_leaf``
     does catalog file I/O that can raise just as easily as a missing contract file, and a raise from
-    there must never propagate out of an already-succeeded ``worktree_integrate``/
+    there must never propagate out of an already-succeeded ``worktree_integrate`` /
     ``lifecycle_finalize_task`` call.
     """
     try:
         contract = load_contract(contract_path)
         leaf_key = f"{contract.repo_name}/{contract.task_root.name}/{contract.task_id}"
         catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
-        host = TerminalHost()
         at = now_iso()
-        retired = retire_seats_for_leaf(
-            catalog, host, leaf_key=leaf_key, roles=roles, reason=reason, edge=edge, at=at
+        landed = land_seats_for_leaf(
+            catalog, leaf_key=leaf_key, roles=roles, reason=reason, edge=edge, at=at
         )
-        for entry in retired:
-            log_retire_event(config, entry)
-        return [entry.id for entry in retired]
+        for entry in landed:
+            log_landed_event(config, entry)
+        return [entry.id for entry in landed]
     except Exception:
         return []
 

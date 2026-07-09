@@ -270,7 +270,7 @@ export interface HarnessInfo {
   detected: boolean;
 }
 
-export type TerminalSessionStatus = "running" | "exited" | "terminated";
+export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";
 
 export interface TerminalSessionInfo {
   id: string;
@@ -289,6 +289,14 @@ export interface TerminalSessionInfo {
   lastAttachedAt: string;
   status: TerminalSessionStatus;
   terminatedAt?: string;
+  landedAt?: string;
+  landedReason?: string;
+  landedEdge?: string;
+  spawnedBySession?: string;
+  spawnedByLifecycle?: string;
+  spawnedLabel?: string;
+  turnState?: string;
+  turnStateChangedAt?: string;
 }
 
 interface OpenTerminalOptions {
@@ -371,6 +379,36 @@ export async function terminateTerminalSession(sessionId: string, base = ""): Pr
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+export interface LandedCleanupResult {
+  closed: number;
+  skipped: number;
+  closedSessions: string[];
+  skippedSessions: Array<{ session: string; reason: string }>;
+}
+
+export async function cleanupLandedTerminalSessions(
+  sessionIds: string[],
+  base = "",
+): Promise<LandedCleanupResult | null> {
+  try {
+    const response = await fetch(`${base}/api/terminal/landed-cleanup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionIds }),
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as Partial<LandedCleanupResult>;
+    return {
+      closed: typeof body.closed === "number" ? body.closed : 0,
+      skipped: typeof body.skipped === "number" ? body.skipped : 0,
+      closedSessions: Array.isArray(body.closedSessions) ? body.closedSessions : [],
+      skippedSessions: Array.isArray(body.skippedSessions) ? body.skippedSessions : [],
+    };
+  } catch {
+    return null;
   }
 }
 

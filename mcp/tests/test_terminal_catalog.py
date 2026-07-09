@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -104,6 +105,51 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(updated.status, "terminated")
         self.assertEqual(updated.terminated_at, "2026-06-26T00:03:00Z")
         self.assertEqual(self.catalog.list(), [])
+
+    def test_mark_landed_keeps_row_visible_and_non_active(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_entry("a", leaf_key=leaf, kind="harness"))
+
+        updated = self.catalog.mark_landed(
+            "a",
+            at="2026-07-09T00:00:00+00:00",
+            reason="leaf integrated",
+            edge="leaf-integration",
+        )
+
+        assert updated is not None
+        self.assertEqual(updated.status, "landed")
+        self.assertEqual(updated.landed_reason, "leaf integrated")
+        self.assertEqual([entry.id for entry in self.catalog.list()], ["a"])
+        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+
+    def test_landed_state_round_trips_and_is_not_reanimated(self) -> None:
+        self.catalog.upsert(_entry("a"))
+        self.catalog.mark_landed(
+            "a",
+            at="2026-07-09T00:00:00+00:00",
+            reason="done",
+            edge="leaf-integration",
+        )
+
+        raw = json.loads(self.catalog.path.read_text(encoding="utf-8"))
+        row = raw["sessions"][0]
+        self.assertEqual(row["status"], "landed")
+        self.assertEqual(row["landedAt"], "2026-07-09T00:00:00+00:00")
+        self.assertEqual(row["landedReason"], "done")
+        self.assertEqual(row["landedEdge"], "leaf-integration")
+
+        attached = self.catalog.mark_attached("a", "2026-07-09T00:01:00+00:00")
+        assert attached is not None
+        self.assertEqual(attached.status, "landed")
+        liveness = self.catalog.record_liveness_probe(
+            "a", alive=True, checked_at=datetime.fromisoformat("2026-07-09T00:02:00+00:00")
+        )
+        assert liveness is not None
+        self.assertEqual(liveness.status, "landed")
+        exited = self.catalog.mark_exited("a")
+        assert exited is not None
+        self.assertEqual(exited.status, "landed")
 
     def test_leaf_key_round_trips_through_json(self) -> None:
         leaf = "agents-remember/260628_operations-integration/260628-L5"

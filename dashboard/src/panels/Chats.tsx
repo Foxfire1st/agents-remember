@@ -14,6 +14,7 @@ import {
 import {
   attachSessionToLeaf,
   bracketedPaste,
+  cleanupLandedTerminalSessions,
   fetchHarnesses,
   fetchTerminalSessionsOrNull,
   sanitizeForInjection,
@@ -158,6 +159,10 @@ const statusPanel = css({
 const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
 const CATALOG_REFRESH_INTERVAL_MS = 2500;
 
+function isInspectableSession(status: string | undefined): boolean {
+  return (status ?? "running") === "running" || status === "landed";
+}
+
 function readLastActiveSessionId(): string | null {
   try {
     return window.localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
@@ -223,6 +228,7 @@ export function Chats({
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
   const activeSession = sessions.find((session) => session.id === activeId);
+  const activeSessionIsRunning = (activeSession?.status ?? "running") === "running";
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   // The attached-leaf name resolver for the session list ("who works on what"): the bound leaf's task-doc
@@ -231,6 +237,7 @@ export function Chats({
     leafTitleForKey(taskDocuments, leafKey) ?? leafIdFromKey(leafKey);
   // A transient note for a refused leaf attach (the server's 409 leaf-taken).
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
+  const [landedCleanupNote, setLandedCleanupNote] = useState<string | null>(null);
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
   // only for detected ones. `[]` (no backend / failure) just leaves ＋ Terminal alone.
@@ -284,7 +291,7 @@ export function Chats({
     setMountedSessionIds((current) => {
       const sessionIds = new Set(sessions.map((session) => session.id));
       const next = new Set([...current].filter((id) => sessionIds.has(id)));
-      if (activeSession && (activeSession.status ?? "running") === "running") {
+      if (activeSession && isInspectableSession(activeSession.status)) {
         next.add(activeSession.id);
       }
       if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
@@ -298,7 +305,7 @@ export function Chats({
       : createSession(label, kind, harness);
 
   const attachActive = () => {
-    if (!activeSession || activeSession.lifecycleId || !selectedLifecycleId) return;
+    if (!activeSession || !activeSessionIsRunning || activeSession.lifecycleId || !selectedLifecycleId) return;
     sessionStore.getState().setLifecycle(activeSession.id, selectedLifecycleId);
   };
 
@@ -306,7 +313,7 @@ export function Chats({
   // just the leaf you happen to be viewing. On success bind the leaf locally + broadcast the catalog
   // change; on 409 the leaf already has a same-role running session, so surface a note instead of binding.
   const attachActiveLeaf = async (leafKey: string) => {
-    if (!activeSession || !leafKey || activeSession.leafKey === leafKey) return;
+    if (!activeSession || !activeSessionIsRunning || !leafKey || activeSession.leafKey === leafKey) return;
     setLeafAttachError(null);
     const result = await attachSessionToLeaf(activeSession.id, leafKey);
     if (result === "ok") {
@@ -332,6 +339,22 @@ export function Chats({
       sessionStore.getState().close(id);
       notifySessionCatalogChanged("terminate", id);
     }
+  };
+
+  const cleanupLandedSessions = async (members: { id: string }[]) => {
+    setLandedCleanupNote(null);
+    const result = await cleanupLandedTerminalSessions(members.map((member) => member.id));
+    if (!result) {
+      setLandedCleanupNote("cleanup failed");
+      return;
+    }
+    for (const id of result.closedSessions) {
+      sessionStore.getState().setStatus(id, "terminated");
+      sessionStore.getState().close(id);
+    }
+    notifySessionCatalogChanged("terminate");
+    void hydrateTerminalSessionsFromCatalog(true, new Set(result.closedSessions));
+    setLandedCleanupNote(`${result.closed} closed · ${result.skipped} skipped`);
   };
 
   // The G1 command tree (L14): group the sidebar by claim + spawn-role provenance. Enclosures come
@@ -371,7 +394,7 @@ export function Chats({
           ))}
         {selectedLifecycleId && activeSession?.lifecycleId === selectedLifecycleId ? (
           <span className={attachBadge}>task {selectedLifecycleId}</span>
-        ) : selectedLifecycleId && activeSession && !activeSession.lifecycleId ? (
+        ) : selectedLifecycleId && activeSessionIsRunning && activeSession && !activeSession.lifecycleId ? (
           <button
             type="button"
             className={launchButton}
@@ -388,7 +411,7 @@ export function Chats({
             leaf {leafNameFor(activeSession.leafKey)}
           </span>
         ) : null}
-        {activeSession && leafTree.length > 0 ? (
+        {activeSession && activeSessionIsRunning && leafTree.length > 0 ? (
           <LeafAttachPicker
             tree={leafTree}
             contextMaster={pickerContextMaster}
@@ -403,6 +426,11 @@ export function Chats({
             {leafAttachError}
           </span>
         ) : null}
+        {landedCleanupNote ? (
+          <span className={attachBadge} data-testid="chats-landed-cleanup-status">
+            {landedCleanupNote}
+          </span>
+        ) : null}
       </header>
       <div className={body}>
         {sessions.length > 0 && (
@@ -412,6 +440,7 @@ export function Chats({
               activeId={activeId}
               onSelect={(id) => sessionStore.getState().setActive(id)}
               onTerminate={(id) => void terminateSession(id)}
+              onCleanupLanded={(members) => void cleanupLandedSessions(members)}
               leafNameFor={leafNameFor}
               grouped={grouped}
             />
@@ -432,10 +461,11 @@ export function Chats({
                       aria-hidden={!visible}
                       data-testid={`chats-terminal-layer-${session.id}`}
                     >
-                      {(session.status ?? "running") === "running" ? (
+                      {isInspectableSession(session.status) ? (
                         <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
                           <Terminal
                             sessionId={session.id}
+                            readOnly={session.status === "landed"}
                             onConnection={(conn) => registerConnection(session.id, conn)}
                           />
                         </Suspense>
@@ -447,11 +477,13 @@ export function Chats({
                     </div>
                   );
                 })}
-              <SessionComposer
-                onSend={(text) =>
-                  sendToSession(activeSession.id, bracketedPaste(sanitizeForInjection(text)))
-                }
-              />
+              {activeSessionIsRunning ? (
+                <SessionComposer
+                  onSend={(text) =>
+                    sendToSession(activeSession.id, bracketedPaste(sanitizeForInjection(text)))
+                  }
+                />
+              ) : null}
             </>
           ) : (
             <EmptyStateBackdrop src="/assets/sc2-adjutant-boomerang.mp4">

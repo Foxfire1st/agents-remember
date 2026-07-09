@@ -646,6 +646,23 @@ class TerminalWebSocketTests(unittest.TestCase):
         assert entry is not None
         self.assertEqual(entry.status, "running")
 
+    def test_websocket_attaches_landed_catalog_session_for_inspection(self) -> None:
+        self.catalog.upsert(
+            _catalog_entry(
+                "landed", cwd=self.tmp, status="landed", tmux_name="ar-landed", command=("bash",)
+            )
+        )
+        self.host.probe_names.add("ar-landed")
+        with TestClient(self.app) as client, client.websocket_connect(
+            "/api/terminal/landed"
+        ) as ws:
+            self.host.feed(b"landed-output")
+            self.assertEqual(ws.receive_bytes(), b"landed-output")
+        self.assertEqual(self.host.attached[0]["sid"], "landed")
+        entry = self.catalog.get("landed")
+        assert entry is not None
+        self.assertEqual(entry.status, "landed")
+
     def test_websocket_marks_stale_catalog_session_exited(self) -> None:
         self.catalog.upsert(_catalog_entry("stale", cwd=self.tmp, tmux_name="ar-stale"))
         with TestClient(self.app) as client, client.websocket_connect(
@@ -674,6 +691,43 @@ class TerminalWebSocketTests(unittest.TestCase):
         entry = self.catalog.get("term-1")
         assert entry is not None
         self.assertEqual(entry.status, "terminated")
+
+    def test_landed_cleanup_closes_only_landed_rows_and_reports_skips(self) -> None:
+        self.catalog.upsert(_catalog_entry("landed", cwd=self.tmp, status="landed", tmux_name="ar-landed"))
+        self.catalog.upsert(_catalog_entry("running", cwd=self.tmp, tmux_name="ar-running"))
+        self.catalog.upsert(_catalog_entry("exited", cwd=self.tmp, status="exited", tmux_name="ar-exited"))
+
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/landed-cleanup",
+                json={"sessionIds": ["landed", "running", "exited", "ghost"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "cleaned")
+        self.assertEqual(body["closed"], 1)
+        self.assertEqual(body["skipped"], 3)
+        self.assertEqual(body["closedSessions"], ["landed"])
+        self.assertEqual(
+            body["skippedSessions"],
+            [
+                {"session": "running", "reason": "status:running"},
+                {"session": "exited", "reason": "status:exited"},
+                {"session": "ghost", "reason": "unknown-session"},
+            ],
+        )
+        self.assertEqual(self.host.terminated, ["ar-landed"])
+        landed = self.catalog.get("landed")
+        running = self.catalog.get("running")
+        exited = self.catalog.get("exited")
+        assert landed is not None
+        assert running is not None
+        assert exited is not None
+        self.assertEqual(landed.status, "terminated")
+        self.assertEqual(landed.retired_reason, "landed group cleanup")
+        self.assertEqual(running.status, "running")
+        self.assertEqual(exited.status, "exited")
 
     def test_post_open_rejects_unknown_kind(self) -> None:
         with TestClient(self.app) as client:
@@ -794,6 +848,14 @@ class TerminalWebSocketTests(unittest.TestCase):
         with TestClient(self.app) as client:
             response = client.post(
                 "/api/terminal/dead/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
+            )
+        self.assertEqual(response.status_code, 404)
+
+    def test_attach_leaf_404_for_landed_session(self) -> None:
+        self.catalog.upsert(_catalog_entry("landed", cwd=self.tmp, status="landed"))
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/landed/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
             )
         self.assertEqual(response.status_code, 404)
 

@@ -140,8 +140,8 @@ watch settings internally.
     "memoryCriticalRatio": 0.92
   },
   "retirement": {
-    "autoRetireOnIntegration": true,
-    "autoRetireOnFinalize": true
+    "autoLandOnIntegration": true,
+    "autoLandOnFinalize": true
   }
 }
 ```
@@ -237,11 +237,13 @@ stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
 `setupFailureCriticalStreak`, and `recentSampleLimit`. Unknown
 `providerDegradation` keys are rejected.
 
-`retirement` (optional, 260707-HFX-L8) configures the auto-retire hooks for
-worktree-backed tmux seats. `autoRetireOnIntegration` and
-`autoRetireOnFinalize` (both default `true`) gate whether integrating or
-finalizing a leaf automatically retires its hosted terminal seat. Unknown
-`retirement` keys are rejected.
+`retirement` (optional) configures the auto-land hooks for worktree-backed tmux
+seats. `autoLandOnIntegration` and `autoLandOnFinalize` (both default `true`)
+gate whether integrating a leaf or finalizing a master marks spent hosted seats
+as landed/archive. Landing leaves transcripts inspectable and non-active; it
+does not close tmux. The legacy `autoRetireOnIntegration` and
+`autoRetireOnFinalize` keys are accepted as aliases for existing settings files.
+Unknown `retirement` keys are rejected.
 
 `orchestration` in the authority file is LEGACY territory (260703-L13): the
 agentic family moved to the global agentic settings file documented below. For

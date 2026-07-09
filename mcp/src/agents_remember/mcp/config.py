@@ -42,10 +42,17 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
-# 260707-HFX-L8: the auto-retire hooks are boot-snapshot, MCP-authority-file settings (unlike
-# orchestration.gateDelegation, which moved to the global agentic settings file) -- retirement is
-# a local server-behavior knob, not a portfolio-wide orchestration policy, so it stays here.
-KNOWN_RETIREMENT_FIELDS = frozenset({"autoRetireOnIntegration", "autoRetireOnFinalize"})
+# 260707-HFX2-L11: the auto-land hooks are boot-snapshot, MCP-authority-file settings (unlike
+# orchestration.gateDelegation, which moved to the global agentic settings file). The legacy
+# autoRetire* names are accepted as migration aliases for existing local authority files.
+KNOWN_RETIREMENT_FIELDS = frozenset(
+    {
+        "autoLandOnIntegration",
+        "autoLandOnFinalize",
+        "autoRetireOnIntegration",
+        "autoRetireOnFinalize",
+    }
+)
 # The agentic orchestration family moved to the coordinator's global settings
 # file (260703-L13); the authority file keeps ONLY the one-cycle gateDelegation
 # legacy fallback. loops/roles/concurrency/spawn here fail loud, pointing at
@@ -93,14 +100,14 @@ class OrchestrationSettings:
 
 @dataclass(frozen=True)
 class RetirementSettings:
-    """The optional ``retirement`` settings object (260707-HFX-L8): auto-retire hook gates.
+    """The optional ``retirement`` settings object: auto-land hook gates.
 
-    Both default ON (developer ruling 2026-07-07: spawn/cleanup symmetry is the happy path) --
-    a completed leaf/master should leave zero spent chats without anyone remembering to clean up.
+    Both default ON: a completed leaf/master lands spent chats into an inspectable non-active
+    archive. Explicit retire / group cleanup remains the path that closes sessions.
     """
 
-    auto_retire_on_integration: bool = True
-    auto_retire_on_finalize: bool = True
+    auto_land_on_integration: bool = True
+    auto_land_on_finalize: bool = True
 
 
 @dataclass(frozen=True)
@@ -454,15 +461,16 @@ def parse_retirement_settings(raw: object) -> RetirementSettings:
         allowed = ", ".join(sorted(KNOWN_RETIREMENT_FIELDS))
         unknown_text = ", ".join(unknown)
         raise ConfigError(f"unsupported retirement setting(s): {unknown_text}; allowed: {allowed}")
-    auto_retire_on_integration = raw.get("autoRetireOnIntegration", True)
-    if not isinstance(auto_retire_on_integration, bool):
-        raise ConfigError("retirement.autoRetireOnIntegration must be a boolean")
-    auto_retire_on_finalize = raw.get("autoRetireOnFinalize", True)
-    if not isinstance(auto_retire_on_finalize, bool):
-        raise ConfigError("retirement.autoRetireOnFinalize must be a boolean")
+    for key in sorted(KNOWN_RETIREMENT_FIELDS):
+        if key in raw and not isinstance(raw[key], bool):
+            raise ConfigError(f"retirement.{key} must be a boolean")
+    auto_land_on_integration = raw.get(
+        "autoLandOnIntegration", raw.get("autoRetireOnIntegration", True)
+    )
+    auto_land_on_finalize = raw.get("autoLandOnFinalize", raw.get("autoRetireOnFinalize", True))
     return RetirementSettings(
-        auto_retire_on_integration=auto_retire_on_integration,
-        auto_retire_on_finalize=auto_retire_on_finalize,
+        auto_land_on_integration=auto_land_on_integration,
+        auto_land_on_finalize=auto_land_on_finalize,
     )
 
 

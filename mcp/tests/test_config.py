@@ -559,7 +559,7 @@ class ProviderDegradationSettingsTests(unittest.TestCase):
 
 
 class RetirementSettingsTests(unittest.TestCase):
-    """260707-HFX-L8: the auto-retire hook gates, both default ON."""
+    """260707-HFX2-L11: the auto-land hook gates, both default ON."""
 
     def _load(self, retirement: object | None) -> McpRuntimeConfig:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -573,31 +573,42 @@ class RetirementSettingsTests(unittest.TestCase):
 
     def test_defaults_are_both_on_when_the_key_is_absent(self) -> None:
         config = self._load(None)
-        self.assertTrue(config.retirement.auto_retire_on_integration)
-        self.assertTrue(config.retirement.auto_retire_on_finalize)
+        self.assertTrue(config.retirement.auto_land_on_integration)
+        self.assertTrue(config.retirement.auto_land_on_finalize)
 
     def test_parses_both_flags_explicitly_off(self) -> None:
         config = self._load(
+            {"autoLandOnIntegration": False, "autoLandOnFinalize": False}
+        )
+        self.assertFalse(config.retirement.auto_land_on_integration)
+        self.assertFalse(config.retirement.auto_land_on_finalize)
+
+    def test_parses_legacy_auto_retire_flags_as_aliases(self) -> None:
+        config = self._load(
             {"autoRetireOnIntegration": False, "autoRetireOnFinalize": False}
         )
-        self.assertFalse(config.retirement.auto_retire_on_integration)
-        self.assertFalse(config.retirement.auto_retire_on_finalize)
+        self.assertFalse(config.retirement.auto_land_on_integration)
+        self.assertFalse(config.retirement.auto_land_on_finalize)
 
     def test_unknown_retirement_key_is_rejected(self) -> None:
         with self.assertRaisesRegex(ConfigError, "unsupported retirement setting"):
             self._load({"autoRetireOnLaunch": True})
 
-    def test_auto_retire_on_integration_must_be_a_boolean(self) -> None:
+    def test_auto_land_on_integration_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoLandOnIntegration must be a boolean"):
+            self._load({"autoLandOnIntegration": "yes"})
+
+    def test_auto_land_on_finalize_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoLandOnFinalize must be a boolean"):
+            self._load({"autoLandOnFinalize": 1})
+
+    def test_legacy_auto_retire_alias_must_be_a_boolean(self) -> None:
         with self.assertRaisesRegex(ConfigError, "autoRetireOnIntegration must be a boolean"):
             self._load({"autoRetireOnIntegration": "yes"})
 
-    def test_auto_retire_on_finalize_must_be_a_boolean(self) -> None:
-        with self.assertRaisesRegex(ConfigError, "autoRetireOnFinalize must be a boolean"):
-            self._load({"autoRetireOnFinalize": 1})
-
     def test_non_object_retirement_settings_are_rejected(self) -> None:
         with self.assertRaisesRegex(ConfigError, "retirement settings must be an object"):
-            self._load(["autoRetireOnIntegration"])
+            self._load(["autoLandOnIntegration"])
 
 
 class OrchestrationSettingsTests(unittest.TestCase):

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   bracketedPaste,
+  cleanupLandedTerminalSessions,
   connectTerminal,
   fetchHarnesses,
   fetchTerminalSessions,
@@ -304,6 +305,44 @@ describe("terminateTerminalSession", () => {
     expect(await terminateTerminalSession("s1")).toBe(false);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await terminateTerminalSession("s1")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("cleanupLandedTerminalSessions", () => {
+  it("POSTs selected session ids and normalizes the cleanup result", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          closed: 1,
+          skipped: 1,
+          closedSessions: ["landed"],
+          skippedSessions: [{ session: "active", reason: "status:running" }],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(cleanupLandedTerminalSessions(["landed", "active"])).resolves.toEqual({
+      closed: 1,
+      skipped: 1,
+      closedSessions: ["landed"],
+      skippedSessions: [{ session: "active", reason: "status:running" }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/landed-cleanup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ sessionIds: ["landed", "active"] }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("returns null on a non-ok response or network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await cleanupLandedTerminalSessions(["s1"])).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await cleanupLandedTerminalSessions(["s1"])).toBeNull();
     vi.unstubAllGlobals();
   });
 });

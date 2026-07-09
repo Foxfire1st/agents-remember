@@ -1,4 +1,4 @@
-"""Observer events for seat retirement / rename / turn-state (260707-HFX-L8).
+"""Observer events for seat landing / retirement / rename / turn-state.
 
 Shared between the ``session_retire``/``session_rename`` MCP tools and the live liveness-sweep
 turn-state classifier (``serving/app.py``'s wiring of ``TerminalCatalogLivenessSweeper``) so both
@@ -39,6 +39,28 @@ def log_retire_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> N
                 "retiredBySession": entry.retired_by_session,
                 "retiredReason": entry.retired_reason,
                 "retiredEdge": entry.retired_edge,
+            },
+        )
+    )
+
+
+def log_landed_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> None:
+    EventStore(observer_root(config)).append(
+        Event(
+            id=new_ulid(),
+            ts=entry.landed_at or now_iso(),
+            kind="seat.landed",
+            trust="observed",
+            actor="system",
+            sessionId=entry.id,
+            lifecycleId=entry.lifecycle_id,
+            data={
+                "session": entry.id,
+                "label": entry.label,
+                "spawnRole": entry.spawn_role,
+                "leafKey": entry.leaf_key,
+                "landedReason": entry.landed_reason,
+                "landedEdge": entry.landed_edge,
             },
         )
     )

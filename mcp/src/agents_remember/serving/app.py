@@ -364,6 +364,12 @@ class TerminalRetireRequest(BaseModel):
     reason: str = "manual retire"
 
 
+class TerminalLandedCleanupRequest(BaseModel):
+    """Body of ``POST /api/terminal/landed-cleanup``: close selected archive rows."""
+
+    session_ids: list[str] = Field(default_factory=list, alias="sessionIds")
+
+
 class TerminalRenameRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}/rename`` (260707-HFX-L8, issue #4): the new display label."""
 
@@ -425,7 +431,7 @@ def _attach_terminal_session(
     liveness_config: TerminalCatalogLivenessConfig,
 ) -> TerminalSession | None:
     entry = catalog.get(session_id)
-    if entry is None or entry.status != "running":
+    if entry is None or entry.status not in ("running", "landed"):
         return None
     observation = observe_terminal_liveness(
         catalog,
@@ -434,7 +440,7 @@ def _attach_terminal_session(
         checked_at=checked_at,
         config=liveness_config,
     )
-    if not observation.alive or observation.entry.status != "running":
+    if not observation.alive or observation.entry.status not in ("running", "landed"):
         return None
     entry = observation.entry
     session = host.attach(
@@ -813,6 +819,46 @@ def create_app(
             ]
         }
 
+    @app.post("/api/terminal/landed-cleanup")
+    def api_terminal_landed_cleanup(request: TerminalLandedCleanupRequest) -> Response:
+        closed: list[str] = []
+        skipped: list[dict[str, str]] = []
+        closed_entries: list[TerminalCatalogEntry] = []
+        for session in request.session_ids:
+            entry = catalog.get(session)
+            if entry is None:
+                skipped.append({"session": session, "reason": "unknown-session"})
+                continue
+            if entry.status != "landed":
+                skipped.append({"session": session, "reason": f"status:{entry.status}"})
+                continue
+            updated = retire_entry(
+                catalog,
+                host,
+                entry,
+                at=now_iso(),
+                by_session=None,
+                reason="landed group cleanup",
+                edge="landed-group-cleanup",
+            )
+            if updated is None:
+                skipped.append({"session": session, "reason": "unknown-session"})
+                continue
+            closed.append(session)
+            closed_entries.append(updated)
+        for entry in closed_entries:
+            log_retire_event(config, entry)
+        return JSONResponse(
+            content={
+                "status": "cleaned",
+                "closed": len(closed),
+                "skipped": len(skipped),
+                "closedSessions": closed,
+                "skippedSessions": skipped,
+            },
+            status_code=200,
+        )
+
     @app.post("/api/terminal/{session}")
     def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
         # Mode B2 opener (slice 6e-2a; harness kinds 6e-2b): the dashboard *spawns + owns* a
@@ -880,7 +926,7 @@ def create_app(
     @app.post("/api/terminal/{session}/attach-leaf")
     def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
         # L5: claim a leaf for an EXISTING session from the Chats page (enclosure-free, no respawn).
-        # 404 if the session is unknown or terminated (a terminated chat cannot hold a leaf); 409 if a
+        # 404 if the session is unknown or non-running (only active chats can hold a leaf); 409 if a
         # different running chat already owns the leaf; else persist the leaf_key and report it.
         try:
             leaf_key = _resolve_request_leaf_key(config, request.leaf_key)

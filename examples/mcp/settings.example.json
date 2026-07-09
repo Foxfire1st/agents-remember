@@ -28,7 +28,7 @@
     "memoryCriticalRatio": 0.92
   },
   "retirement": {
-    "autoRetireOnIntegration": true,
-    "autoRetireOnFinalize": true
+    "autoLandOnIntegration": true,
+    "autoLandOnFinalize": true
   }
 }

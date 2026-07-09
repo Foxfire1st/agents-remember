@@ -112,6 +112,10 @@ export function groupSessions(input: {
   const byMaster = new Map<string, OpenSession[]>();
 
   for (const session of input.sessions) {
+    if (session.status === "landed") {
+      landed.push(session);
+      continue;
+    }
     const segments = session.leafKey ? leafKeySegments(session.leafKey) : undefined;
     const claimsOrchestration =
       (session.leafKey !== undefined && orchestrationLeafKeys.has(session.leafKey)) ||
@@ -134,8 +138,7 @@ export function groupSessions(input: {
       if (members) members.push(session);
       else byMaster.set(segments.master, [session]);
     } else {
-      // Landed or absent enclosure: the work left the hangar, the chat rolls into the archive.
-      landed.push(session);
+      ungrouped.push(session);
     }
   }
 
@@ -178,7 +181,7 @@ export function groupSessions(input: {
     groups.push({
       key: "landed",
       kind: "landed",
-      label: "landed",
+      label: "landed archive",
       nested: false,
       defaultCollapsed: true,
       sessions: landed,

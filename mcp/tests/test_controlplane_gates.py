@@ -1154,9 +1154,9 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
         config = SimpleNamespace(
             coordination_root=self.coord,
             orchestration=SimpleNamespace(gate_policy=HANDOVER_SEAM_POLICY),
-            # 260707-HFX-L8: the auto-retire hook is orthogonal to this test's gate-policy-plumbing
+            # The auto-land hook is orthogonal to this test's gate-policy-plumbing
             # focus -- disabled so it never fires against this fake, unattached contract.
-            retirement=SimpleNamespace(auto_retire_on_integration=False),
+            retirement=SimpleNamespace(auto_land_on_integration=False),
         )
         with mock.patch.object(
             worktree_tools.git_worktree_manager,

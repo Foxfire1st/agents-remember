@@ -91,7 +91,7 @@ describe("SessionList (6e-2c)", () => {
         leafNameFor={() => "Sidebar chat"}
       />,
     );
-    expect(getByTitle("Claude Code 1 · Sidebar chat")).not.toBeNull();
+    expect(getByTitle("Claude Code 1 · Sidebar chat · master: master · leaf: leaf-1")).not.toBeNull();
   });
 
   it("the row terminate action reports the destructive action separately", () => {
@@ -181,7 +181,7 @@ describe("SessionList command tree (L14)", () => {
             group({
               key: "landed",
               kind: "landed",
-              label: "landed",
+              label: "landed archive",
               defaultCollapsed: true,
               sessions: [{ id: "a", label: "Terminal 1", status: "exited" }],
               countLabel: "1 chat · archived",
@@ -217,7 +217,7 @@ describe("SessionList command tree (L14)", () => {
             group({
               key: "landed",
               kind: "landed",
-              label: "landed",
+              label: "landed archive",
               defaultCollapsed: true,
               sessions: [{ id: "a", label: "Terminal 1", status: "exited" }],
               countLabel: "1 chat · archived",
@@ -253,6 +253,40 @@ describe("SessionList command tree (L14)", () => {
     const flatRow = getByTestId("chats-session-a");
     expect(tree.contains(flatRow)).toBe(true);
     expect(flatRow.closest("[data-testid^='chats-group-']")).toBeNull(); // outside every group
+  });
+
+  it("runs landed cleanup without toggling the archive group or selecting a row", () => {
+    const onCleanupLanded = vi.fn();
+    const onSelect = vi.fn();
+    const members = [{ id: "a", label: "Terminal 1", status: "landed" as const }];
+    const { getByTestId, queryByTestId } = render(
+      <SessionList
+        sessions={members}
+        activeId={null}
+        onSelect={onSelect}
+        onTerminate={() => {}}
+        onCleanupLanded={onCleanupLanded}
+        grouped={{
+          groups: [
+            group({
+              key: "landed",
+              kind: "landed",
+              label: "landed archive",
+              defaultCollapsed: true,
+              sessions: members,
+              countLabel: "1 chat · archived",
+            }),
+          ],
+          ungrouped: [],
+        }}
+      />,
+    );
+    const toggle = getByTestId("chats-group-toggle-landed");
+    fireEvent.click(getByTestId("chats-group-cleanup-landed"));
+    expect(onCleanupLanded).toHaveBeenCalledWith(members);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(queryByTestId("chats-session-a")).toBeNull();
   });
 
   it("renders today's flat list when the grouped model derives zero groups", () => {

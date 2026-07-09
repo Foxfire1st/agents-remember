@@ -30,6 +30,14 @@ export interface OpenSession {
   /** The AR_SPAWN_ROLE recorded at spawn (L14) — the Chats command-tree grouping key. */
   spawnRole?: string;
   status?: TerminalSessionStatus;
+  landedAt?: string;
+  landedReason?: string;
+  landedEdge?: string;
+  spawnedBySession?: string;
+  spawnedByLifecycle?: string;
+  spawnedLabel?: string;
+  turnState?: string;
+  turnStateChangedAt?: string;
 }
 
 type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
@@ -155,7 +163,7 @@ function maxOrdinal(labels: string[]): number {
 }
 
 function isLiveSession(session: OpenSession): boolean {
-  return session.status !== "exited" && session.status !== "terminated";
+  return (session.status ?? "running") === "running";
 }
 
 function liveLabels(sessions: OpenSession[]): string[] {
@@ -353,6 +361,14 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     ...(info.lifecycleId ? { lifecycleId: info.lifecycleId } : {}),
     ...(info.leafKey ? { leafKey: info.leafKey } : {}),
     ...(info.spawnRole ? { spawnRole: info.spawnRole } : {}),
+    ...(info.landedAt ? { landedAt: info.landedAt } : {}),
+    ...(info.landedReason ? { landedReason: info.landedReason } : {}),
+    ...(info.landedEdge ? { landedEdge: info.landedEdge } : {}),
+    ...(info.spawnedBySession ? { spawnedBySession: info.spawnedBySession } : {}),
+    ...(info.spawnedByLifecycle ? { spawnedByLifecycle: info.spawnedByLifecycle } : {}),
+    ...(info.spawnedLabel ? { spawnedLabel: info.spawnedLabel } : {}),
+    ...(info.turnState ? { turnState: info.turnState } : {}),
+    ...(info.turnStateChangedAt ? { turnStateChangedAt: info.turnStateChangedAt } : {}),
     status: info.status,
   };
 }

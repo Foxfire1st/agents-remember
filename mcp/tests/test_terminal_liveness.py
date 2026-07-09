@@ -16,14 +16,18 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.serving.terminal import TmuxProbeResult, _tmux_probe_session
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    TerminalCatalogEntry,
+    TerminalSessionStatus,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
 
 
-def _entry(session_id: str) -> TerminalCatalogEntry:
+def _entry(session_id: str, *, status: TerminalSessionStatus = "running") -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Terminal {session_id}",
@@ -35,7 +39,7 @@ def _entry(session_id: str) -> TerminalCatalogEntry:
         command=("codex",),
         created_at="2026-07-07T00:00:00+00:00",
         last_attached_at="2026-07-07T00:00:00+00:00",
-        status="running",
+        status=status,
     )
 
 
@@ -70,6 +74,16 @@ class _FakeHost:
         if self.release is not None:
             self.release.wait(timeout=5)
         return self.result
+
+
+class _CountingCatalog(TerminalCatalog):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.read_calls = 0
+
+    def _read(self) -> list[TerminalCatalogEntry]:
+        self.read_calls += 1
+        return super()._read()
 
 
 class _TmuxSubprocessProbeHost:
@@ -232,6 +246,41 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         sweeper.refresh()
 
         self.assertEqual(host.calls, 1)
+
+    def test_landed_rows_do_not_add_per_row_sweep_probe_or_catalog_reads(self) -> None:
+        def run_sweep(landed_count: int) -> tuple[int, int, int, int]:
+            catalog = _CountingCatalog(self.tmp / f"terminal-sessions-{landed_count}.json")
+            for index in range(landed_count):
+                catalog.upsert(_entry(f"landed-{index:03d}", status="landed"))
+            catalog.upsert(_entry("running"))
+            host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+            captured: list[str] = []
+            sweeper = TerminalCatalogLivenessSweeper(
+                catalog,
+                host,
+                now=self.clock,
+                config=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=0.0,
+                ),
+                pane_capturer=lambda tmux_name: captured.append(tmux_name) or "(esc to interrupt)",
+            )
+
+            catalog.read_calls = 0
+            entries = sweeper.refresh()
+
+            self.assertEqual(len(entries), landed_count + 1)
+            self.assertEqual(sum(entry.status == "landed" for entry in entries), landed_count)
+            self.assertEqual(captured, ["ar-running"])
+            return host.calls, len(captured), catalog.read_calls, len(entries) - landed_count
+
+        small = run_sweep(5)
+        large = run_sweep(500)
+
+        self.assertEqual(small, (1, 1, 3, 1))
+        self.assertEqual(large, small)
 
     def test_overlapping_sweep_returns_current_catalog_without_second_probe(self) -> None:
         self.catalog.upsert(_entry("agent"))

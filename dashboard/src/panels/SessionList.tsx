@@ -169,6 +169,14 @@ const groupBox = css({
   background: "bgPanel",
 });
 const groupNested = css({ marginLeft: "22px" }); // the shared indent grammar (L14 sketch)
+const groupHeaderRow = css({
+  display: "flex",
+  alignItems: "stretch",
+  borderBottomWidth: "0",
+  borderBottomStyle: "solid",
+  borderBottomColor: "grid",
+  "&[data-open=true]": { borderBottomWidth: "1px" },
+});
 const groupHeader = css({
   display: "flex",
   alignItems: "center",
@@ -185,6 +193,21 @@ const groupHeader = css({
   userSelect: "none",
   textAlign: "left",
   _focusVisible: { outline: "1px solid token(colors.cyan)", outlineOffset: "-1px" },
+});
+const cleanupButton = css({
+  flex: "none",
+  font: "inherit",
+  fontSize: "0.64rem",
+  color: "amber",
+  background: "transparent",
+  border: "none",
+  borderLeftWidth: "1px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "grid",
+  cursor: "pointer",
+  paddingInline: "0.5rem",
+  _hover: { color: "ink" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
 });
 const groupChevron = css({
   color: "muted",
@@ -208,17 +231,36 @@ const groupCount = css({
   fontVariantNumeric: "tabular-nums",
 });
 const groupRows = css({
-  borderTopWidth: "1px",
-  borderTopStyle: "solid",
-  borderTopColor: "grid",
   padding: "0.3rem",
 });
+
+function leafKeySegments(leafKey: string): { repo: string; master: string; leafId: string } | null {
+  const parts = leafKey.split("/").filter(Boolean);
+  if (parts.length < 3) return null;
+  return { repo: parts[0], master: parts[1], leafId: parts[parts.length - 1] };
+}
+
+function sessionTitle(session: OpenSession, leafName?: string): string {
+  const parts = [leafName ? `${session.label} · ${leafName}` : session.label];
+  const segments = session.leafKey ? leafKeySegments(session.leafKey) : null;
+  if (segments) {
+    parts.push(`master: ${segments.master}`);
+    parts.push(`leaf: ${segments.leafId}`);
+  }
+  if (session.turnState) parts.push(`turn: ${session.turnState}`);
+  if (session.landedReason) parts.push(`landed: ${session.landedReason}`);
+  if (session.landedAt) parts.push(`at: ${session.landedAt}`);
+  if (session.landedEdge) parts.push(`edge: ${session.landedEdge}`);
+  if (session.spawnedBySession) parts.push(`spawned by: ${session.spawnedBySession}`);
+  return parts.join(" · ");
+}
 
 export function SessionList({
   sessions,
   activeId,
   onSelect,
   onTerminate,
+  onCleanupLanded,
   leafNameFor,
   grouped,
 }: {
@@ -226,6 +268,7 @@ export function SessionList({
   activeId: string | null;
   onSelect: (id: string) => void;
   onTerminate: (id: string) => void;
+  onCleanupLanded?: (sessions: OpenSession[]) => void;
   /** Resolve a bound session's leaf name (task-doc title, fallback leaf id) for the "who works on what" label. */
   leafNameFor?: (leafKey: string) => string;
   /** The G1 command-tree model (L14). Absent or group-less ⇒ today's flat list, unchanged. */
@@ -241,9 +284,8 @@ export function SessionList({
     const leafName = session.leafKey
       ? (leafNameFor?.(session.leafKey) ?? session.leafKey)
       : undefined;
-    // The full, untruncated name for the hover title (the label, plus its bound leaf) — the row
-    // text-overflow-ellipses, so the title is how a long name stays readable (fix 4).
-    const fullName = leafName ? `${session.label} · ${leafName}` : session.label;
+    // The full, untruncated archive identity for hover inspection.
+    const fullName = sessionTitle(session, leafName);
     const knownRole = session.spawnRole && KNOWN_ROLES.has(session.spawnRole)
       ? (session.spawnRole as KnownRole)
       : undefined;
@@ -273,6 +315,7 @@ export function SessionList({
           ) : null}
         </span>
         {session.lifecycleId ? <span className={badge}>{session.lifecycleId}</span> : null}
+        {session.turnState ? <span className={statusBadge}>{session.turnState}</span> : null}
         {session.status && session.status !== "running" ? (
           <span className={statusBadge}>{session.status}</span>
         ) : null}
@@ -331,24 +374,38 @@ export function SessionList({
             data-testid={`chats-group-${group.key}`}
             data-nested={group.nested || undefined}
           >
-            <button
-              type="button"
-              className={groupHeader}
-              aria-expanded={open}
-              data-testid={`chats-group-toggle-${group.key}`}
-              onClick={() =>
-                setCollapsed((current) => ({ ...current, [group.key]: open }))
-              }
-            >
-              <span className={groupChevron} data-expanded={open} aria-hidden="true">
-                ▶
-              </span>
-              {group.tier ? <RankBadge tier={group.tier} size="sm" /> : null}
-              <span className={groupName} title={group.label}>
-                {group.label}
-              </span>
-              <span className={groupCount}>{group.countLabel}</span>
-            </button>
+            <div className={groupHeaderRow} data-open={open || undefined}>
+              <button
+                type="button"
+                className={groupHeader}
+                aria-expanded={open}
+                data-testid={`chats-group-toggle-${group.key}`}
+                onClick={() =>
+                  setCollapsed((current) => ({ ...current, [group.key]: open }))
+                }
+              >
+                <span className={groupChevron} data-expanded={open} aria-hidden="true">
+                  ▶
+                </span>
+                {group.tier ? <RankBadge tier={group.tier} size="sm" /> : null}
+                <span className={groupName} title={group.label}>
+                  {group.label}
+                </span>
+                <span className={groupCount}>{group.countLabel}</span>
+              </button>
+              {group.kind === "landed" && onCleanupLanded ? (
+                <button
+                  type="button"
+                  className={cleanupButton}
+                  aria-label="Close landed archive"
+                  title="Close landed archive"
+                  data-testid="chats-group-cleanup-landed"
+                  onClick={() => onCleanupLanded(group.sessions)}
+                >
+                  Close
+                </button>
+              ) : null}
+            </div>
             {open ? (
               <div className={groupRows}>{gridListFor(group.sessions, `Open sessions — ${group.label}`)}</div>
             ) : null}

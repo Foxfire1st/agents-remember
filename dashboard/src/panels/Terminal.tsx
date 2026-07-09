@@ -85,9 +85,11 @@ function hasViewportScrollback(term: XtermTerminal): boolean {
 export function Terminal({
   sessionId,
   onConnection,
+  readOnly = false,
 }: {
   sessionId: string;
   onConnection?: (conn: TerminalConnection | null) => void;
+  readOnly?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const socketFactory = useContext(TerminalSocketContext);
@@ -141,7 +143,7 @@ export function Terminal({
         } else {
           const [input, nextLineRemainder] = applicationScrollInput(lines, applicationWheelLineRemainder);
           applicationWheelLineRemainder = nextLineRemainder;
-          if (input) conn.sendInput(input);
+          if (input && !readOnly) conn.sendInput(input);
         }
       }
       if (event.cancelable) event.preventDefault();
@@ -153,7 +155,7 @@ export function Terminal({
     // wheel-to-arrow-history mapping.
     node.addEventListener("wheel", handleWheel, { passive: false, capture: true });
 
-    const dataSub = term.onData((data) => conn.sendInput(data));
+    const dataSub = readOnly ? null : term.onData((data) => conn.sendInput(data));
     // Fit to the host + keep the PTY winsize in lockstep (the one known Mode B2 risk). A single fit
     // at mount sticks at the wrong size because the flex layout + the mono web font settle *after*
     // this effect runs — so re-fit on the next frame and once `document.fonts` is ready, on top of
@@ -180,11 +182,11 @@ export function Terminal({
       onConnRef.current?.(null);
       node.removeEventListener("wheel", handleWheel, { capture: true });
       observer.disconnect();
-      dataSub.dispose();
+      dataSub?.dispose();
       conn.dispose();
       term.dispose();
     };
-  }, [sessionId, socketFactory]);
+  }, [readOnly, sessionId, socketFactory]);
 
   return <div ref={hostRef} className={host} data-testid="terminal-host" />;
 }

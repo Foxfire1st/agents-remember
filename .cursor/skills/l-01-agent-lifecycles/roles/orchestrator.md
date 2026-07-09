@@ -275,13 +275,15 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 4. Carry memory + map the ledger (C-11; duplicate memory single-sided; memory quality before the
    memory edge lands).
 5. Record the new super tips in durable notes; mark next masters ready.
-6. **Retire the completed master's spent seats (260707-HFX-L8, issue #12)** —
-   `lifecycle_finalize_task` auto-retires the master's manager + any master-level reviewer seats
-   (config-gated, default ON) the moment the master finalizes into super, so this is usually
-   automatic. You hold the **only** portfolio-wide retire authority: unlike a manager (scoped to
-   its own master's worker/reviewer seats), you may retire ANY seat in the portfolio, including a
-   completed manager — `session_retire(actor_session_id=<your own session>, session_id=<the seat>,
-   reason=...)`. Owner-never-self-retires still holds (you can never retire your own seat). Use
+6. **Land the completed master's spent seats** —
+   `lifecycle_finalize_task` auto-lands the master's manager + any master-level reviewer seats into
+   the dashboard's landed/archive group (config-gated, default ON) the moment the master finalizes
+   into super. Their transcripts remain inspectable and non-active; use the landed archive cleanup
+   button when those rows should be closed. You hold the **only** portfolio-wide retire authority
+   for exceptional stuck/abandoned/duplicate seats: unlike a manager (scoped to its own master's
+   worker/reviewer seats), you may retire ANY seat in the portfolio, including a completed manager —
+   `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`.
+   Owner-never-self-retires still holds (you can never retire your own seat). Use
    this by hand for a stuck/abandoned seat the automation missed; transcripts are never deleted.
 
 **The topology (single home — this section owns it):**

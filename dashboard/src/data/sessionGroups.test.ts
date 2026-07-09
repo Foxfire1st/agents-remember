@@ -146,7 +146,7 @@ describe("groupSessions (L14 G1 command tree)", () => {
     expect(grouped.ungrouped.map((member) => member.id)).toEqual(["mgr", "plain"]);
   });
 
-  it("rolls sessions on landed or absent enclosures into one archive group, collapsed by default", () => {
+  it("rolls only landed rows into the archive group", () => {
     const landedEnclosure = enclosure({
       enclosure: "/contracts/landed",
       leafId: "260706-l0",
@@ -156,8 +156,9 @@ describe("groupSessions (L14 G1 command tree)", () => {
     });
     const grouped = groupSessions({
       sessions: [
-        session({ id: "landed-chat", leafKey: "agents-remember/260706_management-repo/260706-L0", status: "exited" }),
-        session({ id: "absent-chat", leafKey: "agents-remember/260799_unknown/260799-L9" }),
+        session({ id: "landed-chat", leafKey: "agents-remember/260706_management-repo/260706-L0", status: "landed" }),
+        session({ id: "legacy-exited", leafKey: "agents-remember/260799_unknown/260799-L9", status: "exited" }),
+        session({ id: "active-absent", leafKey: "agents-remember/260799_unknown/260799-L10" }),
       ],
       taskDocuments: [COMMANDED_MASTER],
       enclosures: [landedEnclosure],
@@ -165,10 +166,12 @@ describe("groupSessions (L14 G1 command tree)", () => {
     expect(grouped.groups).toHaveLength(1);
     const archive = grouped.groups[0];
     expect(archive.kind).toBe("landed");
+    expect(archive.label).toBe("landed archive");
     expect(archive.tier).toBeUndefined(); // unmarked
     expect(archive.defaultCollapsed).toBe(true);
-    expect(archive.sessions.map((member) => member.id)).toEqual(["landed-chat", "absent-chat"]);
-    expect(archive.countLabel).toBe("2 chats · archived");
+    expect(archive.sessions.map((member) => member.id)).toEqual(["landed-chat"]);
+    expect(archive.countLabel).toBe("1 chat · archived");
+    expect(grouped.ungrouped.map((member) => member.id)).toEqual(["legacy-exited", "active-absent"]);
   });
 
   it("matches enclosure leaf ids case-insensitively (doc ids are uppercase, enclosure ids slugified)", () => {
@@ -209,7 +212,7 @@ describe("groupSessions (L14 G1 command tree)", () => {
     }
     for (let i = 0; i < 13; i += 1) {
       sessions.push(
-        session({ id: `old${i}`, leafKey: `agents-remember/260650_landed/260650-L${i}`, status: "exited" }),
+        session({ id: `old${i}`, leafKey: `agents-remember/260650_landed/260650-L${i}`, status: "landed" }),
       );
     }
     expect(sessions).toHaveLength(30);

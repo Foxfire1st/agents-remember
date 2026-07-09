@@ -142,10 +142,12 @@ stops belong to the orchestrator via the system-specialist protocol.
   the developer's portfolio-gate approval of this series, recorded in the planner master's
   decision log, covers dependency-ordered leaf integrations. Loop until the master's leaves are
   done.
-- **Seat cleanup (260707-HFX-L8, issue #12)** — a landed leaf's worker/reviewer chats have no
-  further purpose; `worktree_integrate` auto-retires them (config-gated, default ON) the moment
-  the leaf lands, so this is usually automatic. When a leaf's worker/reviewer seat goes stuck or
-  abandoned before integration (a dead-end retry, a duplicate spawn), retire it by hand:
+- **Seat cleanup** — a completed leaf's worker/reviewer chats have no further active purpose;
+  `worktree_integrate` auto-lands them into the dashboard's landed/archive group (config-gated,
+  default ON) the moment the leaf lands, preserving transcript inspection without holding the leaf
+  active. Use the landed archive cleanup button when those archived rows should be closed. When a
+  leaf's worker/reviewer seat goes stuck or abandoned before integration (a dead-end retry, a
+  duplicate spawn), retire it by hand:
   `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`. Server
   policy enforces the authority split: **you may retire only worker/reviewer seats of your OWN
   master** — you live outside the master stack you manage, so you can never unseat yourself

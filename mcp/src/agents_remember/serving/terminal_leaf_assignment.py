@@ -51,7 +51,7 @@ def assign_terminal_session_to_leaf(
     """Move an existing catalog session to ``leaf_key`` using catalog uniqueness rules."""
 
     entry = catalog.get(session_id)
-    if entry is None or entry.status == "terminated":
+    if entry is None or entry.status != "running":
         return LeafAssignmentResult(
             status="unknown-session",
             session_id=session_id,

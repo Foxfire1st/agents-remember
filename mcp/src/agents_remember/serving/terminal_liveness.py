@@ -100,14 +100,7 @@ class TerminalCatalogLivenessSweeper:
                 return self._catalog.list()
             self._last_sweep_at = moment
             observations = [
-                observe_terminal_liveness(
-                    self._catalog,
-                    self._host,
-                    entry,
-                    checked_at=moment,
-                    config=self._config,
-                    pane_capturer=self._pane_capturer,
-                )
+                self._observe_catalog_entry(entry, checked_at=moment)
                 for entry in self._catalog.list()
             ]
             if self._on_turn_state_change is not None:
@@ -122,6 +115,20 @@ class TerminalCatalogLivenessSweeper:
         return (
             self._last_sweep_at is not None
             and (moment - self._last_sweep_at).total_seconds() < self._config.sweep_interval_seconds
+        )
+
+    def _observe_catalog_entry(
+        self, entry: TerminalCatalogEntry, *, checked_at: datetime
+    ) -> TerminalLivenessObservation:
+        if entry.status == "landed":
+            return TerminalLivenessObservation(entry=entry, alive=True)
+        return observe_terminal_liveness(
+            self._catalog,
+            self._host,
+            entry,
+            checked_at=checked_at,
+            config=self._config,
+            pane_capturer=self._pane_capturer,
         )
 
 

@@ -27,6 +27,6 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
     taskArchive: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
-    # 260707-HFX-L8: session ids auto-retired at this master->super finalize edge (config-gated,
-    # default ON). Empty when the gate is off, nothing matched, or this call was a dry run.
-    autoRetiredSeats: list[str] = Field(default_factory=list)
+    # Session ids auto-landed at this master->super finalize edge (config-gated, default ON). Empty
+    # when the gate is off, nothing matched, or this call was a dry run.
+    autoLandedSeats: list[str] = Field(default_factory=list)

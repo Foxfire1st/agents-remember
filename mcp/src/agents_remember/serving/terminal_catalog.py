@@ -13,7 +13,7 @@ from typing import Literal
 from uuid import uuid4
 
 TerminalSessionKind = Literal["terminal", "harness"]
-TerminalSessionStatus = Literal["running", "exited", "terminated"]
+TerminalSessionStatus = Literal["running", "exited", "landed", "terminated"]
 TerminalLivenessEvidence = Literal["tmux-command-failed", "pane-gone"]
 # Live turn-state (260707-HFX-L8): derived from pane observation on the L5 prober cadence, never a
 # new hot loop. "working" = the harness appears to be generating; "turn-ended" = an idle prompt
@@ -92,6 +92,12 @@ class TerminalCatalogEntry:
     retired_by_session: str | None = None
     retired_reason: str | None = None
     retired_edge: str | None = None
+    # Landed/archive provenance (260707-HFX2-L11): normal successful completion marks a seat as
+    # inspectable and non-active without killing tmux or hiding the transcript. Explicit retire/cleanup
+    # still uses the terminal ``terminated`` state above.
+    landed_at: str | None = None
+    landed_reason: str | None = None
+    landed_edge: str | None = None
     # Live identity (260707-HFX-L8, issue #4): ``label`` is mutable post-spawn via the rename API;
     # ``spawned_label`` freezes the ORIGINAL label the first time a rename happens, for audit --
     # never overwritten again. ``None`` until the first rename (no rename = no provenance to keep).
@@ -161,6 +167,11 @@ class TerminalCatalogEntry:
                 str(data["retiredReason"]) if data.get("retiredReason") is not None else None
             ),
             retired_edge=str(data["retiredEdge"]) if data.get("retiredEdge") is not None else None,
+            landed_at=str(data["landedAt"]) if data.get("landedAt") is not None else None,
+            landed_reason=(
+                str(data["landedReason"]) if data.get("landedReason") is not None else None
+            ),
+            landed_edge=str(data["landedEdge"]) if data.get("landedEdge") is not None else None,
             spawned_label=(
                 str(data["spawnedLabel"]) if data.get("spawnedLabel") is not None else None
             ),
@@ -226,6 +237,12 @@ class TerminalCatalogEntry:
             data["retiredReason"] = self.retired_reason
         if self.retired_edge is not None:
             data["retiredEdge"] = self.retired_edge
+        if self.landed_at is not None:
+            data["landedAt"] = self.landed_at
+        if self.landed_reason is not None:
+            data["landedReason"] = self.landed_reason
+        if self.landed_edge is not None:
+            data["landedEdge"] = self.landed_edge
         if self.spawned_label is not None:
             data["spawnedLabel"] = self.spawned_label
         if self.turn_state is not None:
@@ -240,7 +257,7 @@ class TerminalCatalogEntry:
         return replace(
             self,
             last_attached_at=attached_at,
-            status="running",
+            status="landed" if self.status == "landed" else "running",
             terminated_at=None,
             liveness_failures=0,
             liveness_first_failed_at=None,
@@ -289,6 +306,31 @@ class TerminalCatalogEntry:
             retired_edge=edge,
         )
 
+    def with_landing(
+        self,
+        *,
+        at: str,
+        reason: str,
+        edge: str,
+    ) -> TerminalCatalogEntry:
+        """The normal completion mark: inspectable archive, no tmux kill, no active leaf claim."""
+        if self.status == "terminated":
+            return self
+        if self.status == "landed":
+            return self
+        return replace(
+            self,
+            status="landed",
+            landed_at=at,
+            landed_reason=reason,
+            landed_edge=edge,
+            liveness_failures=0,
+            liveness_first_failed_at=None,
+            liveness_last_failed_at=None,
+            liveness_evidence=None,
+            exit_evidence=None,
+        )
+
     def with_label(self, label: str) -> TerminalCatalogEntry:
         """A copy renamed to ``label`` -- identity text ONLY, never ``spawn_role`` (L6 immutability).
 
@@ -316,6 +358,15 @@ class TerminalCatalogEntry:
             return self
         if self.status == "terminated":
             return self
+        if self.status == "landed":
+            return replace(
+                self,
+                liveness_failures=0,
+                liveness_first_failed_at=None,
+                liveness_last_failed_at=None,
+                liveness_evidence=None,
+                exit_evidence=None,
+            )
         return replace(
             self,
             status="running",
@@ -440,7 +491,7 @@ class TerminalCatalog:
             if index is None:
                 return None
             entry = entries[index]
-            if entry.status == "terminated":
+            if entry.status in ("landed", "terminated"):
                 return entry
             updated = entry.with_status("exited")
             entries[index] = updated
@@ -512,6 +563,27 @@ class TerminalCatalog:
                 at=at, by_session=by_session, reason=reason, edge=edge
             )
             if updated != entries[index]:
+                entries[index] = updated
+                self._write(entries)
+            return updated
+
+    def mark_landed(
+        self,
+        session_id: str,
+        *,
+        at: str,
+        reason: str,
+        edge: str,
+    ) -> TerminalCatalogEntry | None:
+        """Mark a successful completion as landed/archive without closing the tmux session."""
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            entry = entries[index]
+            updated = entry.with_landing(at=at, reason=reason, edge=edge)
+            if updated != entry:
                 entries[index] = updated
                 self._write(entries)
             return updated
@@ -634,6 +706,8 @@ def _load_catalog_json(text: str) -> object:
 def _status(raw: object) -> TerminalSessionStatus:
     if raw == "exited":
         return "exited"
+    if raw == "landed":
+        return "landed"
     if raw == "terminated":
         return "terminated"
     return "running"
