@@ -230,6 +230,7 @@ export interface TaskDocNode {
   stepsTotal: number;
   currentStep?: string;
   docPath: string;
+  bodyRevision?: string;
   createdAt?: string;
   ageSeconds?: number;
   steps: TaskStepNode[];

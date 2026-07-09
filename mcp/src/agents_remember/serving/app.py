@@ -49,6 +49,7 @@ from fastapi import (
     File,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -72,9 +73,13 @@ from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
-from agents_remember.observer.event_retention import compact_workspace_river
+from agents_remember.observer.event_retention import (
+    WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
+    compact_workspace_river,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
+from agents_remember.observer.snapshots import read_task_document_body
 from agents_remember.observer.store import EventStore
 from agents_remember.providers.degradation import evaluate_provider_degradation
 from agents_remember.providers.metrics import (
@@ -560,13 +565,21 @@ def create_app(
                 logger.exception("supervisor sweep failed; retrying next interval")
             await asyncio.sleep(settings.supervisor.interval_seconds)
 
+    async def workspace_river_compaction_loop() -> None:
+        while True:
+            await asyncio.sleep(WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS)
+            try:
+                await asyncio.to_thread(
+                    compact_workspace_river, observer_root(config), now=(now or utc_now)()
+                )
+            except Exception:
+                logger.exception("workspace event-river compaction failed; retrying next interval")
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # F3/CS-6 D3 (260707-HFX2-L12): reclaim the unbounded workspace event river at the one boundary
-        # where it is cursor-safe -- before the projector/supervisor/metrics loops start writing to it and
-        # before the server accepts the SSE connections that would hold absolute byte offsets into it. The
-        # always-on live compactor (cross-process append locking + in-flight cursor re-seating) is the
-        # escalated F3 follow-up; this bounds the on-disk file across every restart in the meantime.
+        # F3/CS-6 D3: compact once before accepting clients, then keep compacting on a slow live
+        # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
+        # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.
         await asyncio.to_thread(
             compact_workspace_river, observer_root(config), now=(now or utc_now)()
         )
@@ -574,12 +587,16 @@ def create_app(
         task = asyncio.create_task(projector.run())
         metrics_task = asyncio.create_task(metrics_loop())
         supervisor_task = asyncio.create_task(supervisor_loop())
+        river_compaction_task = asyncio.create_task(workspace_river_compaction_loop())
         try:
             yield
         finally:
+            river_compaction_task.cancel()
             supervisor_task.cancel()
             metrics_task.cancel()
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await river_compaction_task
             with contextlib.suppress(asyncio.CancelledError):
                 await supervisor_task
             with contextlib.suppress(asyncio.CancelledError):
@@ -634,6 +651,21 @@ def create_app(
         body["servingBuild"] = build.payload()
         body["supervisorHeartbeat"] = _supervisor_heartbeat_payload()
         return JSONResponse(content=body, headers=headers)
+
+    @app.get("/api/task-document")
+    def api_task_document(path: Annotated[str, Query()]) -> JSONResponse:
+        _, snapshot = projector.current()
+        if snapshot is None:
+            raise HTTPException(status_code=503, detail="projection not ready")
+        doc = read_task_document_body(
+            config.coordination_root,
+            doc_path=path,
+            enclosures=snapshot.enclosures,
+            now=(now or utc_now)(),
+        )
+        if doc is None:
+            raise HTTPException(status_code=404, detail="task document not found")
+        return JSONResponse(content=doc.model_dump(by_alias=True, exclude_none=True))
 
     @app.get("/api/stream", response_class=EventSourceResponse)
     async def api_stream() -> AsyncIterator[ServerSentEvent]:

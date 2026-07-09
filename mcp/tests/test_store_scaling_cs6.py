@@ -49,10 +49,10 @@ from agents_remember.observer.event_retention import (
 )
 from agents_remember.observer.events import Event
 from agents_remember.observer.served_store import ServedRecord, ServedStore
-from agents_remember.observer.store import EventStore
+from agents_remember.observer.store import EventStore, workspace_base_offset
 from agents_remember.providers.degradation import ProviderDegradationStore
 from agents_remember.providers.metrics import PROVIDER_METRICS_SCHEMA, ProviderMetricsStore
-from agents_remember.serving.events import read_new_events
+from agents_remember.serving.events import decode_cursor, read_new_events
 from agents_remember.serving.terminal import TmuxProbeResult
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -258,6 +258,49 @@ class EventStoreToleranceTests(unittest.TestCase):
             )
             events = store.read("life-1")
             self.assertEqual([event.id for event in events], ["g1", "g2"])
+
+
+class LifecycleHeartbeatSidecarTests(unittest.TestCase):
+    def test_heartbeats_coalesce_to_sidecar_and_do_not_grow_event_log_at_two_sizes(self) -> None:
+        """F7/CS-6 D3: live heartbeat ticks overwrite one sidecar row instead of appending to
+        events.jsonl, while EventStore.read still merges the latest heartbeat for reducer liveness."""
+        for beats in (100, 1000):
+            with self.subTest(beats=beats), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                store = EventStore(root)
+                started = Event(
+                    id="started",
+                    ts=NOW.isoformat(),
+                    kind="lifecycle.started",
+                    trust="declared",
+                    actor="model",
+                    lifecycleId="life-1",
+                    data={"fleeting": True},
+                )
+                store.append(started)
+                for index in range(beats):
+                    store.append(
+                        Event(
+                            id=f"beat-{index}",
+                            ts=(NOW + timedelta(seconds=index)).isoformat(),
+                            kind="lifecycle.heartbeat",
+                            trust="observed",
+                            actor="system",
+                            lifecycleId="life-1",
+                            data={"state": "running", "phase": "build"},
+                        )
+                    )
+
+                log_path = root / "lifecycles" / "life-1" / "events.jsonl"
+                sidecar_path = root / "lifecycles" / "life-1" / "heartbeat.json"
+                log_lines = log_path.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(len(log_lines), 1)
+                self.assertNotIn("lifecycle.heartbeat", log_path.read_text(encoding="utf-8"))
+                assert_bounded_file_size(log_path, 1024, label=f"heartbeat-free lifecycle log {beats}")
+                assert_bounded_file_size(sidecar_path, 1024, label=f"heartbeat sidecar {beats}")
+                events = store.read("life-1")
+                self.assertEqual([event.kind for event in events], ["lifecycle.started", "lifecycle.heartbeat"])
+                self.assertEqual(events[-1].id, f"beat-{beats - 1}")
 
 
 class ExpectationCompactTests(unittest.TestCase):
@@ -558,6 +601,26 @@ class EventRiverCompactionTests(unittest.TestCase):
                 events, _ = read_new_events(root, offsets)
                 streamed_ids = [json.loads(event.data)["id"] for event in events]
                 self.assertEqual(streamed_ids, recent_ids)
+
+    def test_live_workspace_cursor_resumes_after_compaction_at_two_sizes(self) -> None:
+        """F3/CS-6 D1+D3: a cursor issued before live compaction is virtual, so after old bytes
+        are reclaimed it resumes at the same retained tail position with no duplicate or skipped rows."""
+        recent_rows = 6
+        for old_rows in (1_000, 10_000):
+            with self.subTest(old_rows=old_rows), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                recent_ids = self._seed_river(root, old_rows=old_rows, recent_rows=recent_rows)
+                offsets = initial_event_offsets(root, now=NOW)
+                first_batch, _ = read_new_events(root, offsets, limit=1)
+                self.assertEqual([json.loads(event.data)["id"] for event in first_batch], [recent_ids[0]])
+                cursor_after_first = decode_cursor(first_batch[0].cursor)
+
+                reclaimed = compact_workspace_river(root, now=NOW)
+
+                self.assertEqual(reclaimed, old_rows)
+                self.assertGreater(workspace_base_offset(root), 0)
+                resumed, _ = read_new_events(root, cursor_after_first)
+                self.assertEqual([json.loads(event.data)["id"] for event in resumed], recent_ids[1:])
 
     def test_compaction_is_noop_when_nothing_aged_out(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

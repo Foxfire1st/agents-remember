@@ -505,6 +505,9 @@ class TaskDocNode(BaseModel):
     stepsTotal: int = 0
     currentStep: str | None = None
     docPath: str
+    # Hash of the reader body fields omitted from the always-on summary. Dashboard readers use it
+    # to refetch an already-open task document only when the on-demand body changed.
+    bodyRevision: str = ""
     createdAt: str = ""
     ageSeconds: float | None = None
     steps: list[TaskStepNode] = Field(default_factory=list)
@@ -796,23 +799,17 @@ class EngineProcessFacts:
     ledger_row_count: int = 0
 
 
-# 260707-HFX2-L12 F6/CS-6 D2+D1: every ``TaskDocNode`` in the always-on projection carries the task's
-# full reader BODY (objective/design/requirements/sections/codeExamples/decisions), and
-# ``read_task_documents`` emits one for EVERY document under ``tasks/`` with no windowing -- so the
-# broadcast payload (``latest-state.json`` + every ``/api/stream`` delta + ``/api/state``) grows with
-# (total docs x body size), re-serialised on every tick. Moving bodies on-demand is a payload-CONTRACT
-# change with frontend coupling (the escalated F6 follow-up); until then this budget + the measurement
-# helper let the write path FLAG when the broadcast has gone body-heavy, rather than the growth staying
-# silent. Chosen so a handful of normal docs sit well under it and the pathological all-bodies case trips.
+# 260707-HFX2-L13 F6/CS-6 D2+D1: ``TaskDocNode`` in the always-on projection is a bounded summary.
+# The full reader body is fetched through the on-demand task-document endpoint. This budget remains as
+# a regression guardrail: the write path should now measure 0 body bytes for broadcast task documents.
 TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES = 256 * 1024
 
 
 def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
-    """Approximate byte cost of the task-doc reader BODIES the broadcast serialises (F6 guardrail).
+    """Approximate byte cost of task-doc reader bodies still present in the broadcast (F6 guardrail).
 
-    Sums the large free-text/list fields windowing would move on-demand. Cheap by construction -- it is
-    ``len`` over strings already built by the reducer, never a re-serialisation -- so the projection
-    write path can call it every tick without adding an order of cost to the finding it is measuring.
+    For summary nodes this returns zero; tests seed full nodes to prove the guard still catches any
+    regression that reintroduces body fields to the always-on path.
     """
     total = 0
     for doc in docs:
