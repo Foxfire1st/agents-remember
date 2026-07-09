@@ -145,3 +145,6 @@ branch, and local command guidance. Use `system/coding-guidelines.md` when
 present for repo-specific coding rules. Use `system/code-quality-report-template.md`
 as a template for reporting code quality results after implementation work
 changes source code.
+Before adding or editing any store, loop-over-a-store, queue, or append-only log, the
+`system/coding-guidelines.md` "Stability, Bounded Resources, and Reclamation" section is
+MUST-READ doctrine.

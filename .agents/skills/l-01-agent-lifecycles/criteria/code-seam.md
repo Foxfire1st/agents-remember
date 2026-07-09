@@ -67,6 +67,17 @@ foreign artifact's consumer.
   memory repo's ledger mid-`worktree_start`) PASSED all four lenses under this analysis — the
   clean exemplar that defined the class. A catch in a later engagement promotes.
 
+### CS-6 — Scaling & reclamation *(candidate — 1 catch)*
+
+**For every loop, store, log, or queue the change set touches, interrogate all three.**
+
+1. (D1 — stability) At 10x/100x fleet, does this mechanism's worst-case resource draw threaten the substrate? Where is the budget / backpressure / load-shed that makes it shed the signal, not the system?
+2. (D2 — bounded) What is the worst-case time and on-disk / in-memory size? Where is the per-cycle cap and the store's cap+eviction? Is any re-read O(n) per item (accidentally quadratic across layers)?
+3. (D3 — reclamation) Who reclaims this data, is that reclamation landed in THIS change, and is it tested by scaling (>=2 sizes), not a single-N smoke?
+
+- Catching evidence: 260707-HFX2-L7 — the supervisor sweep re-folded a 61 MB append-only inbox once per finding (O(n^2)) over 4,298 never-reclaimed dead-seat rows, freezing the heartbeat and pegging a core while every correctness test passed. Style/CRAP/cyclomatic gates were all green.
+- Mechanization seam: 260707-HFX2-L8 owns the doctrine; 260707-HFX2-L7 owns the first executable counterparts (`assert_subquadratic` scaling test R5 and the O(1)-inbox-read invariant R2). CS-6 graduates into a gate once a reusable repo-wide scaling-test helper exists.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): attack

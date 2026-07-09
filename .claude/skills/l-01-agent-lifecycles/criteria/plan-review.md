@@ -50,6 +50,21 @@ a merely not-yet-existing surface is NOT unplannable); and thin leaf scopes the 
 guessed around instead of flagging are themselves findings. Quo-vadis contradictions must be
 flagged at the top of the coherence findings, not buried.
 
+## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
+
+Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
+when it catches in a second engagement (the ratchet below).
+
+### PR-6 — Scaling & reclamation at design time *(candidate — 1 catch)*
+
+**Any plan that introduces or changes a store, loop over a store, queue, or append-only log must name its cap, budget, and compactor/reclamation owner in the design, before code exists.** Challenge all three design claims:
+
+1. (D1 — stability) At 10x/100x fleet, does the proposed mechanism's worst-case resource draw threaten the substrate? Where does the design name the budget, backpressure, or load-shed path that sheds the signal, not the system?
+2. (D2 — bounded) What is the planned worst-case time and on-disk / in-memory size? Where are the per-cycle cap and the store's cap+eviction defined? Does any layer re-read a growing store per item?
+3. (D3 — reclamation) Who owns reclamation, does the same plan land that reclamation with the data it creates, and how will scaling be proven across >=2 input sizes rather than a single-N smoke?
+
+- Catching evidence: 260707-HFX2-L7/L8 — the plan surface had not made worst-case inbox fold cost, retention, or reclamation owner a required design-time question before an O(n^2) supervisor sweep over never-reclaimed dead-seat rows passed correctness gates and froze the heartbeat. A plan that introduces a store/loop/log without naming its cap, budget, and compactor fails PR-6.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): ways
