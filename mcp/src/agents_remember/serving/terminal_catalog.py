@@ -6,11 +6,19 @@ import contextlib
 import json
 import os
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
+
+# 260707-HFX2-L12 F1/CS-6 D3: a ``terminated`` row is a tombstone (the tmux session is gone and the
+# hysteresis refuses to resurrect it), so without reclamation every retire/terminate leaves one to
+# accumulate forever in the always-re-read catalog file. Rows older than this window are dropped by
+# ``TerminalCatalog.compact``; the authoritative history stays in the observer lifecycle event stream
+# (the catalog is a runtime cache), so nothing durable is lost when a stale tombstone is reclaimed.
+TERMINATED_RETENTION_SECONDS = 86400.0
 
 TerminalSessionKind = Literal["terminal", "harness"]
 TerminalSessionStatus = Literal["running", "exited", "landed", "terminated"]
@@ -435,6 +443,12 @@ class TerminalCatalog:
         # keeps any single write valid even across processes; this lock makes concurrent mutations in THIS
         # process compose instead of racing. (RLock so a mutator may call another lock-taking helper.)
         self._lock = threading.RLock()
+        # 260707-HFX2-L12 F1/CS-6 D2: an in-memory unit-of-work buffer for a full-catalog sweep. When a
+        # ``batch()`` is active, ``_read``/``_write`` hit this buffer instead of disk, so the liveness
+        # sweep's per-entry read-modify-writes cost one disk read (at batch begin) + one disk write (at
+        # commit) total, not O(n) disk reads and O(n) disk rewrites. ``None`` when no batch is active.
+        self._batch: list[TerminalCatalogEntry] | None = None
+        self._batch_dirty = False
 
     def list(self, *, include_terminated: bool = False) -> list[TerminalCatalogEntry]:
         entries = self._read()
@@ -616,7 +630,85 @@ class TerminalCatalog:
                 self._write(entries)
             return updated
 
+    @contextlib.contextmanager
+    def batch(self) -> Iterator[None]:
+        """Read-once / write-once unit of work for a full-catalog sweep (F1/CS-6 D2).
+
+        The liveness sweep calls a per-entry mutator (``record_liveness_probe`` / ``record_turn_state``)
+        for every session, and each mutator did its own full-file read + rewrite -- O(n) disk reads and
+        O(n) disk rewrites per sweep, each O(n) to parse/serialise, i.e. O(n^2) disk work that grows with
+        the session count. Inside this context the catalog is read from disk exactly once (here, at begin)
+        and every mutator's ``_read``/``_write`` hits the in-memory buffer; the single atomic disk write
+        happens on exit. The lock is NOT held across the ``yield`` -- only for the begin read and the
+        commit write -- so the slow tmux probes between mutators do not block concurrent API catalog
+        access, and each mutator still takes the lock per-call for its (now in-memory) read-modify-write.
+        Re-entrant: a nested ``batch()`` reuses the outer buffer and defers commit to the outermost frame.
+        """
+        with self._lock:
+            if self._batch is not None:
+                yield
+                return
+            self._batch = self._read_disk()
+            self._batch_dirty = False
+        try:
+            yield
+        finally:
+            # Clear the buffer and flush it under ONE lock acquisition: a mutator that races the commit
+            # either already wrote into ``entries`` (flushed here) or sees ``_batch is None`` and writes
+            # disk directly after this block releases -- never a torn interleave or a clobbered update.
+            with self._lock:
+                entries = self._batch
+                dirty = self._batch_dirty
+                self._batch = None
+                self._batch_dirty = False
+                if dirty and entries is not None:
+                    self._write_disk(entries)
+
+    def compact(self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS) -> int:
+        """Reclaim ``terminated`` tombstones older than ``retain_seconds`` so the file stays bounded.
+
+        260707-HFX2-L12 F1/CS-6 D3: terminated rows are never resurrected (the hysteresis refuses) and
+        the catalog is re-read on every sweep, so unbounded tombstone growth is the reclamation gap. Only
+        ``terminated`` rows past the window are dropped -- ``running``/``exited`` rows are live, and
+        ``landed`` rows are inspectable archives reclaimed by the L11 manual group-cleanup, never here.
+        Provenance survives in the observer lifecycle event stream, so no separate archive file is kept.
+        Returns the number of rows reclaimed. Composes inside ``batch()`` (drops from the buffer, folded
+        into the one commit write).
+        """
+        with self._lock:
+            entries = self._read()
+            kept = [
+                entry
+                for entry in entries
+                if not (
+                    entry.status == "terminated"
+                    and _terminated_beyond(entry, now=now, retain_seconds=retain_seconds)
+                )
+            ]
+            if len(kept) == len(entries):
+                return 0
+            self._write(kept)
+            return len(entries) - len(kept)
+
     def _read(self) -> list[TerminalCatalogEntry]:
+        # Inside a batch the buffer IS the current state -- a shallow copy so a caller's in-place
+        # ``entries[index] = ...`` never mutates the shared buffer out from under a concurrent mutator
+        # (entries are frozen dataclasses, so a shallow copy is a safe snapshot).
+        if self._batch is not None:
+            return list(self._batch)
+        return self._read_disk()
+
+    def _write(self, entries: list[TerminalCatalogEntry]) -> None:
+        # A batch defers durability to commit: every mutator's read-modify-write stays atomic under the
+        # lock (it re-reads the buffer, mutates, writes it back), so concurrency semantics are identical
+        # to the per-write-to-disk path -- only the final os.replace is coalesced to one per sweep.
+        if self._batch is not None:
+            self._batch = list(entries)
+            self._batch_dirty = True
+            return
+        self._write_disk(entries)
+
+    def _read_disk(self) -> list[TerminalCatalogEntry]:
         if not self.path.exists():
             return []
         raw = _load_catalog_json(self.path.read_text(encoding="utf-8"))
@@ -627,7 +719,7 @@ class TerminalCatalog:
             return []
         return [TerminalCatalogEntry.from_json(item) for item in sessions if isinstance(item, dict)]
 
-    def _write(self, entries: list[TerminalCatalogEntry]) -> None:
+    def _write_disk(self, entries: list[TerminalCatalogEntry]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # A UNIQUE temp per write (pid + uuid): a shared fixed-name temp let concurrent writers — even two
         # request threads in one process — interleave their bytes into a torn file. With a private temp +
@@ -677,6 +769,24 @@ def _non_negative_int(raw: object) -> int:
 def _elapsed_seconds(first_failed_at: str, checked_at: datetime) -> float:
     first = datetime.fromisoformat(first_failed_at)
     return (checked_at - first).total_seconds()
+
+
+def _terminated_beyond(
+    entry: TerminalCatalogEntry, *, now: datetime, retain_seconds: float
+) -> bool:
+    """Whether a terminated row's ``terminated_at`` is older than the reclamation window.
+
+    A row with no/unparseable ``terminated_at`` is conservatively KEPT (never reclaimed on a guess).
+    """
+    if entry.terminated_at is None:
+        return False
+    try:
+        stamped = datetime.fromisoformat(entry.terminated_at)
+    except ValueError:
+        return False
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=UTC)
+    return (now - stamped).total_seconds() > retain_seconds
 
 
 def _index_of(entries: list[TerminalCatalogEntry], session_id: str) -> int | None:

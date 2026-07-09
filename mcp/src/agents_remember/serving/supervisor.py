@@ -33,7 +33,8 @@ from agents_remember.controlplane.escalation_ladder import (
     rung_due,
     seat_is_suspect,
 )
-from agents_remember.controlplane.expectation_rows import ExpectationRowStore
+from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
+from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import (
     InboxDeliveryState,
     InboxMessageKind,
@@ -168,6 +169,11 @@ class SupervisorContext:
     escalation_rung_seconds: dict[int, float] = dataclass_field(default_factory=dict)
     respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
     redeliver_budget: int = 250
+    # R2/CS-6 D1 (260707-HFX2-L12): a per-sweep load-shed cap on escalation-rung emission, the
+    # twin of ``redeliver_budget``. Without it one sweep does O(pending-rung-due-rows) synchronous
+    # hosted pastes + escalation.rung event appends, the storm that made the workspace river reach
+    # ~26k rung rows. Deferred rows re-fire next sweep for free (rung_due is level-triggered).
+    escalation_budget: int = 250
 
 
 @dataclass
@@ -176,6 +182,12 @@ class _SweepState:
     redeliver_budget: int
     pending_inbox_count: int = 0
     redeliverable_entries: list[OperatorInboxEntry] = dataclass_field(default_factory=list)
+    # CS-6 D2 (260707-HFX2-L12): the sweep's ONE-read snapshots of the append-only cooldown /
+    # expectation logs, threaded into every per-finding cooldown check + mark so the store is read
+    # once per sweep, not once per finding (the L7 accidental-quadratic fix generalized). ``None``
+    # in the standalone ``act_on_finding`` path falls back to a fresh per-call read.
+    signal_current: list[SupervisorSignalRecord] | None = None
+    expectation_current: dict[str, ExpectationRow] | None = None
 
     @property
     def redeliverable_inbox_count(self) -> int:
@@ -183,6 +195,16 @@ class _SweepState:
 
     def remember(self, entry: OperatorInboxEntry) -> None:
         self.inbox_current[entry.id] = entry
+
+    def remember_signal(self, record: SupervisorSignalRecord) -> None:
+        """Keep the sweep's signal snapshot consistent with a just-appended record."""
+        if self.signal_current is not None:
+            self.signal_current.append(record)
+
+    def remember_expectation(self, row: ExpectationRow) -> None:
+        """Keep the sweep's expectation snapshot consistent with a just-marked row."""
+        if self.expectation_current is not None:
+            self.expectation_current[row.id] = row
 
 
 # --- R2: predicates ----------------------------------------------------------------------------
@@ -467,13 +489,16 @@ def evaluate_predicates(
     findings += evaluate_seat_liveness_findings(
         ctx.catalog, now=now, stale_seconds=ctx.stale_seat_seconds
     )
+    # CS-6 D1 load-shed: cap escalation-rung emission per sweep (twin of the redeliver budget).
+    # Dropped rows stay rung_due and re-fire next sweep (level-triggered), so nothing is lost --
+    # only the per-sweep burst that pegged the river with escalation.rung rows is bounded.
     findings += evaluate_escalation_findings(
         ctx.inbox_store,
         now=now,
         sla_seconds=ctx.escalation_sla_seconds,
         rung_seconds=ctx.escalation_rung_seconds,
         current=inbox_current,
-    )
+    )[: max(1, ctx.escalation_budget)]
     findings += evaluate_dead_upstream_findings(ctx.catalog)
     return findings
 
@@ -628,7 +653,7 @@ def _auto_nudge(
         },
     )
     if record.state == "rate-limited":
-        _mark_expectation_missed(ctx, finding, now=now)
+        _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
         return SupervisorActionResult("auto-nudge", finding, "rate-limited", message)
     delivered = _post_owner_signal(
         ctx,
@@ -639,17 +664,31 @@ def _auto_nudge(
         now=now,
         sweep=sweep,
     )
-    _mark_expectation_missed(ctx, finding, now=now)
+    _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
     return SupervisorActionResult("auto-nudge", finding, "sent", delivered)
 
 
-def _mark_expectation_missed(ctx: SupervisorContext, finding: SupervisorFinding, *, now: datetime) -> None:
+def _mark_expectation_missed(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState | None = None,
+) -> None:
     """The sweep is the reserved caller of ``mark_missed`` (expectation_rows.py:93-97): an overdue
-    row the sweep has now acted on is marked missed, idempotently, every sweep it stays overdue."""
+    row the sweep has now acted on is marked missed, idempotently, every sweep it stays overdue.
+
+    CS-6 D2: pass the sweep's one-read expectation snapshot so K missed-transitions in a sweep do
+    O(1) in-memory lookups + one append each, not K full-file pydantic re-folds."""
     if finding.source_id is None:
         return
+    current = sweep.expectation_current if sweep is not None else None
     with contextlib.suppress(KeyError):
-        ctx.expectation_store.mark_missed(finding.source_id, now=now.isoformat())
+        marked = ctx.expectation_store.mark_missed(
+            finding.source_id, now=now.isoformat(), current=current
+        )
+        if sweep is not None:
+            sweep.remember_expectation(marked)
 
 
 def _post_owner_signal(
@@ -719,6 +758,7 @@ def _signal_emit(
         detail=finding.detail,
         now=now,
         cooldown_seconds=ctx.signal_cooldown_seconds,
+        records=sweep.signal_current,
     ):
         return SupervisorActionResult("signal-emit", finding, "cooldown", "signal cooldown active")
     ask = f"Supervisor observed {finding.kind}: {finding.detail}"
@@ -732,19 +772,19 @@ def _signal_emit(
         now=now,
         sweep=sweep,
     )
-    ctx.signal_cooldown_store.append(
-        SupervisorSignalRecord(
-            id=new_ulid(),
-            ts=now.isoformat(),
-            targetAgentId=owner.agent_id,
-            targetLifecycleId=owner.lifecycle_id,
-            targetRole=owner.role,
-            leafKey=finding.leaf_key,
-            findingKind=finding.kind,
-            detail=finding.detail,
-            deliveryState=delivery_state,
-        )
+    signal_record = SupervisorSignalRecord(
+        id=new_ulid(),
+        ts=now.isoformat(),
+        targetAgentId=owner.agent_id,
+        targetLifecycleId=owner.lifecycle_id,
+        targetRole=owner.role,
+        leafKey=finding.leaf_key,
+        findingKind=finding.kind,
+        detail=finding.detail,
+        deliveryState=delivery_state,
     )
+    ctx.signal_cooldown_store.append(signal_record)
+    sweep.remember_signal(signal_record)
     _log_event(
         ctx,
         "orchestration.supervisor.signal",
@@ -970,6 +1010,21 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     """
     started = perf_counter()
     current = ctx.inbox_store.current()
+    # CS-6 D2/D3: read + reclaim the append-only signal cooldown log ONCE per sweep. compact()
+    # drops rows older than the cooldown window (they can no longer suppress a signal) and returns
+    # the kept snapshot, which every per-finding in_cooldown check reads in-memory -- so the store
+    # is read once per sweep and bounded on disk, instead of re-parsed once per finding forever.
+    signal_retain = require_redelivery_floor_seconds(
+        ctx.signal_cooldown_seconds, owner="supervisor signal cooldown"
+    )
+    _signals_removed, signal_snapshot = ctx.signal_cooldown_store.compact(
+        now=now, retain_seconds=signal_retain
+    )
+    # CS-6 D3 (F4): read + reclaim the expectation log ONCE per sweep — compact() folds by id, drops
+    # met/missed rows past the retention window, and returns the kept snapshot that both the finding
+    # act-phase mark and the sweep reuse. After the first compaction the file stays bounded, so this
+    # one read is O(bounded), not O(daemon-lifetime).
+    _expectations_removed, expectation_snapshot = ctx.expectation_store.compact(now=now)
     sweep = _SweepState(
         inbox_current=current,
         redeliver_budget=max(1, ctx.redeliver_budget),
@@ -979,6 +1034,8 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
             rate_limit_seconds=ctx.redeliver_rate_limit_seconds,
             current=current,
         ),
+        signal_current=signal_snapshot,
+        expectation_current=expectation_snapshot,
     )
     findings = evaluate_predicates(ctx, now=now, sweep=sweep)
     actions = tuple(act_on_finding(ctx, finding, now=now, sweep=sweep) for finding in findings)

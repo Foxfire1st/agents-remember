@@ -18,6 +18,7 @@ from typing import cast
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _scaling import assert_bounded_count
 from agents_remember.controlplane.expectation_rows import (
     ExpectationRowStore,
     write_expectation_row,
@@ -910,6 +911,162 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         ]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].data["grandparentAgentId"], "orchestrator-1")
+
+
+class Cs6SweepScalingTests(unittest.TestCase):
+    """260707-HFX2-L12 CS-6 sweep regressions: the store reads + escalation emission a single
+    sweep does must NOT scale with the finding count (the L7 accidental-quadratic floor)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        observer_root = self.coordination_root / "logs" / "observer"
+        self.catalog = TerminalCatalog(root / "catalog.json")
+        self.inbox_store = OperatorInboxStore(observer_root)
+        self.expectation_store = ExpectationRowStore(observer_root)
+        self.nudge_store = OrchestrationNudgeStore(observer_root)
+        self.signal_cooldown_store = SupervisorSignalCooldownStore(observer_root)
+        self.event_store = EventStore(observer_root)
+        self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
+
+    def _ctx(self, **overrides: object) -> SupervisorContext:
+        base: dict[str, object] = dict(
+            catalog=self.catalog,
+            host=cast(TerminalHost, _FakeHost()),
+            paster=_fake_paster(),
+            inbox_store=self.inbox_store,
+            expectation_store=self.expectation_store,
+            nudge_store=self.nudge_store,
+            signal_cooldown_store=self.signal_cooldown_store,
+            event_store=self.event_store,
+            heartbeat_store=self.heartbeat_store,
+            coordination_root=self.coordination_root,
+            stale_seat_seconds=60.0,
+        )
+        base.update(overrides)
+        return SupervisorContext(**base)  # type: ignore[arg-type]
+
+    def _wrap_reads(self, store: object) -> dict[str, int]:
+        counter = {"count": 0}
+        original = store.read  # type: ignore[attr-defined]
+
+        def counting_read(*args, **kwargs):  # type: ignore[no-untyped-def]
+            counter["count"] += 1
+            return original(*args, **kwargs)
+
+        store.read = counting_read  # type: ignore[attr-defined]
+        return counter
+
+    def _seed_stale_workers(self, count: int) -> None:
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        for index in range(count):
+            self.catalog.upsert(
+                replace(
+                    _entry(
+                        f"worker-{index}",
+                        leaf_key=f"repo/260707_master/leaf-{index}",
+                        turn_state="stale",
+                        turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                    ),
+                    spawn_role="worker",
+                    spawned_by_session="manager-1",
+                )
+            )
+
+    def test_signal_cooldown_store_read_at_most_once_per_sweep_regardless_of_findings(self) -> None:
+        """Z1: the seeded finding. F seat-liveness findings -> F cooldown checks, but the signal
+        log is read ONCE per sweep (in compact) via the threaded snapshot -- not once per finding
+        (the O(F x L) freeze the L9 reviewer flagged)."""
+        for worker_count in (2, 40):
+            with self.subTest(workers=worker_count):
+                self.setUp()
+                self._seed_stale_workers(worker_count)
+                counter = self._wrap_reads(self.signal_cooldown_store)
+                result = run_supervisor_sweep(self._ctx(), now=NOW)
+                signal_emits = [a for a in result.actions if a.action == "signal-emit"]
+                self.assertEqual(len(signal_emits), worker_count)  # every finding hit in_cooldown
+                assert_bounded_count(
+                    counter["count"], 1, label=f"signal reads/sweep at F={worker_count}"
+                )
+                heartbeat = self.heartbeat_store.read()
+                assert heartbeat is not None
+                self.assertEqual(heartbeat.sweepCount, 1)
+
+    def test_expectation_store_reads_do_not_scale_with_overdue_finding_count(self) -> None:
+        """Z4b: K overdue expectations -> K mark_missed calls, but each uses the sweep's one-read
+        snapshot, so total expectation-store reads stay flat instead of growing by K."""
+        reads_by_k: dict[int, int] = {}
+        for overdue_count in (2, 40):
+            self.setUp()
+            self.catalog.upsert(replace(_entry("manager-1"), spawn_role="orchestrator"))
+            self.catalog.upsert(
+                replace(
+                    _entry("worker-1", leaf_key="repo/260707_master/leaf-1"),
+                    spawn_role="worker",
+                    spawned_by_session="manager-1",
+                )
+            )
+            for index in range(overdue_count):
+                write_expectation_row(
+                    self.expectation_store,
+                    row_id=f"exp-{index}",
+                    now=NOW - timedelta(minutes=10),
+                    kind="briefed-by",
+                    sla_seconds=60.0,
+                    source_id=f"seat-{index}",
+                    subject_agent_id="worker-1",
+                    leaf_key="repo/260707_master/leaf-1",
+                )
+            counter = self._wrap_reads(self.expectation_store)
+            result = run_supervisor_sweep(self._ctx(), now=NOW)
+            overdue_findings = [f for f in result.findings if f.kind == "expectation-overdue"]
+            self.assertEqual(len(overdue_findings), overdue_count)
+            reads_by_k[overdue_count] = counter["count"]
+        # Reads are flat in K (the fix); the pre-fix code did one full fold per overdue finding.
+        self.assertEqual(
+            reads_by_k[40],
+            reads_by_k[2],
+            f"expectation reads scaled with finding count: {reads_by_k}",
+        )
+        assert_bounded_count(reads_by_k[40], 6, label="expectation reads/sweep")
+
+    def test_escalation_budget_caps_rung_emission_per_sweep(self) -> None:
+        """Z17: a river-storm-sized backlog of rung-due rows emits at most escalation_budget
+        escalation findings per sweep; the rest stay rung_due and re-fire next sweep."""
+        for pending_count in (20, 60):
+            with self.subTest(pending=pending_count):
+                self.setUp()
+                for index in range(pending_count):
+                    self.inbox_store.append(
+                        create_operator_inbox_entry(
+                            entry_id=f"esc-{index}",
+                            now=(NOW - timedelta(minutes=10)).isoformat(),
+                            lifecycle_id=None,
+                            agent_id=f"worker-{index}",
+                            ask="ask",
+                            response="resp",
+                            created_by="system",
+                            created_via="cli",
+                            message_kind="escalation",
+                        )
+                    )
+                result = run_supervisor_sweep(
+                    self._ctx(
+                        escalation_budget=5,
+                        escalation_sla_seconds={"escalation": 60.0},
+                    ),
+                    now=NOW,
+                )
+                escalation_findings = [f for f in result.findings if f.kind == "escalation-due"]
+                assert_bounded_count(
+                    len(escalation_findings), 5, label=f"escalation findings at N={pending_count}"
+                )
+                self.assertEqual(len(escalation_findings), 5)  # budget-full, not fewer
+                heartbeat = self.heartbeat_store.read()
+                assert heartbeat is not None
+                self.assertEqual(heartbeat.sweepCount, 1)
 
 
 if __name__ == "__main__":

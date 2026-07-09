@@ -796,6 +796,39 @@ class EngineProcessFacts:
     ledger_row_count: int = 0
 
 
+# 260707-HFX2-L12 F6/CS-6 D2+D1: every ``TaskDocNode`` in the always-on projection carries the task's
+# full reader BODY (objective/design/requirements/sections/codeExamples/decisions), and
+# ``read_task_documents`` emits one for EVERY document under ``tasks/`` with no windowing -- so the
+# broadcast payload (``latest-state.json`` + every ``/api/stream`` delta + ``/api/state``) grows with
+# (total docs x body size), re-serialised on every tick. Moving bodies on-demand is a payload-CONTRACT
+# change with frontend coupling (the escalated F6 follow-up); until then this budget + the measurement
+# helper let the write path FLAG when the broadcast has gone body-heavy, rather than the growth staying
+# silent. Chosen so a handful of normal docs sit well under it and the pathological all-bodies case trips.
+TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES = 256 * 1024
+
+
+def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
+    """Approximate byte cost of the task-doc reader BODIES the broadcast serialises (F6 guardrail).
+
+    Sums the large free-text/list fields windowing would move on-demand. Cheap by construction -- it is
+    ``len`` over strings already built by the reducer, never a re-serialisation -- so the projection
+    write path can call it every tick without adding an order of cost to the finding it is measuring.
+    """
+    total = 0
+    for doc in docs:
+        total += len(doc.objective) + len(doc.design or "") + len(doc.currentStep or "")
+        total += sum(len(item) for item in doc.requirements)
+        total += sum(len(item) for item in doc.openQuestions)
+        total += sum(len(item) for item in doc.references)
+        total += sum(len(section.heading) + len(section.body) for section in doc.sections)
+        total += sum(
+            len(example.distinctChange) + len(example.why) + len(example.snippet) + len(example.title)
+            for example in doc.codeExamples
+        )
+        total += sum(len(decision.decision) + len(decision.rationale) for decision in doc.decisions)
+    return total
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 

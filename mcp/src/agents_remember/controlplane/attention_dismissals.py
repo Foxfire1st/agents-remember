@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 ATTENTION_DISMISSAL_SCHEMA = "ar-attention-dismissal/v1"
 
@@ -57,15 +57,23 @@ class AttentionDismissalStore:
         self._replace(list(records.values()))
 
     def read(self) -> list[AttentionDismissalRecord]:
-        """Read current acknowledgement rows (empty when absent)."""
+        """Read current acknowledgement rows (empty when absent).
+
+        260707-HFX2-L12 F12: a torn/legacy line is skipped, not raised — this store is read on the
+        dashboard projection/ASGI path, and a single malformed row must not 500 the endpoint or
+        freeze a tick (these are disposable UI facts, not an audit trail)."""
         path = self.log_path()
         if not path.exists():
             return []
-        return [
-            AttentionDismissalRecord.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        records: list[AttentionDismissalRecord] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                records.append(AttentionDismissalRecord.model_validate_json(line))
+            except ValidationError:
+                continue
+        return records
 
     def current(self) -> dict[str, AttentionDismissalRecord]:
         """Fold by ``itemId``; legacy duplicate rows collapse to the newest row read."""

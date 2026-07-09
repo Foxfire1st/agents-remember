@@ -72,6 +72,7 @@ from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
+from agents_remember.observer.event_retention import compact_workspace_river
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.observer.store import EventStore
@@ -510,6 +511,8 @@ def create_app(
                 )
                 await asyncio.to_thread(metrics_store.record, snapshot)
                 await asyncio.to_thread(evaluate_provider_degradation, config)
+                # F5: reclaim the append-only metrics log (O(1) stat unless past its byte budget).
+                await asyncio.to_thread(metrics_store.compact)
             except Exception:
                 logger.exception("provider metrics sample failed; retrying next interval")
             await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
@@ -541,6 +544,7 @@ def create_app(
             escalation_rung_seconds=settings.escalation.rung_seconds,
             respawn_after_rung=settings.escalation.respawn_after_rung,
             redeliver_budget=settings.supervisor.redeliver_budget,
+            escalation_budget=settings.supervisor.escalation_budget,
         )
 
     async def supervisor_loop() -> None:
@@ -558,6 +562,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # F3/CS-6 D3 (260707-HFX2-L12): reclaim the unbounded workspace event river at the one boundary
+        # where it is cursor-safe -- before the projector/supervisor/metrics loops start writing to it and
+        # before the server accepts the SSE connections that would hold absolute byte offsets into it. The
+        # always-on live compactor (cross-process append locking + in-flight cursor re-seating) is the
+        # escalated F3 follow-up; this bounds the on-disk file across every restart in the meantime.
+        await asyncio.to_thread(
+            compact_workspace_river, observer_root(config), now=(now or utc_now)()
+        )
         await projector.prime()
         task = asyncio.create_task(projector.run())
         metrics_task = asyncio.create_task(metrics_loop())

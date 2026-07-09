@@ -46,6 +46,10 @@ _LEVELS: dict[DegradationState, int] = {"healthy": 0, "degraded": 1, "critical":
 DEGRADATION_STATE_SCHEMA = "ar-provider-degradation-state/v1"
 DEGRADATION_EVENT_SCHEMA = "ar-provider-degradation-event/v1"
 
+# 260707-HFX2-L12 F5: cap for the append-only degradation-events audit log. Events fire only on a
+# state change (rare), so this bound is generous; it exists to stop unbounded growth over years.
+DEGRADATION_EVENT_RETAIN_ROWS = 1_000
+
 ORCHESTRATOR_DEGRADATION_INSTRUCTION = (
     "Dispatch AR_SPAWN_ROLE=system-specialist to investigate this provider degradation "
     "event and write a report. Read that report before ordering a fix. If the report says "
@@ -135,6 +139,24 @@ class ProviderDegradationStore:
         with self.events_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, sort_keys=True) + "\n")
 
+    def compact_events(self, *, retain_rows: int = DEGRADATION_EVENT_RETAIN_ROWS) -> int:
+        """Reclaim degradation-events.jsonl to its newest `retain_rows` events; return rows dropped.
+
+        260707-HFX2-L12 F5/CS-6 D3: degradation events are only written on a state change (rare), so a
+        full read-fold on that rare path is cheap; this gives the append-only audit log a bounded cap."""
+        path = self.events_path
+        if not path.exists():
+            return 0
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if len(lines) <= retain_rows:
+            return 0
+        kept = lines[-retain_rows:]
+        self._root.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".compact.tmp")
+        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+        return len(lines) - len(kept)
+
 
 ProviderStopper = Callable[["McpRuntimeConfig"], dict[str, Any]]
 
@@ -178,6 +200,7 @@ def evaluate_provider_degradation(
         elif state == "critical":
             event["criticalFailsafe"] = {"enabled": False}
         store.append_event(event)
+        store.compact_events()  # F5: bound the append-only degradation audit log
         _post_degradation_alerts(config, event)
 
     updated = ProviderDegradationState(

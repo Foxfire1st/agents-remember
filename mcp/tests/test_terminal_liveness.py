@@ -80,10 +80,20 @@ class _CountingCatalog(TerminalCatalog):
     def __init__(self, path: Path) -> None:
         super().__init__(path)
         self.read_calls = 0
+        self.disk_read_calls = 0
+        self.disk_write_calls = 0
 
     def _read(self) -> list[TerminalCatalogEntry]:
         self.read_calls += 1
         return super()._read()
+
+    def _read_disk(self) -> list[TerminalCatalogEntry]:
+        self.disk_read_calls += 1
+        return super()._read_disk()
+
+    def _write_disk(self, entries: list[TerminalCatalogEntry]) -> None:
+        self.disk_write_calls += 1
+        super()._write_disk(entries)
 
 
 class _TmuxSubprocessProbeHost:
@@ -248,7 +258,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         self.assertEqual(host.calls, 1)
 
     def test_landed_rows_do_not_add_per_row_sweep_probe_or_catalog_reads(self) -> None:
-        def run_sweep(landed_count: int) -> tuple[int, int, int, int]:
+        def run_sweep(landed_count: int) -> tuple[int, int, int, int, int]:
             catalog = _CountingCatalog(self.tmp / f"terminal-sessions-{landed_count}.json")
             for index in range(landed_count):
                 catalog.upsert(_entry(f"landed-{index:03d}", status="landed"))
@@ -269,17 +279,28 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
             )
 
             catalog.read_calls = 0
+            catalog.disk_read_calls = 0
+            catalog.disk_write_calls = 0
             entries = sweeper.refresh()
 
             self.assertEqual(len(entries), landed_count + 1)
             self.assertEqual(sum(entry.status == "landed" for entry in entries), landed_count)
             self.assertEqual(captured, ["ar-running"])
-            return host.calls, len(captured), catalog.read_calls, len(entries) - landed_count
+            return (
+                host.calls,
+                len(captured),
+                catalog.disk_read_calls,
+                catalog.disk_write_calls,
+                len(entries) - landed_count,
+            )
 
         small = run_sweep(5)
         large = run_sweep(500)
 
-        self.assertEqual(small, (1, 1, 3, 1))
+        # F1/CS-6 D2: the batch()-wrapped sweep does exactly ONE disk read + ONE disk write regardless of
+        # how many rows the catalog holds -- the per-row read-modify-writes hit the in-memory buffer. The
+        # old per-mutator disk RMW made both counts grow with the row count (O(n) disk ops, each O(n)).
+        self.assertEqual(small, (1, 1, 1, 1, 1))
         self.assertEqual(large, small)
 
     def test_overlapping_sweep_returns_current_catalog_without_second_probe(self) -> None:

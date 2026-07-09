@@ -400,6 +400,7 @@ fields are optional; an empty block keeps the safe defaults.
 | `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
 | `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
 | `redeliverBudget` | `250` | Maximum inbox redelivery attempts per sweep. Large backlogs are spread across sweeps while the heartbeat keeps ticking. |
+| `escalationBudget` | `250` | Maximum escalation-rung emissions per sweep. A large backlog of rung-due rows is spread across sweeps (rung readiness is level-triggered, so deferred rows re-fire on the next sweep) rather than doing O(backlog) synchronous owner pastes + `escalation.rung` event appends in one sweep. Positive integer. |
 
 `enabled: false` is the emergency kill switch for the supervisor loop. During the
 2026-07-09 redelivery-cadence incident the global coordinator settings disabled

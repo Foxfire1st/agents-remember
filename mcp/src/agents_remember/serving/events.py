@@ -198,15 +198,22 @@ async def stream_raw_events(
     """
     root = observer_root(config)
     now = datetime.now(UTC)
-    prune_expired_lifecycle_event_logs(root, now=now)
+    # CS-6 D1 (260707-HFX2-L12): the prune + initial-offset scan read the whole workspace river
+    # backlog from byte 0. Run them in a worker thread so a large events.jsonl on a fresh connect
+    # never blocks the shared asyncio loop (which serves every SSE stream + every API request),
+    # matching how ``read_new_events`` below is already offloaded.
+    await asyncio.to_thread(prune_expired_lifecycle_event_logs, root, now=now)
     cursor_offsets = decode_cursor(last_event_id)
-    offsets = cursor_offsets or initial_event_offsets(root, now=now)
+    if cursor_offsets:
+        offsets = cursor_offsets
+    else:
+        offsets = await asyncio.to_thread(initial_event_offsets, root, now=now)
     ready_sent = False
     last_prune = now
     while True:
         moment = datetime.now(UTC)
         if (moment - last_prune).total_seconds() >= PRUNE_INTERVAL_SECONDS:
-            prune_expired_lifecycle_event_logs(root, now=moment)
+            await asyncio.to_thread(prune_expired_lifecycle_event_logs, root, now=moment)
             last_prune = moment
         events, offsets = await asyncio.to_thread(
             read_new_events, root, offsets, limit=DEFAULT_EVENT_BATCH

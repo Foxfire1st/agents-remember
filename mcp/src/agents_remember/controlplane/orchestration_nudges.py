@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 ORCHESTRATION_NUDGE_SCHEMA = "ar-orchestration-nudge/v1"
 NudgeReason = Literal["inactive", "missing-turn-report", "manual"]
@@ -42,14 +42,19 @@ class OrchestrationNudgeStore:
         return self._root / "workspace" / "orchestration-nudges.jsonl"
 
     def read(self) -> list[OrchestrationNudgeRecord]:
+        """Read the nudge log, skipping any torn/legacy line (F12: dashboard-tolerant reader)."""
         path = self.log_path()
         if not path.exists():
             return []
-        return [
-            OrchestrationNudgeRecord.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        records: list[OrchestrationNudgeRecord] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                records.append(OrchestrationNudgeRecord.model_validate_json(line))
+            except ValidationError:
+                continue
+        return records
 
     def append(self, record: OrchestrationNudgeRecord) -> None:
         path = self.log_path()

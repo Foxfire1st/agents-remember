@@ -110,6 +110,50 @@ from agents_remember.worktrees.worktree_contract import ContractError, load_cont
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
 WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 
+# 260707-HFX2-L12 F8: cadence for the (write-amplifying) physical gate-log prune. The projection
+# folds the keep-filtered live set every tick regardless; only the on-disk reclamation is throttled
+# to this interval so no whole-file rewrite rides the 1s hot path. Keyed by observer-logs root.
+GATE_COMPACT_TTL_SECONDS = 30.0
+_last_gate_compact: dict[str, datetime] = {}
+
+# 260707-HFX2-L12 F10: the tasks tree is walked + every task JSON parsed by BOTH read_task_documents
+# and read_series_documents each 1s tick (2x rglob + 2x parse of the whole, growing corpus). This TTL
+# cache holds ONE parsed sweep of the task-document payloads, shared by both readers, so a tick pays
+# for one walk+parse (and only every few seconds). Keyed by tasks-root.
+TASK_DOC_CACHE_TTL_SECONDS = 3.0
+_task_doc_cache: dict[str, tuple[datetime, list[tuple[Path, dict[str, object]]]]] = {}
+
+# 260707-HFX2-L12 F11: status_payload() shells out to git per leaf; without a cache the projection
+# fires O(active-leaf) git subprocesses every tick. Git state changes slowly, so this TTL cache lets
+# each leaf's git probe run at most once per interval; the cache is pruned to the live leaf set each
+# tick so it cannot grow unbounded. Keyed by enclosure-contract path.
+STATUS_PAYLOAD_TTL_SECONDS = 8.0
+_status_payload_cache: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
+
+
+def _iter_task_document_payloads(
+    tasks_root: Path, *, now: datetime | None
+) -> list[tuple[Path, dict[str, object]]]:
+    """Shared, TTL-cached ``(path, payload)`` list of task-document JSONs under ``tasks_root``.
+
+    Removes the per-tick double walk+parse (F10): both task and series readers pull from this one
+    parsed sweep. ``now=None`` bypasses the cache (fresh walk) for non-projection callers/tests.
+    """
+    if now is not None:
+        key = str(tasks_root)
+        cached = _task_doc_cache.get(key)
+        if cached is not None and 0 <= (now - cached[0]).total_seconds() < TASK_DOC_CACHE_TTL_SECONDS:
+            return cached[1]
+    docs: list[tuple[Path, dict[str, object]]] = []
+    for path in _iter_task_json(tasks_root):
+        payload = _read_json(path)
+        if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
+            continue
+        docs.append((path, payload))
+    if now is not None:
+        _task_doc_cache[str(tasks_root)] = (now, docs)
+    return docs
+
 
 def read_providers(
     config: McpRuntimeConfig,
@@ -444,23 +488,31 @@ def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[
     Reads the gate logs co-located with the event store under ``observer_logs_root``
     and folds each by id (last-wins), so the projection sees live gate state with no
     event machinery. A malformed log is skipped, never fatal to the tick.
+
+    260707-HFX2-L12 F8/CS-6 D2: one directory scan + one read per gate log per tick
+    (was ``lifecycle_ids()`` + a ``glob`` scan, and ``compact()``'s read + ``current()``'s
+    read per lifecycle). Physical prune is gated to ``GATE_COMPACT_TTL_SECONDS`` so no
+    whole-file rewrite rides the 1s hot path, while the projection stays keep-filtered
+    every tick.
     """
     root = observer_logs_root(coordination_root)
     store = GateStore(root)
+    prune = False
     if now is not None:
-        for lifecycle_id in store.lifecycle_ids():
-            with contextlib.suppress(OSError, ValueError):
-                store.compact(lifecycle_id, now=now)
+        key = str(root)
+        last = _last_gate_compact.get(key)
+        if last is None or (now - last).total_seconds() >= GATE_COMPACT_TTL_SECONDS:
+            prune = True
+            _last_gate_compact[key] = now
     gates: list[GateRecord] = []
-    lifecycles_dir = root / "lifecycles"
-    if lifecycles_dir.is_dir():
-        for log in sorted(lifecycles_dir.glob("*/gates.jsonl")):
-            try:
-                gates.extend(store.current(log.parent.name).values())
-            except (OSError, ValueError):
-                continue
-    with contextlib.suppress(OSError, ValueError):
-        gates.extend(store.current(None).values())
+    for lifecycle_id in store.lifecycle_ids():
+        with contextlib.suppress(OSError, ValueError):
+            if now is None:
+                gates.extend(store.current(lifecycle_id).values())
+            else:
+                gates.extend(
+                    store.compact_current(lifecycle_id, now=now, rewrite=prune).values()
+                )
     return gates
 
 
@@ -552,6 +604,7 @@ def read_engine_process_facts(
     coordination_root: Path,
     *,
     active_worktree_groups: set[str] | None = None,
+    now: datetime | None = None,
 ) -> list[EngineProcessFacts]:
     """Slice 5e: gather one fact bundle per leaf enclosure for the Engine Room map.
 
@@ -565,6 +618,7 @@ def read_engine_process_facts(
     """
     tasks_root = coordination_root / "tasks"
     facts: list[EngineProcessFacts] = []
+    seen_status_keys: set[str] = set()
     for path in iter_leaf_enclosure_contracts(tasks_root):
         try:
             contract = load_contract(path)
@@ -581,24 +635,43 @@ def read_engine_process_facts(
             code_root=cp.get("code_worktree"),
             memory_root=cp.get("memory_worktree"),
         )
+        status_key = str(path)
+        seen_status_keys.add(status_key)
         facts.append(
             EngineProcessFacts(
                 contract=cp,
                 guidance=lifecycle_guidance(contract),
-                status=_safe_status_payload(contract),
+                status=_safe_status_payload(contract, cache_key=status_key, now=now),
                 ledger_rows=ledger_rows,
                 ledger_row_count=ledger_total,
             )
         )
+    # F11: keep the git-status cache bounded to the live leaf set (no unbounded growth over daemon life).
+    if now is not None:
+        for stale in [key for key in _status_payload_cache if key not in seen_status_keys]:
+            _status_payload_cache.pop(stale, None)
     return facts
 
 
-def _safe_status_payload(contract: Any) -> dict[str, Any] | None:
-    """``status_payload`` is the only git-touching part; never let it crash the tick."""
+def _safe_status_payload(
+    contract: Any, *, cache_key: str | None = None, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """``status_payload`` is the only git-touching part; never let it crash the tick.
+
+    260707-HFX2-L12 F11: when ``cache_key``/``now`` are given, the git probe result is TTL-cached so
+    the projection does not fire one git subprocess per leaf every tick — git state changes slowly.
+    """
+    if cache_key is not None and now is not None:
+        cached = _status_payload_cache.get(cache_key)
+        if cached is not None and 0 <= (now - cached[0]).total_seconds() < STATUS_PAYLOAD_TTL_SECONDS:
+            return cached[1]
     try:
-        return status_payload(contract)
+        value = status_payload(contract)
     except Exception:  # a single worktree's git state must never fail the projection tick
-        return None
+        value = None
+    if cache_key is not None and now is not None:
+        _status_payload_cache[cache_key] = (now, value)
+    return value
 
 
 def _ledger_window(
@@ -991,10 +1064,7 @@ def read_task_documents(
         if enclosure.lifecycleId and enclosure.taskRoot and enclosure.leafId
     }
     nodes: list[TaskDocNode] = []
-    for path in _iter_task_json(tasks_root):
-        payload = _read_json(path)
-        if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
-            continue
+    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
         try:
             doc = TaskDocument.model_validate(payload)
         except ValueError:
@@ -1037,10 +1107,7 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
     if not tasks_root.is_dir():
         return []
     nodes: list[SeriesNode] = []
-    for path in _iter_task_json(tasks_root):
-        payload = _read_json(path)
-        if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
-            continue
+    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
         if payload.get("kind") != "master":
             continue
         try:

@@ -37,6 +37,49 @@ INSTANCE_LABEL_KEY = "agents-remember.instance-id"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 30.0
 DOCKER_SAMPLE_TIMEOUT_SECONDS = 20
 
+# Byte-window growth step for the bounded tail reader; read backward from EOF in
+# chunks until enough complete lines are in hand rather than materialising the
+# whole (unbounded) append-only log.
+_TAIL_BLOCK_BYTES = 16384
+
+# 260707-HFX2-L12 F5: retention for metrics.jsonl. ~30s container samples -> 10k rows is ~3.5 days,
+# well past what read_recent (<=500) and the statistics board need. Compaction only fires past a
+# hysteresis byte budget so the common 30s call is an O(1) stat, and it tails the newest rows
+# (O(retain) read+write) rather than folding the whole file.
+PROVIDER_METRICS_RETAIN_ROWS = 10_000
+_APPROX_METRICS_LINE_BYTES = 512
+
+
+def _tail_lines(path: Path, limit: int) -> list[str]:
+    """Return up to the last ``limit`` complete lines of ``path`` without reading it all.
+
+    Seeks backward from EOF in growing blocks until ``limit`` line boundaries are
+    found (or the file start is reached), so the cost is O(limit x line width), not
+    O(filesize). The possibly-partial leading line of a mid-file read is dropped.
+    Returns ``[]`` for a missing/empty file or any OS error.
+    """
+    if limit <= 0:
+        return []
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            pos = handle.tell()
+            data = b""
+            while pos > 0 and data.count(b"\n") <= limit:
+                step = min(_TAIL_BLOCK_BYTES, pos)
+                pos -= step
+                handle.seek(pos)
+                data = handle.read(step) + data
+    except OSError:
+        return []
+    text = data.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # trailing newline
+    if pos > 0 and lines:
+        lines = lines[1:]  # first line may be truncated by the mid-file start
+    return lines[-limit:]
+
 
 @dataclass(frozen=True)
 class ContainerSample:
@@ -129,14 +172,45 @@ class ProviderMetricsStore:
         ]
         return rows[-limit:]
 
-    def read_recent(self, limit: int = 120) -> list[dict[str, Any]]:
-        """The newest ``limit`` samples, oldest first; invalid lines skipped."""
+    def compact(
+        self,
+        *,
+        retain_rows: int = PROVIDER_METRICS_RETAIN_ROWS,
+        max_bytes: int | None = None,
+    ) -> int:
+        """Reclaim metrics.jsonl to its newest `retain_rows` rows; return rows kept (0 if skipped).
+
+        260707-HFX2-L12 F5/CS-6 D3: cheap enough to call every sampler tick — a byte-budget stat
+        guards the common case (O(1)), and when the log exceeds ~2x the target it is rewritten from a
+        bounded EOF tail (O(retain_rows)), never a whole-file fold. Metrics are lossy-tolerant (a
+        sample racing the atomic replace is acceptable, same as the torn-line tolerance in read)."""
+        path = self.log_path
         try:
-            lines = self.log_path.read_text(encoding="utf-8").splitlines()
+            size = path.stat().st_size
         except OSError:
-            return []
+            return 0
+        budget = max_bytes if max_bytes is not None else retain_rows * _APPROX_METRICS_LINE_BYTES * 2
+        if size <= budget:
+            return 0
+        kept = _tail_lines(path, retain_rows)
+        if not kept:
+            return 0
+        self._root.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".compact.tmp")
+        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+        return len(kept)
+
+    def read_recent(self, limit: int = 120) -> list[dict[str, Any]]:
+        """The newest ``limit`` samples, oldest first; invalid lines skipped.
+
+        CS-6 D2 (260707-HFX2-L12): reads a bounded tail from the end of the file
+        instead of ``read_text().splitlines()`` on the whole log, so a metrics.jsonl
+        that grows for months does not cost O(filesize) on the 30s degradation
+        sampler + per-request status hot paths.
+        """
         rows: list[dict[str, Any]] = []
-        for line in lines[-limit:]:
+        for line in _tail_lines(self.log_path, limit):
             if not line.strip():
                 continue
             try:

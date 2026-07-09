@@ -99,10 +99,16 @@ class TerminalCatalogLivenessSweeper:
             if self._rate_limited(moment):
                 return self._catalog.list()
             self._last_sweep_at = moment
-            observations = [
-                self._observe_catalog_entry(entry, checked_at=moment)
-                for entry in self._catalog.list()
-            ]
+            # 260707-HFX2-L12 F1/CS-6 D2+D3: one disk read + one disk write for the whole sweep. The
+            # per-entry probes' read-modify-writes and the terminated-row reclamation all hit the batch's
+            # in-memory buffer; the single atomic commit lands on ``batch()`` exit. Without this each of
+            # the n probes re-read and rewrote the full catalog file -- O(n^2) disk work per sweep.
+            with self._catalog.batch():
+                observations = [
+                    self._observe_catalog_entry(entry, checked_at=moment)
+                    for entry in self._catalog.list()
+                ]
+                self._catalog.compact(now=moment)
             if self._on_turn_state_change is not None:
                 for observation in observations:
                     if observation.turn_state_changed:

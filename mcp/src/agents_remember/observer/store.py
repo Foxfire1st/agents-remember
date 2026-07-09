@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from agents_remember.observer.events import Event
 
 
@@ -47,14 +49,21 @@ class EventStore:
     def read(self, lifecycle_id: str | None) -> list[Event]:
         """Read a log back as validated events (empty when the log is absent).
 
-        The projection layer will read more richly; this is the minimal,
-        validated read that proves the write format round-trips.
+        Corrupt/legacy/version-skew lines are skipped rather than raised (CS-6 D3,
+        260707-HFX2-L12): this read feeds the shared projection tick
+        (``project_and_write`` -> ``read_lifecycle_logs``), so one torn append line
+        must not freeze the whole projection fleet-wide -- it costs at most the one
+        unparseable row, mirroring ``ProviderMetricsStore.read_recent`` tolerance.
         """
         path = self.log_path(lifecycle_id)
         if not path.exists():
             return []
-        return [
-            Event.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        events: list[Event] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                events.append(Event.model_validate_json(line))
+            except ValidationError:
+                continue
+        return events

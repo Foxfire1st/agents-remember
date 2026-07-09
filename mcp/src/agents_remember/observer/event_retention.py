@@ -11,6 +11,7 @@ throwaway event log can always be cleaned up regardless of lifecycle type.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -93,6 +94,60 @@ def prune_expired_lifecycle_event_logs(
         with suppress(OSError):
             entry.rmdir()
     return removed
+
+
+def compact_workspace_river(
+    root: Path, *, now: datetime, ttl_seconds: float = WORKSPACE_EVENT_TTL_SECONDS
+) -> int:
+    """Reclaim ``workspace/events.jsonl`` rows older than the replay TTL (F3/CS-6 D3, partial).
+
+    The per-lifecycle logs are reclaimed wholesale by :func:`prune_expired_lifecycle_event_logs`, but
+    the shared workspace river is a single append-only file that is never deleted -- so it is the one
+    river that grows unbounded on disk, even though a fresh connection already only replays its last
+    ``WORKSPACE_EVENT_TTL_SECONDS`` (:func:`initial_event_offsets`). Rows older than that window are
+    therefore never streamed to any client and are safe to drop physically.
+
+    CURSOR-SAFETY (why this is startup-only, not always-on): a live ``/api/events`` client holds an
+    ABSOLUTE byte offset into this file, and the append path (``EventStore.append``) is lock-free with
+    writers in TWO processes (the serving supervisor loop and the MCP orchestration-nudge tool). A
+    mid-stream physical rewrite would misalign those offsets (a torn line crashes the stream; a shrunk
+    file silently strands the client). So this compactor MUST run only at a boundary with no live cursor
+    and no in-process concurrent writer -- serving startup, before the projector/supervisor/metrics loops
+    and before the server accepts connections. ``handle.read()`` to the live EOF absorbs any bytes a
+    cross-process writer appended up to that instant, and the atomic tmp+``os.replace`` means a concurrent
+    reader never sees a torn file; the always-on live compactor (cross-process ``flock`` on the append
+    hot path + in-flight cursor virtualisation/re-seating) is the escalated F3 follow-up.
+
+    Returns the number of rows reclaimed.
+    """
+    path = root / WORKSPACE_SOURCE / "events.jsonl"
+    if not path.is_file():
+        return 0
+    cutoff = now - timedelta(seconds=ttl_seconds)
+    retained_start: int | None = None
+    dropped = 0
+    for start, _offset_after, payload in _iter_event_payloads(path):
+        ts = _event_time(payload)
+        if ts is None or ts >= cutoff:
+            retained_start = start
+            break
+        dropped += 1
+    if dropped == 0:
+        return 0
+    if retained_start is None:  # every row aged out -> truncate to an empty (but present) source file
+        retained_start = path.stat().st_size
+    with path.open("rb") as handle:
+        handle.seek(retained_start)
+        retained = handle.read()  # reads to the live EOF, absorbing concurrent appends up to this instant
+    tmp = path.with_name(f".{path.name}.compact.{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(retained)
+        os.replace(tmp, path)
+    except BaseException:
+        with suppress(OSError):
+            tmp.unlink()
+        raise
+    return dropped
 
 
 def lifecycle_is_dormant(path: Path, *, now: datetime) -> bool:

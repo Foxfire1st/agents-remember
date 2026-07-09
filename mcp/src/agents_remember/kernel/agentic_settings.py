@@ -131,6 +131,7 @@ KNOWN_SUPERVISOR_FIELDS = frozenset(
         "redeliverRateLimitSeconds",
         "signalCooldownSeconds",
         "redeliverBudget",
+        "escalationBudget",
     }
 )
 # R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-kind ack SLA, per-rung timings,
@@ -142,6 +143,10 @@ KNOWN_ESCALATION_FIELDS = frozenset(
 DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
 DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
 DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 250
+# CS-6 D1 (260707-HFX2-L12): per-sweep cap on escalation-rung emission, the twin of the redeliver
+# budget. Bounds the synchronous hosted pastes + escalation.rung event appends one sweep can do;
+# deferred rows re-fire next sweep (rung_due is level-triggered) so nothing is lost.
+DEFAULT_SUPERVISOR_ESCALATION_BUDGET = 250
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
@@ -306,6 +311,7 @@ class SupervisorSettings:
     redeliver_rate_limit_seconds: float | None = None
     signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
     redeliver_budget: int = DEFAULT_SUPERVISOR_REDELIVER_BUDGET
+    escalation_budget: int = DEFAULT_SUPERVISOR_ESCALATION_BUDGET
 
 
 @dataclass(frozen=True)
@@ -1232,6 +1238,13 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
         if "redeliverBudget" in block
         else DEFAULT_SUPERVISOR_REDELIVER_BUDGET
     )
+    escalation_budget = (
+        _require_positive_int(
+            block["escalationBudget"], "orchestration.supervisor.escalationBudget", source
+        )
+        if "escalationBudget" in block
+        else DEFAULT_SUPERVISOR_ESCALATION_BUDGET
+    )
     return SupervisorSettings(
         enabled=enabled,
         interval_seconds=interval_seconds,
@@ -1239,6 +1252,7 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
         redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
         signal_cooldown_seconds=signal_cooldown_seconds,
         redeliver_budget=redeliver_budget,
+        escalation_budget=escalation_budget,
     )
 
 
