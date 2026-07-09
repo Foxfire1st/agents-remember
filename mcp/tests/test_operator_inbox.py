@@ -227,13 +227,20 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertEqual(delivered.attemptCount, 1)
         self.assertEqual(delivered.lastAttemptAt, T2)
         self.assertIsNotNone(delivered.nextAttemptAt)
+        assert delivered.nextAttemptAt is not None
+        self.assertGreaterEqual(
+            (
+                datetime.fromisoformat(delivered.nextAttemptAt)
+                - datetime.fromisoformat(T2)
+            ).total_seconds(),
+            900.0,
+        )
         # A second delivery attempt (e.g. a redelivery pass) bumps again and re-schedules further out.
         second = self.store.record_delivery(
             "A", now="2026-06-23T10:10:00+00:00", delivery_state="unconfirmed"
         )
         self.assertEqual(second.attemptCount, 2)
         assert second.nextAttemptAt is not None
-        assert delivered.nextAttemptAt is not None
         self.assertGreater(second.nextAttemptAt, delivered.nextAttemptAt)
 
     def test_record_delivery_clears_schedule_only_via_consume(self) -> None:

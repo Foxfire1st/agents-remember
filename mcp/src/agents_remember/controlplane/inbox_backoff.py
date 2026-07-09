@@ -21,10 +21,10 @@ from agents_remember.controlplane.operator_inbox_records import OperatorInboxEnt
 # long-pending row does not retry every few seconds forever (26898-style thundering redelivery).
 BACKOFF_SCHEDULE_SECONDS: tuple[float, ...] = (30.0, 60.0, 300.0, 900.0, 3600.0, 21600.0)
 
-# The per-target floor: even a due row is not re-attempted more often than this, independent of
-# the backoff schedule -- the OrchestrationNudgeStore-style rate-limit gate (a burst of posts to
-# the same target must not become a burst of redeliveries).
-DEFAULT_RATE_LIMIT_SECONDS = 30.0
+# The effective floor: a delivered/queued/unconfirmed/no-hosted-session row may still be in the
+# harness queue or under model processing, so no retry path may run faster than this.
+MIN_REDELIVERY_INTERVAL_SECONDS = 900.0
+DEFAULT_RATE_LIMIT_SECONDS = MIN_REDELIVERY_INTERVAL_SECONDS
 
 _REDELIVERABLE_DELIVERY_STATES = frozenset({"queued", "no-hosted-session", "delivered", "unconfirmed"})
 """Every deliveryState is redeliverable while the row is pending -- 'delivered' is never terminal
@@ -37,13 +37,39 @@ def backoff_seconds_for_attempt(attempt_count: int) -> float:
     return BACKOFF_SCHEDULE_SECONDS[index]
 
 
-def next_attempt_at(*, now: datetime, attempt_count: int) -> str:
+def require_redelivery_floor_seconds(
+    rate_limit_seconds: float | None,
+    *,
+    owner: str = "redelivery interval",
+) -> float:
+    """Return the effective redelivery floor, refusing any sub-15-minute value."""
+    if rate_limit_seconds is None:
+        return DEFAULT_RATE_LIMIT_SECONDS
+    if rate_limit_seconds < MIN_REDELIVERY_INTERVAL_SECONDS:
+        raise ValueError(
+            f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds"
+        )
+    return rate_limit_seconds
+
+
+def next_attempt_at(
+    *,
+    now: datetime,
+    attempt_count: int,
+    redelivery_floor_seconds: float | None = None,
+) -> str:
     """The durable ``nextAttemptAt`` timestamp stamped after one delivery attempt.
 
     A durable ROW, never an in-memory timer -- it is written atomically alongside the delivery
     snapshot, so it survives a daemon/MCP restart (the Restate durable-timer lesson R2 cites).
     """
-    return (now + timedelta(seconds=backoff_seconds_for_attempt(attempt_count))).isoformat()
+    effective_seconds = max(
+        backoff_seconds_for_attempt(attempt_count),
+        require_redelivery_floor_seconds(
+            redelivery_floor_seconds, owner="nextAttemptAt redelivery floor"
+        ),
+    )
+    return (now + timedelta(seconds=effective_seconds)).isoformat()
 
 
 def is_due(entry: OperatorInboxEntry, *, now: datetime) -> bool:
@@ -70,13 +96,16 @@ def is_rate_limited(
     rate_limit_seconds: float = DEFAULT_RATE_LIMIT_SECONDS,
 ) -> bool:
     """Whether the per-target floor still holds since the last attempt on this entry."""
+    floor_seconds = require_redelivery_floor_seconds(
+        rate_limit_seconds, owner="redelivery rate limit"
+    )
     if entry.lastAttemptAt is None:
         return False
     try:
         last_attempt = datetime.fromisoformat(entry.lastAttemptAt)
     except ValueError:
         return False
-    return (now - last_attempt).total_seconds() < rate_limit_seconds
+    return (now - last_attempt).total_seconds() < floor_seconds
 
 
 def redeliverable(

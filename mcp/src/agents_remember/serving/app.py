@@ -67,6 +67,7 @@ from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
+from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
@@ -523,11 +524,13 @@ def create_app(
             inbox_store=OperatorInboxStore(root),
             expectation_store=ExpectationRowStore(root),
             nudge_store=OrchestrationNudgeStore(root),
+            signal_cooldown_store=SupervisorSignalCooldownStore(root),
             event_store=EventStore(root),
             heartbeat_store=supervisor_heartbeat_store,
             coordination_root=config.coordination_root,
             stale_seat_seconds=max(settings.supervisor.interval_seconds * 4, 60.0),
             redeliver_rate_limit_seconds=settings.supervisor.redeliver_rate_limit_seconds,
+            signal_cooldown_seconds=settings.supervisor.signal_cooldown_seconds,
             escalation_sla_seconds=settings.escalation.sla_seconds,
             escalation_rung_seconds=settings.escalation.rung_seconds,
             respawn_after_rung=settings.escalation.respawn_after_rung,

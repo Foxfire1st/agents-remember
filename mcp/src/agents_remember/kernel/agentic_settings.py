@@ -49,6 +49,10 @@ from agents_remember.controlplane.gate_policy import (
     make_gate_policy,
     named_gate_policy,
 )
+from agents_remember.controlplane.inbox_backoff import (
+    DEFAULT_RATE_LIMIT_SECONDS,
+    MIN_REDELIVERY_INTERVAL_SECONDS,
+)
 from agents_remember.controlplane.records import GateKind, coerce_gate_kind
 from agents_remember.errors import AgentsRememberError
 from agents_remember.serving.harnesses import HARNESSES, Harness
@@ -118,14 +122,14 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
 # R1/R5 (260707-HFX2-L2): the deterministic supervisor sweep's own knobs -- interval, enable
-# flag, self-liveness staleness cutoff, and the inbox redelivery rate limit (the sweep's own
-# reuse of OperatorInboxStore.list_redeliverable's rate_limit_seconds, R3/R4a).
+# flag, self-liveness staleness cutoff, inbox redelivery rate limit, and owner-signal cooldown.
 KNOWN_SUPERVISOR_FIELDS = frozenset(
     {
         "enabled",
         "intervalSeconds",
         "staleCutoffSeconds",
         "redeliverRateLimitSeconds",
+        "signalCooldownSeconds",
         "redeliverBudget",
     }
 )
@@ -293,14 +297,14 @@ class SupervisorSettings:
     """``orchestration.supervisor`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
 
     ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
-    own default (``inbox_backoff.DEFAULT_RATE_LIMIT_SECONDS``) rather than duplicating that number
-    here as a second source of truth.
+    own default. ``signal_cooldown_seconds`` controls supervisor pane/seat-liveness signal posts.
     """
 
     enabled: bool = True
     interval_seconds: float = DEFAULT_SUPERVISOR_INTERVAL_SECONDS
     stale_cutoff_seconds: float = DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
     redeliver_rate_limit_seconds: float | None = None
+    signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
     redeliver_budget: int = DEFAULT_SUPERVISOR_REDELIVER_BUDGET
 
 
@@ -1204,13 +1208,22 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
         else DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
     )
     redeliver_rate_limit_seconds = (
-        _require_positive_number(
+        _require_supervisor_floor_seconds(
             block["redeliverRateLimitSeconds"],
             "orchestration.supervisor.redeliverRateLimitSeconds",
             source,
         )
         if "redeliverRateLimitSeconds" in block
         else None
+    )
+    signal_cooldown_seconds = (
+        _require_supervisor_floor_seconds(
+            block["signalCooldownSeconds"],
+            "orchestration.supervisor.signalCooldownSeconds",
+            source,
+        )
+        if "signalCooldownSeconds" in block
+        else DEFAULT_RATE_LIMIT_SECONDS
     )
     redeliver_budget = (
         _require_positive_int(
@@ -1224,8 +1237,18 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
         interval_seconds=interval_seconds,
         stale_cutoff_seconds=stale_cutoff_seconds,
         redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
+        signal_cooldown_seconds=signal_cooldown_seconds,
         redeliver_budget=redeliver_budget,
     )
+
+
+def _require_supervisor_floor_seconds(raw: object, owner: str, source: str) -> float:
+    value = _require_positive_number(raw, owner, source)
+    if value < MIN_REDELIVERY_INTERVAL_SECONDS:
+        raise AgenticSettingsError(
+            f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds: {source}"
+        )
+    return value
 
 
 def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:

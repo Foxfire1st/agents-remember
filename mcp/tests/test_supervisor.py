@@ -25,9 +25,12 @@ from agents_remember.controlplane.expectation_rows import (
 from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
+from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.supervisor import (
     SupervisorContext,
+    SupervisorFinding,
+    act_on_finding,
     evaluate_dead_upstream_findings,
     evaluate_escalation_findings,
     evaluate_expectation_findings,
@@ -320,6 +323,7 @@ class SweepIntegrationTests(unittest.TestCase):
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
         self.nudge_store = OrchestrationNudgeStore(observer_root)
+        self.signal_cooldown_store = SupervisorSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
 
@@ -331,6 +335,7 @@ class SweepIntegrationTests(unittest.TestCase):
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
             nudge_store=self.nudge_store,
+            signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
             coordination_root=self.coordination_root,
@@ -523,6 +528,113 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(heartbeat.redeliverableInboxCount, 3)
         self.assertIsNotNone(heartbeat.lastSweepDurationSeconds)
 
+    def test_repeated_seat_liveness_sweeps_emit_one_signal_per_cooldown(self) -> None:
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(
+                _entry(
+                    "worker-1",
+                    leaf_key="repo-a/260707_master/leaf-3",
+                    turn_state="stale",
+                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                ),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        ctx = self._ctx(signal_cooldown_seconds=900.0)
+
+        run_supervisor_sweep(ctx, now=NOW)
+        run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=10))
+
+        signal_rows = [
+            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+        ]
+        self.assertEqual(len(signal_rows), 1)
+        self.assertEqual(signal_rows[0].agentId, "manager-1")
+
+        run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=901))
+        signal_rows = [
+            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+        ]
+        self.assertEqual(len(signal_rows), 2)
+
+    def test_mid_turn_pane_signal_is_observed_without_owner_inbox_noise(self) -> None:
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        finding = SupervisorFinding(
+            kind="pane-signal",
+            detail="mid-turn",
+            session_id="worker-1",
+            leaf_key="repo-a/260707_master/leaf-3",
+        )
+
+        result = act_on_finding(self._ctx(), finding, now=NOW)
+
+        self.assertEqual(result.action, "signal-emit")
+        self.assertEqual(result.outcome, "skipped")
+        self.assertEqual(self.inbox_store.current(), {})
+
+    def test_pending_backlog_does_not_burst_redeliver_before_floor_after_restart(self) -> None:
+        for index in range(3):
+            entry = create_operator_inbox_entry(
+                entry_id=f"row-{index}",
+                now=NOW.isoformat(),
+                lifecycle_id=None,
+                agent_id=f"worker-{index}",
+                ask="ask",
+                response="resp",
+                created_by="system",
+                created_via="cli",
+            ).model_copy(
+                update={
+                    "deliveryState": "delivered",
+                    "attemptCount": 1,
+                    "lastAttemptAt": NOW.isoformat(),
+                    "nextAttemptAt": (NOW + timedelta(seconds=900)).isoformat(),
+                }
+            )
+            self.inbox_store.append(entry)
+
+        restarted_ctx = self._ctx()
+        result = run_supervisor_sweep(restarted_ctx, now=NOW + timedelta(seconds=60))
+
+        self.assertEqual([a for a in result.actions if a.action == "redeliver"], [])
+        self.assertEqual(result.redeliverable_inbox_count, 0)
+
+    def test_one_second_sweeps_do_not_emit_per_second_signal_rows(self) -> None:
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(
+                _entry(
+                    "worker-1",
+                    leaf_key="repo-a/260707_master/leaf-3",
+                    turn_state="stale",
+                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                ),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        ctx = self._ctx(signal_cooldown_seconds=900.0)
+
+        for tick in range(180):
+            run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=tick))
+
+        signal_rows = [
+            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+        ]
+        self.assertEqual(len(signal_rows), 1)
+        heartbeat = self.heartbeat_store.read()
+        assert heartbeat is not None
+        self.assertEqual(heartbeat.sweepCount, 180)
+
 
 class EscalationPredicateTests(unittest.TestCase):
     def test_pending_row_past_sla_fires(self) -> None:
@@ -610,6 +722,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
         self.nudge_store = OrchestrationNudgeStore(observer_root)
+        self.signal_cooldown_store = SupervisorSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
 
@@ -621,6 +734,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
             nudge_store=self.nudge_store,
+            signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
             coordination_root=self.coordination_root,

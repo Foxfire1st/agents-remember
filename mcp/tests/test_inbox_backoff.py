@@ -13,6 +13,8 @@ import unittest
 
 from agents_remember.controlplane.inbox_backoff import (
     BACKOFF_SCHEDULE_SECONDS,
+    DEFAULT_RATE_LIMIT_SECONDS,
+    MIN_REDELIVERY_INTERVAL_SECONDS,
     backoff_seconds_for_attempt,
     is_due,
     is_rate_limited,
@@ -49,13 +51,21 @@ class BackoffMathTests(unittest.TestCase):
             BACKOFF_SCHEDULE_SECONDS[-1],
         )
 
-    def test_next_attempt_at_adds_the_ladder_offset(self) -> None:
+    def test_next_attempt_at_respects_the_15_minute_floor(self) -> None:
         now = datetime.fromisoformat(T1)
         stamped = next_attempt_at(now=now, attempt_count=0)
         due = datetime.fromisoformat(stamped)
         self.assertAlmostEqual(
-            (due - now).total_seconds(), BACKOFF_SCHEDULE_SECONDS[0], places=3
+            (due - now).total_seconds(), MIN_REDELIVERY_INTERVAL_SECONDS, places=3
         )
+
+    def test_next_attempt_at_rejects_a_sub_floor_override(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 900 seconds"):
+            next_attempt_at(
+                now=datetime.fromisoformat(T1),
+                attempt_count=0,
+                redelivery_floor_seconds=30.0,
+            )
 
 
 class DueAndRateLimitTests(unittest.TestCase):
@@ -86,12 +96,21 @@ class DueAndRateLimitTests(unittest.TestCase):
     def test_a_recent_attempt_is_rate_limited(self) -> None:
         entry = _entry().model_copy(update={"lastAttemptAt": T1})
         now = datetime.fromisoformat("2026-06-23T10:00:10+00:00")
-        self.assertTrue(is_rate_limited(entry, now=now, rate_limit_seconds=30.0))
+        self.assertTrue(is_rate_limited(entry, now=now, rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS))
 
     def test_an_attempt_outside_the_rate_limit_window_is_not_limited(self) -> None:
         entry = _entry().model_copy(update={"lastAttemptAt": T1})
-        now = datetime.fromisoformat("2026-06-23T10:01:00+00:00")
-        self.assertFalse(is_rate_limited(entry, now=now, rate_limit_seconds=30.0))
+        now = datetime.fromisoformat("2026-06-23T10:16:00+00:00")
+        self.assertFalse(is_rate_limited(entry, now=now, rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS))
+
+    def test_rate_limit_rejects_a_sub_floor_override(self) -> None:
+        entry = _entry().model_copy(update={"lastAttemptAt": T1})
+        with self.assertRaisesRegex(ValueError, "at least 900 seconds"):
+            is_rate_limited(
+                entry,
+                now=datetime.fromisoformat("2026-06-23T10:00:10+00:00"),
+                rate_limit_seconds=30.0,
+            )
 
     def test_redeliverable_filters_due_and_unlimited_entries_only(self) -> None:
         due_and_clear = _entry(entry_id="A")
@@ -101,7 +120,9 @@ class DueAndRateLimitTests(unittest.TestCase):
         )
         now = datetime.fromisoformat("2026-06-23T10:00:05+00:00")
         selected = redeliverable(
-            [due_and_clear, rate_limited, not_due], now=now, rate_limit_seconds=30.0
+            [due_and_clear, rate_limited, not_due],
+            now=now,
+            rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS,
         )
         self.assertEqual([entry.id for entry in selected], ["A"])
 

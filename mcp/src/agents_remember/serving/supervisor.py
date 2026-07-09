@@ -35,6 +35,7 @@ from agents_remember.controlplane.escalation_ladder import (
 )
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
+    InboxDeliveryState,
     InboxMessageKind,
     OperatorInboxEntry,
     create_operator_inbox_entry,
@@ -54,6 +55,10 @@ from agents_remember.controlplane.signal_routing import (
     derive_signal_owner,
     derive_skip_level_owner,
     is_seat_dead,
+)
+from agents_remember.controlplane.supervisor_signals import (
+    SupervisorSignalCooldownStore,
+    SupervisorSignalRecord,
 )
 from agents_remember.observer.events import Event, now_iso
 from agents_remember.observer.store import EventStore
@@ -103,6 +108,7 @@ leaf only reserves the transition (``OperatorInboxStore.mark_escalated``) -- HFX
 actual ladder that reads it."""
 
 _INACTIVE_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
+_NON_ESCALATING_PANE_DETAILS = frozenset({"mid-turn"})
 
 
 @dataclass(frozen=True)
@@ -146,11 +152,13 @@ class SupervisorContext:
     inbox_store: OperatorInboxStore
     expectation_store: ExpectationRowStore
     nudge_store: OrchestrationNudgeStore
+    signal_cooldown_store: SupervisorSignalCooldownStore
     event_store: EventStore
     heartbeat_store: SupervisorHeartbeatStore
     coordination_root: Path
     stale_seat_seconds: float = 120.0
     redeliver_rate_limit_seconds: float | None = None
+    signal_cooldown_seconds: float = 900.0
     nudge_rate_limit_seconds: int = 900
     # R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-``message_kind`` ack SLA
     # (rung 0 -> 1), per-rung dwell time thereafter (keyed 1/2), and the rung a silent seat is
@@ -501,6 +509,7 @@ def _redeliver(
         entry=entry,
         submit=True,
         current=sweep.inbox_current,
+        redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
     )
     sweep.remember(updated)
     _log_event(
@@ -652,7 +661,7 @@ def _post_owner_signal(
     response: str,
     now: datetime,
     sweep: _SweepState | None = None,
-) -> str:
+) -> InboxDeliveryState:
     """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
     its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses."""
     entry = create_operator_inbox_entry(
@@ -682,6 +691,7 @@ def _post_owner_signal(
         entry=entry,
         submit=True,
         current=sweep.inbox_current if sweep is not None else None,
+        redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
     )
     if sweep is not None:
         sweep.remember(delivered)
@@ -698,6 +708,19 @@ def _signal_emit(
     owner = derive_signal_owner(ctx.catalog, sender_agent_id=finding.session_id, message_kind="escalation")
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return SupervisorActionResult("signal-emit", finding, "skipped", "no routable owner")
+    if finding.kind == "pane-signal" and finding.detail in _NON_ESCALATING_PANE_DETAILS:
+        return SupervisorActionResult("signal-emit", finding, "skipped", "busy pane state")
+    if ctx.signal_cooldown_store.in_cooldown(
+        target_agent_id=owner.agent_id,
+        target_lifecycle_id=owner.lifecycle_id,
+        target_role=owner.role,
+        leaf_key=finding.leaf_key,
+        finding_kind=finding.kind,
+        detail=finding.detail,
+        now=now,
+        cooldown_seconds=ctx.signal_cooldown_seconds,
+    ):
+        return SupervisorActionResult("signal-emit", finding, "cooldown", "signal cooldown active")
     ask = f"Supervisor observed {finding.kind}: {finding.detail}"
     response = f"session {finding.session_id or 'unknown'} (leaf {finding.leaf_key or 'unknown'})"
     delivery_state = _post_owner_signal(
@@ -708,6 +731,19 @@ def _signal_emit(
         response=response,
         now=now,
         sweep=sweep,
+    )
+    ctx.signal_cooldown_store.append(
+        SupervisorSignalRecord(
+            id=new_ulid(),
+            ts=now.isoformat(),
+            targetAgentId=owner.agent_id,
+            targetLifecycleId=owner.lifecycle_id,
+            targetRole=owner.role,
+            leafKey=finding.leaf_key,
+            findingKind=finding.kind,
+            detail=finding.detail,
+            deliveryState=delivery_state,
+        )
     )
     _log_event(
         ctx,

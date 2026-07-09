@@ -95,6 +95,7 @@ class OperatorInboxStore:
         delivered_to_session: str | None = None,
         delivery_detail: str | None = None,
         current: dict[str, OperatorInboxEntry] | None = None,
+        redelivery_floor_seconds: float | None = None,
     ) -> OperatorInboxEntry:
         """Append a delivery-status snapshot for one pending entry.
 
@@ -118,7 +119,11 @@ class OperatorInboxStore:
                 "attemptCount": attempt_count,
                 "lastAttemptAt": now,
                 "nextAttemptAt": (
-                    next_attempt_at(now=datetime.fromisoformat(now), attempt_count=attempt_count)
+                    next_attempt_at(
+                        now=datetime.fromisoformat(now),
+                        attempt_count=attempt_count,
+                        redelivery_floor_seconds=redelivery_floor_seconds,
+                    )
                     if entry.state == "pending"
                     else entry.nextAttemptAt
                 ),

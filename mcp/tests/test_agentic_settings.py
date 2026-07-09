@@ -443,6 +443,7 @@ class TypedModelTests(unittest.TestCase):
         self.assertEqual(settings.supervisor.interval_seconds, 10.0)
         self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
         self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
+        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 900.0)
         self.assertEqual(settings.supervisor.redeliver_budget, 250)
 
     def test_supervisor_knobs_parse(self) -> None:
@@ -452,7 +453,8 @@ class TypedModelTests(unittest.TestCase):
                     "enabled": False,
                     "intervalSeconds": 5,
                     "staleCutoffSeconds": 30,
-                    "redeliverRateLimitSeconds": 45,
+                    "redeliverRateLimitSeconds": 900,
+                    "signalCooldownSeconds": 1200,
                     "redeliverBudget": 75,
                 }
             }
@@ -461,7 +463,8 @@ class TypedModelTests(unittest.TestCase):
         self.assertFalse(settings.supervisor.enabled)
         self.assertEqual(settings.supervisor.interval_seconds, 5.0)
         self.assertEqual(settings.supervisor.stale_cutoff_seconds, 30.0)
-        self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 45.0)
+        self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 900.0)
+        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 1200.0)
         self.assertEqual(settings.supervisor.redeliver_budget, 75)
 
     def test_supervisor_enabled_must_be_a_boolean(self) -> None:
@@ -475,6 +478,14 @@ class TypedModelTests(unittest.TestCase):
     def test_supervisor_redeliver_budget_must_be_positive(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "redeliverBudget"):
             self._load({"supervisor": {"redeliverBudget": 0}})
+
+    def test_supervisor_redelivery_floor_must_be_at_least_15_minutes(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "redeliverRateLimitSeconds"):
+            self._load({"supervisor": {"redeliverRateLimitSeconds": 899}})
+
+    def test_supervisor_signal_cooldown_must_be_at_least_15_minutes(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "signalCooldownSeconds"):
+            self._load({"supervisor": {"signalCooldownSeconds": 899}})
 
     def test_unknown_supervisor_key_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "sweepSeconds"):

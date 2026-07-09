@@ -47,6 +47,7 @@ from agents_remember.controlplane.expectation_rows import (
 from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
+from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.pane_signals import classify_pane_signal
 from agents_remember.serving.supervisor import (
@@ -171,6 +172,7 @@ class _LivenessSimulationCase(unittest.TestCase):
         self.inbox_store = OperatorInboxStore(self.observer_root)
         self.expectation_store = ExpectationRowStore(self.observer_root)
         self.nudge_store = OrchestrationNudgeStore(self.observer_root)
+        self.signal_cooldown_store = SupervisorSignalCooldownStore(self.observer_root)
         self.event_store = EventStore(self.observer_root)
         self.heartbeat_store = SupervisorHeartbeatStore(self.observer_root)
 
@@ -182,6 +184,7 @@ class _LivenessSimulationCase(unittest.TestCase):
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
             nudge_store=self.nudge_store,
+            signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
             coordination_root=self.coordination_root,

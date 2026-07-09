@@ -49,6 +49,12 @@ def _expectation_sla_seconds(config: McpRuntimeConfig | None, kind: str) -> floa
     return load_agentic_settings(config.coordination_root).expectations.sla_for(kind)
 
 
+def _redelivery_floor_seconds(config: McpRuntimeConfig | None) -> float | None:
+    if config is None:
+        return None
+    return load_agentic_settings(config.coordination_root).supervisor.redeliver_rate_limit_seconds
+
+
 def _entry_payload(entry: OperatorInboxEntry) -> dict[str, Any]:
     return entry.model_dump(mode="json", by_alias=True, exclude_none=True)
 
@@ -123,6 +129,7 @@ def operator_inbox_post_payload(
             paster=terminal_paster or TerminalPaster(),
             entry=entry,
             submit=True,
+            redelivery_floor_seconds=_redelivery_floor_seconds(config),
         )
     return _tool_payload(
         "operator_inbox_post",

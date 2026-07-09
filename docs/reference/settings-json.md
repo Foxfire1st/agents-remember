@@ -387,8 +387,14 @@ fields are optional; an empty block keeps the safe defaults.
 | `enabled` | `true` | Turns the sweep loop on or off. |
 | `intervalSeconds` | `10` | Sweep cadence. |
 | `staleCutoffSeconds` | `60` | Age after which the supervisor heartbeat is reported stale. |
-| `redeliverRateLimitSeconds` | store default | Per-row floor between redelivery attempts; omitted inherits the inbox-store default. |
+| `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
+| `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
 | `redeliverBudget` | `250` | Maximum inbox redelivery attempts per sweep. Large backlogs are spread across sweeps while the heartbeat keeps ticking. |
+
+`enabled: false` is the emergency kill switch for the supervisor loop. During the
+2026-07-09 redelivery-cadence incident the global coordinator settings disabled
+the supervisor until the 15-minute redelivery and signal-cooldown fix landed and
+passed smoke.
 
 ### orchestration.concurrency, orchestration.spawn
 
