@@ -104,7 +104,6 @@ from agents_remember.serving.retire_policy import (
     RetirePolicyError,
     SeatRef,
     check_retire_authority,
-    master_of,
 )
 from agents_remember.serving.seat_events import (
     log_rename_event,
@@ -356,6 +355,7 @@ class TerminalAttachLeafRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}/attach-leaf``: claim a leaf for an existing session."""
 
     leaf_key: str = Field(alias="leafKey")
+    role: str | None = None
 
 
 class TerminalRetireRequest(BaseModel):
@@ -940,8 +940,7 @@ def create_app(
                 content={"status": "bad-kind", "detail": result.detail}, status_code=400
             )
         if result.status == "leaf-taken":
-            # Server-authoritative uniqueness (per leaf, role): refuse so two chats never mingle on
-            # one leaf. The client guard in data/sessions.ts is only advisory.
+            # Server-authoritative pair uniqueness; the client guard is only advisory.
             return JSONResponse(
                 content={
                     "status": "leaf-taken",
@@ -960,6 +959,7 @@ def create_app(
                 "harness": request.harness,
                 "lifecycleId": request.lifecycle_id,
                 "leafKey": entry.leaf_key,
+                "seatRole": entry.binding_role,
                 "cwd": str(entry.cwd),
                 "tmuxName": entry.tmux_name,
                 "status": "running",
@@ -969,9 +969,7 @@ def create_app(
 
     @app.post("/api/terminal/{session}/attach-leaf")
     def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
-        # L5: claim a leaf for an EXISTING session from the Chats page (enclosure-free, no respawn).
-        # 404 if the session is unknown or non-running (only active chats can hold a leaf); 409 if a
-        # different running chat already owns the leaf; else persist the leaf_key and report it.
+        # Claim or move one existing session's leaf-role binding (enclosure-free, no respawn).
         try:
             leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
         except LeafRefResolutionError as exc:
@@ -979,8 +977,10 @@ def create_app(
         assert leaf_key is not None
         result = assign_terminal_session_to_leaf(
             catalog,
+            host,
             session_id=session,
             leaf_key=leaf_key,
+            role=request.role,
         )
         if result.status == "unknown-session":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -993,8 +993,25 @@ def create_app(
                 },
                 status_code=409,
             )
+        if result.status == "role-required":
+            return JSONResponse(
+                content={
+                    "session": session,
+                    "status": "role-required",
+                    "leafKey": leaf_key,
+                    "detail": "role is required for a hand-opened harness session",
+                },
+                status_code=400,
+            )
         return JSONResponse(
-            content={"session": session, "status": "attached", "leafKey": leaf_key},
+            content={
+                "session": session,
+                "status": "attached",
+                "leafKey": leaf_key,
+                "role": result.role,
+                "seatRole": result.seat_role,
+                "previousSeatRole": result.previous_seat_role,
+            },
             status_code=200,
         )
 
@@ -1096,13 +1113,13 @@ def create_app(
             check_retire_authority(
                 SeatRef(
                     session_id=actor_entry.id,
-                    role=actor_entry.spawn_role,
-                    master=master_of(actor_entry.leaf_key),
+                    leaf_key=actor_entry.binding_leaf_key,
+                    seat_role=actor_entry.binding_role,
                 ),
                 SeatRef(
                     session_id=target_entry.id,
-                    role=target_entry.spawn_role,
-                    master=master_of(target_entry.leaf_key),
+                    leaf_key=target_entry.binding_leaf_key,
+                    seat_role=target_entry.binding_role,
                 ),
             )
         except RetirePolicyError as exc:

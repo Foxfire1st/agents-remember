@@ -19,6 +19,14 @@ from agents_remember.serving.terminal_leaf_assignment import assign_terminal_ses
 from agents_remember.tasks import TaskDocument, write_task_doc
 
 
+class _Host:
+    def __init__(self, *tmux_names: str) -> None:
+        self.known = set(tmux_names)
+
+    def has_session(self, tmux_name: str) -> bool:
+        return tmux_name in self.known
+
+
 def _config(root: Path) -> McpRuntimeConfig:
     return McpRuntimeConfig(
         config_path=root / "settings.json",
@@ -68,7 +76,12 @@ def _write_leaf(root: Path) -> str:
     return "repo/master/leaf-1"
 
 
-def _entry(session_id: str, *, leaf_key: str | None = None) -> TerminalCatalogEntry:
+def _entry(
+    session_id: str,
+    *,
+    leaf_key: str | None = None,
+    spawn_role: str | None = None,
+) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Claude Code {session_id}",
@@ -82,6 +95,7 @@ def _entry(session_id: str, *, leaf_key: str | None = None) -> TerminalCatalogEn
         last_attached_at="2026-07-02T00:00:00Z",
         status="running",
         leaf_key=leaf_key,
+        spawn_role=spawn_role,
     )
 
 
@@ -100,8 +114,10 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
 
             result = assign_terminal_session_to_leaf(
                 catalog,
+                _Host("ar-chat-1"),
                 session_id="chat-1",
                 leaf_key="repo/master/new",
+                role="worker",
             )
 
             self.assertEqual(result.status, "attached")
@@ -112,13 +128,15 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
     def test_assign_terminal_session_to_leaf_reports_leaf_taken_without_mutating(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
-            catalog.upsert(_entry("owner", leaf_key="repo/master/new"))
-            catalog.upsert(_entry("seeker", leaf_key="repo/master/old"))
+            catalog.upsert(_entry("owner", leaf_key="repo/master/new", spawn_role="worker"))
+            catalog.upsert(_entry("seeker", leaf_key="repo/master/old", spawn_role="worker"))
 
             result = assign_terminal_session_to_leaf(
                 catalog,
+                _Host("ar-owner", "ar-seeker"),
                 session_id="seeker",
                 leaf_key="repo/master/new",
+                role="worker",
             )
 
             self.assertEqual(result.status, "leaf-taken")
@@ -138,6 +156,8 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
                 config,
                 session_id="chat-1",
                 leaf_key="legacy-leaf",
+                role="worker",
+                host=_Host("ar-chat-1"),
             )
 
             self.assertTrue(payload["ok"])
@@ -146,9 +166,69 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
             self.assertEqual(payload["session"], "chat-1")
             self.assertEqual(payload["previousLeafKey"], "repo/master/old")
             self.assertEqual(payload["role"], "chat")
+            self.assertEqual(payload["seatRole"], "worker")
             updated = _require_entry(catalog, "chat-1")
             self.assertEqual(payload["leafKey"], canonical)
             self.assertEqual(updated.leaf_key, canonical)
+
+    def test_attach_defaults_to_spawn_role_and_requires_role_for_hand_opened_chat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _config(root)
+            canonical = _write_leaf(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("worker", spawn_role="worker"))
+            catalog.upsert(_entry("hand-opened"))
+            host = _Host("ar-worker", "ar-hand-opened")
+
+            worker = attach_terminal_session_to_leaf_payload(
+                config, session_id="worker", leaf_key=canonical, host=host
+            )
+            hand_opened = attach_terminal_session_to_leaf_payload(
+                config, session_id="hand-opened", leaf_key=canonical, host=host
+            )
+
+            self.assertEqual(worker["status"], "attached")
+            self.assertEqual(worker["seatRole"], "worker")
+            self.assertEqual(hand_opened["status"], "role-required")
+            self.assertIsNone(_require_entry(catalog, "hand-opened").leaf_key)
+
+    def test_hand_opened_architect_attaches_without_impersonating_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
+            catalog.upsert(_entry("worker", leaf_key="repo/master/leaf", spawn_role="worker"))
+            catalog.upsert(_entry("architect"))
+            host = _Host("ar-worker", "ar-architect")
+
+            result = assign_terminal_session_to_leaf(
+                catalog,
+                host,
+                session_id="architect",
+                leaf_key="repo/master/leaf",
+                role="architect",
+            )
+
+            self.assertEqual(result.status, "attached")
+            self.assertEqual(_require_entry(catalog, "worker").binding_role, "worker")
+            self.assertEqual(_require_entry(catalog, "architect").binding_role, "architect")
+
+    def test_role_suffixed_leaf_ref_is_rejected_with_pair_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _config(root)
+            _write_leaf(root)
+
+            payload = attach_terminal_session_to_leaf_payload(
+                config,
+                session_id="unused",
+                leaf_key="legacy-leaf-curator",
+                role="curator",
+                host=_Host(),
+            )
+
+            self.assertEqual(payload["status"], "leaf-ref-not-found")
+            self.assertIn("role-suffixed leaf refs are unsupported", payload["detail"])
+            self.assertIn("role='curator'", payload["detail"])
 
     def test_attach_payload_rejects_unmatchable_leaf_ref_without_mutating(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

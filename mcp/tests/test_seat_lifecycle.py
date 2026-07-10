@@ -63,6 +63,7 @@ def _entry(
     *,
     leaf_key: str | None = None,
     spawn_role: str | None = None,
+    replacement_for_leaf: str | None = None,
     status: TerminalSessionStatus = "running",
     kind: TerminalSessionKind = "harness",
 ) -> TerminalCatalogEntry:
@@ -79,6 +80,7 @@ def _entry(
         last_attached_at="2026-07-07T00:00:00+00:00",
         status=status,
         leaf_key=leaf_key,
+        replacement_for_leaf=replacement_for_leaf,
         spawn_role=spawn_role,
     )
 
@@ -100,54 +102,57 @@ class RetirePolicyMatrixTests(unittest.TestCase):
     """The exact authority matrix from the leaf doc's failing-first list."""
 
     def test_manager_retires_own_worker(self) -> None:
-        actor = SeatRef(session_id="mgr", role="manager", master="repo/master-a")
-        target = SeatRef(session_id="worker-1", role="worker", master="repo/master-a")
+        actor = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
+        target = SeatRef(session_id="worker-1", leaf_key="repo/master-a/leaf", seat_role="worker")
         check_retire_authority(actor, target)  # must not raise
 
     def test_manager_retires_own_reviewer(self) -> None:
-        actor = SeatRef(session_id="mgr", role="manager", master="repo/master-a")
-        target = SeatRef(session_id="rev-1", role="reviewer", master="repo/master-a")
+        actor = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
+        target = SeatRef(session_id="rev-1", leaf_key="repo/master-a/leaf", seat_role="reviewer")
         check_retire_authority(actor, target)  # must not raise
 
     def test_manager_refused_against_other_masters_worker(self) -> None:
-        actor = SeatRef(session_id="mgr", role="manager", master="repo/master-a")
-        target = SeatRef(session_id="worker-1", role="worker", master="repo/master-b")
+        actor = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
+        target = SeatRef(session_id="worker-1", leaf_key="repo/master-b/leaf", seat_role="worker")
         with self.assertRaisesRegex(RetirePolicyError, "own master"):
             check_retire_authority(actor, target)
 
     def test_manager_refused_against_a_manager_seat(self) -> None:
-        actor = SeatRef(session_id="mgr-a", role="manager", master="repo/master-a")
-        target = SeatRef(session_id="mgr-b", role="manager", master="repo/master-a")
+        actor = SeatRef(session_id="mgr-a", leaf_key="repo/master-a/manager-a", seat_role="manager")
+        target = SeatRef(session_id="mgr-b", leaf_key="repo/master-a/manager-b", seat_role="manager")
         with self.assertRaisesRegex(RetirePolicyError, "own master"):
             check_retire_authority(actor, target)
 
     def test_no_seat_retires_itself(self) -> None:
-        actor = SeatRef(session_id="same", role="orchestrator", master=None)
-        target = SeatRef(session_id="same", role="orchestrator", master=None)
+        actor = SeatRef(session_id="same", leaf_key=None, seat_role="orchestrator")
+        target = SeatRef(session_id="same", leaf_key=None, seat_role="orchestrator")
         with self.assertRaisesRegex(RetirePolicyError, "never retires itself"):
             check_retire_authority(actor, target)
 
     def test_manager_cannot_self_retire_even_against_worker_role_confusion(self) -> None:
         # Owner-never-self-retires is checked BEFORE the role-scoped rule -- no role authority
         # ever overrides it, even a manager whose own row were somehow role-tagged "worker".
-        actor = SeatRef(session_id="same", role="worker", master="repo/master-a")
+        actor = SeatRef(session_id="same", leaf_key="repo/master-a/leaf", seat_role="worker")
         with self.assertRaisesRegex(RetirePolicyError, "never retires itself"):
             check_retire_authority(actor, actor)
 
     def test_orchestrator_retires_a_completed_manager(self) -> None:
-        actor = SeatRef(session_id="orch", role="orchestrator", master=None)
-        target = SeatRef(session_id="mgr", role="manager", master="repo/master-a")
+        actor = SeatRef(session_id="orch", leaf_key=None, seat_role="orchestrator")
+        target = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
         check_retire_authority(actor, target)  # must not raise
 
     def test_orchestrator_retires_any_role(self) -> None:
-        actor = SeatRef(session_id="orch", role="orchestrator", master=None)
+        actor = SeatRef(session_id="orch", leaf_key=None, seat_role="orchestrator")
         for role in ("worker", "reviewer", "manager", "designer", "strategist"):
             with self.subTest(role=role):
-                check_retire_authority(actor, SeatRef(session_id=f"x-{role}", role=role, master="m"))
+                check_retire_authority(
+                    actor,
+                    SeatRef(session_id=f"x-{role}", leaf_key="repo/m/leaf", seat_role=role),
+                )
 
     def test_unprivileged_role_has_no_retire_authority(self) -> None:
-        actor = SeatRef(session_id="w", role="worker", master="repo/master-a")
-        target = SeatRef(session_id="other", role="worker", master="repo/master-a")
+        actor = SeatRef(session_id="w", leaf_key="repo/master-a/leaf", seat_role="worker")
+        target = SeatRef(session_id="other", leaf_key="repo/master-a/leaf", seat_role="worker")
         with self.assertRaisesRegex(RetirePolicyError, "no retire authority"):
             check_retire_authority(actor, target)
 
@@ -215,6 +220,28 @@ class SessionRetireToolTests(unittest.TestCase):
         retired = _get(self.catalog, "worker-1")
         self.assertEqual(retired.status, "terminated")
         self.assertIsNotNone(retired.retired_at)
+
+    def test_manager_retires_unbound_failed_dispatch_from_replacement_leaf(self) -> None:
+        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/manager", spawn_role="manager"))
+        self.catalog.upsert(
+            _entry(
+                "worker-failed",
+                spawn_role="worker",
+                replacement_for_leaf="repo/master-a/leaf-1",
+            )
+        )
+
+        result = self._with_catalog_patched(
+            lambda: session_retire_payload(
+                self.config,
+                actor_session_id="mgr",
+                session_id="worker-failed",
+                reason="failed dispatch cleanup",
+            )
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "retired")
 
     def test_manager_refused_against_other_masters_worker(self) -> None:
         self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))

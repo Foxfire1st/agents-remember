@@ -19,7 +19,7 @@ def land_seats_for_leaf(
     for candidate in catalog.list(include_terminated=True):
         if candidate.leaf_key != leaf_key or candidate.status == "terminated":
             continue
-        if candidate.spawn_role not in roles:
+        if candidate.binding_role not in roles:
             continue
         updated = catalog.mark_landed(candidate.id, at=at, reason=reason, edge=edge)
         if updated is not None and updated.status == "landed":

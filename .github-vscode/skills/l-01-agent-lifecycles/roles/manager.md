@@ -97,8 +97,8 @@ stops belong to the orchestrator via the system-specialist protocol.
   attached, regardless of the count.
 - `spawn_agent_session(worker)` — a **fresh session** on the leaf: the brief (compiled from
   `../templates/worker-brief.md`) is pasted + submitted, with `env={"AR_SPAWN_ROLE": "worker"}` and
-  the **qualified** leaf key `<repository>/<master>/<docId>`; the worker edits inside the leaf
-  worktrees the brief names.
+  the **qualified** leaf key `<repository>/<master>/<docId>`; together they claim the worker's
+  `(leaf, role)` seat, and the worker edits inside the leaf worktrees the brief names.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
   **every** hand-off; you do not watch for it. The HFX2-L2 supervisor sweep evaluates each expected
   artifact (`evaluate_turn_report_findings`/`missing_artifact()`) on its own mechanical tick and, on
@@ -148,11 +148,11 @@ stops belong to the orchestrator via the system-specialist protocol.
   `worktree_integrate` auto-lands them into the dashboard's landed/archive group (config-gated,
   default ON) the moment the leaf lands, preserving transcript inspection without holding the leaf
   active. Use the landed archive cleanup button when those archived rows should be closed. When a
-  leaf's worker/reviewer seat goes stuck or abandoned before integration (a dead-end retry, a
-  duplicate spawn), retire it by hand:
+  leaf's worker/reviewer/curator seat goes stuck or abandoned before integration (a dead-end
+  retry, a duplicate spawn), retire it by hand:
   `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`. Server
-  policy enforces the authority split: **you may retire only worker/reviewer seats of your OWN
-  master** — you live outside the master stack you manage, so you can never unseat yourself
+  policy enforces the authority split: **you may retire only worker/reviewer/curator seats of your
+  OWN master** — you live outside the master stack you manage, so you can never unseat yourself
   (owner-never-self-retires); a target of any other role, or of a different master, is refused
   loudly. Transcripts are never deleted — retiring only terminates the tmux session and marks the
   catalog row.
@@ -222,6 +222,6 @@ own lifecycle if you need its state).
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
 | promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
-| tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · `session_retire` (your own master's worker/reviewer seats only) · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |
+| tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · `session_retire` (your own master's worker/reviewer/curator seats only) · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |
 
 Settings.json `orchestration.roles.manager` overrides these, and `orchestration.rolesPerLevel.<level>.manager` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

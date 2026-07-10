@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from agents_remember.serving.seat_binding import migrated_seat_role
+
 # 260707-HFX2-L12 F1/CS-6 D3: a ``terminated`` row is a tombstone (the tmux session is gone and the
 # hysteresis refuses to resurrect it), so without reclamation every retire/terminate leaves one to
 # accumulate forever in the always-re-read catalog file. Rows older than this window are dropped by
@@ -60,6 +62,11 @@ class TerminalCatalogEntry:
     # ``lifecycleId`` / ``terminatedAt``) so legacy rows with no ``leafKey`` read back as ``None``
     # -- no schema bump, migration-safe. A chat claims a leaf at open/attach, enclosure-independent.
     leaf_key: str | None = None
+    # The role occupying ``leaf_key``. Unlike ``spawn_role`` (immutable origin provenance), this is
+    # binding state: hand-opened sessions gain it through attach, and moving a session updates the
+    # leaf + role atomically. Legacy rows migrate from spawnRole, otherwise chat (terminal rows keep
+    # their distinct terminal slot).
+    seat_role: str | None = None
     # Explicit manager-declared leaf linkage for an unbound replacement seat. Unlike ``cwd`` (the
     # fleet-wide workspace root), this value varies per leaf and can safely credit chain progress.
     replacement_for_leaf: str | None = None
@@ -129,10 +136,12 @@ class TerminalCatalogEntry:
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
         raw_command = data.get("command", [])
         command = raw_command if isinstance(raw_command, list) else []
+        kind: TerminalSessionKind = "harness" if data.get("kind") == "harness" else "terminal"
+        spawn_role = str(data["spawnRole"]) if data.get("spawnRole") is not None else None
         return cls(
             id=str(data["id"]),
             label=str(data["label"]),
-            kind="harness" if data.get("kind") == "harness" else "terminal",
+            kind=kind,
             harness=str(data["harness"]) if data.get("harness") is not None else None,
             lifecycle_id=(
                 str(data["lifecycleId"]) if data.get("lifecycleId") is not None else None
@@ -147,6 +156,11 @@ class TerminalCatalogEntry:
                 str(data["terminatedAt"]) if data.get("terminatedAt") is not None else None
             ),
             leaf_key=str(data["leafKey"]) if data.get("leafKey") is not None else None,
+            seat_role=migrated_seat_role(
+                persisted=str(data["seatRole"]) if data.get("seatRole") is not None else None,
+                spawn_role=spawn_role,
+                kind=kind,
+            ),
             replacement_for_leaf=(
                 str(data["replacementForLeaf"])
                 if data.get("replacementForLeaf") is not None
@@ -160,7 +174,7 @@ class TerminalCatalogEntry:
                 if data.get("spawnedByLifecycle") is not None
                 else None
             ),
-            spawn_role=str(data["spawnRole"]) if data.get("spawnRole") is not None else None,
+            spawn_role=spawn_role,
             launch_args=_string_tuple(data.get("launchArgs")),
             prompt_keywords=_string_tuple(data.get("promptKeywords")),
             session_commands=_string_tuple(data.get("sessionCommands")),
@@ -237,6 +251,7 @@ class TerminalCatalogEntry:
             data["terminatedAt"] = self.terminated_at
         if self.leaf_key is not None:
             data["leafKey"] = self.leaf_key
+        data["seatRole"] = self.binding_role
         if self.replacement_for_leaf is not None:
             data["replacementForLeaf"] = self.replacement_for_leaf
         if self.spawned_by_session is not None:
@@ -322,6 +337,11 @@ class TerminalCatalogEntry:
     def with_leaf_key(self, leaf_key: str | None) -> TerminalCatalogEntry:
         """A copy bound to ``leaf_key`` (or unbound when ``None``); the leaf-attach write point."""
         return replace(self, leaf_key=leaf_key)
+
+    def with_leaf_binding(self, leaf_key: str, seat_role: str) -> TerminalCatalogEntry:
+        """A copy moved to one ``(leaf_key, seat_role)`` binding in a single catalog write."""
+
+        return replace(self, leaf_key=leaf_key, seat_role=seat_role)
 
     def with_retirement(
         self,
@@ -460,6 +480,22 @@ class TerminalCatalogEntry:
         """This session's leaf-uniqueness role, derived from its kind (chat vs. terminal)."""
         return role_for_kind(self.kind)
 
+    @property
+    def binding_role(self) -> str:
+        """The persisted seat role, with the migration rule available before the first rewrite."""
+
+        return migrated_seat_role(
+            persisted=self.seat_role,
+            spawn_role=self.spawn_role,
+            kind=self.kind,
+        )
+
+    @property
+    def binding_leaf_key(self) -> str | None:
+        """The leaf this seat works for, including an unbound replacement's declared target."""
+
+        return self.leaf_key or self.replacement_for_leaf
+
 
 def terminal_catalog_path(coordination_root: Path) -> Path:
     """Runtime catalog path for dashboard-owned terminal sessions."""
@@ -496,23 +532,21 @@ class TerminalCatalog:
         return next((entry for entry in self._read() if entry.id == session_id), None)
 
     def active_for_leaf(
-        self, leaf_key: str, *, role: TerminalSessionRole = "chat"
+        self, leaf_key: str, *, seat_role: str
     ) -> TerminalCatalogEntry | None:
-        """The single RUNNING session of ``role`` that owns ``leaf_key``, or ``None``.
+        """The single RUNNING session of ``seat_role`` that owns ``leaf_key``, or ``None``.
 
-        Uniqueness is per (leaf, role): a leaf may hold at most one running chat AND one running
-        terminal, so the probe is role-scoped (the default ``"chat"`` is the agent slot). ``list()``
-        already excludes terminated rows; gating on ``status == "running"`` means an exited/terminated
-        session frees its leaf. The liveness sweeper and direct liveness observations keep persisted
-        catalog status honest without letting transient tmux command failures immediately free a live
-        session's leaf claim. This is the server-authoritative uniqueness probe the opener + attach-leaf
-        routes call immediately before an upsert.
+        Uniqueness is per (leaf, seat role): worker, reviewer, curator, manager, architect, generic
+        chat, and terminal bindings coexist. Gating on ``status == "running"`` means a completed or
+        terminated holder frees only its own role slot.
         """
         return next(
             (
                 entry
                 for entry in self.list()
-                if entry.leaf_key == leaf_key and entry.status == "running" and entry.role == role
+                if entry.leaf_key == leaf_key
+                and entry.status == "running"
+                and entry.binding_role == seat_role
             ),
             None,
         )
@@ -775,7 +809,11 @@ class TerminalCatalog:
         sessions = raw.get("sessions", [])
         if not isinstance(sessions, list):
             return []
-        return [TerminalCatalogEntry.from_json(item) for item in sessions if isinstance(item, dict)]
+        rows = [item for item in sessions if isinstance(item, dict)]
+        entries = [TerminalCatalogEntry.from_json(item) for item in rows]
+        if any("seatRole" not in item for item in rows):
+            self._write_disk(entries)
+        return entries
 
     def _write_disk(self, entries: list[TerminalCatalogEntry]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

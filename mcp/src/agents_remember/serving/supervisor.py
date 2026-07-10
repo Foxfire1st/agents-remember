@@ -121,6 +121,7 @@ class SupervisorFinding:
     detail: str
     session_id: str | None = None
     leaf_key: str | None = None
+    seat_role: str | None = None
     source_id: str | None = None
 
 
@@ -234,6 +235,7 @@ def evaluate_pane_findings(
                 detail=classification.signal,
                 session_id=entry.id,
                 leaf_key=entry.leaf_key,
+                seat_role=entry.binding_role,
             )
         )
     return findings
@@ -253,6 +255,7 @@ def evaluate_expectation_findings(
             detail=row.kind,
             session_id=row.subjectAgentId,
             leaf_key=row.leafKey,
+            seat_role=row.seatRole,
             source_id=row.id,
         )
         for row in store.overdue(now=now)
@@ -300,6 +303,7 @@ def evaluate_turn_report_findings(
                     detail=str(path),
                     session_id=row.subjectAgentId,
                     leaf_key=row.leafKey,
+                    seat_role=row.seatRole,
                     source_id=row.id,
                 )
             )
@@ -327,7 +331,8 @@ def evaluate_inbox_findings(
             kind="inbox-redeliverable",
             detail=entry.messageKind,
             session_id=entry.agentId,
-            leaf_key=None,
+            leaf_key=entry.leafKey,
+            seat_role=entry.seatRole,
             source_id=entry.id,
         )
         for entry in entries
@@ -357,7 +362,8 @@ def evaluate_ladder_terminal_findings(
             kind="inbox-ladder-terminal",
             detail="ladder-resolved",
             session_id=entry.agentId,
-            leaf_key=None,
+            leaf_key=entry.leafKey,
+            seat_role=entry.seatRole,
             source_id=entry.id,
         )
         for entry in entries.values()
@@ -452,6 +458,7 @@ def evaluate_seat_liveness_findings(
                     detail="turn-state-stale",
                     session_id=entry.id,
                     leaf_key=entry.leaf_key,
+                    seat_role=entry.binding_role,
                 )
             )
         elif entry.liveness_failures > 0:
@@ -461,6 +468,7 @@ def evaluate_seat_liveness_findings(
                     detail="liveness-degraded",
                     session_id=entry.id,
                     leaf_key=entry.leaf_key,
+                    seat_role=entry.binding_role,
                 )
             )
     return findings
@@ -489,7 +497,8 @@ def evaluate_escalation_findings(
                     kind="escalation-due",
                     detail=entry.messageKind,
                     session_id=entry.agentId,
-                    leaf_key=None,
+                    leaf_key=entry.leafKey,
+                    seat_role=entry.seatRole,
                     source_id=entry.id,
                 )
             )
@@ -504,7 +513,7 @@ def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[Supervisor
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
             continue
-        if entry.spawn_role not in ("worker", "manager"):
+        if entry.binding_role not in ("worker", "manager"):
             continue
         if entry.spawned_by_session is None:
             continue  # no recorded provenance at all is a legacy/unrouted row, not a dead owner
@@ -516,6 +525,7 @@ def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[Supervisor
                 detail="owner-dead",
                 session_id=entry.id,
                 leaf_key=entry.leaf_key,
+                seat_role=entry.binding_role,
             )
         )
     return findings
@@ -613,6 +623,7 @@ def _redeliver(
         submit=True,
         current=sweep.inbox_current,
         redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
+        delivery_at=now.isoformat(),
     )
     sweep.remember(updated)
     _log_event(
@@ -747,6 +758,7 @@ def _auto_nudge(
         now=now,
         sweep=sweep,
         leaf_key=finding.leaf_key,
+        seat_role=finding.seat_role,
         subject_agent_id=finding.session_id,
     )
     _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
@@ -777,7 +789,12 @@ def _mark_expectation_missed(
 
 
 def _find_coalescible(
-    entries: dict[str, OperatorInboxEntry], *, ask: str, message_kind: InboxMessageKind
+    entries: dict[str, OperatorInboxEntry],
+    *,
+    ask: str,
+    message_kind: InboxMessageKind,
+    leaf_key: str | None,
+    seat_role: str | None,
 ) -> OperatorInboxEntry | None:
     """The ruled coalescing lookup (developer, 2026-07-09): a supervisor-authored condition that
     is still pending under the SAME ask is the row to renew -- matched on content, not address,
@@ -788,6 +805,8 @@ def _find_coalescible(
             and row.createdBy == "supervisor"
             and row.messageKind == message_kind
             and row.ask == ask
+            and row.leafKey == leaf_key
+            and row.seatRole == seat_role
         ):
             return row
     return None
@@ -803,6 +822,7 @@ def _post_owner_signal(
     now: datetime,
     sweep: _SweepState | None = None,
     leaf_key: str | None = None,
+    seat_role: str | None = None,
     subject_agent_id: str | None = None,
 ) -> InboxDeliveryState:
     """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
@@ -813,13 +833,20 @@ def _post_owner_signal(
     appending a duplicate -- the storm that took the host down was this function minting a new
     pending row per re-fire, each of which the ladder then escalated into more rows."""
     entries = sweep.inbox_current if sweep is not None else ctx.inbox_store.current()
-    existing = _find_coalescible(entries, ask=ask, message_kind=message_kind)
+    existing = _find_coalescible(
+        entries,
+        ask=ask,
+        message_kind=message_kind,
+        leaf_key=leaf_key,
+        seat_role=seat_role,
+    )
     if existing is not None:
         entry = ctx.inbox_store.renew(
             existing.id,
             now=now.isoformat(),
             response=response,
             leaf_key=leaf_key,
+            seat_role=seat_role,
             subject_agent_id=subject_agent_id,
             owner_role=owner.role,
             owner_agent_id=owner.agent_id,
@@ -841,6 +868,7 @@ def _post_owner_signal(
             recipient_role=owner.role,
             message_kind=message_kind,
             leaf_key=leaf_key,
+            seat_role=seat_role,
             subject_agent_id=subject_agent_id,
             owner_role=owner.role,
             owner_agent_id=owner.agent_id,
@@ -858,6 +886,7 @@ def _post_owner_signal(
         submit=True,
         current=sweep.inbox_current if sweep is not None else None,
         redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
+        delivery_at=now.isoformat(),
     )
     if sweep is not None:
         sweep.remember(delivered)
@@ -886,6 +915,7 @@ def _signal_emit(
         target_lifecycle_id=owner.lifecycle_id,
         target_role=owner.role,
         leaf_key=finding.leaf_key,
+        seat_role=finding.seat_role,
         finding_kind=finding.kind,
         detail=finding.detail,
         now=now,
@@ -904,6 +934,7 @@ def _signal_emit(
         now=now,
         sweep=sweep,
         leaf_key=finding.leaf_key,
+        seat_role=finding.seat_role,
         subject_agent_id=finding.session_id,
     )
     signal_record = SupervisorSignalRecord(
@@ -913,6 +944,7 @@ def _signal_emit(
         targetLifecycleId=owner.lifecycle_id,
         targetRole=owner.role,
         leafKey=finding.leaf_key,
+        seatRole=finding.seat_role,
         findingKind=finding.kind,
         detail=finding.detail,
         deliveryState=delivery_state,
@@ -927,6 +959,7 @@ def _signal_emit(
             "detail": finding.detail,
             "sessionId": finding.session_id,
             "leafKey": finding.leaf_key,
+            "seatRole": finding.seat_role,
             "ownerRole": owner.role,
             "deliveryState": delivery_state,
         },
@@ -982,6 +1015,7 @@ def _escalate_rung(
         submit=True,
         current=sweep.inbox_current,
         redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
+        delivery_at=now.isoformat(),
     )
     sweep.remember(delivered)
     delivery_state = delivered.deliveryState
@@ -1010,6 +1044,7 @@ def _escalate_rung(
             detail="ladder-resolved",
             session_id=advanced.agentId,
             leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
             source_id=advanced.id,
         )
         _resolve_ladder_terminal(ctx, terminal_finding, now=now, sweep=sweep)
@@ -1049,11 +1084,11 @@ def _respawn_suspect(
         edge="supervisor-respawn",
     )
     orphaned: list[str] = []
-    if entry.spawn_role == "manager":
+    if entry.binding_role == "manager":
         orphaned = [worker.id for worker in find_orphaned_workers(ctx.catalog, manager_agent_id=agent_id)]
     delivery_state = "skipped"
     if owner.agent_id is not None or owner.role is not None:
-        ask = f"Respawn directive: seat {agent_id} ({entry.spawn_role}) retired as suspect (R3)"
+        ask = f"Respawn directive: seat {agent_id} ({entry.binding_role}) retired as suspect (R3)"
         response = f"Pending queue for the successor: {pending_queue}. Orphaned workers: {orphaned}."
         delivery_state = _post_owner_signal(
             ctx,
@@ -1070,6 +1105,7 @@ def _respawn_suspect(
         {
             "agentId": agent_id,
             "spawnRole": entry.spawn_role,
+            "seatRole": entry.binding_role,
             "pendingQueue": pending_queue,
             "orphanedWorkers": orphaned,
             "ownerRole": owner.role,
@@ -1111,6 +1147,7 @@ def _signal_dead_upstream(
         now=now,
         sweep=sweep,
         leaf_key=finding.leaf_key,
+        seat_role=finding.seat_role,
         subject_agent_id=finding.session_id,
     )
     _log_event(
@@ -1119,6 +1156,7 @@ def _signal_dead_upstream(
         {
             "sessionId": finding.session_id,
             "leafKey": finding.leaf_key,
+            "seatRole": finding.seat_role,
             "managerRole": owner.role,
             "managerAgentId": owner.agent_id,
             "deliveryState": delivery_state,

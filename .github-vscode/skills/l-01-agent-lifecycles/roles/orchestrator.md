@@ -34,8 +34,9 @@ exception):
 
 0. **Task-seat takeover:** if the developer declared this chat the orchestrator for a named task,
    first run `../SKILL.md`'s Developer-Declared Task-Seat Takeover checklist: open that task doc,
-   attach this dashboard terminal catalog session to the qualified leaf key, rename the session,
-   and verify the catalog/dashboard row.
+   attach this dashboard terminal catalog session to the qualified leaf key while explicitly
+   claiming the `orchestrator` role, rename the session, and verify that pair in the
+   catalog/dashboard row.
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the architect/developer relay — and **say it back**.
@@ -230,8 +231,9 @@ Dispatch independent ready masters in parallel by default up to
 name a gate, a shared-file one-writer dependency, or an explicit ruling. For each ready master
 (dependencies integrated into super), call `spawn_agent_session(manager)` with a brief compiled from
 `../templates/manager-brief.md` (`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key
-`<repository>/<master>/<docId>`; the brief carries the load-bearing base fact: master branches
-off the **current super**, never off main);
+`<repository>/<master>/<docId>`; together the environment role and qualified leaf claim the
+manager's `(leaf, role)` seat; the brief carries the load-bearing base fact: master branches off
+the **current super**, never off main);
 process and ack the pending signals the L2 supervisor sweep wakes you with — turn-report
 artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
 (**watcher ban, uniform-mechanism ruling 2026-07-07:** the supervisor sweep is the one mechanism,

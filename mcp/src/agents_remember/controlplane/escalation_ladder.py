@@ -173,7 +173,7 @@ def seat_is_suspect(
     if agent_id is None:
         return False
     live = catalog.get(agent_id)
-    if live is not None and live.spawn_role == "architect":
+    if live is not None and live.binding_role == "architect":
         return False
     if is_seat_dead(catalog, agent_id):
         return True

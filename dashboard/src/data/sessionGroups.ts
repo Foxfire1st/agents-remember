@@ -1,5 +1,5 @@
 import type { EnclosureNode, TaskDocNode } from "../types/projection";
-import type { OpenSession } from "./sessions";
+import { sessionSeatRole, type OpenSession } from "./sessions";
 import { isOrchestrationDoc, pathDir } from "./taskHierarchy";
 import { qualifiedLeafKey } from "./taskIdentity";
 
@@ -111,7 +111,7 @@ export function groupSessions(input: {
         (doc.repository === repo && (doc.orchestrates ?? []).includes(folder));
     });
     const hasCommand = deckExists && members.some((session) =>
-      (session.spawnRole !== undefined && COMMAND_ROLES.has(session.spawnRole)) ||
+      COMMAND_ROLES.has(sessionSeatRole(session)) ||
       (session.leafKey !== undefined && orchestrationKeys.has(session.leafKey)),
     );
     const kind = hasCommand ? "command" : "master";

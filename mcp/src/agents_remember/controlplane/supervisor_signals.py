@@ -29,6 +29,7 @@ class SupervisorSignalRecord(BaseModel):
     targetLifecycleId: str | None = None
     targetRole: AgentRole | None = None
     leafKey: str | None = None
+    seatRole: str | None = None
     findingKind: str
     detail: str
     deliveryState: InboxDeliveryState
@@ -87,6 +88,7 @@ class SupervisorSignalCooldownStore:
         leaf_key: str | None,
         finding_kind: str,
         detail: str,
+        seat_role: str | None = None,
         records: list[SupervisorSignalRecord] | None = None,
     ) -> SupervisorSignalRecord | None:
         source = self.read() if records is None else records
@@ -98,6 +100,7 @@ class SupervisorSignalCooldownStore:
             and record.targetLifecycleId == target_lifecycle_id
             and record.targetRole == target_role
             and record.leafKey == leaf_key
+            and record.seatRole == seat_role
             and record.findingKind == finding_kind
             and record.detail == detail
         ]
@@ -114,6 +117,7 @@ class SupervisorSignalCooldownStore:
         detail: str,
         now: datetime,
         cooldown_seconds: float,
+        seat_role: str | None = None,
         records: list[SupervisorSignalRecord] | None = None,
     ) -> bool:
         """Whether an identical signal was sent within the cooldown window.
@@ -130,6 +134,7 @@ class SupervisorSignalCooldownStore:
             target_lifecycle_id=target_lifecycle_id,
             target_role=target_role,
             leaf_key=leaf_key,
+            seat_role=seat_role,
             finding_kind=finding_kind,
             detail=detail,
             records=records,

@@ -538,7 +538,7 @@ def _role_recipients(coordination_root: Path, role: AgentRole) -> list[str | Non
     sessions: list[str | None] = [
         entry.id
         for entry in catalog.list()
-        if entry.status == "running" and entry.kind == "harness" and entry.spawn_role == role
+        if entry.status == "running" and entry.kind == "harness" and entry.binding_role == role
     ]
     if sessions:
         return sessions

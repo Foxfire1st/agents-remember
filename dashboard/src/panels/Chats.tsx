@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 
 import { css } from "../../styled-system/css";
 import {
+  attachSeatRole,
   createSession,
   fromTerminalSessionInfo,
   notifySessionCatalogChanged,
@@ -312,15 +313,15 @@ export function Chats({
   // Attach or move the active session to ANY chosen leaf via the server (the uniqueness arbiter) — NOT
   // just the leaf you happen to be viewing. On success bind the leaf locally + broadcast the catalog
   // change; on 409 the leaf already has a same-role running session, so surface a note instead of binding.
-  const attachActiveLeaf = async (leafKey: string) => {
+  const attachActiveLeaf = async (leafKey: string, seatRole: string) => {
     if (!activeSession || !activeSessionIsRunning || !leafKey || activeSession.leafKey === leafKey) return;
     setLeafAttachError(null);
-    const result = await attachSessionToLeaf(activeSession.id, leafKey);
+    const result = await attachSessionToLeaf(activeSession.id, leafKey, seatRole);
     if (result === "ok") {
-      sessionStore.getState().applyLeafAssignment(activeSession.id, leafKey);
+      sessionStore.getState().applyLeafAssignment(activeSession.id, leafKey, seatRole);
       notifySessionCatalogChanged("leaf", activeSession.id);
     } else if (result === "leaf-taken") {
-      setLeafAttachError("leaf already has a chat");
+      setLeafAttachError(`leaf already has a ${seatRole} seat`);
     } else {
       setLeafAttachError("could not attach to leaf");
     }
@@ -415,10 +416,12 @@ export function Chats({
           <LeafAttachPicker
             tree={leafTree}
             contextMaster={pickerContextMaster}
-            onPick={(leafKey) => void attachActiveLeaf(leafKey)}
+            onPick={(leafKey, seatRole) => void attachActiveLeaf(leafKey, seatRole)}
             testId="chats-attach-leaf-picker"
             label={activeSession.leafKey ? "Move leaf" : "Attach to leaf"}
             align="left"
+            seatRole={attachSeatRole(activeSession)}
+            roleOptions={activeSession.kind === "terminal" ? ["terminal"] : undefined}
           />
         ) : null}
         {leafAttachError ? (

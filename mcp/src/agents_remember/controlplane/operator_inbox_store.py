@@ -227,6 +227,7 @@ class OperatorInboxStore:
         now: str,
         response: str | None = None,
         leaf_key: str | None = None,
+        seat_role: str | None = None,
         subject_agent_id: str | None = None,
         owner_role: AgentRole | None = None,
         owner_agent_id: str | None = None,
@@ -248,6 +249,8 @@ class OperatorInboxStore:
             update["response"] = response
         if leaf_key is not None:
             update["leafKey"] = leaf_key
+        if seat_role is not None:
+            update["seatRole"] = seat_role
         if subject_agent_id is not None:
             update["subjectAgentId"] = subject_agent_id
         if readdress:

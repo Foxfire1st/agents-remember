@@ -261,6 +261,7 @@ describe("RailChat create from anywhere (L5)", () => {
     ); // NO leafKey
     // Drill-down picker: open it, then pick the leaf (a lone leaf with no master doc shows at top level).
     fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker-role-worker"));
     const leaf = await findByTestId("rail-attach-leaf-picker-leaf");
     expect(leaf.getAttribute("data-leaf-key")).toBe(LEAF_KEY);
 
@@ -291,6 +292,7 @@ describe("RailChat create from anywhere (L5)", () => {
     );
 
     fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker-role-worker"));
     const leaves = await findAllByTestId("rail-attach-leaf-picker-leaf");
     const next = leaves.find((leaf) => leaf.getAttribute("data-leaf-key") === SECOND_LEAF_KEY);
     expect(next).not.toBeUndefined();
@@ -320,10 +322,11 @@ describe("RailChat create from anywhere (L5)", () => {
 
     const { findByTestId } = render(<RailChat taskDocuments={[leafDoc()]} />); // NO leafKey
     fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker-role-worker"));
     fireEvent.click(await findByTestId("rail-attach-leaf-picker-leaf"));
 
     const note = await findByTestId("rail-leaf-attach-error");
-    expect(note.textContent).toContain("leaf already has a chat");
+    expect(note.textContent).toContain("leaf already has a worker seat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
     expect(pasteDraftToSession).not.toHaveBeenCalled();
   });
@@ -346,6 +349,7 @@ describe("RailChat create from anywhere (L5)", () => {
 
     const { findByTestId } = render(<RailChat taskDocuments={[leafDoc()]} />);
     fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("rail-attach-leaf-picker-role-worker"));
     fireEvent.click(await findByTestId("rail-attach-leaf-picker-leaf"));
 
     const note = await findByTestId("rail-leaf-context-note");
@@ -354,6 +358,25 @@ describe("RailChat create from anywhere (L5)", () => {
 });
 
 describe("RailChat chat + terminal split (L5 fix 2)", () => {
+  it("shows the current leaf binding role instead of stale spawn provenance", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    sessionStore.getState().hydrate([
+      {
+        id: "c1",
+        label: "Claude Code 1",
+        kind: "harness",
+        spawnRole: "worker",
+        seatRole: "reviewer",
+        leafKey: LEAF_KEY,
+        status: "running",
+      },
+    ]);
+
+    const { findByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+
+    expect((await findByTestId("rail-pane-chat")).textContent).toContain("reviewer · Claude Code 1");
+  });
+
   it("splits into a chat pane and a terminal pane when the leaf has both", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
     sessionStore.getState().hydrate([

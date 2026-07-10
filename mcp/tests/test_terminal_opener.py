@@ -70,7 +70,12 @@ def _detected(_command: str) -> str | None:
     return "/usr/bin/harness"
 
 
-def _running_chat(session_id: str, *, leaf_key: str) -> TerminalCatalogEntry:
+def _running_chat(
+    session_id: str,
+    *,
+    leaf_key: str,
+    spawn_role: str | None = None,
+) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
         label="Claude Code",
@@ -84,6 +89,7 @@ def _running_chat(session_id: str, *, leaf_key: str) -> TerminalCatalogEntry:
         last_attached_at="2026-07-04T00:00:00Z",
         status="running",
         leaf_key=leaf_key,
+        spawn_role=spawn_role,
     )
 
 
@@ -123,6 +129,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.harness, "claude")
         # The AR_SPAWN_ROLE riding the spawn env is recorded on the durable row (L14).
         self.assertEqual(entry.spawn_role, "worker")
+        self.assertEqual(entry.binding_role, "worker")
         # The knob env was seeded into the detached tmux spawn.
         self.assertEqual(
             self.host.ensured[0]["env"],
@@ -132,6 +139,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.to_json()["spawnedBySession"], "manager-9")
         self.assertEqual(entry.to_json()["spawnedByLifecycle"], "LC-manager")
         self.assertEqual(entry.to_json()["spawnRole"], "worker")
+        self.assertEqual(entry.to_json()["seatRole"], "worker")
 
     def test_reopen_preserves_spawn_role_and_hand_open_records_none(self) -> None:
         # Role provenance is set once at first spawn and survives a role-less re-open (the same
@@ -150,12 +158,78 @@ class OpenTerminalSessionTests(unittest.TestCase):
 
     def test_leaf_taken_surfaces_owner_without_spawning(self) -> None:
         self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))
+        self.host.known.add("ar-owner-1")
         result = self._open(session_id="intruder", leaf_key="repo/master/leaf-1")
         self.assertEqual(result.status, "leaf-taken")
         self.assertEqual(result.owner_session_id, "owner-1")
         # Never spawned, never upserted the intruder.
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("intruder"))
+
+    def test_different_roles_share_leaf_and_dead_same_role_is_replaced(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_running_chat("worker", leaf_key=leaf, spawn_role="worker"))
+        self.host.known.add("ar-worker")
+
+        reviewer = self._open(
+            session_id="reviewer",
+            leaf_key=leaf,
+            env={"AR_SPAWN_ROLE": "reviewer"},
+        )
+        self.assertEqual(reviewer.status, "opened")
+
+        self.host.known.discard("ar-worker")
+        replacement = self._open(
+            session_id="worker-2",
+            leaf_key=leaf,
+            env={"AR_SPAWN_ROLE": "worker"},
+        )
+        self.assertEqual(replacement.status, "opened")
+        prior_worker = self.catalog.get("worker")
+        next_worker = self.catalog.get("worker-2")
+        reviewer_entry = self.catalog.get("reviewer")
+        assert prior_worker is not None and next_worker is not None and reviewer_entry is not None
+        self.assertEqual(prior_worker.status, "exited")
+        self.assertEqual(next_worker.binding_role, "worker")
+        self.assertEqual(reviewer_entry.binding_role, "reviewer")
+
+    def test_pipeline_roles_and_manager_anchor_share_one_canonical_leaf(self) -> None:
+        leaf = "repo/master/leaf-1"
+        first_worker = self._open(
+            session_id="worker-1",
+            leaf_key=leaf,
+            env={"AR_SPAWN_ROLE": "worker"},
+        )
+        self.assertEqual(first_worker.status, "opened")
+        self.catalog.mark_exited("worker-1")
+
+        for session_id, role in (
+            ("curator", "curator"),
+            ("worker-2", "worker"),
+            ("reviewer", "reviewer"),
+            ("manager", "manager"),
+        ):
+            result = self._open(
+                session_id=session_id,
+                leaf_key=leaf,
+                env={"AR_SPAWN_ROLE": role},
+            )
+            self.assertEqual(result.status, "opened")
+
+        live = {
+            entry.id: entry.binding_role
+            for entry in self.catalog.list()
+            if entry.leaf_key == leaf and entry.status == "running"
+        }
+        self.assertEqual(
+            live,
+            {
+                "curator": "curator",
+                "worker-2": "worker",
+                "reviewer": "reviewer",
+                "manager": "manager",
+            },
+        )
 
     def test_bad_kind_reports_detail(self) -> None:
         result = self._open(kind="bogus")

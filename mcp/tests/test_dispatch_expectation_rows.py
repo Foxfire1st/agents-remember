@@ -87,6 +87,7 @@ class SpawnExpectationRowTests(unittest.TestCase):
             leaf_key="repo/master/leaf-1",
             context="You are the worker.",
             submit=True,
+            env={"AR_SPAWN_ROLE": "worker"},
             host=self.host,  # type: ignore[arg-type]
             which=_detected,
             paster=_FakePaster(),  # type: ignore[arg-type]
@@ -97,6 +98,7 @@ class SpawnExpectationRowTests(unittest.TestCase):
         self.assertEqual(kinds, ["briefed-by", "turn-report-by"])
         for row in rows:
             self.assertEqual(row.sourceId, "worker-1")
+            self.assertEqual(row.seatRole, "worker")
 
     def test_a_bare_command_chat_with_no_leaf_key_gets_no_turn_report_by(self) -> None:
         payload = spawn_agent_session_payload(

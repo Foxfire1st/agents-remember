@@ -30,12 +30,12 @@ from agents_remember.serving.harnesses import (
     knob_argv,
     unknown_harness_detail,
 )
+from agents_remember.serving.seat_binding import migrated_seat_role
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
     TerminalSessionKind,
-    role_for_kind,
 )
 from agents_remember.serving.terminal_leaf_assignment import leaf_conflict_owner
 
@@ -49,6 +49,7 @@ class OpenTerminalResult:
     status: OpenTerminalStatus
     entry: TerminalCatalogEntry | None = None
     kind: TerminalSessionKind | None = None
+    seat_role: str | None = None
     owner_session_id: str | None = None
     detail: str | None = None
 
@@ -179,19 +180,26 @@ def open_terminal_session(
         return OpenTerminalResult(status="bad-kind", detail=str(exc))
 
     resolved_kind: TerminalSessionKind = "harness" if kind == "harness" else "terminal"
-    # Server-authoritative uniqueness, scoped to the launch role: a taken leaf is refused so two chats
-    # never mingle on one leaf. Checked immediately before the ensure/upsert in the single-process app
-    # + atomic JSON store, so check-then-write is effectively atomic (the client guard is advisory).
+    existing = catalog.get(session_id)
+    seat_role = migrated_seat_role(
+        persisted=existing.seat_role if existing is not None else None,
+        spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),
+        kind=resolved_kind,
+    )
+    # Server-authoritative uniqueness is scoped to the derived seat role. Checked immediately before
+    # ensure/upsert so only a live owner of the same pair can refuse this launch.
     owner = leaf_conflict_owner(
         catalog,
         leaf_key=leaf_key,
         session_id=session_id,
-        role=role_for_kind(resolved_kind),
+        seat_role=seat_role,
+        host=host,
     )
     if owner is not None:
         return OpenTerminalResult(
             status="leaf-taken",
             kind=resolved_kind,
+            seat_role=seat_role,
             owner_session_id=owner,
         )
 
@@ -206,7 +214,6 @@ def open_terminal_session(
         env=spawn_env,
     )
     attached_at = now_iso()
-    existing = catalog.get(session_id)
     resolved_label = label or (
         existing.label if existing else _terminal_label(resolved_kind, harness, session_id)
     )
@@ -230,6 +237,7 @@ def open_terminal_session(
         status="running",
         # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already owns.
         leaf_key=preserved(leaf_key, existing.leaf_key if existing else None),
+        seat_role=seat_role,
         replacement_for_leaf=preserved(
             replacement_for_leaf, existing.replacement_for_leaf if existing else None
         ),
@@ -270,4 +278,6 @@ def open_terminal_session(
         session_log_path=existing.session_log_path if existing else None,
     )
     catalog.upsert(entry)
-    return OpenTerminalResult(status="opened", entry=entry, kind=resolved_kind)
+    return OpenTerminalResult(
+        status="opened", entry=entry, kind=resolved_kind, seat_role=entry.binding_role
+    )

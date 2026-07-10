@@ -470,6 +470,7 @@ describe("Chats session-tab persistence (6e-4)", () => {
     // Drill-down picker: open it, then pick the leaf (a lone leaf with no master doc shows at top level),
     // labelled by its task-doc title.
     fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker-role-worker"));
     const leaf = await findByTestId("chats-attach-leaf-picker-leaf");
     expect(leaf.getAttribute("data-leaf-key")).toBe(LEAF_KEY);
     expect(leaf.textContent).toContain("Sidebar chat attachment");
@@ -500,6 +501,7 @@ describe("Chats session-tab persistence (6e-4)", () => {
 
     expect(await findByTestId("chats-leaf-badge")).not.toBeNull();
     fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker-role-worker"));
     const leaves = await findAllByTestId("chats-attach-leaf-picker-leaf");
     const next = leaves.find((leaf) => leaf.getAttribute("data-leaf-key") === SECOND_LEAF_KEY);
     expect(next).not.toBeUndefined();
@@ -523,10 +525,11 @@ describe("Chats session-tab persistence (6e-4)", () => {
 
     const { findByTestId } = render(<Chats taskDocuments={[leafDoc()]} />);
     fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker-role-worker"));
     fireEvent.click(await findByTestId("chats-attach-leaf-picker-leaf"));
 
     const note = await findByTestId("chats-leaf-attach-error");
-    expect(note.textContent).toContain("leaf already has a chat");
+    expect(note.textContent).toContain("leaf already has a worker seat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
   });
 

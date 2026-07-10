@@ -2,12 +2,14 @@ import { lazy, Suspense, useEffect, useState } from "react";
 
 import { css } from "../../styled-system/css";
 import {
+  attachSeatRole,
   createSession,
   notifySessionCatalogChanged,
   pasteDraftToSession,
   registerConnection,
   sendToSession,
   sessionRole,
+  sessionSeatRole,
   sessionStore,
   useSessions,
   type OpenSession,
@@ -33,9 +35,9 @@ import { SessionComposer } from "./SessionComposer";
 // Create-from-anywhere (L5 fix): a chat is NEVER gated on a leaf. When a leaf is being viewed the rail
 // shows that leaf's chat + (optional) terminal; when NO leaf is viewed it shows the latest UNATTACHED
 // (free) chat/terminal and still lets you start one. A free chat carries an "Attach to leaf ▾" picker so
-// it can be moved onto ANY projected leaf afterwards (the chat then "moves to that leaf"). Per leaf there
-// is at most one CHAT (an agent: Claude Code / Codex / Pi.dev — the unique slot) on top and, when one
-// exists, an optional TERMINAL (a plain shell) split below it. Each pane reuses the same `Terminal` +
+// it can be moved onto ANY projected leaf afterwards (the chat then "moves to that leaf"). The focused
+// agent seat and optional plain terminal render their current binding roles; the full multi-role fleet
+// remains available in the session rail. Each pane reuses the same `Terminal` +
 // `SessionComposer` + the shared connection registry as the Chats page (one xterm/WebSocket per session);
 // the Chats-page row and this rail surface the same session because the registry is shared.
 
@@ -335,18 +337,18 @@ export function RailChat({
   // The master→…→leaf tree the attach picker drills (nested masters supported). The server is the
   // uniqueness arbiter; a 409 surfaces a note instead of a bind.
   const leafTree = buildTaskTree(taskDocuments);
-  const attachChatToLeaf = async (sessionId: string, lk: string) => {
+  const attachChatToLeaf = async (sessionId: string, lk: string, seatRole: string) => {
     if (!lk) return;
     const current = sessionStore.getState().sessions.find((session) => session.id === sessionId);
     if (current?.leafKey === lk) return;
     setLeafAttachError(null);
-    const result = await attachSessionToLeaf(sessionId, lk);
+    const result = await attachSessionToLeaf(sessionId, lk, seatRole);
     if (result === "ok") {
-      sessionStore.getState().applyLeafAssignment(sessionId, lk);
+      sessionStore.getState().applyLeafAssignment(sessionId, lk, seatRole);
       notifySessionCatalogChanged("leaf", sessionId);
       await deliverLeafContext(sessionId, lk);
     } else if (result === "leaf-taken") {
-      setLeafAttachError("leaf already has a chat");
+      setLeafAttachError(`leaf already has a ${seatRole} seat`);
     } else {
       setLeafAttachError("could not attach to leaf");
     }
@@ -416,10 +418,11 @@ export function RailChat({
                 <LeafAttachPicker
                   tree={leafTree}
                   contextMaster={contextMaster}
-                  onPick={(lk) => void attachChatToLeaf(chatSession.id, lk)}
+                  onPick={(lk, seatRole) => void attachChatToLeaf(chatSession.id, lk, seatRole)}
                   testId="rail-attach-leaf-picker"
                   label={chatSession.leafKey ? "Move leaf" : "Attach to leaf"}
                   align="right"
+                  seatRole={attachSeatRole(chatSession)}
                 />
                 {leafAttachError ? (
                   <span className={attachError} data-testid="rail-leaf-attach-error">
@@ -471,11 +474,12 @@ function Pane({
   session: OpenSession;
   onTerminate: (id: string) => void;
 }) {
+  const seatRole = sessionSeatRole(session);
   return (
     <div className={pane} data-testid={`rail-pane-${role}`}>
       <div className={paneHeader}>
-        <span className={paneTitle} title={session.label}>
-          {session.label}
+        <span className={paneTitle} title={`${seatRole} · ${session.label}`}>
+          {seatRole} · {session.label}
         </span>
         <button
           type="button"

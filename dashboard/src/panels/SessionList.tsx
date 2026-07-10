@@ -3,7 +3,7 @@ import { GridList, GridListItem } from "react-aria-components";
 
 import { css, cva, cx } from "../../styled-system/css";
 import type { GroupedSessions, SessionGroup } from "../data/sessionGroups";
-import type { OpenSession } from "../data/sessions";
+import { sessionSeatRole, type OpenSession } from "../data/sessions";
 import { RankBadge } from "../grammar/RankBadge";
 
 // The session switcher (slice 6e-2c): the open terminal/chat sessions as a left-rail list, replacing
@@ -85,7 +85,7 @@ const statusBadge = css({
   borderRadius: "2px",
   paddingInline: "0.25rem",
 });
-// The spawn-role chip (L14, sketch vocabulary): who this chat IS in the run. Colour keys the l-01
+// The binding-role chip: who this chat currently IS in the run. Colour keys the l-01
 // seat — command seats glow gold/purple to match their insignia; the worker/reviewer lanes reuse the
 // existing progress/attention hues. Unknown roles fall through to the muted base (never throw).
 const roleChip = cva({
@@ -280,19 +280,19 @@ function orderedVisibleMembers(
   };
   const compare = (left: OpenSession, right: OpenSession) => {
     const liveDelta = Number((right.status ?? "running") === "running") - Number((left.status ?? "running") === "running");
-    return liveDelta || (roleRank[left.spawnRole ?? ""] ?? 4) - (roleRank[right.spawnRole ?? ""] ?? 4) || left.id.localeCompare(right.id);
+    return liveDelta || (roleRank[sessionSeatRole(left)] ?? 4) - (roleRank[sessionSeatRole(right)] ?? 4) || left.id.localeCompare(right.id);
   };
   const roots = members.filter((session) => !session.spawnedBySession || !members.some((parent) => parent.id === session.spawnedBySession));
   roots.sort(compare);
   const output: Array<{ session: OpenSession; depth: 0 | 1; hasChildren: boolean }> = [];
   const emit = (parent: OpenSession, depth: 0 | 1) => {
     const nested = (children.get(parent.id) ?? []).sort(compare);
-    const hasChildren = parent.spawnRole === "manager" && nested.length > 0;
+    const hasChildren = sessionSeatRole(parent) === "manager" && nested.length > 0;
     output.push({ session: parent, depth, hasChildren });
     // A non-manager parent (normally the pinned orchestrator) does not own collapse state, but
     // its descendants must still be emitted. Deeper chains remain visible at the second rail
     // level, preserving the max-two-indent contract without dropping any member.
-    if (parent.spawnRole !== "manager" || !collapsedManagers[parent.id]) {
+    if (sessionSeatRole(parent) !== "manager" || !collapsedManagers[parent.id]) {
       for (const child of nested) {
         emit(child, depth === 0 ? 1 : 1);
       }
@@ -310,7 +310,8 @@ function leafKeySegments(leafKey: string): { repo: string; master: string; leafI
 
 function sessionTitle(session: OpenSession, leafName?: string): string {
   const parts = [leafName ? `${session.label} · ${leafName}` : session.label];
-  if (session.spawnRole) parts.push(`role: ${session.spawnRole}`);
+  const declaredRole = session.seatRole ?? session.spawnRole;
+  if (declaredRole) parts.push(`role: ${declaredRole}`);
   if (session.lifecycleId) parts.push(`lifecycle: ${session.lifecycleId}`);
   const segments = session.leafKey ? leafKeySegments(session.leafKey) : null;
   if (segments) {
@@ -358,8 +359,9 @@ export function SessionList({
       : undefined;
     // The full, untruncated identity for hover inspection.
     const fullName = sessionTitle(session, leafName);
-    const knownRole = session.spawnRole && KNOWN_ROLES.has(session.spawnRole)
-      ? (session.spawnRole as KnownRole)
+    const seatRole = session.seatRole ?? session.spawnRole;
+    const knownRole = seatRole && KNOWN_ROLES.has(seatRole)
+      ? (seatRole as KnownRole)
       : undefined;
     return (
       <GridListItem
@@ -384,14 +386,14 @@ export function SessionList({
             {collapsedManagers[session.id] ? "▶" : "▼"}
           </button>
         ) : depth === 1 ? <span className={managerToggle} aria-hidden="true" /> : null}
-        {session.spawnRole ? (
+        {seatRole ? (
           <span
             className={roleChip({ role: knownRole })}
-            title={session.spawnRole}
+            title={seatRole}
             data-known-role={knownRole ? "true" : "false"}
             data-testid={`chats-session-role-${session.id}`}
           >
-            {session.spawnRole}
+            {seatRole}
           </span>
         ) : null}
         <span className={label} title={fullName}>

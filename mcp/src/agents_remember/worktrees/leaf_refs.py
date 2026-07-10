@@ -42,6 +42,7 @@ class LeafRefResolutionError(TaskResolutionError):
         repo_name: str | None,
         reason: str,
         candidates: Iterable[str] = (),
+        guidance: str | None = None,
     ) -> None:
         self.ref = ref
         self.repo_name = repo_name
@@ -50,10 +51,13 @@ class LeafRefResolutionError(TaskResolutionError):
         self.status = "leaf-ref-ambiguous" if reason == "ambiguous" else "leaf-ref-not-found"
         scope = f" for repo {repo_name!r}" if repo_name else ""
         nearest = ", ".join(self.candidates) if self.candidates else "none"
-        super().__init__(
+        message = (
             f"leaf ref {ref!r} is {reason}{scope}; expected "
             f"{LEAF_REF_EXPECTED_FORM}; candidates: {nearest}"
         )
+        if guidance:
+            message = f"{message}; {guidance}"
+        super().__init__(message)
 
 
 @dataclass(frozen=True)

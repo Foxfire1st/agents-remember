@@ -75,12 +75,12 @@ def signal_leaf_key(
     sender = catalog.get(sender_agent_id) if sender_agent_id is not None else None
     if sender is None:
         return None
-    if sender.leaf_key is not None:
-        return sender.leaf_key
+    if sender.binding_leaf_key is not None:
+        return sender.binding_leaf_key
     prior_manager = (
         catalog.get(sender.spawned_by_session) if sender.spawned_by_session is not None else None
     )
-    return prior_manager.leaf_key if prior_manager is not None else None
+    return prior_manager.binding_leaf_key if prior_manager is not None else None
 
 
 def _direct_live_manager(
@@ -94,7 +94,7 @@ def _direct_live_manager(
         manager is None
         or manager.kind != "harness"
         or manager.status != "running"
-        or manager.spawn_role != "manager"
+        or manager.binding_role != "manager"
     ):
         return None
     return manager
@@ -106,7 +106,7 @@ def _live_managers(catalog: TerminalCatalog) -> list[TerminalCatalogEntry]:
         for entry in catalog.list()
         if entry.kind == "harness"
         and entry.status == "running"
-        and entry.spawn_role == "manager"
+        and entry.binding_role == "manager"
     ]
 
 
@@ -120,14 +120,14 @@ def _scoped_managers(
     linked_manager_ids = {
         entry.spawned_by_session
         for entry in catalog.list()
-        if entry.leaf_key == route_leaf and entry.spawned_by_session is not None
+        if entry.binding_leaf_key == route_leaf and entry.spawned_by_session is not None
     }
     return [
         manager
         for manager in managers
         if manager.id in linked_manager_ids
-        or manager.leaf_key == route_leaf
-        or (route_master is not None and _master_key(manager.leaf_key) == route_master)
+        or manager.binding_leaf_key == route_leaf
+        or (route_master is not None and _master_key(manager.binding_leaf_key) == route_master)
     ]
 
 
@@ -189,7 +189,7 @@ def _entry_carries_leaf_chain(
     leaf_key: str,
     manager_agent_id: str | None,
 ) -> bool:
-    if entry.leaf_key == leaf_key or (
+    if entry.binding_leaf_key == leaf_key or (
         manager_agent_id is not None and entry.id == manager_agent_id
     ):
         return True
@@ -199,7 +199,7 @@ def _entry_carries_leaf_chain(
     return bool(
         manager_agent_id is not None
         and entry.spawned_by_session == manager_agent_id
-        and entry.spawn_role in ("worker", "reviewer", "curator")
+        and entry.binding_role in ("worker", "reviewer", "curator")
         and entry.leaf_key is None
         and entry.replacement_for_leaf == leaf_key
     )
@@ -265,9 +265,9 @@ def derive_signal_owner(
     if sender_agent_id is None:
         return RoutedOwner()
     entry = catalog.get(sender_agent_id)
-    if entry is None or entry.spawn_role is None:
+    if entry is None:
         return RoutedOwner()
-    owner_role = _OWNER_ROLE_BY_SENDER_SPAWN_ROLE.get(entry.spawn_role)
+    owner_role = _OWNER_ROLE_BY_SENDER_SPAWN_ROLE.get(entry.binding_role)
     if owner_role is None:
         return RoutedOwner()
     if owner_role == "manager":
@@ -332,7 +332,7 @@ def derive_architect_owner(catalog: TerminalCatalog) -> RoutedOwner:
         if (
             entry.kind == "harness"
             and entry.status == "running"
-            and entry.spawn_role == "architect"
+            and entry.binding_role == "architect"
         ):
             return RoutedOwner(
                 role="architect", agent_id=entry.id, lifecycle_id=entry.lifecycle_id

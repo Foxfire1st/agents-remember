@@ -610,6 +610,7 @@ class TerminalWebSocketTests(unittest.TestCase):
                 "createdAt": response.json()["sessions"][0]["createdAt"],
                 "lastAttachedAt": response.json()["sessions"][0]["lastAttachedAt"],
                 "status": "running",
+                "seatRole": "terminal",
             },
         )
 
@@ -826,6 +827,7 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.catalog.upsert(
             _catalog_entry("seeker", cwd=self.tmp, tmux_name="ar-seeker").with_leaf_key(None)
         )
+        self.host.probe_names.update({"ar-owner", "ar-seeker"})
         with TestClient(self.app) as client:
             client.post("/api/terminal/owner/attach-leaf", json={"leafKey": leaf})
             response = client.post("/api/terminal/seeker/attach-leaf", json={"leafKey": leaf})

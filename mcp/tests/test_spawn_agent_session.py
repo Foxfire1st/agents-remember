@@ -349,6 +349,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
 
     def test_leaf_taken_is_surfaced_never_overridden(self) -> None:
         self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))
+        self.host.known.add("ar-owner-1")
         paster = _FakePaster()
         payload = self._spawn(session_id="intruder", leaf_key="repo/master/leaf-1", paster=paster)
         self.assertFalse(payload["ok"])

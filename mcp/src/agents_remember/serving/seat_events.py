@@ -35,6 +35,7 @@ def log_retire_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> N
                 "session": entry.id,
                 "label": entry.label,
                 "spawnRole": entry.spawn_role,
+                "seatRole": entry.binding_role,
                 "leafKey": entry.leaf_key,
                 "retiredBySession": entry.retired_by_session,
                 "retiredReason": entry.retired_reason,
@@ -58,6 +59,7 @@ def log_landed_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> N
                 "session": entry.id,
                 "label": entry.label,
                 "spawnRole": entry.spawn_role,
+                "seatRole": entry.binding_role,
                 "leafKey": entry.leaf_key,
                 "landedReason": entry.landed_reason,
                 "landedEdge": entry.landed_edge,
@@ -81,6 +83,7 @@ def log_rename_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> N
                 "label": entry.label,
                 "spawnedLabel": entry.spawned_label,
                 "spawnRole": entry.spawn_role,
+                "seatRole": entry.binding_role,
             },
         )
     )
@@ -101,6 +104,7 @@ def log_turn_state_change_event(config: McpRuntimeConfig, entry: TerminalCatalog
                 "label": entry.label,
                 "turnState": entry.turn_state,
                 "spawnRole": entry.spawn_role,
+                "seatRole": entry.binding_role,
             },
         )
     )

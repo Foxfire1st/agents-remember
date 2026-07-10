@@ -136,7 +136,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         return read_ar_files_payload(config, repo_id, files, refresh=refresh)
 
     @server.tool()
-    def attach_terminal_session_to_leaf(session_id: str, leaf_key: str) -> dict[str, Any]:
+    def attach_terminal_session_to_leaf(
+        session_id: str,
+        leaf_key: str,
+        role: str | None = None,
+    ) -> dict[str, Any]:
         """Move an existing hosted terminal/chat session to a durable task leaf.
 
         Reuses the dashboard terminal catalog's server-authoritative `(leaf, role)` uniqueness
@@ -147,6 +151,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             session_id=session_id,
             leaf_key=leaf_key,
+            role=role,
         )
 
     @server.tool()

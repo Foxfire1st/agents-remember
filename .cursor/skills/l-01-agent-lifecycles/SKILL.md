@@ -56,12 +56,14 @@ current dashboard chat to that leaf.
 
 Operational checklist:
 
-1. Resolve the named task to the **qualified** leaf key `<repository>/<master>/<docId>`.
+1. Resolve the named task to the **qualified** leaf key `<repository>/<master>/<docId>` and the
+   lifecycle role this seat is claiming.
 2. Use the dashboard terminal catalog session id for this chat — not `CLAUDE_CODE_SESSION_ID`, not
    `CODEX_THREAD_ID`.
-3. Call `attach_terminal_session_to_leaf` with that qualified leaf key.
+3. Call `attach_terminal_session_to_leaf` with that qualified leaf key and the claimed role.
 4. Rename the session to the seat label the developer expects.
-5. Verify the terminal catalog and dashboard row show the attachment before continuing.
+5. Verify the terminal catalog and dashboard row show that exact `(qualified leaf key, seat role)`
+   binding before continuing.
 
 If no dashboard terminal catalog session id can be found, record the blocker and ask for the
 missing attachment path. Do not claim the seat is attached until the catalog/dashboard row proves
@@ -149,8 +151,10 @@ handles a lifecycle id** — identity is server-side, anchored in the worktree c
 Rules: a tool call outside any lifecycle is **dropped, never misattributed**; `paused` is
 system-owned. **A spawned role that never touches mutating AR tools simply never instantiates a
 lifecycle — that is correct, not a violation.** A spawned role runs its **own** lifecycle when it
-runs one; it never adopts its spawner's. The session↔leaf association is the catalog binding made
-at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifecycle adoption.
+runs one; it never adopts its spawner's. The session↔task-seat association is the catalog binding
+made at spawn — the pair of **qualified** leaf key `<repository>/<master>/<docId>` and seat role —
+not lifecycle adoption. Different roles may coexist on one leaf; only a second live owner of the
+same `(qualified leaf key, seat role)` pair collides.
 
 **Notify-and-stop is safe by design (HFX2-L1..L4, landed):** ending a turn on
 `lifecycle_turn_end_notification` — or simply stopping once your artifact is written and nothing is

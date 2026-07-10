@@ -130,6 +130,24 @@ describe("groupSessions (L14 G1 command tree)", () => {
     expect(grouped.ungrouped).toEqual([]);
   });
 
+  it("uses the current binding role rather than stale spawn provenance for command styling", () => {
+    const grouped = groupSessions({
+      sessions: [
+        session({
+          id: "moved-manager",
+          spawnRole: "worker",
+          seatRole: "manager",
+          leafKey: "agents-remember/260706_management-repo/260706-L1",
+        }),
+      ],
+      taskDocuments: [SPRINT, COMMANDED_MASTER],
+      enclosures: [LIVE_ENCLOSURE],
+    });
+
+    expect(grouped.groups[0]?.kind).toBe("command");
+    expect(grouped.groups[0]?.tier).toBe("orchestration");
+  });
+
   it("keeps command-role sessions out of the deck when NO orchestration task exists (D3 flat run)", () => {
     const grouped = groupSessions({
       sessions: [

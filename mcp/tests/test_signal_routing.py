@@ -12,6 +12,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.signal_routing import (
     RoutedOwner,
+    derive_leaf_manager_owner,
     derive_signal_owner,
     derive_skip_level_owner,
     is_seat_dead,
@@ -267,6 +268,73 @@ class SignalRoutingTests(unittest.TestCase):
     def test_no_sender_agent_id_derives_no_route(self) -> None:
         owner = derive_signal_owner(self.catalog, sender_agent_id=None, message_kind="message")
         self.assertEqual(owner, RoutedOwner())
+
+    def test_pair_bound_worker_credit_and_manager_address_hold_at_two_fleet_sizes(self) -> None:
+        leaf_key = "repo-a/260707_master/leaf-9"
+        for fleet_size in (3, 30):
+            with self.subTest(fleet_size=fleet_size), tempfile.TemporaryDirectory() as tmp:
+                catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
+
+                def add(
+                    session_id: str,
+                    _catalog: TerminalCatalog = catalog,
+                    **overrides: object,
+                ) -> None:
+                    base: dict[str, object] = {
+                        "id": session_id,
+                        "label": session_id,
+                        "kind": "harness",
+                        "harness": "claude",
+                        "lifecycle_id": None,
+                        "cwd": Path("/tmp"),
+                        "tmux_name": f"ar-{session_id}",
+                        "command": ("claude",),
+                        "created_at": T1,
+                        "last_attached_at": T1,
+                        "status": "running",
+                    }
+                    base.update(overrides)
+                    _catalog.upsert(TerminalCatalogEntry(**base))  # type: ignore[arg-type]
+
+                add("manager", leaf_key=leaf_key, seat_role="manager")
+                add(
+                    "worker",
+                    leaf_key=leaf_key,
+                    seat_role="worker",
+                    spawn_role="worker",
+                    spawned_by_session="manager",
+                    turn_state="working",
+                )
+                add(
+                    "reviewer",
+                    leaf_key=leaf_key,
+                    seat_role="reviewer",
+                    spawn_role="reviewer",
+                    spawned_by_session="manager",
+                )
+                for index in range(fleet_size - 3):
+                    add(
+                        f"filler-{index}",
+                        leaf_key=f"repo-a/other/leaf-{index}",
+                        seat_role=f"role-{index}",
+                    )
+
+                self.assertTrue(
+                    leaf_chain_has_progress(
+                        catalog,
+                        leaf_key=leaf_key,
+                        subject_agent_id="reviewer",
+                        since=T1,
+                    )
+                )
+                self.assertEqual(
+                    derive_leaf_manager_owner(
+                        catalog,
+                        sender_agent_id="worker",
+                        leaf_key=leaf_key,
+                    ).agent_id,
+                    "manager",
+                )
 
 
 class SkipLevelOwnerTests(unittest.TestCase):

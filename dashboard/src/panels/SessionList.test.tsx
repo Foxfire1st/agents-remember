@@ -318,6 +318,20 @@ describe("SessionList command tree (L16)", () => {
     expect(queryByTestId("chats-session-role-b")).toBeNull();
   });
 
+  it("renders the current binding role ahead of stale spawn provenance", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[
+          { id: "moved", label: "Moved seat", spawnRole: "worker", seatRole: "reviewer" },
+        ]}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    expect(getByTestId("chats-session-role-moved").textContent).toBe("reviewer");
+  });
+
   it("renders architect spawn-role as a known owner-tier chip", () => {
     const { getByTestId } = render(
       <SessionList

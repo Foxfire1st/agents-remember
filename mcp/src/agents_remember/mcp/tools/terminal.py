@@ -40,7 +40,6 @@ from agents_remember.serving.retire_policy import (
     RetirePolicyError,
     SeatRef,
     check_retire_authority,
-    master_of,
 )
 from agents_remember.serving.seat_events import log_rename_event, log_retire_event
 from agents_remember.serving.terminal import TerminalHost
@@ -49,7 +48,10 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalogEntry,
     terminal_catalog_path,
 )
-from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
+from agents_remember.serving.terminal_leaf_assignment import (
+    LeafAssignmentHost,
+    assign_terminal_session_to_leaf,
+)
 from agents_remember.serving.terminal_opener import open_terminal_session
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
@@ -110,6 +112,8 @@ def attach_terminal_session_to_leaf_payload(
     *,
     session_id: str,
     leaf_key: str,
+    role: str | None = None,
+    host: LeafAssignmentHost | None = None,
 ) -> dict[str, Any]:
     """Move an existing hosted terminal/chat session to a durable leaf key."""
 
@@ -118,10 +122,13 @@ def attach_terminal_session_to_leaf_payload(
     except LeafRefResolutionError as exc:
         return leaf_ref_refusal_payload("attach_terminal_session_to_leaf", leaf_key, exc)
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    assignment_host = host if host is not None else TerminalHost()
     result = assign_terminal_session_to_leaf(
         catalog,
+        assignment_host,
         session_id=session_id,
         leaf_key=leaf_key,
+        role=role,
     )
     return _tool_payload(
         "attach_terminal_session_to_leaf",
@@ -134,6 +141,8 @@ def attach_terminal_session_to_leaf_payload(
             "previousLeafKey": result.previous_leaf_key,
             "ownerSession": result.owner_session_id,
             "role": result.role,
+            "seatRole": result.seat_role,
+            "previousSeatRole": result.previous_seat_role,
         },
     )
 
@@ -689,6 +698,7 @@ def spawn_agent_session_payload(
                 "harness": harness if kind == "harness" else None,
                 "kind": result.kind,
                 "leafKey": leaf_key,
+                "seatRole": result.seat_role,
                 "ownerSession": result.owner_session_id,
             },
         )
@@ -744,6 +754,7 @@ def _write_spawn_expectation_rows(config: McpRuntimeConfig, entry: TerminalCatal
         subject_agent_id=entry.id,
         subject_lifecycle_id=entry.lifecycle_id,
         leaf_key=expectation_leaf,
+        seat_role=entry.binding_role,
         note=f"briefed-by: {entry.label} ({entry.spawn_role or entry.kind})",
     )
     if expectation_leaf is not None:
@@ -757,6 +768,7 @@ def _write_spawn_expectation_rows(config: McpRuntimeConfig, entry: TerminalCatal
             subject_agent_id=entry.id,
             subject_lifecycle_id=entry.lifecycle_id,
             leaf_key=expectation_leaf,
+            seat_role=entry.binding_role,
             note=f"turn-report-by: {expectation_leaf}",
         )
 
@@ -771,6 +783,7 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "harness": entry.harness,
         "kind": entry.kind,
         "leafKey": entry.leaf_key,
+        "seatRole": entry.binding_role,
         "replacementForLeaf": entry.replacement_for_leaf,
         "label": entry.label,
         "cwd": str(entry.cwd),
@@ -879,13 +892,13 @@ def session_retire_payload(
         check_retire_authority(
             SeatRef(
                 session_id=actor_entry.id,
-                role=actor_entry.spawn_role,
-                master=master_of(actor_entry.leaf_key),
+                leaf_key=actor_entry.binding_leaf_key,
+                seat_role=actor_entry.binding_role,
             ),
             SeatRef(
                 session_id=target_entry.id,
-                role=target_entry.spawn_role,
-                master=master_of(target_entry.leaf_key),
+                leaf_key=target_entry.binding_leaf_key,
+                seat_role=target_entry.binding_role,
             ),
         )
     except RetirePolicyError as exc:

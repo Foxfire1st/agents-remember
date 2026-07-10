@@ -50,6 +50,7 @@ class ExpectationRow(BaseModel):
     subjectAgentId: str | None = None
     subjectLifecycleId: str | None = None
     leafKey: str | None = None
+    seatRole: str | None = None
     note: str | None = None
     metAt: str | None = None
     missedAt: str | None = None
@@ -65,6 +66,7 @@ def create_expectation_row(
     subject_agent_id: str | None = None,
     subject_lifecycle_id: str | None = None,
     leaf_key: str | None = None,
+    seat_role: str | None = None,
     note: str | None = None,
 ) -> ExpectationRow:
     """Create a pending expectation row. Pure: the caller mints ``row_id``/``now``/``due_at``."""
@@ -79,6 +81,7 @@ def create_expectation_row(
         subjectAgentId=subject_agent_id,
         subjectLifecycleId=subject_lifecycle_id,
         leafKey=leaf_key,
+        seatRole=seat_role,
         note=note,
     )
 
@@ -261,6 +264,7 @@ def write_expectation_row(
     subject_agent_id: str | None = None,
     subject_lifecycle_id: str | None = None,
     leaf_key: str | None = None,
+    seat_role: str | None = None,
     note: str | None = None,
 ) -> ExpectationRow:
     """Create + append one expectation row in one call -- the atomic-write-at-dispatch helper
@@ -276,6 +280,7 @@ def write_expectation_row(
         subject_agent_id=subject_agent_id,
         subject_lifecycle_id=subject_lifecycle_id,
         leaf_key=leaf_key,
+        seat_role=seat_role,
         note=note,
     )
     store.append(row)

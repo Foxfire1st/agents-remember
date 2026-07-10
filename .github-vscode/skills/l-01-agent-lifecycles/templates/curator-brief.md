@@ -7,7 +7,8 @@ is the change-set feeding contract: the curator never infers a change set from t
 it is FED the landed change set, the leaf task doc, and notes/ as inputs.
 
 Spawn with `env={"AR_SPAWN_ROLE": "curator"}` and the **qualified** leaf key
-`<repository>/<master>/<docId>` so the session-start router and the dashboard leaf rail both engage.
+`<repository>/<master>/<docId>`; together they claim the curator's `(leaf, role)` seat while the
+session-start router and dashboard leaf rail engage.
 
 ---
 

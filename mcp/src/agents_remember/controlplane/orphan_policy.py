@@ -26,7 +26,7 @@ def find_orphaned_workers(
     return [
         entry
         for entry in catalog.list()
-        if entry.spawn_role == "worker"
+        if entry.binding_role == "worker"
         and entry.spawned_by_session == manager_agent_id
         and entry.status == "running"
     ]

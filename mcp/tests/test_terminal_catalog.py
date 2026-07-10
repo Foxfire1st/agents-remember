@@ -121,7 +121,7 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(updated.status, "landed")
         self.assertEqual(updated.landed_reason, "leaf integrated")
         self.assertEqual([entry.id for entry in self.catalog.list()], ["a"])
-        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+        self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
 
     def test_landed_state_round_trips_and_is_not_reanimated(self) -> None:
         self.catalog.upsert(_entry("a"))
@@ -183,6 +183,31 @@ class TerminalCatalogTests(unittest.TestCase):
         unset = self.catalog.get("b")
         assert unset is not None
         self.assertIsNone(unset.spawn_role)
+
+    def test_legacy_catalog_migrates_seat_roles_in_place_without_row_loss(self) -> None:
+        rows = [
+            replace(_entry("worker", kind="harness"), spawn_role="worker").to_json(),
+            _entry("legacy-chat", kind="harness").to_json(),
+            _entry("terminal", kind="terminal").to_json(),
+        ]
+        for row in rows:
+            row.pop("seatRole")
+        self.catalog.path.write_text(
+            json.dumps({"schema": "ar-dashboard-terminal-sessions/v1", "sessions": rows}),
+            encoding="utf-8",
+        )
+
+        migrated = self.catalog.list(include_terminated=True)
+
+        self.assertEqual([entry.id for entry in migrated], ["worker", "legacy-chat", "terminal"])
+        self.assertEqual(
+            {entry.id: entry.binding_role for entry in migrated},
+            {"worker": "worker", "legacy-chat": "chat", "terminal": "terminal"},
+        )
+        persisted = json.loads(self.catalog.path.read_text(encoding="utf-8"))["sessions"]
+        self.assertEqual(len(persisted), len(rows))
+        self.assertEqual(len({row["id"] for row in persisted}), len(rows))
+        self.assertTrue(all("seatRole" in row for row in persisted))
 
     def test_dispatch_binding_fields_round_trip(self) -> None:
         leaf = "repo/master/leaf-1"
@@ -260,18 +285,18 @@ class TerminalCatalogTests(unittest.TestCase):
     def test_active_for_leaf_returns_running_owner(self) -> None:
         leaf = "repo/master/leaf-1"
         self.catalog.upsert(_entry("a", leaf_key=leaf, kind="harness"))
-        owner = self.catalog.active_for_leaf(leaf)  # defaults to the chat role
+        owner = self.catalog.active_for_leaf(leaf, seat_role="chat")
         assert owner is not None
         self.assertEqual(owner.id, "a")
-        self.assertIsNone(self.catalog.active_for_leaf("repo/master/other"))
+        self.assertIsNone(self.catalog.active_for_leaf("repo/master/other", seat_role="chat"))
 
     def test_active_for_leaf_is_scoped_by_role(self) -> None:
         # A chat and a terminal can both own the same leaf; the probe resolves each independently.
         leaf = "repo/master/leaf-1"
         self.catalog.upsert(_entry("chat", leaf_key=leaf, kind="harness"))
         self.catalog.upsert(_entry("term", leaf_key=leaf, kind="terminal"))
-        chat = self.catalog.active_for_leaf(leaf, role="chat")
-        term = self.catalog.active_for_leaf(leaf, role="terminal")
+        chat = self.catalog.active_for_leaf(leaf, seat_role="chat")
+        term = self.catalog.active_for_leaf(leaf, seat_role="terminal")
         assert chat is not None
         assert term is not None
         self.assertEqual(chat.id, "chat")
@@ -282,12 +307,12 @@ class TerminalCatalogTests(unittest.TestCase):
         self.catalog.upsert(_entry("exited", leaf_key=leaf, kind="harness"))
         self.catalog.mark_exited("exited")
         # An exited chat frees its leaf.
-        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+        self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
 
         self.catalog.upsert(_entry("terminated", leaf_key=leaf, kind="harness"))
         self.catalog.mark_terminated("terminated", "2026-06-26T00:05:00Z")
         # A terminated chat frees its leaf too.
-        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+        self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
 
     def test_with_leaf_key_copies_binding(self) -> None:
         entry = _entry("a")

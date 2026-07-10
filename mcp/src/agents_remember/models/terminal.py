@@ -10,6 +10,7 @@ LeafAssignmentStatus = Literal[
     "attached",
     "leaf-taken",
     "unknown-session",
+    "role-required",
     "leaf-ref-not-found",
     "leaf-ref-ambiguous",
 ]
@@ -25,6 +26,8 @@ class AttachTerminalSessionToLeafResponse(ToolResponse):
     previousLeafKey: str | None = None
     ownerSession: str | None = None
     role: Literal["chat", "terminal"] | None = None
+    seatRole: str | None = None
+    previousSeatRole: str | None = None
     detail: str | None = None
 
 
@@ -68,6 +71,7 @@ class SpawnAgentSessionResponse(ToolResponse):
     harness: str | None = None
     kind: Literal["harness", "terminal"] | None = None
     leafKey: str | None = None
+    seatRole: str | None = None
     replacementForLeaf: str | None = None
     label: str | None = None
     cwd: str | None = None

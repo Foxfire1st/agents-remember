@@ -209,10 +209,28 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().add("Chat", "seeker");
     sessionStore.getState().setLeaf("owner", leaf);
 
-    sessionStore.getState().applyLeafAssignment("seeker", leaf);
+    sessionStore.getState().applyLeafAssignment("seeker", leaf, "chat");
 
     expect(findSessionForLeaf(leaf)?.id).toBe("seeker");
     expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.leafKey).toBeUndefined();
+  });
+
+  it("keeps different role seats on the same leaf while replacing only the matching role", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().hydrate([
+      { id: "worker-old", label: "Worker", leafKey: leaf, seatRole: "worker", status: "running" },
+      { id: "reviewer", label: "Reviewer", leafKey: leaf, seatRole: "reviewer", status: "running" },
+      { id: "worker-new", label: "Replacement worker", status: "running" },
+    ]);
+
+    sessionStore.getState().applyLeafAssignment("worker-new", leaf, "worker");
+
+    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-old")?.leafKey).toBeUndefined();
+    expect(sessionStore.getState().sessions.find((s) => s.id === "reviewer")?.leafKey).toBe(leaf);
+    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-new")).toMatchObject({
+      leafKey: leaf,
+      seatRole: "worker",
+    });
   });
 
   it("frees a leaf so an exited owner no longer blocks a new bind", () => {
@@ -250,13 +268,21 @@ describe("sessionStore (6e hardening)", () => {
         label: "Chat 1",
         kind: "terminal",
         leafKey: leaf,
+        seatRole: "terminal",
         cwd: "/ws",
         tmuxName: "ar-s1",
         createdAt: "2026-06-26T00:00:00Z",
         lastAttachedAt: "2026-06-26T00:00:00Z",
         status: "running",
       }),
-    ).toEqual({ id: "s1", label: "Chat 1", kind: "terminal", leafKey: leaf, status: "running" });
+    ).toEqual({
+      id: "s1",
+      label: "Chat 1",
+      kind: "terminal",
+      leafKey: leaf,
+      seatRole: "terminal",
+      status: "running",
+    });
 
     // No leafKey on the row → no leafKey on the session (omitted, not undefined-valued).
     expect(
@@ -307,6 +333,7 @@ describe("sessionStore (6e hardening)", () => {
         lifecycleId: "LC1",
         leafKey: "repo/master/leaf-1",
         spawnRole: "worker",
+        seatRole: "reviewer",
         cwd: "/ws",
         tmuxName: "ar-s1",
         createdAt: "2026-06-26T00:00:00Z",
@@ -329,6 +356,7 @@ describe("sessionStore (6e hardening)", () => {
       lifecycleId: "LC1",
       leafKey: "repo/master/leaf-1",
       spawnRole: "worker",
+      seatRole: "reviewer",
       status: "landed",
       landedAt: "2026-07-09T00:00:00Z",
       landedReason: "leaf integrated",

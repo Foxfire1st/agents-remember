@@ -3,7 +3,8 @@
 The dispatch packet the orchestrator compiles for a manager taking one master. Like the worker
 brief, **this brief is the manager's entire session start** — it replaces the front half the
 orchestrator already ran. Spawn with `env={"AR_SPAWN_ROLE": "manager"}` and the **qualified** leaf
-key of the master's coordination leaf (`<repository>/<master>/<docId>`).
+key of the master's coordination leaf (`<repository>/<master>/<docId>`); together they claim the
+manager's `(leaf, role)` seat.
 
 ---
 
@@ -30,14 +31,16 @@ master's leaf loop to the master-exit seam, then hand over.
 
 ## Dispatch defaults
 - Worker spawns: `templates/worker-brief.md`, `env={"AR_SPAWN_ROLE": "worker"}`, qualified leaf
-  keys; knob overrides: <settings/orchestration notes or none>.
+  keys; the environment role and qualified leaf together claim each worker's `(leaf, role)` seat;
+  knob overrides: <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator memory pass — never before the curator pass exists.
 - Curator spawns: `../templates/curator-brief.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per
-  leaf after builder code and the reviewer verdict are available; the brief FEEDS the landed
-  change set (leaf contract's base-to-head range) + the leaf task doc + notes/ — the curator routes
-  each to the right onboarding home (specific sidecar or governing overview; L3 Operational-Notes
-  last-resort only) and writes onboarding only.
+  leaf with the qualified leaf key, so the environment role and qualified leaf claim the
+  curator's `(leaf, role)` seat; dispatch only after builder code and the reviewer verdict are
+  available. The brief FEEDS the landed change set (leaf contract's base-to-head range) + the leaf
+  task doc + notes/ — the curator routes each to the right onboarding home (specific sidecar or
+  governing overview; L3 Operational-Notes last-resort only) and writes onboarding only.
 - Concurrency: <max parallel leaves or "sequential">.
 - Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
@@ -45,8 +48,8 @@ master's leaf loop to the master-exit seam, then hand over.
   system-specialist.
 - Cleanup: `worktree_integrate` auto-lands a completed leaf's worker/reviewer seats into the
   dashboard landed/archive group (config-gated, default ON). Use the landed archive cleanup button
-  for archived rows; use `session_retire` only for a stuck/abandoned seat of YOUR OWN master —
-  server policy refuses any other target.
+  for archived rows; use `session_retire` only for a stuck/abandoned worker/reviewer/curator seat of
+  YOUR OWN master — server policy refuses any other target.
 
 ## The exit
 - When all leaves have landed on your branch: spawn the master-exit reviewer

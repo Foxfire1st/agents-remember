@@ -70,6 +70,7 @@ class OperatorInboxEntry(BaseModel):
     # Leaf-scoped supervisor/completion signals carry their durable routing subject so later
     # redelivery/escalation can re-check the live leaf chain instead of trusting a stale address.
     leafKey: str | None = None
+    seatRole: str | None = None
     subjectAgentId: str | None = None
     ask: str
     response: str
@@ -131,6 +132,7 @@ def create_operator_inbox_entry(
     message_kind: InboxMessageKind = "message",
     artifact_path: str | None = None,
     leaf_key: str | None = None,
+    seat_role: str | None = None,
     subject_agent_id: str | None = None,
     owner_role: AgentRole | None = None,
     owner_agent_id: str | None = None,
@@ -161,6 +163,7 @@ def create_operator_inbox_entry(
         messageKind=message_kind,
         artifactPath=artifact_path,
         leafKey=leaf_key,
+        seatRole=seat_role,
         subjectAgentId=subject_agent_id,
         ask=ask,
         response=response,

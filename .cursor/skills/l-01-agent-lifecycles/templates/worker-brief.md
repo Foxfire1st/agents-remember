@@ -7,7 +7,8 @@ absorbed a series of real dispatch frictions (route-index leaks, attestation for
 keying, missing `python` shim), so deviate knowingly or not at all.
 
 Spawn with `env={"AR_SPAWN_ROLE": "worker"}` and the **qualified** leaf key
-`<repository>/<master>/<docId>` so the session-start router and the dashboard leaf rail both engage.
+`<repository>/<master>/<docId>`; together they claim the worker's `(leaf, role)` seat while the
+session-start router and dashboard leaf rail engage.
 
 ---
 

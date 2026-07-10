@@ -646,6 +646,38 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(signal_rows[0].id, first.id)
         self.assertGreater(signal_rows[0].ts, first.ts)
 
+    def test_same_leaf_different_seat_roles_do_not_coalesce(self) -> None:
+        leaf_key = "repo-a/260707_master/leaf-3"
+        self.catalog.upsert(replace(_entry("manager-1", leaf_key=leaf_key), seat_role="manager"))
+        for session_id, role in (("worker-1", "worker"), ("reviewer-1", "reviewer")):
+            self.catalog.upsert(
+                replace(
+                    _entry(session_id, leaf_key=leaf_key),
+                    seat_role=role,
+                    spawn_role=role,
+                    spawned_by_session="manager-1",
+                )
+            )
+
+        for session_id, role in (("worker-1", "worker"), ("reviewer-1", "reviewer")):
+            act_on_finding(
+                self._ctx(),
+                SupervisorFinding(
+                    kind="seat-liveness",
+                    detail="turn-state-stale",
+                    session_id=session_id,
+                    leaf_key=leaf_key,
+                    seat_role=role,
+                ),
+                now=NOW,
+            )
+
+        signal_rows = [
+            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+        ]
+        self.assertEqual(len(signal_rows), 2)
+        self.assertEqual({entry.seatRole for entry in signal_rows}, {"worker", "reviewer"})
+
     def test_mid_turn_pane_signal_is_observed_without_owner_inbox_noise(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
@@ -1155,9 +1187,9 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             for line in self.inbox_store.log_path().read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        # One sweep appends at most a handful of snapshots per row (delivery mark, rung advance,
-        # escalated stamp); the divergent pre-fix shape produced THOUSANDS of lines here.
-        self.assertLessEqual(len(lines), seeded * 8)
+        # One row reaches a nine-snapshot fixed point (initial row, delivery/rung/escalation marks);
+        # the divergent pre-fix shape produced THOUSANDS of lines here.
+        self.assertLessEqual(len(lines), seeded * 9)
 
     def test_dead_upstream_signals_the_current_manager(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))

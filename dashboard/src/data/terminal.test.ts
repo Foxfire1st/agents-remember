@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  attachSessionToLeaf,
   bracketedPaste,
   cleanupLandedTerminalSessions,
   connectTerminal,
@@ -343,6 +344,23 @@ describe("cleanupLandedTerminalSessions", () => {
     expect(await cleanupLandedTerminalSessions(["s1"])).toBeNull();
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await cleanupLandedTerminalSessions(["s1"])).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("attachSessionToLeaf", () => {
+  it("posts the leaf and explicit seat role as one binding move", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(attachSessionToLeaf("s 1", "repo/master/leaf", "curator")).resolves.toBe("ok");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/s%201/attach-leaf",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ leafKey: "repo/master/leaf", role: "curator" }),
+      }),
+    );
     vi.unstubAllGlobals();
   });
 });
